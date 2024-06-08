@@ -1,0 +1,357 @@
+/*
+    A micro Script Language for JSFX plug-ins
+
+    Part0 : utilities
+        mSL_Utilities.jsfx-inc
+    J.J. Girardot - 7/2020
+*/
+
+
+@init
+
+
+
+
+
+/*
+    Check that "bl" is a valid bloc in current dynamic memory, return type or false
+*/
+function mSL_Mbl_check(bl)
+local (ty, s)
+(
+    ((bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min)
+            && (ty <= mSL_MKey_max) && (s === bl[s])
+            && (bl[s+1] === (ty ~ mSL_CC_Chksum))
+            && (bl >= mSL_current_memory[mSL_MM_LowAd])
+            && (bl < mSL_current_memory[mSL_MM_HighAd])) ? ty : 0;
+);
+
+/*
+    Check that "bl" is a valid bloc, or signal an error "err"
+
+*/
+function mSL_bl_check(bl, type, err)
+local (ty, s)
+(
+    (mSL_errX == 0) ? (
+        (!((bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min)
+               && (ty <= mSL_MKey_max) && (s == bl[s]) && ((type === ty) || (type === Undef))
+               && (bl[s+1] == (ty ~ mSL_CC_Chksum)))) ? (
+            mSL_errX = err;
+        );
+    );
+    mSL_errX;
+);
+
+
+function mSL_bl_Dup(src)
+local (s, ty, res)
+(
+    res = 0;
+    ((src > 2) && ((s = src[-1]) >= 0) && ((ty = src[-2]) >= mSL_MKey_min)
+            && (ty <= mSL_MKey_max) && (s === src[s])
+            && (src[s+1] === (ty ~ mSL_CC_Chksum))
+            && (src >= mSL_current_memory[mSL_MM_LowAd])
+            && (src < mSL_current_memory[mSL_MM_HighAd])) ? (
+        res = mSL_Dyn_Alloc(s, ty, 0);
+        memcpy(res, src, s);
+    );
+    res;
+);
+
+/*
+    Check that "bl" is a valid bloc in current memory, or signal an error "err"
+
+//function mSL_Mbl_check(bl, err)
+local (ty, s)
+(
+    (mSL_errX == 0) ? (
+        (!((bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min)
+               && (ty <= mSL_MKey_max) && (s == bl[s])
+               && (bl[s+1] == (ty ~ mSL_CC_Chksum))
+               && (bl >= mSL_current_memory[mSL_MM_LowAd])
+               && (bl < mSL_current_memory[mSL_MM_HighAd]))) ? (
+            mSL_errX = err;
+        );
+    );
+    mSL_errX;
+);
+*/
+
+
+/*
+    Return the type of a bloc
+*/
+function mSL_blType(bl)
+local (ty, s)
+(
+    (!((bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min)
+            && (ty <= mSL_MKey_max) && (s == bl[s])
+            && (bl[s+1] == (ty ~ mSL_CC_Chksum)))) ? (
+        0;
+    ) : (
+        ty;
+    );
+);
+
+
+// Explode a string into a block
+function mSL_str_explode(bl, str)
+local (ty, s, l, ib, sz)
+(
+    sz = 0;
+    ((bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min) && (ty <= mSL_MKey_max)
+            && (s == bl[s]) && (bl[s+1] == (ty ~ mSL_CC_Chksum))) ? (
+        // Copy the chars of string in the block
+        l = strlen(str);
+        ib = 0;
+        while ((l > 0) && (ib < s)) (
+            bl[ib] = str_getchar(str, ib, 'cu');
+            ib += 1; l -= 1; sz += 1;
+        );
+        while (ib < s) (
+            bl[ib] = 0; ib += 1;
+        );
+    );
+    sz;
+);
+
+// Inpload a string out of a block
+function mSL_str_implode(str, bl)
+local (ty, s, l, ib)
+(
+    ((bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min) && (ty <= mSL_MKey_max)
+            && (s == bl[s]) && (bl[s+1] == (ty ~ mSL_CC_Chksum))) ? (
+        // Create the empty string
+        (str === 0) ? str = #local_mSL_str_implode;
+        strcpy(str, "");
+        ib = 0;
+        while (l > 0) (
+            ch = bl[ib]; ib += 1; l -= 1;
+            (ch > 0) ? str_setchar(str, -0.25, ch, 'cu') : l=0;
+        );
+        src;
+    ) : (
+        0;
+    );
+);
+
+function mSL_search_elt(bl, item, pos)
+local (ty, s, re, ib)
+(
+    res = -1;
+    pos = 0|max(0, pos);
+    ((bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min) && (ty <= mSL_MKey_max)
+            && (s == bl[s]) && (bl[s+1] == (ty ~ mSL_CC_Chksum))) ? (
+        // search the entry equal to item, starting at pos.
+        ib = pos;
+        while ((ib < s) && (res === -1)) (
+            (item == bl[ib]) ? res = ib;
+            ib += 1;
+        );
+    );
+);
+
+
+
+
+
+function mSL_available_memory()
+local (m, s, a, pt, ps, ppt, ppm)
+(
+    m = mSL_current_memory;
+    mSL_Err_Bl = a = 0;
+    ((m > 2) && (m[-2] == mSL_KODE_memory) && ((s = m[-1]) > 0) && (m[s] == s) && (m[s+1] == (mSL_KODE_memory ~ mSL_CC_Chksum))) ? (
+        // try to check all free blocks
+        ppt = m[mSL_MM_FrHd] + 1; // first pointer
+        ppm = m[mSL_MM_FrTl];
+        while (ppt < ppm) ( // explore all entries
+            pt = m[ppt];
+            while (pt > 0) (
+                // we check that pt is a free valid block...
+                ((pt[mSL_Obj_Type] == mSL_MT_FreeSt) && ((ps = pt[mSL_Obj_Size]) > 0) && (pt[ps+2] == ps) && (pt[ps+3] == mSL_MT_FreeNd)) ? (
+                    a += ps;
+                    pt = pt[mSL_Free_Next];
+                ) : (
+                    mSL_Err_Bl = pt; a = -2; pt = -1; ppt = ppm;
+                );
+            );
+            ppt += 3;
+        );
+    ) : (
+        a = -1;
+    );
+    a;
+);
+
+// Protect a block from garbage collection
+// in a specific table
+function mSL_GC_BProtect(ptr, tab)
+local (siz, cnt, p)
+(
+    // we expect both ptr & tab to be valid memory object
+    ((tab > 2) && (ptr > 2) && ((siz = tab[-1]) > 0) && (tab[-2] == mSL_KODE_protect)) ? (
+        cnt = siz;
+        p = tab % siz;
+        while (cnt > 0) (
+            (tab[p] == 0) ? (
+                // free entry - use it
+                tab[p] = ptr; cnt = 0;
+            ) : (
+                p = (p+17) % siz; cnt -= 1;
+            );
+        );
+    );
+);
+
+
+
+/*
+*/
+function mSL_make_memory(mem, size) (mSL_Dyn_Init(mem, size)) ;
+function mSL_mfree(obj) ( mSL_Dyn_Free(obj) );
+function mSL_malloc(size, type) ( mSL_Dyn_Alloc(size, type, mSL_StM_FlClear) );
+
+
+// Copy from src to dst - respect blocks size, and access gmem
+function
+mSL_memcpy(dst, src, size)
+local(dstsiz, srcsiz, xcp)
+(
+    xcp = 0;
+    dstsiz = (mSL_bl_check(dst)) ? dst[-1] : -1;
+    srcsiz = (mSL_bl_check(src)) ? src[-1] : -1;
+
+    0 ? (
+        sprintf(#s, "mSL_memcpy(%d, %d, %d) [%d %d] ", dst, src, size, dstsiz, srcsiz);
+        mSL_log(SysLogBox, #s);
+    );
+
+    (dst >= 0) ? (
+        (src >= 0) ? (
+            (size < 0) ? (
+                size = min(dstsiz, srcsiz);
+            ) : (
+                (dstsiz > 0) ? size = min(dstsiz, size);
+                (srcsiz > 0) ? size = min(srcsiz, size);
+            );
+            (size > 0) ?
+                xcp = size;
+                memcpy(dst, src, size);
+        ) : (
+            src = -src;
+            (size < 0) ? size = dstsiz;
+            (dstsiz > 0) ? size = min(dstsiz, size);
+            xcp = size;
+            while (size > 0) (
+                dst[0] = gmem[src];
+                dst += 1; src += 1; size -= 1;
+            );
+        );
+    ) : (
+        dst = -dst;
+        (src >= 0) ? (
+            (size < 0) ? size = srcsiz;
+            (srcsiz > 0) ? size = min(srcsiz, size);
+            xcp = size;
+            while (size > 0) (
+                gmem[dst] = src[0];
+                dst += 1; src += 1; size -= 1;
+            );
+        ) : (
+            src = -src;
+            xcp = size;
+            while (size > 0) (
+                gmem[dst] = gmem[src];
+                dst += 1; src += 1; size -= 1;
+            );
+        );
+    );
+    max(0, xcp);
+);
+
+
+
+// Sort a block of values
+function mSL_sort_bl(bl)
+local (sz, i, j, k)
+(
+    mSL_bl_check(bl) ? (
+        sz = bl[-1];
+        i = 0; while (i < sz - 1) (
+            j = i+1; while (j < sz) (
+                (bl[i] > bl[j]) ? (
+                    k = bl[i]; bl[i] = bl[j]; bl[j] = k;
+                );
+                j += 1;
+            );
+            i += 1;
+        );
+    );
+);
+
+
+
+// Initialize some words in low main memory
+function
+GMI(s1, s2, s3)
+local(mmm, ii)
+(
+    fmemmax = __memtop(); // total memory available
+    fmemmax_4 = fmemmax - 4; //
+    mmm = 0;
+    ii =0; loop (16, mmm[ii] = fmemmax; ii += 1;);
+    mmm[0] = 'MAIN';
+    mmm[1] = fmemmax_4;
+    mmm[2] = GM_Word0 = s1;
+    mmm[3] = GM_Word1 = s2;
+    mmm[4] = GM_Word2 = s3;
+    mmm[fmemmax - 2] = fmemmax_4;
+    mmm[fmemmax - 1] =  'MAIN'~ mSL_CC_Chksum;
+    mmm[6] = mmm[fmemmax - 2];
+    mmm[7] = mmm[fmemmax - 1];
+    mmmDefLoc = 15; // where to write without consequences in memory
+);
+
+function
+GMI()
+(
+    GMI(GM_Word0, GM_Word1, GM_Word2);
+);
+
+// Check that words in low main memory have not been modified
+function GMW()
+(
+    0[0] === 'MAIN'  &&  0[1] === fmemmax_4  &&  0[2] === GM_Word0  &&  0[3] === GM_Word1
+            &&  0[4] === GM_Word2  &&  0[5] === fmemmax  &&  0[6] === fmemmax_4  &&  0[7] === ('MAIN'~ mSL_CC_Chksum)
+            &&  0[fmemmax - 2] === 0[6]  &&  0[fmemmax - 1] === 0[7]
+);
+
+function GMW0(msg)
+(
+    mSL_edit_value(#AA0, 0[0]); mSL_edit_value(#AA1, 0[1]);
+    mSL_edit_value(#AA2, 0[2]); mSL_edit_value(#AA3, 0[3]); mSL_edit_value(#AA4, 0[4]);
+    mSL_edit_value(#AA5, 0[5]); mSL_edit_value(#AA6, 0[6]); mSL_edit_value(#AA7, 0[7]);
+    mSL_edit_value(#AA8, 0[fmemmax - 2]); mSL_edit_value(#AA9, 0[fmemmax - 1]);
+    sprintf(#s2, "[%s]  %s %s %s %s %s %s %s %s .. %s %s", msg, #AA0, #AA1, #AA2, #AA3, #AA4, #AA5, #AA6, #AA7, #AA8, #AA9);
+    mSL_log(SysLogBox, #s2);
+);
+
+GMIfsig = 0;
+function GMW2(msg)
+(
+    // Check first words of memory, to detect eventual bugs
+    ((!GMW()) && (XDcount > 0)) ? (
+        /*
+        sprintf(#s2, "[%s] Game Master Damaged! %s %s %s %s %s %s %s %s", msg, mSL_edit_value(#Z0, 0[0]),
+                mSL_edit_value(#Z1, 0[1]), mSL_edit_value(#Z2, 0[2]), mSL_edit_value(#Z3, 0[3]),
+                mSL_edit_value(#Z4, 0[4]), mSL_edit_value(#Z5, 0[5]), mSL_edit_value(#Z6, 0[6]),
+                 mSL_edit_value(#Z7, 0[7]));
+        mSL_log(SysLogBox, #s2);
+        */
+        GMW0(msg);
+        XDcount -= 1;
+        XDcount > 0 ? GMI();
+    );
+);
+

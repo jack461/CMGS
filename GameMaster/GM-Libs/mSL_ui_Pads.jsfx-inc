@@ -1,0 +1,857 @@
+/*
+
+    =============================== Leds and Pads ===============================
+
+    === Mouse Buttons ===
+    1: left mouse button
+    2: right mouse button
+    4: Control key (Windows), Command key (OSX)
+    8: Shift key
+    16: Alt key (Windows), Option key (OSX)
+    32: Windows key (Windows), Control key (OSX)
+    64: middle mouse button
+
+*/
+
+
+@init
+
+
+
+uix_jled_col_off = 0xA9A9A9 ; // "off" default color
+uix_jled_minsize = 6; // min. size
+
+ui_jled_type = ui_jbtype; // for type "led"
+ui_jled_spos = ui_jbsize; // size position
+ui_jled_w = 2; // width
+ui_jled_h = 3; // height
+ui_jled_r = 4; // corner size if any
+ui_jled_c_on = 5; // color "on"
+ui_jled_status = 6; // on/off status
+ui_jled_alt = 7; // alternate value
+ui_jled_menu1 = 8;
+ui_jled_menu2 = 9;
+ui_jled_mk_round = 0x40;
+ui_jled_mk_rrect = 0x80;
+ui_jled_mk_interact = 0x100;
+ui_jled_mk_actOnSel = 0x200;
+ui_jled_mk_cartr = ui_jled_mk_round | ui_jled_mk_rrect;
+ui_jledty = 10;
+ui_jled_size = 10; // size of a led structure
+
+
+function make_jled(flags, w, h, c)
+local (led)
+(
+    led = make_array(ui_jled_size, 'led_');
+    led[ui_jbtype] = ui_jledty | flags;
+    led[ui_jbsize] = ui_jled_size;
+    led[ui_jled_w] = w;
+    led[ui_jled_h] = h;
+    led[ui_jled_c_on] = c;
+    led[ui_jled_r] = 0;
+    led[ui_jled_status] = 0;
+    led[ui_jled_alt] = 0;
+    led[ui_jled_menu1] = 0;
+    led[ui_jled_menu2] = 0;
+    led;
+);
+
+
+function show_jled(led, val, uc)
+local (r, ty, curw, curh, askw, askh, lpad, tpad, flgs, z, color, askr, rr, lxc, lyc, lrc)
+(
+    r = 0;
+    (led[ui_jbtype] & ui_jbtmask == ui_jledty) ? (
+        flgs = led[ui_jbtype] & ui_jbfmask;
+        curw = ui_width(); curh = ui_height();
+        (curw > uix_jled_minsize) && (curh > uix_jled_minsize) ? (
+            askw = led[ui_jled_w]; askh = led[ui_jled_h];
+            (askw <= 0) ? ( askw = curw; ) : (askw <= 1) ? ( askw *= curw; ) :
+                  ( askw = min(askw, curw); );
+            (askh <= -1) ? (askh = askw = min(askw, curh); ) :
+            (askh <= 0) ? ( askh = curh; ) : (askh <= 1) ? ( askh *= curh; ) :
+                  ( askh = min(askh, curh); );
+            askw = max(uix_jled_minsize, askw);
+            askh = max(uix_jled_minsize, askh);
+            lpad = (curw-askw)/2; tpad = (curh-askh)/2; // pads
+            ty = flgs & ui_jled_mk_cartr;
+            led[ui_jled_status] = val;
+            color = val < 0.5 ? uix_jled_col_off :
+                (uc < 0) ? led[ui_jled_c_on] : uc;
+            (ty == 0) ? (
+                ui_pad(lpad, tpad);
+                ui_pcolor(ui_jcolor_draw);
+                ui_fill();
+                ui_pad(1, 1);
+                ui_pcolor(color);
+                ui_fill();
+            ) :
+            (ty == ui_jled_mk_round) ? (
+                ui_pcolor(color);
+                lxc = ui_left() + curw/2; lyc = ui_top() + curh/2; lrc = min(askw, askh)/2;
+                gfx_circle(lxc, lyc, lrc-1, 1);
+                ui_pcolor(ui_jcolor_draw);
+                gfx_circle(lxc, lyc, lrc, 0);
+            ) :
+            (ty == ui_jled_mk_rrect) ? (
+                askr = led[ui_jled_r]; rr = 0 | (min(askh, askw)/2.1);
+                (askr <= 0) ? ( askr = 0.4*rr; ) : (askr <= 1) ? ( askr *= rr; ) :
+                              ( askr = min(askr, rr); );
+                ui_pad(lpad, tpad);
+                ui_pcolor(ui_jcolor_draw);
+                gfx_fillrrect(ui_left(),ui_top(),ui_width(),ui_height(),askr);
+                ui_pcolor(color);
+                gfx_fillrrect(ui_left()+1,ui_top()+1,ui_width()-2,ui_height()-2,askr);
+            ) :
+            /* (ty == ui_jled_mk_cartr) ? */
+            (
+                ui_pad(lpad, tpad);
+                ui_pcolor(ui_jcolor_draw);
+                gfx_fillrcart(ui_left(),ui_top(),ui_width(),ui_height());
+                ui_pcolor(color);
+                gfx_fillrcart(ui_left()+1,ui_top()+1,ui_width()-2,ui_height()-2);
+            );
+        );
+
+/*
+*/
+        // should we interact ?
+        (flgs & ui_jled_mk_interact) ? (
+            ui_hover() ? (
+                // Mouse pointer in our window
+                k = ui_key();
+                (k >= ' ') ? (
+                    (k == 'x') ? (
+                        led[ui_jled_status] = led[ui_jled_status] > 0.5 ? 0 : 1;
+                        r = 1;
+                    );
+                );
+                ((x = led[ui_jled_menu1]) != 0) ? (
+                    (x == 1) ? (
+                        // use left clic to on/off
+                        ui_click(1) ? (
+                            led[ui_jled_status] = led[ui_jled_status] > 0.5 ? 0 : 1;
+                            r = 1;
+                        );
+                    ) :
+                    (x == 2) ? (
+                        // use right clic to on/off
+                        ui_click(2) ? (
+                            led[ui_jled_status] = led[ui_jled_status] > 0.5 ? 0 : 1;
+                            r = 1;
+                        );
+                    ) :
+                    (x == 3) ? (
+                        // accept both buttons
+                        (ui_click(1) || ui_click(2)) ? (
+                            led[ui_jled_status] = led[ui_jled_status] > 0.5 ? 0 : 1;
+                            r = 1;
+                        );
+                    ) :
+                    (x == 4) ? (
+                        // Use the std. on/off menu
+                        (ui_jled_def_menu != 0) ? (
+                            ui_menu_tick(ui_jled_def_menu, led[ui_jled_status]+1, 1);
+                            z = control_jmenu(ui_jled_def_menu);
+                            (z != 0) ? (
+                                led[ui_jled_status] = z - 1;
+                                r = 1;
+                            );
+                        );
+                    ) : (
+                        // use X as a control menu
+                        ui_menu_tick(x, led[ui_jled_status]+1, 1);
+                        z = control_jmenu(x);
+                        (z != 0) ? (
+                            led[ui_jled_status] = z-1;
+                            r = 2;
+                        );
+                    );
+                );
+                ((x = led[ui_jled_menu2]) != 0) ? (
+                    ui_menu_tick(x, led[ui_jled_alt]+1, 1);
+                    z = control_jmenu(x);
+                    (z != 0) ? (
+                        led[ui_jled_alt] = z-1;
+                        r = 4; // alt value changed
+                        // should we activate ?
+                        (flgs & ui_jled_mk_actOnSel) ? (led[ui_jled_status] = 1; r = 5; );
+                    );
+                );
+                ui_GFXdoNow |= (r !=0);
+            );
+        );
+    );
+    r;
+);
+
+function show_jled(led, val)
+(
+    show_jled(led, val, -1);
+);
+
+function show_jled(led)
+(
+    show_jled(led, led[ui_jled_status], -1);
+);
+
+
+
+
+
+
+///-------------------------------------///
+///----------  Pad Utilities -----------///
+
+
+ui_jpad_typ = ui_jbtype;  // pad type and flags
+ui_jpad_bsize = ui_jbsize; // block pad size
+ui_jpad_last = 2; // last clicked entry number
+ui_jpad_lmods = 3; // modifiers when last clicked
+ui_jpad_rflags = 4; // return flags
+ui_jpad_lkey = 5; // last typed char
+ui_jpad_entkey = 6; // ent where char was typed
+ui_jpad_lslider = 7; // last slider
+ui_jpad_nli = 8;  // number of displayed lines
+ui_jpad_nco = 9;  // number of displayed columns
+ui_jpad_siz = 10; // pad size as cell count - can be > or < than lines*columns
+ui_jpad_gloff = 11;  // global offset
+ui_jpad_linc = 12; // line increment
+ui_jpad_cinc = 13; // column increment
+ui_jpad_border= 14; // border size
+ui_jpad_cells = 15; // cells types and flags [array address]
+ui_jpad_labs = 16; // labels addresses [array address]
+ui_jpad_altlabs = 17; // alt labels addresses [array address]
+ui_jpad_clrs = 18; // colors addresses [array address]
+ui_jpad_altclrs = 19; // alt colors addresses [array address]
+ui_jpad_values = 20; // numbers associated to cells [array address]
+ui_jpad_actns = 21; // actions associated to cells [array address]
+ui_jpad_fmts = 22; // string for formatting the values
+ui_jpad_color1 = 23; // local color 1
+ui_jpad_color2 = 24; // local color 2
+ui_jpad_color3 = 25; // local color 3
+ui_jpad_color4 = 26; // local color 4
+ui_jpad_color5 = 27; // local color 5
+ui_jpad_coff = 28;  // global offset
+ui_jpad_free = 30; // size of description, and first free entry.
+
+// Description of pad types
+ui_jpad_ty_act = 5; // action type : no pad is ever selected
+ui_jpad_ty_sel = 6; // selection type : just one selected object
+ui_jpad_ty_opt = 7; // options : any pad can be selected
+// pad flags
+ui_jpad_ty_bord = 0x80; // draw a border around the pad
+ui_jpad_ty_nbr = 0x100; // use numbers as labels, starting at 1
+ui_jpad_ty_lbs = 0x200; // use label strings from ui_jpad_labs
+ui_jpad_ty_cls = 0x400; // use colors from ui_jpad_clrs
+
+// Description of cells type
+// ui_jpad_ct_align = 0x30; // align mask
+ui_jpad_ct_selec = 0x100; // the cell is selected
+ui_jpad_ct_UNselec = 0x7FFFFFFF ~ 0x100; // the cell is selected
+ui_jpad_ct_round = 0x200; // draw round cells
+ui_jpad_ct_rrect = 0x400; // draw round rectangles cells
+ui_jpad_ct_nocolor = 0x800; // no color for this cell
+ui_jpad_ct_showval = 0x1000; // show value of cell if any
+ui_jpad_ct_nobrd = 0x2000; // no border
+ui_jpad_ct_cclear = 0x4000; // set to leave the cell without label
+ui_jpad_ct_disab = 0x8000; // set if cell is disabled
+ui_jpad_ct_altcol = 0x10000; // set to use alternate color for cell
+
+// Creation Flags, not used elsewhere
+// Combine with "|", not "+"
+ui_jpad_mk_labs = 0x40;
+ui_jpad_mk_colors = 0x80;
+ui_jpad_mk_values = 0x100;
+ui_jpad_mk_actions = 0x200;
+ui_jpad_mk_rcells = 0x400; // make round cells
+ui_jpad_mk_rrcells = 0x800; // make round rectangles cells
+ui_jpad_mk_clnobrd = 0x1000; // no border
+ui_jpad_mk_lallign = 0x2000; // left align cell contents
+ui_jpad_mk_callign = 0x4000; // center align cell contents
+ui_jpad_mk_rallign = 0x8000; // right align cell contents
+ui_jpad_mk_colmaj = 0x10000; // use column major order
+ui_jpad_mk_altlabs =   0x20000; // use also alt. labels
+ui_jpad_mk_altcolors = 0x40000; // use also alt. colors
+ui_jpad_mk_cclear =    0x80000; // set to leave the cell without label
+
+// Event flags returned
+ui_jpad_ev_cclk = 0x1; // a cell was clicked
+ui_jpad_ev_key = 0x2; // a char was keyed
+ui_jpad_ev_mov = 0x80; // mouse over event
+ui_jpad_ev_lmc = 0x10; // mouse left button clicked
+ui_jpad_ev_rmc = 0x20; // mouse right button clicked
+ui_jpad_ev_cmc = 0x40; // mouse center button clicked
+ui_jpad_ev_slev = 0x100; // slider event
+
+ui_jpad_cl_minWidth = 76; //  minimal width in pixels
+/* Modifiers in "ui_jpad_lmods"
+    1: left mouse button
+    2: right mouse button
+    4: Control key (Windows), Command key (OSX)
+    8: Shift key
+    16: Alt key (Windows), Option key (OSX)
+    32: Windows key (Windows), Control key (OSX)
+    64: middle mouse button
+*/
+/*
+   Check that a structure is a pad
+*/
+function uix_jpad_check(pad) local (pty)
+(
+    // check we have a pad
+    pty = pad[ui_jpad_typ] & ui_jbtmask;
+    ((pty == ui_jpad_ty_act) || (pty == ui_jpad_ty_sel) || (pty == ui_jpad_ty_opt));
+);
+
+/*
+    Set or reset a flag for an item of a pad.  ex:
+        set_jpad_cell(my_pad, 5, ui_jpad_ty_cls); // set the flag "color" of the fifth cell
+        set_jpad_cell(my_pad, 5, -ui_jpad_ty_cls); // reset the flag
+    UNUSED - PROBABLY WRONG
+*/
+function set_jpad_cell(pad, num, flag) local (pty, pc, vcel)
+(
+    // check that we really have a pad
+    pty = pad[ui_jpad_typ] & ui_jbtmask;
+    ((pty == ui_jpad_ty_act) || (pty == ui_jpad_ty_sel) || (pty == ui_jpad_ty_opt)) ? (
+        ((num >= 1) && (num <= pad[ui_jpad_siz])) ? (
+            pc = pad + pad[ui_jpad_cells]; vcel = pc[num-1];
+            (flag >= 0) ? (vcel |= flag) : (vcel &= flag -1);
+            pc[num-1] = vcel;
+            ui_XlocDoNow |= 1;
+        );
+    );
+);
+
+
+/*
+    Select or desselect pad "ent" of matrix "pad"
+    [[ internal function ]]
+        ent is in [1, #items]
+        flag == 0   => desselect
+        flag == 1   => select
+        flag == -1  => invert
+*/
+function ui_jpad_select(pad, ent, flag)
+local (pty, pp, cel, v, ii, r)
+(
+    r = 0;
+    pty = pad[ui_jpad_typ] & ui_jbtmask;
+    ((pty == ui_jpad_ty_act) || (pty == ui_jpad_ty_sel) || (pty == ui_jpad_ty_opt)) ? (
+        pp = pad + pad[ui_jpad_cells] -1; // subtract 1 because ent starts at 1
+        (ent >=1 && ent <= pad[ui_jpad_siz]) ? (
+            // ent is a valid entry
+            cel = pp[ent]; // cell entry
+            !(cel & ui_jpad_ct_disab) ? (
+                (pty == ui_jpad_ty_sel) ? (
+                    // only one can be selected at a time
+                    v = cel & ui_jpad_ct_selec; // keep current status
+                    // reset all
+                    ii = 1;
+                    loop (pad[ui_jpad_siz],
+                        pp[ii] &= -1 ~ ui_jpad_ct_selec; ii += 1;
+                    );
+                    ((flag > 0) || ((flag < 0) && (v == 0))) ?  pp[ent] |= ui_jpad_ct_selec;
+                );
+                (pty == ui_jpad_ty_opt) ? ( // any pad can be selected
+                    (flag >= 0) ? (
+                        flag ? (cel |= ui_jpad_ct_selec) : (cel &= -1 ~ ui_jpad_ct_selec);
+                    ) : (
+                        cel = cel ~ ui_jpad_ct_selec;
+                    );
+                    pp[ent] = cel;
+                );
+                r = 1; // valid choice
+            );
+            ui_XlocDoNow |= 1;
+        ) : (
+            (ent == 0) ? (
+                // deselect the pads
+                //(pty == ui_jpad_ty_sel) ? (
+                    ii = 1;
+                    loop (pad[ui_jpad_siz],
+                        pp[ii] &= -1 ~ ui_jpad_ct_selec; ii += 1;
+                    );
+                //);
+                r = 1; // valid choice
+            );
+        );
+    );
+    r;
+);
+
+
+/*
+   Draw a control pad and interact with it
+*/
+function control_jpad(pm, fnl, fnc, opt)
+local (ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, iy, rs,
+       dc, labs, gloff, isvalid, ctype, cc, cdefs, nums, colors, z1, z2, z3, z4, z5,
+       CS, alabs, acolors, selected, fmsin, flevnt, drc, drr, bcl, dcl, i, ms_x, ms_y,
+       xc, yc, rc, xcl, ycl, zcl)
+(
+    ty = pm[ui_jpad_typ]; // pad type and flags
+    pty = ty & ui_jbtmask; // just the pad type
+    rs = uix_drawconfig_current[9]; // retina scaling
+    bcl = ((pm[ui_jpad_color2] >= 0) ? pm[ui_jpad_color2] : ui_jcolor_text);
+    dcl = ((pm[ui_jpad_color3] >= 0) ? pm[ui_jpad_color3] : ui_jcolor_draw);
+    xcl = ((pm[ui_jpad_color1] >= 0) ? pm[ui_jpad_color1] : bcl);
+    ycl = ((pm[ui_jpad_color4] >= 0) ? pm[ui_jpad_color4] : bcl);
+    zcl = ((pm[ui_jpad_color5] >= 0) ? pm[ui_jpad_color5] : bcl);
+    flevnt = 0; // no event yet
+    ((pty == ui_jpad_ty_act) || (pty == ui_jpad_ty_sel) || (pty == ui_jpad_ty_opt)) ? (
+        ui_push(); // push viewport to save it
+        nc = pm[ui_jpad_nco]; nc <= 0 ? nc = 1;
+        (fnc > 0) ? (nc = (opt & 1) ? fnc : min(nc, fnc));
+        nl = pm[ui_jpad_nli]; nl <= 0 ? nl = 1;
+        (fnl > 0) ? (nl = (opt & 1) ? fnl : min(nl, fnl));
+        iy = pm[ui_jpad_linc]; ((iy <= 0) || (opt & 2)) ? iy = nc;
+        ix = pm[ui_jpad_cinc]; ix <= 0 ? ix = 1;
+        // is the mouse in the pad ?
+        ms_x = ms_y = -1;
+        (fmsin = ui_hover()) ? (
+            ms_x = uix_mouse_x; ms_y = uix_mouse_y;
+        );
+        // cells rectangle size
+        z2 = ui_width(); z3 = ui_height();
+        // z2 = ui_width_retina(); z3 = ui_height_retina();
+        wi = 0|(z2/nc); he = 0|(z3/nl);
+        // Adjust rectangle for correct displaying.
+        z2 = z2 - wi*nc; z3 = z3 - he*nl; z4 = 0|(z2/2); z5 = 0|(z3/2);
+        ui_pad(z4, z5, z2-z4, z3-z5); // corrected work area for the pad
+        // draw a border ?
+        (ty & ui_jpad_ty_bord) ? ( ui_pad(4, 2, 5, 2); ui_pcolor(bcl); ui_border(); );
+        ((z5 = pm[ui_jpad_border]) != 0) ?  ui_pad(z5, z5, z5, z5);
+        left = ui_left(); ypos = top = ui_top();
+        // left = ui_left_retina(); ypos = top = ui_top_retina();
+        gloff = pm[ui_jpad_gloff];  // global offset for displaying
+        labs = pm[ui_jpad_labs]; labs != 0 ? labs += pm; // labels, if any
+        alabs = pm[ui_jpad_altlabs]; alabs != 0 ? alabs += pm; // alt labels, if any
+        cdefs = pm[ui_jpad_cells]; cdefs != 0 ? cdefs += pm; // cell definitions
+        nums = pm[ui_jpad_values]; nums != 0 ? nums += pm; // values definitions
+        colors = pm[ui_jpad_clrs]; colors != 0 ? colors += pm; // colors definitions
+        acolors = pm[ui_jpad_altclrs]; acolors != 0 ? acolors += pm; // alt colors definitions
+        pm[ui_jpad_lmods] = ui_jmouse_cap; // keep mouse/keys infos
+        fmsin ? (
+            // Mouse clicked here ?
+            (z1 = ui_click(1)) ? (
+                flevnt |= ui_jpad_ev_lmc; ui_XlocDoNow |= 1;
+            );
+            (z2 = ui_click(2)) ? (
+                flevnt |= ui_jpad_ev_rmc; ui_XlocDoNow |= 1;
+            );
+            (z3 = ui_click(64)) ? (
+                flevnt |= ui_jpad_ev_cmc; ui_XlocDoNow |= 1;
+            );
+            xm = z1 + z2 + z3;
+        );
+        // Loop to display the individual cells
+        ny = 0; loop (nl, (  // displayed line
+            xpos = left;
+            nx = 0; loop (nc, ( // displayed column
+                np = nx*ix + ny*iy - gloff; // the cell to be displayed in it
+                ctype = drc = drr = 0; // dc = dcl;
+                CS = 0; // no color change for now
+                isvalid = (np >= 0) && (np < pm[ui_jpad_siz]);
+                (isvalid && (cdefs != 0)) ? (ctype = cdefs[np];); // cell type
+                (ctype & ui_jpad_ct_nobrd) ? ( z4 = z5 = 0;) : ( z4 = 2; z5 = 5; ) ;
+                ui_set_rect(xpos, ypos, wi-z4, he-z4); // set rectangle
+                xc = xpos + wi/2 - z4; yc = ypos + he/2 - z4 +1;
+                rc = min(wi,he)/2 - z5 + 4;
+                drc = (ctype & ui_jpad_ct_round);  // draw round cells
+                drr = (ctype & ui_jpad_ct_rrect) ? 4 : 0; // draw round rectangles cells
+                dc = (ctype & ui_jpad_ct_altcol) ? ycl : dcl;
+                /*
+                (drc && drr) ? (
+                    drc = 0;
+                    drr = 0|min((wi-4)/2, (he-4)/2);
+                );
+                */
+                ui_pcolor(dc);
+                (!(ctype & ui_jpad_ct_nobrd)) ? (  // need the border
+                    (drc) ? (
+                         (drr) ? (
+                             i = -1 + (0|min((wi-4)/2, (he-4)/2));
+                             gfx_roundrect(rs * (xpos+1), rs * (ypos+1), rs * (wi-4), rs * (he-4), rs * i);
+                         ) : (
+                             // gfx_set_pcolor(cc2);
+                             gfx_circle(rs * xc, rs * yc, rs * rc * 1.1, 1);
+                         );
+                    ) : (
+                         gfx_roundrect(rs * (xpos+1), rs * (ypos+1), rs * (wi-4), rs * (he-4), rs * drr);
+                    );
+                );
+                ui_pcolor(dc);
+                isvalid ? (
+                    // Mouse clicked here & cell enabled ?
+                    (fmsin && (ms_x >= xpos) && (ms_x < xpos+wi-2) && (ms_y >= ypos) && (ms_y < ypos+he-2)) ? (
+                        ui_jmouse_buttons ? CS |= 1;
+                        pm[ui_jpad_entkey] = pm[ui_jpad_last] = np+1; // keep the cell number, in "1" origin
+                        ((ctype & ui_jpad_ct_disab) == 0) ? (
+                            (xm != 0) ? (
+                                flevnt |= ui_jpad_ev_cclk; // a cell was clicked
+                                (pty == ui_jpad_ty_sel) ? (
+                                    i = 0; loop (pm[ui_jpad_siz],
+                                        cdefs[i] = cdefs[i] & (-1 ~ ui_jpad_ct_selec);  // reset all selections
+                                        i += 1;
+                                    );
+                                    cdefs[np] = ctype = cdefs[np] | ui_jpad_ct_selec; // set for this one
+                                );
+                                (pty == ui_jpad_ty_opt) ? (
+                                    // auto mark/unmark
+                                    (cdefs != 0) ? (
+                                         cdefs[np] = ctype = cdefs[np] ~ ui_jpad_ct_selec;
+                                    );
+                                );
+                            ) : (
+                                // has a char been typed ?
+                                ui_key() ? (
+                                    flevnt |= ui_jpad_ev_key;
+                                    pm[ui_jpad_lkey] = ui_key();
+                                    pm[ui_jpad_entkey] = np+1; // ent, in 1-origin
+                                    // ui_key_next(); // take the char
+                                    uix_latestchar = 0;
+                                );
+                            );
+                        ) : (
+                            // cell is disabled.
+                            pm[ui_jpad_last] = 0; // consider no clic
+                            pm[ui_jpad_entkey] = 0; // ent, in 1-origin
+                        );
+                        // at least, the mouse was on a cell
+                        /*
+                        (flevnt === 0) ? (
+                            flevnt = ui_jpad_ev_mov;
+                        ); // in "1" origin
+                        */
+                    );
+                    selected = ctype & ui_jpad_ct_selec;
+                    (ctype & ui_jpad_ct_disab) ? CS |=4;
+                    cc = (ctype & ui_jpad_ct_altcol) ? ycl : xcl;
+                    (!(ctype & ui_jpad_ct_nocolor)) ? (
+                        selected ? (
+                            ((acolors != 0) && (acolors[np] >= 0)) ? (
+                                cc = acolors[np];
+                            ) : (
+                                ((colors != 0) && (colors[np] >= 0)) ? cc = colors[np];
+                                CS |= 2;
+                            );
+                        ) : (
+                            ((colors != 0) && (colors[np] >= 0))? cc = colors[np];
+                        );
+                    );
+                    cc = ui_pcolor_derived(cc, CS);
+                    gfx_set_pcolor(cc, 1);
+                    (drc) ? (
+                         (drr) ? (
+                             z1 = -1 + (0|min((wi-z5)/2, (he-z5)/2));
+                             gfx_circle(rs * (xpos+z4+z1-1), rs * (ypos+z4+z1-1), rs * z1, 1);
+                             gfx_circle(rs * (xpos+z4+wi-z5-z1-1), rs * (ypos+z4+he-z5-z1-1), rs * z1, 1);
+                             (wi > he) ? (
+                                 gfx_rect(rs * (xpos+z4+z1), rs * (ypos+z4), rs * (wi-z5-2*z1), rs * (he-z5));
+                             ) : (
+                                 gfx_rect(rs * (xpos+z4), rs * (ypos+z4+z1), rs * (wi-z5), rs * (he-z5-2*z1));
+                             );
+                         ) : (
+                             gfx_circle(rs * xc, rs * yc, rs * rc, 1);
+                         );
+                    ) : (
+                        (drr) ? (
+                            //gfx_roundrect(rs * xpos, rs * ypos, rs * (wi-2), rs * (he-2), rs * drr);
+                            gfx_roundrect(rs * (xpos+2), rs * (ypos+2), rs * (wi-6), rs * (he-6), rs * drr);
+                            //gfx_rect(rs * (xpos+z4), rs * (ypos+z4), rs * (wi-z5), rs * (he-z5));
+                        ) : (
+                            gfx_rect(rs * (xpos+z4), rs * (ypos+z4), rs * (wi-z5), rs * (he-z5));
+                        );
+                    );
+                    cc2 = ui_pcontrast(cc);
+                    // dc = dcl;
+                    // should we "mark" the cell ?
+                    selected ? (
+                         // selected cell
+                         ui_pcolor(ui_jcolor_draw_bg);
+                         // ui_pcolor(cc2);
+                         // gfx_set_pcolor(cc2);
+                         (drc) ? (
+                             (drr) ? (
+                                 i = min((wi-6)/2, (he-6)/2);
+                                 gfx_roundrect(rs * xpos, rs * ypos, rs * (wi-2), rs * (he-2), rs * (i+2));
+                                 gfx_roundrect(rs * (xpos+2), rs * (ypos+2), rs * (wi-6), rs * (he-6), rs * i);
+                             ) : (
+                                 gfx_a = 0.3;
+                                 gfx_set_pcolor(cc2);
+                                 gfx_circle(rs * xc, rs * yc, rs * rc, 1);
+                                 gfx_a = 1;
+                                 gfx_set_pcolor(cc);
+                                 gfx_circle(rs * xc, rs * yc, rs * rc * 0.70, 1);
+                             );
+                         ) : (
+                             gfx_roundrect(rs * xpos, rs * ypos, rs * (wi-2), rs * (he-2), rs * drr);
+                             gfx_roundrect(rs * (xpos+2), rs * (ypos+2), rs * (wi-6), rs * (he-6), rs * drr);
+                         );
+                         // dc = ui_pcontrast(ui_jcolor_draw_bg);
+                    );
+
+
+                    ui_pcolor(cc2);
+                    //   ui_align((((ctype & ui_jpad_ct_align)>>4) -1)/2,-1); // set align type
+                    //   ui_pad();
+                    ui_pad(0,ui_jd_padTopDec,0,0); ui_align(0.5, 0.5);
+                    ((ctype & ui_jpad_ct_cclear) == 0) ? (
+                        (selected && (alabs != 0) && (alabs[np] != 0)) ? (
+                            ui_text(alabs[np]);
+                        ) :
+                        ((labs != 0) && (labs[np] != 0) && ((ctype & ui_jpad_ct_showval) == 0)) ? (
+                            // if there is a label, put the label
+                            ui_text(labs[np]);
+                        ) :
+                        (nums != 0) ? (
+                            // if there is a value for the cell, print this number
+                            ui_textnumber(nums[np], pm[ui_jpad_fmts] != 0 ? pm[ui_jpad_fmts] : "%f");
+                        ) : (
+                            // print the cell number
+                            ui_textnumber(np+pm[ui_jpad_coff], "%d");
+                        );
+                    );
+
+                );
+                // next cell
+                xpos += wi; nx +=1;
+            ));
+            ypos += he; ny +=1;
+        ));
+        ui_pop(); // restore previous viewport
+        pm[ui_jpad_rflags] = flevnt;
+    );
+    flevnt;
+);
+
+
+function control_jpad(pm)
+(
+    control_jpad(pm, -1, -1, 0);
+);
+
+/*
+   Draw a control pad linked with a slider and interact with it
+*/
+function control_jpad(pm, slidervar*)
+local (z, zs)
+(
+    z = control_jpad(pm, -1, -1, 0);
+    (z != 0) ? (
+        // automate the thing
+        pm[ui_jpad_lslider] = zs = pm[ui_jpad_last];
+        ui_automate(slidervar, zs);
+    );
+    (z == 0) ? (
+        (pm[ui_jpad_lslider] != slidervar) ? (
+            // slider moved
+            zs = slidervar;
+            ui_jpad_select(pm, zs, -1) ? (
+                pm[ui_jpad_lslider] = pm[ui_jpad_last] = zs;
+                // return a slider event
+                z = ui_jpad_ev_slev ;
+            ) : (
+                slidervar = pm[ui_jpad_lslider] = pm[ui_jpad_last];
+                sliderchange(slidervar);
+            );
+            ui_automate(slidervar, zs);
+            ui_XlocDoNow |= 1;
+        );
+    );
+    z;
+);
+
+function control_jpad_set(pm, ent, val) local(pty)
+(
+    pty = pm[ui_jpad_typ] & ui_jbtmask; // just the pad type
+    ((pty == ui_jpad_ty_act) || (pty == ui_jpad_ty_sel) || (pty == ui_jpad_ty_opt)) ? (
+        ui_jpad_select(pm, ent, val) ? (
+            pm[ui_jpad_last] = ent;
+        );
+    );
+);
+
+function control_jpad_set(pm, slidervar*, ent, val) local(pty)
+(
+    pty = pm[ui_jpad_typ] & ui_jbtmask; // just the pad type
+    ((pty == ui_jpad_ty_act) || (pty == ui_jpad_ty_sel) || (pty == ui_jpad_ty_opt)) ? (
+        ui_jpad_select(pm, ent, val) ? (
+            pm[ui_jpad_lslider] = pm[ui_jpad_last] = slidervar = ent;
+            ui_automate(slidervar, ent);
+            sliderchange(slidervar);
+            ui_XlocDoNow |= 1;
+        );
+    );
+);
+
+/*
+
+  Build a pad structure.
+  Sequence :
+
+       my_pad = make_jpad(creation_flags, nl, nc, items);
+
+
+
+
+   - creation_flags is a pad type and a set of flags that can be combined :
+      -   ui_jpad_ty_act    action type : no pad is ever selected
+      -   ui_jpad_ty_sel    selection type : just one selected object at a time
+      -   ui_jpad_ty_opt    options : any pad can be selected
+      -   ui_jpad_mk_labs     reserve area for labels
+      -   ui_jpad_mk_altlabs     reserve area for alternative labels
+      -   ui_jpad_mk_colors   reserve area for colors
+      -   ui_jpad_mk_altcolors   reserve area for alternative colors
+      -   ui_jpad_mk_values   reserve area for values
+      -   ui_jpad_mk_actions  reserve area for actions
+      -   ui_jpad_mk_rcells   make round cells
+      -   ui_jpad_mk_cclear  leave the cell without label
+      -   ui_jpad_mk_clnobrd  no border
+   - nl : number of lines to be displayed
+   - nc : number of columns to be displayed
+   - items : number of items to be displayed. It can differ from nl x nc.
+     If 0, it is assumed to be equal to nl x nc.
+
+   Other functions let you add names, colors, etc.
+
+*/
+function make_jpad(flags, lcnt, ccnt, icnt)
+local (pad, ii, plast, add, cty)
+(
+    pad = mSL_StM_BlockStart('pad_');
+    // clear the first part of the structure
+    ii=0; loop(ui_jpad_free, pad[ii] = 0; ii+=1;);
+    cty = flags & ui_jbtmask; // extract the type
+    ((cty != ui_jpad_ty_act) && (cty != ui_jpad_ty_sel) && (cty != ui_jpad_ty_opt)) ? ( cty = ui_jpad_ty_sel; );
+    pad[ui_jpad_typ] = cty;
+    pad[ui_jpad_nli] = lcnt;
+    pad[ui_jpad_nco] = ccnt;
+    flags & ui_jpad_mk_colmaj ? (
+        pad[ui_jpad_linc] = 1; pad[ui_jpad_cinc] = lcnt;
+    ) : (
+        pad[ui_jpad_linc] = ccnt; pad[ui_jpad_cinc] = 1;
+    );
+    pad[ui_jpad_last] = -1;
+    pad[ui_jpad_border] = 2; // default border
+    pad[ui_jpad_siz] = icnt = (icnt == 0 ? lcnt*ccnt : icnt);
+    pad[ui_jpad_fmts] = "%f"; // some default format for values displaying
+    pad[ui_jpad_color1] = -1;
+    pad[ui_jpad_color2] = -1;
+    pad[ui_jpad_color3] = -1;
+    pad[ui_jpad_color4] = -1;
+    pad[ui_jpad_color5] = -1;
+    plast = ui_jpad_free;
+    // area for the cell descriptions - always present
+    pad[ui_jpad_cells] = plast; plast += icnt;
+    // area for labels
+    (flags & ui_jpad_mk_labs) ? (pad[ui_jpad_labs] = plast; plast += icnt;);
+    // area for alternate labels
+    (flags & ui_jpad_mk_altlabs) ? (pad[ui_jpad_altlabs] = plast; plast += icnt;);
+    // area for colors
+    (flags & ui_jpad_mk_colors) ? (pad[ui_jpad_clrs] = plast; plast += icnt;);
+    // area for alternate colors
+    (flags & ui_jpad_mk_altcolors) ? (pad[ui_jpad_altclrs] = plast; plast += icnt;);
+    // area for values
+    (flags & ui_jpad_mk_values) ? (pad[ui_jpad_values] = plast; plast += icnt;);
+    // area for actions
+    (flags & ui_jpad_mk_actions) ? (pad[ui_jpad_actns] = plast; plast += icnt;);
+    pad[ui_jpad_bsize] = plast;
+    // clear the rest of the structure
+    loop(plast-ui_jpad_free, pad[ii] = 0; ii+=1;);
+    // Build the array of the cells flags
+    cty = 0;
+    (flags & ui_jpad_mk_callign) ? cty = 0x20;  // center alligned cell contents
+    (flags & ui_jpad_mk_lallign) ? cty = 0x10;  // left alligned cell contents
+    (flags & ui_jpad_mk_rallign) ? cty = 0x30;  // right alligned
+    (flags & ui_jpad_mk_rcells) ? cty |= ui_jpad_ct_round;
+    (flags & ui_jpad_mk_rrcells) ? cty |= ui_jpad_ct_rrect;
+    (flags & ui_jpad_mk_cclear) ? cty |= ui_jpad_ct_cclear;
+    (flags & ui_jpad_mk_clnobrd) ? cty |= ui_jpad_ct_nobrd;
+    add = pad + pad[ui_jpad_cells];
+    ii=0; loop(icnt, add[ii] = cty; ii+=1;);
+    // color specific initialisation (use -1 for nocolor specified)
+    (flags & ui_jpad_mk_colors) ? (
+        add = pad + pad[ui_jpad_clrs]; ii=0; loop(icnt, add[ii] = -1; ii+=1;);
+    );
+    (flags & ui_jpad_mk_altcolors) ? (
+        add = pad + pad[ui_jpad_altclrs]; ii=0; loop(icnt, add[ii] = -1; ii+=1;);
+    );
+    pad[ui_jpad_coff] = 1; // default pad offset
+    mSL_StM_BlockEnd(pad + plast);
+    pad;
+);
+
+
+/*
+    Some utilities
+
+    Fill pads with a single color
+*/
+function ui_jpad_set_colors(pad, color) local (pty, pc)
+(
+    // check we have a pad
+    pty = pad[ui_jpad_typ] & ui_jbtmask;
+    ((pty == ui_jpad_ty_act) || (pty == ui_jpad_ty_sel) || (pty == ui_jpad_ty_opt)) ? (
+        // check we have a color array
+        pc = pad[ui_jpad_clrs];
+        (pc != 0) ? (
+            set_pcolors_array(pad+pc, pad[ui_jpad_siz], color);
+        );
+    );
+);
+
+/*
+
+  Fill pads with a gradient of colors
+     see "set_pcolors_array" documentation
+*/
+function ui_jpad_set_colors(pad, col1, col2, mids, midv) local (pty, pc)
+(
+    // check we have a pad
+    pty = pad[ui_jpad_typ] & ui_jbtmask;
+    ((pty == ui_jpad_ty_act) || (pty == ui_jpad_ty_sel) || (pty == ui_jpad_ty_opt)) ? (
+        // check we have a color array
+        pc = pad[ui_jpad_clrs];
+        (pc != 0) ? (
+            set_pcolors_array(pad+pc, pad[ui_jpad_siz], col1, col2, mids, midv);
+        );
+    );
+);
+
+/*
+   Set string "lab" as label for entry "ent" (in [1,N]) of matrix pad "pad"
+*/
+function ui_jpad_set_label(pad, ent, lab)
+local (pty, pl)
+(
+    // check we have a pad
+    pty = pad[ui_jpad_typ] & ui_jbtmask;
+    ((pty == ui_jpad_ty_act) || (pty == ui_jpad_ty_sel) || (pty == ui_jpad_ty_opt)) ? (
+        // Check the entry number [1 to "n"]
+        ((ent > 0) && (ent <= pad[ui_jpad_siz])) ? (
+            // check we have a color array
+            pl = pad[ui_jpad_labs];
+            (pl != 0) ? (
+                pad[pl+ent-1] = lab;
+            );
+        );
+    );
+);
+
+
+
+
+//========================================
+
+
+function gfxInit()
+(
+    // Create a default menus to turn "leds" on and off...
+     ui_jled_def_menu = make_jmenu(ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_lclick | ui_jmenu_opt_notitle,
+     "led", "off|on");
+);
+

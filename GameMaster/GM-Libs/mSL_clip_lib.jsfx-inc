@@ -1,0 +1,1261 @@
+/*
+    The clip manager globals
+    (c)Jean-Jacques Girardot
+    2018-2023
+*/
+
+
+
+@init
+
+// All shared memory addresses
+// Max size is 8Mo, or :
+gmemLimit=8388608;
+
+/*
+
+    0 to 0x300 are for specific/individual informations
+
+*/
+
+clipLibVers = 0x10002;
+#section = "Unidentified";
+ULocPrime = 599;
+tickShift = 4;
+
+
+// <? include("import GM-Libs/mSL_clip_map.jsfx-inc"); ?>
+
+
+gMemFree = UGDummy + UCBSize;
+
+
+
+
+// 18448 - 2023-04
+paramGCopy = gMemFree; // value copy for the parameters
+gMemFree += paramCount;
+
+
+
+infoBSize = 0x4000;
+infoBStarts = gMemFree;    //
+infoBEnds = infoBStarts + infoBSize; // for now
+gMemFree = infoBEnds;    //
+
+// Some temporary exploded strings of size 512
+xplStr1 = gMemFree; gMemFree += 512;
+xplStr2 = gMemFree; gMemFree += 512;
+
+
+/*
+
+    Memory for clips information
+
+    start at clInfStart
+
+*/
+#clNameFormat = "WAVES/clip1%04d.%s";
+#clEdFormat = "clip1%04d.%s";
+#clDirectory = "WAVES";
+// #clNameFormat = "/Users/girardot/MusicProjects/GranLux/Gamer/Audio/WAVES/clip1%04d.%s";
+// Define consistent suffixes between gamer, player, etc.
+function setFileFormats(ff)
+(
+    ff[0] = "?"; // Entry zero unused
+    ff[1] = "wav";
+    ff[2] = "aiff";
+    ff[3] = "flac";
+    ff[4] = "mp3";
+    ff[5] = "ogg";
+    ff[6] = "aif";
+    ff[7] = "wmv";
+    ff[8] = "mp4";
+    ff[9] = "mov";
+    ff[10] = 0;
+    ff[11] = 0;
+    ff[12] = 0;
+    ff[13] = 0;
+    ff[14] = 0;
+    ff[15] = 0;
+);
+
+clBSCount = 10; // number of banksets (or groups)
+clBSSize = 10; // number of banks in a bankset
+clNBanks = clBSCount * clBSSize; // number of banks
+clInBank = 100; // number of clips in a bank
+clTSize = clNBanks * clInBank; // total clips count [10000 for now]
+clDataSize5 = clTSize * 5; // size of the clips data area except aliases
+clDataSize = clTSize * 6; // size of the clips data area
+clVolumeBias = 128; // volume bias in clClVolumes
+clVolumeMask = 0xFF; // mask for the volume bias
+clVolumeFlgs = 0xFFFFFF00; // exclude vol. bias
+//========= Clips description
+clInfStart = gMemFree; // 1st part : Errors or Clip counters
+clClSizes = clInfStart + clTSize;  // 2nd part of infos : sample count
+clClInfos = clClSizes + clTSize; // 3rd part of infos : freq, channels, format...
+clClVolumes = clClInfos + clTSize; // 4rth part : volumes adjustments // some flags
+clClDurations = clClVolumes + clTSize; // 5th part: std. duration in seconds at rate 1
+clClAlias = clClDurations + clTSize; // 6th part: ext. alias for clips
+//=========
+gMemFree += clDataSize;
+
+// Categories for the  banks
+ctPerc = 0x100; // best suited for percussion
+ctFric = 0x200; // best suited for friction
+ctSnds = 0x400; // a playable sound
+
+
+/*
+
+   Memory for Random States management
+
+*/
+RandomStates = 8; // number of random states generators
+RandomSColorsCnt = 32;                     // reserve some random colors
+RandomSColors = gMemFree;                  // Colors table for Random States
+gMemFree += RandomSColorsCnt;              // reserve locations for various colors, 1 to 8 used for rand. states
+RandomSActiv = gMemFree;                   // Active/inactive flags
+RandomSType = RandomSActiv + RandomStates; // Type of generator
+RandomSMode = RandomSType + RandomStates;  // Mode of generator
+RandomSCurr = RandomSMode + RandomStates;  // Current random states, in 0-100 - float
+RandomSFlags = RandomSCurr + RandomStates; // Current validity flags
+RandomSTimr = RandomSFlags + RandomStates; // Random timers - in ms
+gMemFree = RandomSTimr + RandomStates;
+// Some shared values
+RandomSMxSL = paramGCopy + p_rgenA1 ;    // 8 slider values, direct copies for Random States Amplitudes in 0 to 100% - float
+RandomSChSL = paramGCopy + p_rgenP1 ;    // 8 slider values, direct copies for Random Changes Cycles, integer ms in 10 to 120000 ms
+rndMainTimer = 0;
+
+
+// GM Midi Tmp Buffer Area
+tmpMIDIbuff = gMemFree;
+tmpMIDIsiz = 4096;
+tmpMIDIptr = 0;
+tmpMIDIptw = 0;
+gMemFree += tmpMIDIsiz;
+
+
+// Trace area
+trIAra = gMemFree;
+trISiz = 8 * 32 * 16;
+trIEnd = trIAra + trISiz;
+gMemFree = trIEnd;
+
+// An array to monitor HP usage.
+HP_uSize = 128;
+HP_usage = gMemFree;
+gMemFree += HP_uSize;
+
+// An array to copy The HP Configurations
+HPASize = 0x8000; // 32768 entries
+HPPSize = 4000; // configurations
+HPGlTabSiz = HPASize + HPPSize + 4096;
+gHPGlTab = gMemFree; gMemFree += HPGlTabSiz;
+gHPATab = gHPGlTab + 2;
+gHPPTab = gHPGlTab + 2 + HPASize + 2;
+gHPApt = gMemFree; gMemFree += 1;
+gHPCntDef = gMemFree; gMemFree += 1;
+
+//==========================================
+// Control structures for the play log
+playLogEcnt = 80000; // 65536; // entry count
+playLogESize = RCB_Saved_Size;
+plTInfo = gMemFree;
+gMemFree += 40; // (?)
+playLogStrt = gMemFree;
+playLogEnd = gMemFree = playLogStrt + playLogEcnt * playLogESize;
+// Some fields in the 8 word block pointing to gmem
+plLEINum = 5;  // entry number in record order
+plLEntRcrd = 6; // start date of the sound
+plLEntGRef = 7; // reference (as "-addr" to the gmem entry
+
+function plChckEnt(baddr)
+(
+    (baddr >= playLogStrt) && (baddr < playLogEnd) && (((baddr - playLogStrt) % playLogESize) === 0)  ;
+);
+
+
+
+
+//############################## MISC ###############################
+// Utilities functions
+
+/*
+      Random number generator
+
+      Hull–Dobell Theorem :
+      Linear congruential generator "x <-- (x * a + c) % m" is correct when:
+        m and c are relatively prime,
+        a − 1 is divisible by all prime factors of m,
+        a − 1 is divisible by 4 if m is divisible by 4.
+*/
+MaxDouble = 1.7976931348623158  * 10^308;
+MinDouble = -1.7976931348623158  * 10^308;
+Rndm_m = 256 * 256 * 256 * 256 ; // Modulo: 2^32
+Rndm_m_1 = Rndm_m - 1;
+Rndm_a = 4 * 8191 + 1;  // 8191 is a prime
+Rndm_c = 8167; // a prime, less than 8191
+Rndm_n = 59933; // the seed : ANY value will do
+// next seed is then "Rndm_n = (Rndm_n * Rndm_a + Rndm_c) % Rndm_m;"
+// "(Rndm_n * Rndm_a + Rndm_c)" take integers values in [0 2^48-1] correctly represented on 64 bits floats.
+
+// provide a random integer in [0 .. k-1]
+/*
+function irand(k)
+(
+    Rndm_n = (Rndm_n * Rndm_a + Rndm_c) % Rndm_m;
+    floor(k * Rndm_n / Rndm_m);
+);
+*/
+function irand(k)
+local (u)
+(
+    u = Rndm_n * Rndm_a + Rndm_c;
+    Rndm_n = u - Rndm_m * floor(u/Rndm_m);
+    // Rndm_n = (Rndm_n * Rndm_a + Rndm_c) % Rndm_m;
+    (k <= 0) ? Rndm_n : floor(k * Rndm_n / Rndm_m);
+);
+
+// provide a random float in [0 .. 1]
+function frand()
+local (u)
+(
+    u = Rndm_n * Rndm_a + Rndm_c;
+    Rndm_n = u - Rndm_m * floor(u/Rndm_m);
+    Rndm_n / Rndm_m_1;
+);
+
+// provide a random float in [a b]
+function frand(a, b)
+local (u)
+(
+    u = Rndm_n * Rndm_a + Rndm_c;
+    Rndm_n = u - Rndm_m * floor(u/Rndm_m);
+    a + (b - a) * (Rndm_n / Rndm_m_1);
+);
+
+// provide a random float between u and v according to an exponential distribution
+function xrand(u,v)
+(
+    (u <= 0) ? u = MinDouble : u = log(u);
+    (v <= 0) ? v = MinDouble : v = log(v);
+    u = Rndm_n * Rndm_a + Rndm_c;
+    Rndm_n = u - Rndm_m * floor(u/Rndm_m);
+    exp (u + (v - u) * (Rndm_n / Rndm_m_1));
+);
+
+// To be called once !
+function gInit()
+local (i, Un, done)
+(
+    (!(done = (gmem[flagGInited] == clipLibVers))) ? (
+        i = 0; loop(gMemFree,
+            gmem[i] = 0; i+=1;
+        );
+
+        gmem[0x00] = loczerovalue;
+        gmem[0x01] = 'gmem';
+        gmem[0x02] = clipLibVers;
+        gmem[0x03] = Undef;
+        gmem[0x04] = gmemLimit;
+        gmem[0x05] = ULocPrime;
+        gmem[0x06] = tickShift;
+        gmem[flagSect] = 0;
+        gmem[flagSubS] = SubSection = -1;
+        gmem[flagGInited] = clipLibVers;
+        gmem[commonGlobalVolume] = gmem[speedBase] = 1;
+        gmem[clRdMaxSize] = 240;
+        gmem[gVolBias] = 0.00001;
+        gmem[gmemLastUsed] = gMemFree;
+        gmem[dateStrt] = gmem[dateDone] = gmem[scptStrt] = gmem[scptDone] = 1;
+        // provide some prime numbers for various algorithms
+        i = 0; gmem[somePrimes] = 11; // start the list at 11
+        // =========== Primes, more or less at random; Size is "primeCount", currently 131
+        gmem[somePrimes + (i+=1)] = 499; gmem[somePrimes + (i+=1)] = 503; gmem[somePrimes + (i+=1)] = 509;
+        gmem[somePrimes + (i+=1)] = 53;  gmem[somePrimes + (i+=1)] = 59;  gmem[somePrimes + (i+=1)] = 67;
+        gmem[somePrimes + (i+=1)] = 673; gmem[somePrimes + (i+=1)] = 677; gmem[somePrimes + (i+=1)] = 683;
+        gmem[somePrimes + (i+=1)] = 431; gmem[somePrimes + (i+=1)] = 433; gmem[somePrimes + (i+=1)] = 439;
+        gmem[somePrimes + (i+=1)] = 757; gmem[somePrimes + (i+=1)] = 761; gmem[somePrimes + (i+=1)] = 769;
+        gmem[somePrimes + (i+=1)] = 73;  gmem[somePrimes + (i+=1)] = 89;  gmem[somePrimes + (i+=1)] = 97;
+        gmem[somePrimes + (i+=1)] = 587; gmem[somePrimes + (i+=1)] = 593; gmem[somePrimes + (i+=1)] = 599;
+        gmem[somePrimes + (i+=1)] = 139; gmem[somePrimes + (i+=1)] = 149; gmem[somePrimes + (i+=1)] = 151;
+        gmem[somePrimes + (i+=1)] = 739; gmem[somePrimes + (i+=1)] = 743; gmem[somePrimes + (i+=1)] = 751;
+        gmem[somePrimes + (i+=1)] = 191; gmem[somePrimes + (i+=1)] = 193; gmem[somePrimes + (i+=1)] = 197;
+        gmem[somePrimes + (i+=1)] = 827; gmem[somePrimes + (i+=1)] = 829; gmem[somePrimes + (i+=1)] = 839;
+        gmem[somePrimes + (i+=1)] = 227; gmem[somePrimes + (i+=1)] = 229; gmem[somePrimes + (i+=1)] = 233;
+        gmem[somePrimes + (i+=1)] = 617; gmem[somePrimes + (i+=1)] = 619; gmem[somePrimes + (i+=1)] = 631;
+        gmem[somePrimes + (i+=1)] = 521; gmem[somePrimes + (i+=1)] = 523; gmem[somePrimes + (i+=1)] = 541;
+        gmem[somePrimes + (i+=1)] = 257; gmem[somePrimes + (i+=1)] = 263; gmem[somePrimes + (i+=1)] = 269;
+        gmem[somePrimes + (i+=1)] = 641; gmem[somePrimes + (i+=1)] = 643; gmem[somePrimes + (i+=1)] = 647;
+        gmem[somePrimes + (i+=1)] = 311; gmem[somePrimes + (i+=1)] = 313; gmem[somePrimes + (i+=1)] = 317;
+        gmem[somePrimes + (i+=1)] = 809; gmem[somePrimes + (i+=1)] = 811; gmem[somePrimes + (i+=1)] = 823;
+        gmem[somePrimes + (i+=1)] = 353; gmem[somePrimes + (i+=1)] = 367; gmem[somePrimes + (i+=1)] = 373;
+        gmem[somePrimes + (i+=1)] = 409; gmem[somePrimes + (i+=1)] = 419; gmem[somePrimes + (i+=1)] = 421;
+        gmem[somePrimes + (i+=1)] = 691; gmem[somePrimes + (i+=1)] = 701; gmem[somePrimes + (i+=1)] = 709;
+        gmem[somePrimes + (i+=1)] = 383; gmem[somePrimes + (i+=1)] = 397; gmem[somePrimes + (i+=1)] = 401;
+        gmem[somePrimes + (i+=1)] = 461; gmem[somePrimes + (i+=1)] = 463; gmem[somePrimes + (i+=1)] = 467;
+        gmem[somePrimes + (i+=1)] = 113; gmem[somePrimes + (i+=1)] = 853; gmem[somePrimes + (i+=1)] = 137;
+        gmem[somePrimes + (i+=1)] = 199; gmem[somePrimes + (i+=1)] = 211; gmem[somePrimes + (i+=1)] = 223;
+        gmem[somePrimes + (i+=1)] = 479; gmem[somePrimes + (i+=1)] = 487; gmem[somePrimes + (i+=1)] = 491;
+        gmem[somePrimes + (i+=1)] = 13;  gmem[somePrimes + (i+=1)] = 43;  gmem[somePrimes + (i+=1)] = 47;
+        gmem[somePrimes + (i+=1)] = 157; gmem[somePrimes + (i+=1)] = 163; gmem[somePrimes + (i+=1)] = 167;
+        gmem[somePrimes + (i+=1)] = 547; gmem[somePrimes + (i+=1)] = 557; gmem[somePrimes + (i+=1)] = 563;
+        gmem[somePrimes + (i+=1)] = 283; gmem[somePrimes + (i+=1)] = 293; gmem[somePrimes + (i+=1)] = 307;
+        gmem[somePrimes + (i+=1)] = 569; gmem[somePrimes + (i+=1)] = 571; gmem[somePrimes + (i+=1)] = 577;
+        gmem[somePrimes + (i+=1)] = 101; gmem[somePrimes + (i+=1)] = 103; gmem[somePrimes + (i+=1)] = 107;
+        gmem[somePrimes + (i+=1)] = 601; gmem[somePrimes + (i+=1)] = 607; gmem[somePrimes + (i+=1)] = 613;
+        gmem[somePrimes + (i+=1)] = 173; gmem[somePrimes + (i+=1)] = 179; gmem[somePrimes + (i+=1)] = 181;
+        gmem[somePrimes + (i+=1)] = 17;  gmem[somePrimes + (i+=1)] = 19;  gmem[somePrimes + (i+=1)] = 23;
+        gmem[somePrimes + (i+=1)] = 239; gmem[somePrimes + (i+=1)] = 241; gmem[somePrimes + (i+=1)] = 251;
+        gmem[somePrimes + (i+=1)] = 653; gmem[somePrimes + (i+=1)] = 659; gmem[somePrimes + (i+=1)] = 661;
+        gmem[somePrimes + (i+=1)] = 271; gmem[somePrimes + (i+=1)] = 277; gmem[somePrimes + (i+=1)] = 281;
+        gmem[somePrimes + (i+=1)] = 719; gmem[somePrimes + (i+=1)] = 727; gmem[somePrimes + (i+=1)] = 733;
+        gmem[somePrimes + (i+=1)] = 443; gmem[somePrimes + (i+=1)] = 449; gmem[somePrimes + (i+=1)] = 457;
+        gmem[somePrimes + (i+=1)] = 331; gmem[somePrimes + (i+=1)] = 337; gmem[somePrimes + (i+=1)] = 347;
+        gmem[somePrimes + (i+=1)] = 31;  gmem[somePrimes + (i+=1)] = 37;  gmem[somePrimes + (i+=1)] = 41;
+        gmem[somePrimes + (i+=1)] = 773; gmem[somePrimes + (i+=1)] = 787; gmem[somePrimes + (i+=1)] = 797;
+        //============
+        gmem[somePrimes + (i+=1)] = 857;
+        gmem[pprimecnt] = i + 1;
+        gmem[primeCurrent] = irand(primeCount);
+
+        gmem[flagSect] = mSL_Str_Perm();
+        gmem[dynGlFlags] = 0x7FFFFFFF;
+
+    );
+    done;
+);
+
+function tr(p, v)
+(
+   p = 0|((p<0) ? 0 : (p >= trISiz) ? trISiz-1 : p);
+   gmem[trIAra + p] = v;
+);
+
+
+
+/*
+    Randomly choose a value from an array.
+    rcb is a 3 entry array,
+       rcb[0] = result
+       rcb[1] = array
+       rcb[2] = current element count
+     ( rcb[3] = size of the array)
+*/
+function irchoose(rcb) local(tab, p, j, k)
+(
+    tab = rcb[1];
+    ((p = rcb[2]) <= 1) ? (
+        k = tab[0];
+    ) : (
+        j = irand(p);
+        k = tab[j];
+        rcb[2] = p = p - 1;
+        tab[j] = tab[p];
+    );
+    rcb[0] = k;
+);
+
+/*
+Random states functions
+       igen is the number of the generator, in [0, RandomStates-1]
+
+    randS(k) returns a floating point number
+    irandS(k) returns an integer
+*/
+function initRandomStates() local (ii)
+(
+    ii=0; loop(RandomStates,
+        // gmem[RandomSMxSL+ii] = 10; // default random slider values as 10%
+        // gmem[RandomSChSL+ii] = 1000; // in ms -- change every second  in [0.01  120]
+        gmem[RandomSActiv+ii] = 1; // generator is active
+        gmem[RandomSCurr+ii] = 0; // random initial values initial values
+        gmem[RandomSType+ii] = 0; // type of random generators
+        gmem[RandomSMode+ii] = 0; // mode of random generators
+        gmem[RandomSFlags+ii] = 1; // but this value is invalid
+        gmem[RandomSTimr+ii] = irand(100000); // some random initial value
+        ii+= 1;
+    );
+    rndMainTimer = time_precise() + gmem[timeDelta];  // part of Random State initialisation
+);
+
+// Returns a [0 100] floating RS value from generator "igen"
+function randS(igen)
+local (ty)
+(
+    igen = max(0, min(RandomStates-1, 0|igen));
+    gmem[RandomSFlags+igen] ? (
+        ty = gmem[RandomSMode+igen];
+
+        gmem[RandomSCurr+igen] = gmem[RandomSMxSL+igen] * frand();
+        gmem[RandomSFlags+igen] = 0;
+    );
+    gmem[RandomSCurr+igen];
+);
+
+// Returns a [0 100] integer RS value from generator "igen"
+function irandS(igen)
+(
+    igen = max(0, min(RandomStates-1, 0|igen));
+    gmem[RandomSFlags+igen] ? (
+        gmem[RandomSCurr+igen] = gmem[RandomSMxSL+igen] * frand();
+        gmem[RandomSFlags+igen] = 0;
+    );
+    0|gmem[RandomSCurr+igen];
+);
+
+function v2dB(u) (
+    (u <= 0) ? -1000 : log(u) * 8.68588963806503655305;
+);
+
+function dB2v(u) (
+    10 ^ (u/20);
+);
+
+//########################### DATE TIME ############################
+
+// Create a Date & Time variable
+// dec is the distance in hours to GMT
+// in France, use dec=1 for winter time, dec=2 for summer time.
+function DTG_init(dec)
+instance(year,month,mday,hour,minute,second,wday,last_ts,GMT_dec)
+(
+    year = month = mday = hour = minute = second = wday = last_ts = 0;
+    GMT_dec = dec;
+);
+
+function DTG_set(dec)
+instance(year,month,mday,hour,minute,second,wday,last_ts,GMT_dec)
+(
+    GMT_dec = dec;
+);
+
+// Converts a Unix time stamp in :
+//    year in 1970 => ...
+//    month in [1 12]
+//    mday in [1 31] : day in the month
+//    wday in [0 6] : day in week, with 0=monday
+//    hour in [0 23]
+//    minute in [0 59]
+//    second in [0 59]
+function DTG_update(ts)
+instance(year,month,mday,hour,minute,second,wday,last_ts,GMT_dec)
+local(a,b,y,x,m,d,h,j,k)
+(
+    ts += GMT_dec * 3600;
+    second = ts%60;
+    ts = 0|(ts/60);
+    minute = ts%60;
+    ts = 0|(ts/60);
+    hour = ts%24;
+    ts = 0|(ts/24);
+    (last_ts != ts) ? (
+        last_ts = ts; // aka "days since 1/1/1970"
+        a = (0|((4*ts+102032)/146097))+15;
+        b = ts+2442113+a-(a>>2);
+        y = 0|((20*b-2442)/7305);
+        x = b-365*y-(y>>2);
+        m = 0|(x*1000/30601);
+        d = x-m*30-(0|(m*601/1000));
+        (m<=13) ? (y-=4716;m-=1;) : (y-=4715;m-=13;);
+        year = y;
+        month = m;
+        mday = d;
+        (m <= 2) ? (m+=12; y-=1;);
+        j = 0|(y/100);
+        k = y%100;
+        h = d+(0|(26*(m+1)/10))+k+(k>>2)+5*j+(j>>2);
+        wday = (h+5)%7;
+    );
+);
+
+
+function isBissext(y)
+(
+    ((y%400) == 0) ? 1 :
+    ((y%100) == 0) ? 0 :
+    (y%4) == 0;
+);
+
+
+function timeGMemUpdate() local (vv, yy, zz) (
+    // keep values available for others
+    (gmem[timeYear] != locT.year) ? (
+        gmem[timeYear] = locT.year;
+        gmem[timeYisBissext] = isBissext(locT.year);
+    );
+AAAmonth =
+    gmem[timeMonth] = vv = locT.month;
+    (gmem[timeDay] != locT.mday) ? (
+AAAmday =
+        gmem[timeDay] = zz = locT.mday;
+        (vv > 1) ? zz += 31; // jan.
+        (vv > 2) ? zz += 28 + gmem[timeYisBissext]; // feb.
+        (vv > 3) ? zz += 31; // march.
+        (vv > 4) ? zz += 30; // apr.
+        (vv > 5) ? zz += 31; // may.
+        (vv > 6) ? zz += 30; // june
+        (vv > 7) ? zz += 31; // july
+        (vv > 8) ? zz += 31; // august
+        (vv > 9) ? zz += 30; // september
+        (vv > 10) ? zz += 31; // october
+        (vv > 11) ? zz += 30; // november;
+AAAmyear =
+        gmem[timeDofYear] = zz; // day of year
+        yy = locT.year;
+        vv = 2; // default GMT_dec
+        // built-in update of GMT_dec
+        (yy == 2022) ? (((zz < 86)||(zz > 303)) ? vv = 1;);
+        (yy == 2023) ? (((zz < 85)||(zz > 302)) ? vv = 1;);
+        (yy == 2024) ? (((zz < 91)||(zz > 301)) ? vv = 1;);
+        (yy == 2025) ? (((zz < 89)||(zz > 299)) ? vv = 1;);
+        (yy == 2026) ? (((zz < 88)||(zz > 298)) ? vv = 1;);
+        (locT.GMT_dec != vv) ? (
+            locT.GMT_dec = vv;
+            gmem[timeDay] = -1;
+        );
+AAAtdec = locT.GMT_dec;
+AAAtday = gmem[timeDay];
+    );
+    gmem[timeHour] = locT.hour;
+    gmem[timeMinute] = locT.minute;
+    gmem[timeSecond] = locT.second;
+    gmem[timeDofWeek] = locT.wday;
+    gmem[timeSecOfDay] = (vv = 0|((tUnix + locT.GMT_dec * 3600)%86400)); // tick every second
+    gmem[timeTick] = (vv >> tickShift); // tick every 16 seconds
+    gmem[timeSecOfRun] = tUnix - tStart;
+);
+
+#edt = "";
+function edTime(dur) local (dz, hr, mn, sc) (
+    dur = (dur<=0) ? 0 : dur;
+    dz = 0|(dur/86400); dur = dur - 86400*dz;
+    hr = 0|(dur/3600); dur = dur - 3600*hr;
+    mn = 0|(dur/60); dur = dur - 60*mn;
+    sc = dur;
+    (dz == 0) ? (
+        (hr == 0) ? (
+            (mn == 0) ? (
+                sprintf(#edt, "%2d\"", sc);
+            ) : (
+                sprintf(#edt, "%2d\'%02d\"", mn, sc);
+            );
+        ) : (
+            sprintf(#edt, "%dh%02d\'%02d\"", hr, mn, sc);
+        );
+    ) : (
+        sprintf(#edt, "%dd%dh%02d\'%02d\"", dz, hr, mn, sc);
+    );
+    #edt;
+);
+
+
+
+function edTimeL(dur) local (dz, hr, mn, sc) (
+    dur = (dur<=0) ? 0 : dur;
+    dz = 0|(dur/86400); dur = dur - 86400*dz;
+    hr = 0|(dur/3600); dur = dur - 3600*hr;
+    mn = 0|(dur/60); dur = dur - 60*mn;
+    sc = dur;
+    (dz == 0) ? (
+        sprintf(#edt, "%02dh%02d\'%02d\"", hr, mn, sc);
+    ) : (
+        sprintf(#edt, "%dd%02dh%02d\'%02d\"", dz, hr, mn, sc);
+    );
+    #edt;
+);
+
+/*
+    Edit a duration as "hmm'ss.mmm"
+    xms = 0/1/2 : use 0/1/2 digits for the ms
+    xms = 0x10 : don't print hour if zero
+*/
+function edTimeMs(dur, xms)
+local (hr, mn, sc, ms, fh)
+(
+    dur = (dur<=0) ? 0 : dur;
+    ms = (0|(dur * 1000)) % 1000;
+    hr = 0|(dur/3600); dur = (0|dur) - 3600*hr;
+    mn = 0|(dur/60); dur = dur - 60*mn;
+    fh = ((xms & 0x10) != 0) && (hr == 0);
+    xms &= 0xf;
+    sc = dur;
+    (xms == 0) ? (
+        fh ? (
+            sprintf(#edt, "%d\'%02d", mn, sc);
+        ) : (
+            sprintf(#edt, "%dh%02d\'%02d", hr, mn, sc);
+        );
+    ) :
+    (xms == 1) ? (
+        fh ? (
+            sprintf(#edt, "%dh%02d\'%02d.%01d", hr, mn, sc, ms/100);
+        ) : (
+            sprintf(#edt, "%02d\'%02d.%01d", mn, sc, ms/100);
+        );
+    ) :
+    (xms == 2) ? (
+        fh ? (
+            sprintf(#edt, "%02d\'%02d.%02d", mn, sc, ms/10);
+        ) : (
+            sprintf(#edt, "%dh%02d\'%02d.%02d", hr, mn, sc, ms/10);
+        );
+    ) : (
+        fh ? (
+            sprintf(#edt, "%02d\'%02d.%03d", mn, sc, ms);
+        ) : (
+            sprintf(#edt, "%dh%02d\'%02d.%03d", hr, mn, sc, ms);
+        );
+    );
+    #edt;
+);
+
+//#################### UNITS MANAGEMENT ##############
+
+/*
+  Allocate an entry for a unit of a given type
+
+  Typical :
+        // in the @init section
+        UId = UAdd = UnewId = UIrId = -1;
+        UType = uSoundGen; // <some unit type>
+        checkUnit();
+
+        // in the @block section, every 10 seconds or so...
+        checkUnit();
+*/
+function checkUnit()
+local (newId, Ukill, iir, yU, isl)
+(
+    newId = Ukill = -1;
+    // Command to change the UId ?
+    ((UnewId >= 0) && (UnewId < uCnt)) ? (
+        Ukill = UAdd;
+        newId = UnewId;
+        UAdd = UnewId = -1;
+    ) :
+    // UId unmodified ?
+    ((UId >= 0) && (UId < uCnt) && (UAdd == UId * UCBSize + UGAddr) &&
+        (gmem[UAdd+cbType] == UType) && (gmem[UAdd+cbRUniq] == UIrId)) ? (
+            // The track may have been duplicated...
+            (gmem[UAdd+cbUSt] != UStime) ? newId = uCnt;
+    ) :
+    // UId unattributed ?
+    ((UId < 0) || (UId >= uCnt)) ? (
+        newId = uCnt;
+    ) :
+    // UId valid, but unit modified ?
+    ((UId >= 0) && (UId < uCnt)) ? (
+         yU = UId * UCBSize + UGAddr;
+         (gmem[yU+cbType] == 0) ? (
+             // the entry is free
+             newId = UId;
+             // Delete previous ?
+             (UAdd != yU) ? Ukill = UAdd;
+         ) : (
+             newId = uCnt; Ukill = UId * UCBSize + UGAddr;
+         );
+    );
+
+    (newId >= 0) ? (
+        while (newId >= uCnt) (
+            iir = irand(uCnt);
+            yU = iir * UCBSize + UGAddr;
+            (gmem[yU+cbType] == 0) ? (
+                newId = iir;
+            );
+        );
+        UAdd = (UId = newId) * UCBSize + UGAddr;
+        isl = 0; loop(UCBSize, gmem[UAdd+isl] = 0; isl+= 1;);
+        gmem[UAdd+cbStat] = uSUnused;
+        gmem[UAdd+cbType] = UType;
+        gmem[UAdd+cbRUniq] = UIrId = (gmem[idAlloc] += 1);
+        gmem[UAdd+cbUSt] = UStime = time_precise() + gmem[timeDelta];
+        gmem[UAdd+cbLocPrime] = gmem[somePrimes + (gmem[primeCurrent] = (gmem[primeCurrent]+1)%primeCount)];
+        Rndm_n += gmem[Ubg+cbLocPrime];
+    );
+
+    ((Ukill >= UGAddr) && (Ukill < UGAddrLast) && (Ukill != UAdd)) ? (
+        isl = 0; loop(UCBSize, gmem[Ukill+isl] = 0; isl+= 1;);
+    );
+
+    gmem[UAdd+cbInacFlg] = 0; // reset inactive flag
+    gmem[UAdd+cbUnitIdt] = UId; // set actual Ident
+    ULocPrime = gmem[UAdd+cbLocPrime]; // current allocated prime
+    UAdd;
+);
+
+//##################### SIGNAL FILTERING ###################
+// integrate RMS for "msint" milli-seconds
+function RMS_set(msint)
+instance (rms2, icoeff, rcoeff)
+(
+    rcoeff = exp(-1/(msint/1000 * srate));
+    icoeff = 1 - rcoeff;
+    rms2 = 0;
+);
+
+// add a new sample and get RMS SQUARED
+function RMS_sqr(inp)
+instance (rms2, icoeff, rcoeff)
+(
+    rms2 = rms2*rcoeff + inp*inp*icoeff;
+);
+
+// add a new sample and get actual RMS
+function RMS(inp)
+instance (rms2, icoeff, rcoeff)
+(
+    rms2 = rms2*rcoeff + inp*inp*icoeff;
+    sqrt(rms2);
+);
+
+
+//--------------------------------------------
+// one pole low pass filter
+function LPF1_set(freq)
+instance (yn, iCoeff, rCoeff)
+(
+    rCoeff = exp(-2*$pi*freq/srate);
+    iCoeff = 1-rCoeff;
+    yn = 0;
+);
+
+function LPF1(in)
+instance (yn, iCoeff, rCoeff)
+(
+    yn = in*iCoeff + yn*rCoeff;
+);
+
+
+//--------------------------------------------
+// one pole high pass filter
+function HPF1_set(freq)
+instance (yn, xn_1, iCoeff, rCoeff)
+(
+    rCoeff = exp(-2*$pi*freq/srate);
+    iCoeff = (1+rCoeff)/2;
+    yn = xn_1 = 0;
+);
+
+function HPF1(in)
+instance (yn, xn_1, iCoeff, rCoeff)
+(
+    yn = in*iCoeff - xn_1*iCoeff + yn*rCoeff;
+    xn_1 = in;
+    yn;
+);
+
+
+//--------------------------------------------
+//  DC blocker : a simplified low frequency high pass filter
+function DCBlock_set()
+instance (yn, xn_1)
+(
+    yn = xn_1 = 0;
+);
+
+function DCBlock(in)
+instance (yn, xn_1)
+(
+    yn = in - xn_1 + 0.996 * yn;
+    xn_1 = in;
+    yn;
+);
+
+//################## READ FROM A BUFFER ####################
+// read the sample at fractionnal position "index" in memory
+// A is 1 for mono index, 2 for stereo index
+//    or "p" if there are "p" channels in the file
+// ex:
+//    mono :    spl0 = getInterpolated(buffer, index, 1);
+//
+//    stereo :  spl0 = getInterpolated(buffer, index, 2);
+//              spl1 = getInterpolated(buffer+1, index, 2);
+//
+// buffer MUST have copies of edges elements at -1, -2 and n, n+1...
+// when mono, n* more if stereo, multi.
+function getInterpolated(Buff, index, A)
+local (iIndex, delta, xm1, x0, x1, x2, a, b, c)
+(
+    iIndex = floor (index);
+    delta = index - iIndex;
+    iIndex *= A; // actual read index, double when stereo
+    (delta < 0.0001) ? (
+        Buff[iIndex] ; // optimize for speed == 1
+    ) : (
+    (delta > 0.9999) ? (
+        Buff[iIndex+A] ; // optimize for speed == 1
+    ) : (
+        // do some real interpolation
+        xm1 = Buff[iIndex-A];
+        x0 = Buff[iIndex];
+        x1 = Buff[iIndex+A];
+        x2 = Buff[iIndex+A+A];
+        a = (3.0 * (x0 - x1) - xm1 + x2) * 0.5;
+        b = 2.0 * x1 + xm1 - (5.0 * x0 + x2) * 0.5;
+        c = (x1 - xm1) * 0.5;
+        ((a * delta + b) * delta + c) * delta + x0;
+    ); );
+);
+
+/*
+    Get a simple linear interpolated value from an "enveloppe" simple buffer
+
+    SBuffer : the samples
+
+*/
+function getBLIValue(SBuff, index, size)
+local (iIndex, delta, x0, x1)
+(
+    (index <= 0) ? (
+        SBuff[0];
+    ) :
+    (index >= size-1) ? (
+        SBuff[size-1];
+    ) : (
+        iIndex = floor (index);
+        delta = index - iIndex;
+        x0 = SBuff[iIndex];
+        x1 = SBuff[iIndex+1];
+        x0 + (x1-x0)*delta;
+    );
+);
+
+//################## FILE FUNCTIONS ####################
+
+/*
+    BUFFER PLAYING
+*/
+
+BCBsize = 128; // including results for up to 64 channels
+
+idxpt = 0;
+bcbTyp = idxpt;
+bcbSrcPCB = (idxpt += 1); // source player
+bcbRBuffer = (idxpt += 1);
+bcbFSize = (idxpt += 1);
+bcbNch = (idxpt += 1);
+bcbRindex = (idxpt += 1);
+bcbNIfade = bcbNfade = (idxpt += 1);
+bcbNOfade = (idxpt += 1);
+bcbSIfade = bcbSfade = (idxpt += 1);
+bcbSOfade = (idxpt += 1);
+bcbLLow = (idxpt += 1);
+bcbSLow = (idxpt += 1);
+bcbLHigh = (idxpt += 1);
+bcbSHigh = (idxpt += 1);
+bcbSpeed = (idxpt += 1);
+bcbClSpeed = (idxpt += 1);
+bcbClMode = (idxpt += 1);
+bcbGVol = (idxpt += 1);
+bcbLVol = (idxpt += 1);
+bcbRVol = (idxpt += 1);
+bcbSttus = (idxpt += 1);
+bcbFstCh = (idxpt += 1);
+bcbIncCh = (idxpt += 1);
+// -- Last, and first of all values for samples read
+bcbSpl0 = (idxpt += 1);
+bcbSpl1 = (idxpt += 1);
+
+// Prepare a buffer for playing with various parameters
+//    we should have sizeof(buff) >= bsize * nbch
+/*
+function BPlayer_init(bcb,srcpcb,buff,bsize,nbch)
+(
+    memset(bcb, 0, BCBsize); // clear buffer
+    bcb[bcbSrcPCB] = srcpcb;
+    bcb[bcbRBuffer] = buff;
+    bcb[bcbFSize] = bsize; // in tuples of samples
+    bcb[bcbLLow] = bcb[bcbSLow] = 2;
+    bcb[bcbLHigh] = bcb[bcbSHigh] = bsize - 2;
+    bcb[bcbClSpeed] = bcb[bcbSpeed] = 1;
+    bcb[bcbClMode] = (bcb[bcbNch] = nbch) == 2;
+    bcb[bcbRindex] = -1;
+    bcb[bcbSfade] = 300; // as ms - a default value
+    bcb[bcbSpl0] = bcb[bcbSpl1] = 0;
+    bcb[bcbSttus] = 0;
+    bcb[bcbGVol] = 1;
+    bcb[bcbLVol] = bcb[bcbRVol] = 0.707;
+);
+
+
+// play betweed "low" and "high" at selected "speed"
+function BPlayer_limits(bcb,plow,phigh)
+(
+    bcb[bcbSLow] = plow; bcb[bcbSHigh] = phigh;
+);
+
+
+// play betweed "low" and "high" at selected "speed"
+function BPlayer_speed(bcb,pspeed)
+(
+    bcb[bcbSpeed] = pspeed;
+);
+
+
+// fade is the fade in/fade out time in ms.
+// Use 0 for very fast FI/FO, and a very large number for a "peak"
+function BPlayer_fade(bcb,pIfade, pOfade)
+(
+    bcb[bcbSIfade] = pIfade; // keep fifo time
+    bcb[bcbSOfade] = pOfade;
+);
+
+
+function BPlayer_fade(bcb,pfade)
+(
+    bcb[bcbSIfade] = bcb[bcbSOfade] = pfade; // keep fifo time
+);
+
+function BPlayer_pan(bcb,ppan)
+(
+    ppan = (ppan < -1) ? -1 : (ppan > 1) ? 1 : ppan;
+    ppan = PiS4+PiS4*ppan;
+    bcb[bcbLVol] = bcb[bcbGVol] * sin(ppan);
+    bcb[bcbRVol] = bcb[bcbGVol] * cos(ppan);
+);
+
+
+// Prepare to play
+function BPlayer_play(bcb) local (u)
+(
+    (bcb[bcbSLow] < 0) ? bcb[bcbSLow] = 0;
+    (bcb[bcbSHigh] < bcb[bcbSLow]) ? bcb[bcbSHigh] = bcb[bcbSLow];
+    bcb[bcbLLow] = bcb[bcbSLow]; bcb[bcbLHigh] = bcb[bcbSHigh];
+    bcb[bcbSpeed] = (bcb[bcbSpeed] < highNSpeed) ? highNSpeed : (bcb[bcbSpeed] > highPSpeed) ? highPSpeed : bcb[bcbSpeed];
+    ((bcb[bcbSpeed] >= 0) && (bcb[bcbSpeed] < lowPSpeed)) ? bcb[bcbSpeed] = lowPSpeed;
+    ((bcb[bcbSpeed] < 0) && (bcb[bcbSpeed] > lowNSpeed)) ? bcb[bcbSpeed] = lowNSpeed;
+    bcb[bcbClSpeed] = bcb[bcbSpeed];
+AAAA_bcbClSpeed = bcb[bcbClSpeed];
+    (bcb[bcbClSpeed] > 0) ? bcb[bcbRindex] = bcb[bcbLLow] : bcb[bcbRindex] = bcb[bcbLHigh];
+    u = 0|(srate * abs(bcb[bcbClSpeed]) * min(60, max(0.001, bcb[bcbSIfade] / 1000)));
+    bcb[bcbNIfade] = max(8, min(u, (bcb[bcbLHigh]-bcb[bcbLLow]) >> 1)); // always > 0
+AAAA_fadeIn = bcb[bcbNIfade];
+    u = 0|(srate * abs(bcb[bcbClSpeed]) * min(60, max(0.001, bcb[bcbSOfade] / 1000)));
+    bcb[bcbNOfade] = max(8, min(u, (bcb[bcbLHigh]-bcb[bcbLLow]) >> 1));  // always > 0
+AAAA_fadeOut = bcb[bcbNOfade];
+    bcb[bcbSttus] = 1; // ready to play
+);
+
+
+
+function BPlayer_stop(bcb)
+local (u)
+(
+    // Change the fade time and the "end" of read
+    u = 0|(srate * abs(bcb[bcbClSpeed]) * min(2, max(0.01, min(bcb[bcbSIfade], bcb[bcbSOfade])/1000)));
+    u = min(u, (bcb[bcbLHigh]-bcb[bcbLLow]) >> 1);
+    (bcb[bcbClSpeed] > 0) ? (
+        // Update High Limit
+        (u > bcb[bcbLHigh] - bcb[bcbRindex]) ? (
+            bcb[bcbNOfade] = bcb[bcbLHigh] - bcb[bcbRindex];
+        ) : (
+            bcb[bcbLHigh] = bcb[bcbRindex] + (bcb[bcbNOfade] = u);
+        );
+    ) : (
+        // Update Low limit
+        (u > bcb[bcbRindex] - bcb[bcbLLow]) ? (
+            bcb[bcbNOfade] = bcb[bcbRindex] - bcb[bcbLLow];
+        ) : (
+            bcb[bcbLLow] = bcb[bcbRindex] - (bcb[bcbNOfade] = u);
+        );
+    );
+);
+
+
+
+// get next samples
+function BPlayer_next(bcb)
+local (d, vol, c, i)
+(
+    (bcb[bcbSttus] != 0) ? (
+        ((bcb[bcbRindex] < bcb[bcbLLow]) || (bcb[bcbRindex] > bcb[bcbLHigh])) ? (
+            bcb[bcbSttus] = 0; // play finished
+            bcb[bcbTyp] = 0;
+            // play finished, reset all values
+            d = 0; loop(64, bcb[bcbSpl0 + d] = 0; d += 1;);
+        ) : (
+            (bcb[bcbClSpeed] > 0) ? (
+                // Positive speed
+                d = min(1, min((bcb[bcbLHigh] - bcb[bcbRindex])/bcb[bcbNOfade],
+                               (bcb[bcbRindex] - bcb[bcbLLow])/bcb[bcbNIfade]));
+            ) : (
+                // Negative speed
+                d = min(1, min((bcb[bcbLHigh] - bcb[bcbRindex])/bcb[bcbNIfade],
+                               (bcb[bcbRindex] - bcb[bcbLLow])/bcb[bcbNOfade]));
+            );
+            AAAA_Play_d = d;
+            AAAA_Play_vol = vol = FP_GlobVol * d * d ; // for progressive sensation
+            c = bcb[bcbNch];
+            (c == 1) ? (
+                // mono play -- use pan indication ?
+                vol = vol * getInterpolated(bcb[bcbRBuffer], bcb[bcbRindex], 1);
+                bcb[bcbSpl0] = vol * bcb[bcbLVol];
+                bcb[bcbSpl1] = vol * bcb[bcbRVol];
+            ) :
+            (c == 2) ? (
+                // stereo play  -- use pan indication ?
+                bcb[bcbSpl0] = vol * bcb[bcbLVol] * getInterpolated(bcb[bcbRBuffer], bcb[bcbRindex], 2);
+                bcb[bcbSpl1] = vol * bcb[bcbRVol] * getInterpolated(bcb[bcbRBuffer]+1, bcb[bcbRindex], 2);
+            ) : (
+                // multi channel play...
+                i = 0; loop (c,
+                    bcb[bcbSpl0+i] = vol * getInterpolated(bcb[bcbRBuffer]+i, bcb[bcbRindex], c);
+                    i += 1;
+                );
+            );
+            bcb[bcbRindex] += bcb[bcbClSpeed];
+        );
+    );
+    bcb[bcbSttus];
+);
+
+*/
+
+
+
+//############################## PLAYERS FUNCTIONS ####################
+
+// Send a "command" to players
+function doPlayer(n, kmd, p1)
+local(Unit, p, q, zc)
+(
+    zc = countPlayersMax;
+    p = q = 0;
+    (n == -1) ? (
+        p=0; q=zc;
+    ) :
+    ((n >= 0) && (n < zc)) ? (
+        p = n; q = n+1
+    );
+    while (p < q) (
+        Unit = gmem[addPlayer + p];
+        ((Unit >= UGAddr) && (Unit < UGAddrLast) && (gmem[Unit + cbType] == uPlayer)) ? (
+            gmem[Unit + RCB_Kmd] = kmd;
+            gmem[Unit + cbP08] = p1;
+        );
+        p += 1;
+    );
+);
+
+
+function doActivePlayer(n, kmd, p1)
+local(Unit, p, q, zc)
+(
+    zc = countPlayersMax;
+    p = q = 0;
+    (n == -1) ? (
+        p=0; q=zc;
+    ) :
+    ((n >= 0) && (n < zc)) ? (
+        p = n; q = n+1
+    );
+    while (p < q) (
+        Unit = gmem[addPlayer + p];
+        ((Unit >= UGAddr) && (Unit < UGAddrLast) && (gmem[Unit + cbType] == uPlayer)
+            && (gmem[Unit+cbStat] != uSReady)) ? (
+            gmem[Unit + RCB_Kmd] = kmd;
+            gmem[Unit + cbP08] = p1;
+        );
+        p += 1;
+    );
+);
+
+
+
+
+function findPlayer()
+local (Unt, xV, xW, plc, cnt, plyr)
+(
+    plyr = xV = Unt = 0;
+    ((plc = gmem[playerAvail]) != 0) ? (
+        cnt = plc;
+        while ((cnt >= 0) && (Unt == 0)) (
+            cnt -= 1;
+            plyr = gmem[playerCurrent] = (gmem[playerCurrent] + 1) % plc;
+            xW = gmem[addPlayer + plyr];
+            (gmem[xW + cbType] == uPlayer) ? (
+                xV = xW; // is a player
+                (gmem[xV + cbStat] == uSReady) ? (
+                    Unt = xV; // keep unit
+                    gmem[xV + cbStat] == uSReserved;
+                );
+            );
+        );
+    );
+    Unt;
+);
+
+
+
+
+
+
+
+//#################### Enveloppes / Peaks ###################
+// Average level enveloppe
+// lpF : low pass filtering frequency
+// evps = smoothing coeficient ; typical 0.0001
+function AvEnv_Set(lpF, eveps)
+instance(xlpF, exDcr, avg, evl)
+(
+    xlpF = exp(-2*$pi*lpF/srate);
+    evDcr = 1-eveps;
+    avg = evl = 0;
+);
+// input is current sample (ex: spl0)
+// output is current enveloppe value
+function AvEnv(u)
+instance(xlpF, exDcr, avg, evl)
+(
+    u < 0 ? (u = -u);
+    avg = avg * (1 - xlpF) + u * xlpF; // filter
+    evl < avg ? (evl = avg) : (evl = evl * evDcr) ; // enveloppe
+);
+
+// Enveloppe & peak detection
+// eveps = enveloppe smoothing value ; typical 0.0001
+// ptsh = peak level treshold = typical -16 to -22 as in -16dB
+// tsh = hysteresis level = typical -4 as -4dB
+// sdur = state duration (strike detection) in ms = typical 10 ms
+//    NO CHECK of correctness for input values
+function Env_Set(eveps, ptsh, tsh, sdur)
+instance(env, peak, fric, env1, env2, env3, xcnt, evDcr, scnt, wstk, curMenv, pRatio, maxdec, mindec, sigdec, tlB, lmax, puf)
+(
+    evDcr = 1 - eveps;
+    lmax = curMenv = env = peak = fric = 0;
+    env1 = env2 = env3 = 1;
+    xcnt = scnt = wstk = 0;
+    pRatio = 10^(tsh/20);
+    tlB = 10^(ptsh/20);
+    // min time between peak and end-peak, or end-peak and peak
+    sigdec = 0|(sdur*srate/2/1000);
+    mindec = 2 * sigdec;
+    maxdec = 20 * sigdec;
+    puf = 1;
+);
+
+// use this for just the enveloppe value
+// u = current input (like spl0)
+function Env_Env(u)
+instance(env, peak, fric, env1, env2, env3, xcnt, evDcr, scnt, wstk, curMenv, pRatio, maxdec, mindec, sigdec, tlB, lmax, puf)
+(
+    u < 0 ? u = -u;
+    xcnt += 1;
+    (xcnt % 36) == 0 ? (
+        env3 = env2; env2 = env1; env1 = env; xcnt = 0;
+    );
+    env < u ? (env += (u-env) * puf) : (env = env * evDcr) ;
+    peak < env ? peak = env;
+    env; // return current envelop value
+);
+
+// peak detection
+// returns : 0 : nothing
+//           1 : rising peak (lmax is the peak value)
+//          -1 : falling peak
+// u = current input (like spl0)
+// snd : a kind of noise level. Between 0 and 0.4
+avgLongEps = 0.000001;
+avgShortEps = 0.0001;
+avgEps = 0.000001;
+function Env_Peak(u, snd)
+local(rtc)
+instance(env, peak, fric, env1, env2, env3, xcnt, evDcr, scnt, wstk, curMenv, pRatio, maxdec, mindec, sigdec, tlB, lmax, puf)
+(
+    u < 0 ? u = -u;
+    avgLong = max(avgEps, avgLong * (1 - avgLongEps) + avgLongEps * u);
+    avgShort = max(avgEps, avgShort * (1 - avgShortEps) + avgShortEps * u);
+    (avgLong > avgShort) ? avgLong -= 0.00001 * avgShort;
+
+    avgRatio = avgShort / avgLong;
+
+    ((xcnt += 1) > 24) ? (
+        // keep some values to "random" check for decrescending
+        env3 = env2; env2 = env1; env1 = env; xcnt = 0;
+    );
+    env < u ? (env += (u-env) * puf) : (env = env * evDcr) ;
+    peak < env ? (peak = env) : (peak = peak * 0.999998); // keep peak value reached, very slowly decreasing
+    fric < env ? (fric = env) : (fric = fric * 0.99993);  // keep friction level, slowly decreasing
+    scnt += 1;
+    rtc = 0; // return code
+    wstk ? (
+        // Let peak be stable for "sigdec" samples, then signal max value reached so far
+        env > curMenv ? curMenv = env;
+        (scnt > maxdec) ? (
+            (env < curMenv*pRatio) ? (
+                // we are under the hysteresis limit, and some time has passed
+                curMenv = scnt = wstk = 0;
+                // signal "end of peak"
+                rtc = -1;
+            );
+        ) : (
+            // signal "start of peak"
+            scnt == sigdec ? (rtc = 1; lmax = curMenv; ); // lmax is the value signaled
+        );
+    ) : (
+        // should we decide we have a peak ?
+        ((env > env1) && (env > env2) && (env > env3)
+                      && (env > tlB*(1+snd)) && (scnt > mindec)) ? (
+            scnt = 0; wstk = 1;
+        );
+    );
+    rtc; // return value
+);
+
+// Smooth enveloppe and peak
+// dc filter, gentle low pass, smooth enveloppe, peak keeper
+// use eps = 0.001
+function Smooth_set(eps, freq)
+instance(tn, sn_1, un, lpc, env, envDcr)
+(
+    env = un = tn = sn_1 = 0;
+    lpc = exp(-2 * $pi * freq / srate); // a filter at some mid freq.
+    envDcr = 1 - eps;
+);
+
+function Smooth(in)
+local (uv)
+instance(tn, sn_1, un, lpc, env, envDcr)
+(
+    // first, apply DC filter
+    tn = in - sn_1 + 0.996 * tn; sn_1 = in;
+    // gentle low pass filter
+    un = tn * (1 - lpc) - un * lpc;
+    uv = (un < 0) ? -un : un ;
+    uv > 1 ? uv = 1;
+    env = (env < uv) ? uv : (env * envDcr);
+);
+
+
+//############################## GRAPHIC ##############################
+xWdth = 120;
+yHght = 10;
+
+
+function xBlack() (gfx_r = 0.0; gfx_g = 0.0; gfx_b = 0.0; gfx_a = 1.0;);
+function xDark() (gfx_r = 0.40; gfx_g = 0.35; gfx_b = 0.35;);
+function xBlue() (gfx_r = 0.1; gfx_g = 0.1; gfx_b = 1.0;);
+function xGreen() (gfx_r = 0.0; gfx_g = 0.8; gfx_b = 0.0;);
+function xRed() (gfx_r = 0.8; gfx_g = 0.0; gfx_b = 0.0;);
+
+function show(xP, yP, name, value, prec, suff)
+
+(
+    gfx_x = 10 + xWdth*xP; gfx_y = 10 + yHght*yP; xBlack();
+    gfx_drawstr(name); gfx_drawnumber(value, prec); gfx_drawstr(suff);
+);
+
+
+function show(xP, yP, str) (
+    gfx_x = 10 + xWdth*xP; gfx_y = 10 + yHght*yP; xBlack();
+    gfx_drawstr(str);
+);
+
+function show(xP, yP, str1, str2) (
+    gfx_x = 10 + xWdth*xP; gfx_y = 10 + yHght*yP; xBlack();
+    gfx_drawstr(str1); gfx_drawstr(str2);
+);
+

@@ -1,0 +1,2691 @@
+/*
+    The SCRIPT MASTER main code
+*/
+
+
+@init
+
+version = 0x10207;
+
+tStart = tUnix = time();
+spl_prev_count = spl_count = -1;
+T_fact = 4096 * 4096 * 4096 * 4096  ;
+FP____memtop = __memtop();
+the_host = mSL_KW_ScriptMaster;
+gfx_col_width = 330; // min width for an info column
+gfx_colM_width = 960; // max width for a memory column
+gfx_colL_width = 260; // min width for a memory column
+current_Memory_Mode = 0; // no memory allocation allowed for now
+mSL_Dyn_RecycleF = 1;
+mSL_Dyn_Tr = 0; // 0xffff;
+UType = uScripter; // I am a lonesome scripter,
+UAdd = UGDummy; // with no Unit bloc allocated,
+UId = Undef; // and an undefined identification...
+UAddChs = 0; // address of UAdd output channels
+UStime = 0;
+CheckTime = 0;
+XDcount = 1;
+gc_count = 0;
+gfxMaxDur = 0.025; //
+mSL_loc_tadd = 0.1;
+mSL_loc_tim = 4;
+gui_show_syslog = 1;
+gui_show_memory = 0;
+dbg_show_height = 96;
+dbg_line_height = 19;
+mm_show_ratio = 1;
+TestCount =0;
+mSL_run_test = 0;
+mSL_run_once = 0;
+mSL_run_ct = 0;
+mSL_run_max = 0;
+
+// (minima) number of mSL instructions we can execute in a second
+// This is of course depending of the CPU !
+// Here for my iMac, 3.5 GHz, Intel Core i7
+// mSL_insts_per_s = 18000000;
+// mSL_insts_per_s = 14000000; // Mac Book Pro
+mSL_insts_per_s = 32000000; // Mac Studio Pro
+#efs = "";
+
+/*
+// Initialize some words in low main memory
+function
+GMI()
+local(mmm, ii)
+(
+    fmemmax = __memtop(); // total memory available
+    fmemmax_4 = fmemmax - 4; //
+    mmm = 0;
+    ii =0; loop (16, mmm[ii] = fmemmax; ii += 1;);
+    mmm[0] = 'MAIN';
+    mmm[1] = fmemmax_4;
+    mmm[2] = GM_Word0 = 'Scri';
+    mmm[3] = GM_Word1 = 'ptMa';
+    mmm[4] = GM_Word2 = 'ster';
+    mmm[fmemmax - 2] = fmemmax_4; mmm[fmemmax - 1] =  'MAIN'~ mSL_CC_Chksum;
+    mmm[6] = mmm[fmemmax - 2];
+    mmm[7] = mmm[fmemmax - 1];
+);
+// Check that words in low main memory have not been modified
+function GMW()
+(
+    0[0] === 'MAIN'  &&  0[1] === fmemmax_4  &&  0[2] === GM_Word0  &&  0[3] === GM_Word1
+            &&  0[4] === GM_Word2  &&  0[5] === fmemmax  &&  0[6] === fmemmax_4  &&  0[7] === ('MAIN'~ mSL_CC_Chksum)
+            &&  0[fmemmax - 2] === 0[6]  &&  0[fmemmax - 1] === 0[7]
+);
+GMI();
+
+function GMW0(msg)
+(
+    mSL_edit_value(#AA0, 0[0]); mSL_edit_value(#AA1, 0[1]);
+    mSL_edit_value(#AA2, 0[2]); mSL_edit_value(#AA3, 0[3]); mSL_edit_value(#AA4, 0[4]);
+    mSL_edit_value(#AA5, 0[5]); mSL_edit_value(#AA6, 0[6]); mSL_edit_value(#AA7, 0[7]);
+    sprintf(#s2, "[%s]  %s %s %s %s %s %s %s %s", msg, #AA0, #AA1, #AA2, #AA3, #AA4, #AA5, #AA6, #AA7);
+    mSL_log(SysLogBox, #s2);
+);
+
+GMIfsig = 0;
+function GMW2(msg)
+(
+// Check first words of memory, to detect eventual bugs
+((!GMW()) && (XDcount > 0)) ? (
+    /*
+    sprintf(#s2, "[%s] Game Master Damaged! %s %s %s %s %s %s %s %s", msg, mSL_edit_value(#Z0, 0[0]), mSL_edit_value(#Z1, 0[1]),
+                mSL_edit_value(#Z2, 0[2]), mSL_edit_value(#Z3, 0[3]), mSL_edit_value(#Z4, 0[4]), mSL_edit_value(#Z5, 0[5]),
+                mSL_edit_value(#Z6, 0[6]), mSL_edit_value(#Z7, 0[7]));
+    mSL_log(SysLogBox, #s2);
+    * /
+    GMW0(msg);
+    XDcount -= 1;
+    XDcount > 0 ? GMI();
+);
+);
+*/
+
+GMI('Scri', 'ptMa', 'ster'); // init memory
+
+
+#GL_Directory = "";
+#tmpFname = "";
+#GM_Scripts = "";
+#GM_Project_Path = "";
+#GM_Project_PathX = "";
+
+
+#dbg_trace0 = "";
+#dbg_trace1 = "";
+#dbg_trace2 = "";
+#dbg_trace3 = "";
+#dbg_trace4 = "";
+#dbg_trace5 = "";
+#dbg_trace6 = "";
+#dbg_trace7 = "";
+
+
+function nowTime()
+(
+    sprintf(#nowis, "Now: %02d/%02d/%02d ", gmem[timeDay], gmem[timeMonth], gmem[timeYear]);
+    edTimeL(gmem[timeSecOfDay]);
+    strcat(#nowis, #edt);
+);
+
+// ========== EXTENSIONS ==========
+KodedSchFree = mSL_symbol("SchFree");
+KodedSchDlay = mSL_symbol("SchDlay");
+KodedSchActv = mSL_symbol("SchActv");
+KodedSchInac = mSL_symbol("SchInac");
+KodedSchCthr = mSL_symbol("CThread");
+KodedSchPads = mSL_symbol("SchPads");
+
+padStPVals = padStFlags = padStClipsL = padStClipsH = 0;
+
+SchedPadSet = 0;
+
+// This redefines the function "mSL_134" as the product of its operands
+function mSL_134(argc, argv)
+local (product, ip)
+(
+    product = 1;
+    ip = 0;
+    loop(argc, product *= argv[ip]; ip += 1;);
+    product;
+);
+
+// Print a sequence of strings
+function mSL_133(argc, argv)
+(
+    while (argc > 0) (
+        mSL_log(SysLogBox, argv[0]);
+        argc -= 1; argv += 1;
+    );
+);
+
+
+// External access to some useful data structures
+function mSL_135(argc, argv)
+local (item)
+(
+    item = argv[0];
+    (item == 'padv') ? ( padStPVals; ) :
+    (item == 'padf') ? ( padStFlags; ) :
+    (item == 'padl') ? ( padStClipsL; ) :
+    (item == 'padh') ? ( padStClipsH; ) :
+    (item == KodedSchFree) ? (
+        SchedFreePts;
+    ) :
+    (item == KodedSchDlay) ? (
+        SchedDlydPts;
+    ) :
+    (item == KodedSchActv) ? (
+        SchedActivPts;
+    ) :
+    (item == KodedSchInac) ? (
+        SchedInactPts;
+    ) :
+    (item == KodedSchCthr) ? (
+        mSL_current_thread;
+    ) :
+    (item == KodedSchPads) ? (
+        SchedPadSet; // A 16 entries array
+    ) :
+    (
+        -1;
+    );
+);
+
+
+function mSL_define_extensions()
+(
+    mSL_define_opcode("GM_Log", 133); // define 254 as "GM_Log"
+    mSL_define_opcode("prod", 134); // define 255 as "prod"
+    mSL_define_opcode("GM_Addr", 135); // etc.
+);
+
+
+syssrate = sysTempo = sysPlayState = sysPlayPosition = sysBeatPosition = 0; // set later
+sysSampPosition = sysSampBeatPosition = sysSampBeat = 0; // set later
+
+glIsiz = 0;
+
+inPlay = 0x100;
+inWait = 0x200;
+fileReading = 0;
+limitime = 0;
+startime = 0;
+timeAllow = 0.1;
+
+kFactor = 3;
+kOffset = 25;
+kBeatDurInt = 0;
+kBeatTimer = 0;
+
+Inactive = idx = 0;
+CurrentActPlaying = ActPlaying = (idx += 1) + inPlay;
+ActPlaying2 = (idx += 1) + inPlay;
+ActLooping = (idx += 1) + inPlay;
+WaitPlaying = (idx += 1) + inWait;
+WaitLooping = (idx += 1) + inWait;
+ActNext = (idx += 1) ;
+ActRand = (idx += 1) ;
+Actstop = (idx += 1) ;
+ActClear = (idx += 1) ;
+
+// Some globals variables
+mSL_act = 0; // active threads
+mSL_wait = 0; // waiting threads
+mSL_plck = 0; // locked threads
+mSL_inactv = 0; // inactive threads
+mSL_maxact = 0; // maximum active threads
+currentClip = -1;
+currRdSize = maxRdSize = srate * 2 * 12; // read 12" stereo at a time
+frstRdsize = srate * 6; // start with few samples
+FP_GlobVol = 1; // smoothed global volume
+FP_GlobSet = 1; // raw global volume
+FP_GlobWidth = 1;
+FP_GlobWSet = 1;
+VolumeMod0_u = 1;
+VolumeMod1_u = 1;
+FP_GlobVAdj = 1; // all global volume adjustments
+FP_Coeff = 0.00015;  // global volume...
+FP_CoeffK = 1 - FP_Coeff; // ...smoothing factors
+clClip = 0;  // The clip we are playing
+GCBL = 0; // current play buffer, unspecified yet
+clPFlags = 0; // Flags associés à la commande
+BState = 0; // The block automaton state
+GState = 0; // The gfx automaton state
+KmdIn = 0; // Last command
+KmdLast = 0; // Last "non inquery" command
+KmdLastIn = 0; // Last command
+KmdLastDate = 0; // reduced date of last command
+KmdKurrent = -1; // Current play command : PLAY or LOOP
+Pmode = Inactive; // playmode
+doSync = 0; // prepare synchro
+doStop = 0; // stop asked...
+doRestart = 0; // execute a full restart
+RZcnt = 2; // add. some zero values samples at start or end for each channel
+CCCC = 0; // current clip channel count
+HPCnt = 0; // number of HP (channels) provided
+HPIndx = 0; // HP index allocation
+clRSpeed = 1; // Clip Read Speed
+ClRIndex = 0; // Clip Read index, in tupples
+ClLowLimit = 0; // low read limit, in tupples
+ClHighLimit = 0; // high read limit, in tupples
+ClLowArea = 0; // low read limit w/out fade, in tupples
+ClHighArea = 0; // high read limit w/out fade, in tupples
+CLStartPC = 0; // low read limit, in percent
+CLEndPC = 0; // high read limit, in percent
+Tmem = 0; // Top of memory defined later
+clLargeSize = 800; // large duration, in seconds, for clips
+clMaxDur = clRdMaxD = 240; // standard max duration, in seconds, for clips
+clDur = 0; // this clip asked duration, in seconds
+clLng = 0; // this clip to play, in tupples
+CFSize = 0; // size of the clip in samples
+CRSize = 0; // clip max read size in sample excluding zeroes
+CTSize = 0; // clip max read size in tupples excluding zeroes
+FInDur = 0; // fade in time in milliseconds
+FOutDur = 0; // fade out time in milliseconds
+FInTpl = 0; // fade in time in tupples
+FOutTpl = 0; // fade out time in tupples
+GrFInTpl = 0; // grain fade in time in samples
+GrFOutTpl = 0; // grain fade out time in samples
+GrStLLimit = 0; // grain start lower limit
+GrStHLimit = 0; // grain start upper limit
+GrMinTpl = 0; // grain min. length in tupples
+GrMaxTpl = 0; // grain max. length in tupples
+ActivePlaying = 0; // are we playing, or not ?
+doGen = 0; // used as stop test in LOOP
+guarddog = 0;  // used as a time limit when playing
+endclip = 0;  // date of the end of the clip
+Fhandle = -1; // handle of current file
+FileOpenCtr = 0; // file_open operations counter
+FErrc = 0; // error found when reading clip
+cflag = 0; // when != 0 : "all is ok" indicator
+Fformat = 0; // clip internal file format - c.f. fFormats[]
+FFrRate = 0; // clip frequency rate
+FAdjRate = 1; // clip adjust rate to srate
+UBuffer = 0; // universal very large clip buffer
+M_avail = 0; // memory available for the buffer
+zCount = 0; // number of "zeroes" added at the start and the end of the clip
+PlayMono =  0; // max duration for a mono clip in seconds
+bSize = 0; // size to read at each block execution
+bAddr = 0; // memory address for next read
+SpdFact = srate; // speed factor : srate * abs(clRSpeed)
+smUFlagVol = 1;
+smUFlagWidth = 2;
+flSaveAddr = 0; // Entry where we have to save the RCB in play log memory
+smUpdateFlag = smUFlagVol;
+rsize = 0;
+rpos = 0;
+genCount = 0;
+playCount = 0;
+loopCount = 0;
+currSmpl = 0;
+CheckNum = 0;
+synchroPos = 0; // synchro process
+synchroSource = 0; // no synchro
+synchSmpls = srate; // a 1 second synchro factor
+second = ticker = lastMn = gfxMn = gfxMcnt = 0;
+volUpdt = -1;
+NState = 0; // State changed flags
+PF_Coeff = 0.00015;
+PF_Const = 0.00001;
+//PF_CoeffX = 0.1;
+//PF_CoeffK = 1 - PF_Coeff;
+//PF_Coeff2 = PF_Coeff * PF_CoeffX;
+//PF_CoeffK2 = 1 - PF_Coeff2;
+dirChangeNum = 0;
+xind = 0; // effects index level 1
+pflg = 0; // some flag
+ph = 0; // temporary phase
+iph = 0; // temporary phase
+ipos = 0; // temp. index
+XPND = 0;
+mdtb = 0; // temp ref. modulation table
+bfsx = 0; // buffer in the modulation table
+
+gmem[clPlAvail] = UTmem = __memtop(); // total memory available
+
+SharedLowMemory = 0;
+SharedLowMemorySize = 1024;
+// 0 to 127 reserved
+wa128 = 128; // a 128 words work area
+wa256 = 256; // a 256 words work area
+wa512 = 512; // a (surprise !) 512 words work area
+
+SharedHighMemory = 0; // will be updated later
+SharedHighMemorySize = 0; // yet unknown
+
+// Graphic
+// protect location "0" from errors...
+
+// x = ui_setup(2);
+///=============== STATIC MEMORY ===============
+idx = SharedLowMemory + SharedLowMemorySize;
+mSL_StM_Init(20); // init static memory
+current_Memory_Mode = mSL_MMd_Static; // starting now, allow use of "make_array"
+mSL_Str_Init(#strFirst, #strLast); // allocate strings for strings allocator
+mSL_Str_TInit(#wstrFirst, #wstrLast); // allocate strings for temporary strings
+mSL_Str_PInit(#xstrFirst, #xstrLast); // allocate strings for permanent strings
+//====== GLOBALS ======
+init_idents();
+mSL_Init_Keywords();
+mSL_Init_long_Keywords();
+init_log_boxes();
+
+
+//====== Init "ui-lib-JJ.jsfx-inc" ======
+ui_lib_start = mSL_StM_BlockStart('uilb'); // ui lib block
+ui_lib_end = ui_setup(ui_lib_start);
+mSL_StM_BlockEnd(ui_lib_end);
+gfxInit();
+ui_lib_JJ_GUI_init(2);
+
+
+//====== GRAPHICS-INIT ======
+
+<? include("GM-Libs/mSL_Colors.jsfx-inc"); ?>
+
+// Structure of a grain
+gStatus = idx = 0;
+gClRIndex = (idx += 1);
+gClLowLimit = (idx += 1);
+gClHighLimit = (idx += 1);
+gClLowArea = (idx += 1);
+gClHighArea = (idx += 1);
+gclRSpeed = (idx += 1);
+gChIndex = (idx += 1);
+gChOffset = (idx += 1);
+gChCount = (idx += 1);
+gChNum = (idx += 1);
+GPBSize = idx + 1;
+MaxGr = 32;
+NumbGr = MaxGr + 2; // with security
+
+
+
+// ========== mSL DATA ==========
+// Some global variables
+
+
+FlagsTbSiz = 32;
+FlagsTbVals = make_array(FlagsTbSiz);
+idx = 0;
+Flgs_PrOps = (idx += 1);
+Flgs_Thrds = (idx += 1);
+Flgs_Evnts = (idx += 1);
+Flgs_Acts = (idx += 1);
+Flgs_Traces = (idx += 1);
+
+
+KRun_mSL_Thread = 10;
+
+
+
+
+xPeriod = 1; // choose a specific tempo for updating
+xCount = 0; // update counter
+
+uuuMslFn = 0;
+uuuMslFname = 0;
+uuuMslFent = 0;
+uuuMslTSiz = 64;
+uuuMslTabs = make_array(uuuMslTSiz); // an array of names of files to compile
+uuuMslTPt =  0; // index in this table
+uuuMslCSiz = 128;
+uuuMslCTab = make_array(uuuMslCSiz); // an array of names of compileds files to execute
+uuuMslCPt = 0; // index in this table
+
+
+
+err_sys = 0; // generic error system
+err_sys_ini = 0; // generic initialization error system
+err_sys_rtm = 0; // generic run-time error system
+err_sys_gfx = 0; // generic graphic error system
+err_fclp = 0; // error when reading clips description file
+err_fplm = 0; // error in play modes description file
+err_fhpc = 0; // error in HP configuration description file
+err_fspm = 0; // error in space modes description file
+err_fbnk = 0; // error in partials/banks description file
+err_sdfr = 0; // error in sensors def reader
+
+SchedActive = 1; // scheduler activity
+
+
+
+
+//====== GC ======
+mSL_Dyn_LogSiz = 128;
+mSL_Dyn_Log = make_array(mSL_Dyn_LogSiz);
+mSL_Dyn_fLogSiz = 128;
+mSL_Dyn_fLog = make_array(mSL_Dyn_LogSiz);
+// Memory management Arrays
+gc_run_phaz = 0;
+gc_run_count = 0;
+mm_rem_siz = 128;
+mm_rem_in = 0;
+gc_MMA = mm_rem_mm = make_array(mm_rem_siz); // A list of remanent/protected objects
+mm_list_siz = 49957;
+mm_list_in = 0;
+mm_list_pt = 0;
+mm_list_cnt = 0;
+mm_list_mxc = 0;
+mm_list_mm = make_array(mm_list_siz); // temporary circular list of encountered object
+mm_hash_siz = 104729;
+mm_hash_mm = make_array(mm_hash_siz); // temporary hashcode table for already encountered objects
+mm_tmp_siz = 8;
+mm_tmp_in = 0;
+mm_tmp_mm = make_array(mm_tmp_siz); // temporary array of blocs to free
+mm_xec_siz = 180;
+mm_xec_ptr = 0;
+mm_xec_cnt = 0;
+mm_xec_max = 0;
+mm_xec_mm = make_array(mm_xec_siz); // temporary array
+mm_cyc_siz = 2048;
+mm_cyc_ptr = 0;
+mm_cyc_max=0;
+mm_cyc_maxU = 0;
+mm_cyc_mm = make_array(mm_cyc_siz); // temporary array
+mm_dur_max = 0;
+mm_dur_mm = make_array(mm_cyc_siz); // temporary array
+mm_lowmem = 0; // low and
+mm_highmem = 0; // high memory address of the memory allocated blocks
+mm_Knew = -2;
+mm_show_frbl = 1;
+mm_show_usbl = 0;
+mm_show_flr = 0;
+mm_show_dmg = 0;
+mm_show_ttf = 0;
+mm_show_ttu = 0;
+mSL_gc_start = 0;
+mSL_gc_end = 0;
+mSL_gc_MaxDur = 0;
+
+mm_bl_huge = 1;
+mm_bl_big = 0;
+mm_bl_large = 0;
+mm_bl_medium = 0;
+mm_bl_mini = 0;
+
+
+// Hash table for parameters coded names
+//paramHashIds = make_array(paramHSiz);
+//paramHashNbs = make_array(paramHSiz);
+paramHashTbl = mSL_makeHT(paramHSiz, paramHStep);
+paramHStep = paramHashTbl[-1]; // in case the func updated the step
+
+//  Hash table for JSFX vars access
+jvarsHashTbl = mSL_makeHT(128 + 0|(1.35*mSL_JSFX_var_count), 6121);
+jvarsHStep = jvarsHashTbl[-1];
+jvarsHSize = jvarsHashTbl[-2];
+
+// Create the entries
+mSL_dcl_JSFX_vars();
+
+
+
+// Global objects
+menu_uix_jlog = make_jmenu(
+    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_usesel | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+    "Log Layout", "!&X1 column|&X2 columns|&X3 columns|&X4 columns||&/height +|&/height -|&/blank|&/clear");
+
+
+//================ Debugging ===================
+// Memory display boxes
+memoryBoxSize = 24;
+memoryBox1  = make_array(memoryBoxSize);
+memoryBox2  = make_array(memoryBoxSize);
+
+// Pad debug
+padDebugNL = 1;
+padDebugNC = 8;
+padDebugSiz = padDebugNL * padDebugNC;
+padDebug1p = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    padDebugNL, padDebugNC, padDebugSiz);
+
+padDebug1Labs = padDebug1p + padDebug1p[ui_jpad_labs]; // addresses of labels
+padDebug1Colrs = padDebug1p + padDebug1p[ui_jpad_clrs]; // addresses of colors
+padDebug1Cells = padDebug1p + padDebug1p[ui_jpad_cells]; // addresses of cells desc.
+padDebug1Vals = padDebug1p + padDebug1p[ui_jpad_values]; // addresses of values
+//
+ii = 0; loop(padDebugSiz,
+            padDebug1Colrs[ii] = Col_Inactive;
+            padDebug1Labs[ii] = "";
+            ii+=1;
+);
+
+padDebug2p = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    padDebugNL, padDebugNC, padDebugSiz);
+
+padDebug2Labs = padDebug2p + padDebug2p[ui_jpad_labs]; // addresses of labels
+padDebug2Colrs = padDebug2p + padDebug2p[ui_jpad_clrs]; // addresses of colors
+padDebug2Cells = padDebug2p + padDebug2p[ui_jpad_cells]; // addresses of cells desc.
+padDebug2Vals = padDebug2p + padDebug2p[ui_jpad_values]; // addresses of values
+//
+ii = 0; loop(padDebugSiz,
+            padDebug2Colrs[ii] = Col_Inactive;
+            padDebug2Labs[ii] = "";
+            ii+=1;
+);
+
+memoryBoxAdd = 0; // shared address between boxes
+
+memoryBox1[0] = padDebug1p;
+memoryBox1[1] = padDebug1Labs;
+memoryBox1[2] = padDebug1Colrs;
+memoryBox1[3] = padDebug1Cells;
+memoryBox1[4] = padDebug1Vals;
+memoryBox1[5] = "Memory 1";
+// 6
+memoryBox1[17] = 96;
+memoryBox1[18] = 19;
+memoryBox1[19] = 0;
+memoryBox1[20] = 0;
+
+
+memoryBox2[0] = padDebug2p;
+memoryBox2[1] = padDebug2Labs;
+memoryBox2[2] = padDebug2Colrs;
+memoryBox2[3] = padDebug2Cells;
+memoryBox2[4] = padDebug2Vals;
+memoryBox2[5] = "Memory 2";
+// 6
+memoryBox2[17] = 96;
+memoryBox2[18] = 19;
+memoryBox2[19] = 0;
+memoryBox1[20] = 0;
+
+// The debug menu ActionTbSiz
+DebugTbSize = 64;
+DebugTbNames = make_array(DebugTbSize);
+DebugTbTyps = make_array(DebugTbSize);
+DebugTbAdds = make_array(DebugTbSize);
+DebugTbDecs = make_array(DebugTbSize);
+
+dbg_u_za = 0;
+
+// ============ Memory Debug ============
+/*
+    Types:   0x100  : the address to display is computed in the memory displayer
+             0x001  : show absolute : relative address
+             0x002  : data is in gmem
+             0x004  : show @ in hexadecimal
+             0x008  : show data in hexadecimal
+*/
+// The debug menu ActionTbSiz
+idx = 0;
+DebugTbTyps[idx] = 0; DebugTbAdds[idx] = 0; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Memory"; idx += 1;
+DebugTbTyps[idx] = 0x101; DebugTbAdds[idx] = 4; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Mem. mSL"; idx += 1;
+DebugTbTyps[idx] = 1; DebugTbAdds[idx] = serialBlock; DebugTbDecs[idx] = serialBlock; DebugTbNames[idx] = "Presets"; idx += 1;
+DebugTbTyps[idx] = 1; DebugTbAdds[idx] = paramBlock; DebugTbDecs[idx] = paramBlock; DebugTbNames[idx] = "Params"; idx += 1;
+DebugTbTyps[idx] = 2; DebugTbAdds[idx] = 0; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Gmem"; idx += 1;
+
+//DebugTbTyps[idx] = 2; DebugTbAdds[idx] = HP_usage; DebugTbDecs[idx] = HP_usage; DebugTbNames[idx] = "HP usage"; idx += 1;
+DebugTbTyps[idx] = 1; DebugTbAdds[idx] = AAAAC_thrdArea; DebugTbDecs[idx] = AAAAC_thrdArea; DebugTbNames[idx] = "Threads"; idx += 1;
+DebugTbTyps[idx] = 0x101; DebugTbAdds[idx] = 0; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "C.thread"; idx += 1;
+DebugTbTyps[idx] = 0x101; DebugTbAdds[idx] = 1; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Tree.gen"; idx += 1;
+DebugTbTyps[idx] = 0x10D; DebugTbAdds[idx] = 2; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Blocks.gen"; idx += 1;
+DebugTbTyps[idx] = 0x103; DebugTbAdds[idx] = 3; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Play. UCB"; idx += 1;
+DebugTbTyps[idx] = 0xF; DebugTbAdds[idx] = 0x300; DebugTbDecs[idx] = 0x300; DebugTbNames[idx] = "Ugens"; idx += 1;
+//DebugTbTyps[idx] = 1; DebugTbAdds[idx] = BKTab; DebugTbDecs[idx] = BKTab; DebugTbNames[idx] = "Banks"; idx += 1;
+DebugTbTyps[idx] = 1; DebugTbAdds[idx] = SchedArea; DebugTbDecs[idx] = SchedArea; DebugTbNames[idx] = "Sched ents"; idx += 1;
+//DebugTbTyps[idx] = 1; DebugTbAdds[idx] = HPATab; DebugTbDecs[idx] = HPATab; DebugTbNames[idx] = "HP Sets"; idx += 1;
+//DebugTbTyps[idx] = 1; DebugTbAdds[idx] = HPPTab; DebugTbDecs[idx] = HPPTab; DebugTbNames[idx] = "HP Ptrs"; idx += 1;
+//DebugTbTyps[idx] = 1; DebugTbAdds[idx] = SMTab; DebugTbDecs[idx] = SMTab; DebugTbNames[idx] = "Space Modes"; idx += 1;
+//DebugTbTyps[idx] = 1; DebugTbAdds[idx] = PMTab; DebugTbDecs[idx] = PMTab; DebugTbNames[idx] = "Play Modes"; idx += 1;
+//DebugTbTyps[idx] = 1; DebugTbAdds[idx] = MIDISeqncs; DebugTbDecs[idx] = MIDISeqncs; DebugTbNames[idx] = "Sensors"; idx += 1;
+//DebugTbTyps[idx] = 1; DebugTbAdds[idx] = Mac_WA_Tab; DebugTbDecs[idx] = Mac_WA_Tab; DebugTbNames[idx] = "Macros"; idx += 1;
+//DebugTbTyps[idx] = 1; DebugTbAdds[idx] = Mac_WA_Temp; DebugTbDecs[idx] = Mac_WA_Temp; DebugTbNames[idx] = "M.Expensions"; idx += 1;
+DebugTbTyps[idx] = 1; DebugTbAdds[idx] = Mac_WA_Errs; DebugTbDecs[idx] = Mac_WA_Errs; DebugTbNames[idx] = "Errors"; idx += 1;
+//DebugTbTyps[idx] = 1; DebugTbAdds[idx] = Mac_WA_Tcrs; DebugTbDecs[idx] = Mac_WA_Tcrs; DebugTbNames[idx] = "Play info"; idx += 1;
+//DebugTbTyps[idx] = 2; DebugTbAdds[idx] = plHDStrt; DebugTbDecs[idx] = plHDStrt; DebugTbNames[idx] = "Play store"; idx += 1;
+//DebugTbTyps[idx] = 2; DebugTbAdds[idx] = playLogStrt; DebugTbDecs[idx] = playLogStrt; DebugTbNames[idx] = "Play entries"; idx += 1;
+//DebugTbTyps[idx] = 1; DebugTbAdds[idx] = playTimes; DebugTbDecs[idx] = playTimes; DebugTbNames[idx] = "Play line"; idx += 1;
+//DebugTbTyps[idx] = 1; DebugTbAdds[idx] = SlidersBlockA; DebugTbDecs[idx] = SlidersBlockA; DebugTbNames[idx] = "P.Blocks"; idx += 1;
+//DebugTbTyps[idx] = 1; DebugTbAdds[idx] = clipsWorkArea; DebugTbDecs[idx] = clipsWorkArea; DebugTbNames[idx] = "Clips WA"; idx += 1;
+//DebugTbTyps[idx] = 1; DebugTbAdds[idx] = ClSetTab; DebugTbDecs[idx] = ClSetTab; DebugTbNames[idx] = "ClipSets"; idx += 1;
+//DebugTbTyps[idx] = 1; DebugTbAdds[idx] = psKPlaying; DebugTbDecs[idx] = psKPlaying; DebugTbNames[idx] = "Active Players"; idx += 1;
+DebugTbTyps[idx] = 1; DebugTbAdds[idx] = mSL_Dyn_Log; DebugTbDecs[idx] = mSL_Dyn_Log; DebugTbNames[idx] = "Log malloc"; idx += 1;
+DebugTbTyps[idx] = 1; DebugTbAdds[idx] = mSL_Dyn_fLog; DebugTbDecs[idx] = mSL_Dyn_fLog; DebugTbNames[idx] = "Log mfree"; idx += 1;
+DebugCount = idx;
+
+mSL_Sort_Strings(DebugCount, 0, DebugTbNames, DebugTbTyps, DebugTbAdds, DebugTbDecs);
+
+menu_Debug = make_jmenu(
+            ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "debug", DebugCount, DebugTbNames);
+
+debugDSize = 128;
+memoryBox1[12] = make_array(debugDSize);
+memoryBox2[12] = make_array(debugDSize);
+// Preselect "Memory"
+// Look for the "Memory" entry.
+dbg_curr_sel = -1;
+ii = 0; while ((dbg_curr_sel < 0) && (ii < DebugCount)) (
+    (DebugTbNames[ii] == "Memory") ? dbg_curr_sel = ii;
+    ii += 1;
+);
+memoryBox1[6] = memoryBox2[6] = dbg_curr_sel;
+memoryBox1[8] = memoryBox2[8] = 0;
+memoryBox1[9] = memoryBox2[9] = 0;
+memoryBox1[10] = memoryBox2[10] = 0;
+memoryBox1[11] = memoryBox2[11] = 0;
+memoryBox1[13] = memoryBox2[13] = 0;
+memoryBox1[14] = memoryBox2[14] = 0;
+
+
+
+/* Add a file name to the compiler list */
+function doMslCompile(fname)
+(
+    // Do not accept empty strings
+    (strlen(fname) != 0) ? (
+        0 ? (sprintf(#s, "::About to doMslCompile: \"%s\"", fname); mSL_log(SysLogBox, #s););
+        atomic_set(mSL_Lock, max(1,atomic_get(mSL_Lock)));
+        uuuMslTabs[uuuMslTPt] = fname; uuuMslTPt = (uuuMslTPt + 1) % uuuMslTSiz;
+        atomic_add(mSL_loc_tim,mSL_loc_tadd);
+        uuuMslFn = 1; // set flag
+    )
+);
+
+
+// The threads operations
+<? include("GM-Libs/mSL_Threads.jsfx-inc"); ?>
+
+
+// The Garbage Collector
+<? include("GM-Libs/mSL_Garbage_Collector.jsfx-inc"); ?>
+
+
+
+
+
+
+// Try to open a file somewhere
+function GM_file_open(fname)
+local (fhd)
+(
+    strcpy(#tmpFname, fname);
+    0 ? (sprintf(#gfxu, "::-> Trying \"%s\"  %d", #tmpFname, mSL_errC); mSL_log(SysLogBox, #gfxu););
+    fhd = file_open(#tmpFname);
+    (fhd < 0) ? (
+        // is the file in current directory ?
+        strcpy(#tmpFname, #GL_Directory); strcat(#tmpFname, fname);
+        0 ? (sprintf(#gfxu, "::-> Trying \"%s\"  %d", #tmpFname, mSL_errC); mSL_log(SysLogBox, #gfxu););
+        fhd = file_open(#tmpFname);
+        (fhd < 0) ? (
+            // is the file in the script directory ?
+            strcpy(#tmpFname, #GM_Scripts); strcat(#tmpFname, fname);
+            0 ? (sprintf(#gfxu, "::-> Trying \"%s\"  %d", #tmpFname, mSL_errC); mSL_log(SysLogBox, #gfxu););
+            fhd = file_open(#tmpFname);
+            (fhd < 0) ? (
+                strcpy(#tmpFname, #GL_Directory); strcat(#tmpFname, #GM_Scripts); strcat(#tmpFname, fname);
+                0 ? (sprintf(#gfxu, "::-> Trying \"%s\"  %d", #tmpFname, mSL_errC); mSL_log(SysLogBox, #gfxu););
+                // is the file is Libs/Scripts
+                fhd = file_open(#tmpFname);
+                (fhd < 0) ? (
+                    strcpy(#tmpFname, #GM_Project_Path); strcat(#tmpFname, #GM_Scripts); strcat(#tmpFname, fname);
+                    0 ? (sprintf(#gfxu, "::-> Trying \"%s\"  %d", #tmpFname, mSL_errC); mSL_log(SysLogBox, #gfxu););
+                    fhd = file_open(#tmpFname);
+                );
+            );
+        );
+    );
+    fhd;
+);
+
+
+
+
+/*
+    Try to understand the why(s) of an error in mSL
+*/
+function mSL_error_analysis(thrd)
+(
+    sprintf(#uuu, " _ Thread: %d", thrd);
+    mSL_log(SysLogBox, #uuu);
+    sprintf(#uuu, " _ Mem avail: %d", mSL_available_memory());
+    mSL_log(SysLogBox, #uuu);
+);
+
+
+
+
+// The values to send in each sample
+TPL = tplZ = make_array(64); // always 0 samples
+tplA = make_array(64); // the channels values
+
+// The formats array
+fFormats = make_array(16);
+setFileFormats(fFormats);
+
+
+
+// Make the Grains control blocks
+GCBpts = make_array(NumbGr); // pointers
+GCBacts = make_array(NumbGr); // active pointers
+GCBactM = -1; // max. indice of active pointers
+GCBArray = make_array(NumbGr * GPBSize); // the blocks
+ii = 0; loop(NumbGr,
+    GCBpts[ii] = GCBArray + ii * GPBSize;
+    ii += 1;
+);
+GCBL = GCBArray;
+
+
+////===================XPERIMENT===================
+// We have 16 mod.tables with 20 parameters each, and 4 base
+ModTabCnt=16;
+ModTabSiz=20;
+ModTabPtrs=make_array(ModTabCnt);
+ii=0; loop(ModTabCnt, ModTabPtrs[ii]=make_array(ModTabSiz); ii+=1;);
+ModWSize=48000;
+ModWSizB=ModWSize+1;
+ModWav0 = make_array(ModWSizB);
+ModWav1 = make_array(ModWSizB);
+ModWav2 = make_array(ModWSizB);
+ModWav3 = make_array(ModWSizB);
+
+
+
+//// Oct. 2023 -- New objects
+
+
+Simple_temp = make_array(10);
+
+
+
+
+mm_lowblocks = make_array(2); // creates a gap of 2 zeroes.
+mSL_GC_Protected = make_array(1123, mSL_KODE_protect);
+
+// Create the scheduler structure
+SchedSetup();
+0 ? (sprintf(#uuu, "    ---> SchedSetup :   %d tasks", SchedListSize(SchedFreePts));mSL_log(SysLogBox, #uuu););
+
+
+// Sizes of Allocated arrays for the Compiler and the Evaluator
+C_compSize = 32 * 1024; // size : 64 kW [kilo words, not kilo watts]
+C_progSize = 32 * 1024; // size  for the evaluator
+ui_jmake_arraymax = 0x7FFFFFF; // "no" limit in the size of an array...
+
+// Then, initialize all structures of the compiler.
+C_compArea = make_array(C_compSize);
+C_progArea = make_array(C_progSize);
+
+mm_limit_a = make_array(2);
+mm_limit_a[0] = 'STRT'; mm_limit_a[1] = 'MEMR';
+
+
+// Memory size :
+C_memrSize = 8 * 1024 * 1024; // size : X x 1MW
+C_memrArea = make_array(C_memrSize); // THE MEMORY !
+
+mm_limit_b = make_array(2);
+mm_limit_b[0] = 'END_'; mm_limit_b[1] = 'MEMR';
+
+// Build the memory
+mSL_current_memory = mSL_new_memory = 0; // make sure it is clear
+AAAAC_5 = mSL_make_memory(C_memrArea, C_memrSize);
+
+memoryBox1[7] = memoryBox2[7] = AAAAC_5 - 2; // actual start
+mm_lowmem = mSL_new_memory + mSL_new_memory[mSL_MM_LowAd];
+mm_highmem = mSL_new_memory + mSL_new_memory[mSL_MM_HighAd];
+// mm_sizmem = max(1, mm_highmem - mm_lowmem);
+mm_show_ttf = mm_sizmem = mSL_new_memory[mSL_MM_MemSiz];//
+//AGMW166 = GMW();
+
+// Try to provide an independent main symbol table for the compiler - "var" declarations
+aprime = 3313;
+size = 4 * (aprime + 1);
+mem = make_array(size + 4);
+A_mSL_GCTab = mSL_buildGVTab(mem, size, aprime);
+
+// Try to provide an independent local symbol table for the compiler - "loc" declarations
+aprime = 191;
+size = 4 * (aprime + 1);
+mem = make_array(size + 4);
+A_mSL_LCTab = mSL_buildLCTab(mem, size, aprime);
+// Build the compiler
+AAAAC_6 = mSL_make_compiler(C_compArea, C_compSize);
+// Then, the interpreter
+AAAAC_7 = mSL_make_evaluator(C_progArea, C_progSize);
+mSL_new_thread = 0;
+
+// define our new extensions
+mSL_define_extensions();
+
+mm_limit_g = make_array(2);
+mm_limit_g[0] = 'END_'; mm_limit_g[1] = 'COMP';
+
+mm_highblocks = make_array(2); // no block with memory references beyond that
+
+
+
+
+////===============================================
+
+
+function FillModWav(tab, siz, typ)
+local (i, ph, inc, cnt)
+(
+    siz = max(1, siz);
+    cnt = max(1, siz-1);
+    (typ == 0) ? (
+        memset(tab, 0, siz);
+    ) : (
+        // default : build a sin wave
+        inc = (2 * $pi) / cnt;
+        i = ph = 0; loop(siz,
+            tab[i] = sin(ph); ph += inc; i += 1;
+        );
+        i = 0; ph = 0; loop(siz,
+            ph = ph + abs(tab[i]); i += 1;
+        );
+        gmem[ModSWav] = ph;
+    );
+);
+
+
+////===================XPERIMENT===================
+XPND = 4;
+FillModWav(ModWav0, ModWSizB, 1);
+ii=0; loop(ModTabCnt, mdtb = ModTabPtrs[ii]; mdtb[0] = ModWav0; ii+=1;);
+mdtb = ModTabPtrs[0];
+mdtb[0] = ModWav0;
+mdtb[1] = 0; // initial position in buffer
+mdtb[2] = 0; // initial phase
+mdtb[3] = 0.18; // increment
+mdtb[4] = 189; // excursion
+mdtb[5] = ModWSize; // wave size (-1)
+mdtb[6] = 0; // add. offset
+mdtb[7] = 0; // volume modification
+mdtb[8] = 0; // Flags [ex: wrap around/not]
+mdtb = ModTabPtrs[1];
+mdtb[0] = ModWav0;
+mdtb[1] = 0; // initial position in buffer
+mdtb[2] = 10000; // initial phase
+mdtb[3] = 0.29; // increment
+mdtb[4] = 177; // excursion
+mdtb[5] = ModWSize;
+mdtb = ModTabPtrs[2];
+mdtb[0] = ModWav0;
+mdtb[1] = 0; // initial position in buffer
+mdtb[2] = 33333; // initial phase
+mdtb[3] = 0.21; // increment
+mdtb[4] = 182; // excursion
+mdtb[5] = ModWSize;
+mdtb = ModTabPtrs[3];
+mdtb[0] = ModWav0;
+mdtb[1] = 0; // initial position in buffer
+mdtb[2] = 440000; // initial phase
+mdtb[3] = 0.14; // increment
+mdtb[4] = 122; // excursion
+mdtb[5] = ModWSize;
+////===============================================
+
+
+checkUnit();
+UAddChs = UAdd+cbPch00; // save address of output channels
+gmem[UAdd+RCB_Mem_Avail] = __memtop() - mSL_StM_FreePt; // set mem avail
+
+
+
+// ========== mSL functions ==========
+
+
+
+mSL_baseAVSize = 822;
+mSL_baseOVSize = 256;
+mSL_basePVSize = 128;
+
+
+
+
+
+
+function parGetV(xp)
+local (val, act)
+(
+    xp = 0|max(0,min(paramNMax,xp)); // minimalistic check
+    val = paramValues[xp];
+);
+
+function parSet(xop, value)
+local (f, pp, pq, pv, fspect)
+(
+    xop = 0|max(0,min(paramNMax,xop)); // minimalistic check
+    pv = paramValues[xop]; // previous value
+);
+
+/*
+    Implementation of the mSL "get"
+*/
+function mSL_get(argc, argv)
+local (pfid, ref, addr, res, flg, kod, size, s, ip, k, k2, pt, kid, pid)
+(
+    pfid = argv[0]; ref = argv[1];
+    res = addr = flg = 0;
+    kod = size = -1;
+    kid = (argc > 1) && (((ref > mSL_Sym_Low) && (ref < mSL_Sym_High)) || ((ref >= mSL_MKey_min) && (ref <= mSL_MKey_max)));
+
+    // is this a keyword ?
+    ((pfid > mSL_Sym_Low) && (pfid < mSL_Sym_High)) ? (
+        (FlagsTbVals[Flgs_PrOps] & 1) ? (
+            // just for trace
+            strcpy(#sZ0, mSL_id2Str(pfid));
+            (argc <= 1) ? (
+                sprintf(#sfc, "mSL_get[%d]  \"%s\".", argc, #sZ0);
+            ) :
+            (
+                sprintf(#sfc, "mSL_get[%d]  \"%s\"  \"%s\" / %d", argc, #sZ0, mSL_edit_value(#sZ1, ref), kid);
+            );
+            mSL_log(SysLogBox, #sfc);
+        );
+        pid = -1;
+        ((pfid === mSL_KW_JSFX) || (pfid === mSL_KW_jsfx_) || (pfid === mSL_KW_GM) || (pfid === mSL_KW_GM_)) ? (
+            // acces a JSFX variable
+            res = mSL_vGet(ref);
+        ) :
+        ((pfid === mSL_KW_JSFXref) || (pfid === mSL_KW_jsfxref_)) ? (
+            // acces a JSFX variable reference
+            res = mSL_get_var_idt(ref);
+        ) :
+        (pfid === mSL_KW_PNum) ? (
+            // Get a parameter number
+            (kid && ((k = mSL_getinHT(paramHashTbl, ref)) >= 0)) ? (
+                pid = mSL_getinHTaux; // use the auxiliary result = param number
+            );
+            res = pid;
+        ) :
+        (pfid === mSL_KW_ParamV) ? (
+            // get a parameter value
+            pid = 0; k = -2; // for now
+            // Get the value of a parameter by name or by number
+            (kid) ? (
+                // look for the ident. in a table
+                ((k = mSL_getinHT(paramHashTbl, ref)) >= 0) ? (
+                    pid = mSL_getinHTaux;
+                );
+            ) :
+            ((ref >= 0) && (ref < paramNMax)) ? (
+                pid = ref;
+            );
+            (pid >= 0) ? (
+                res = parGetV(pid);
+            );
+            // sprintf(#sfc, "Get Param  %d / %d =>  %f", pid, k, res);
+            // mSL_log(SysLogBox, #sfc);
+        ) :
+        (pfid === mSL_KW_Host) ? (
+            res = the_host;
+        ) :
+        //(pfid === mSL_KW_vars) ? (
+        //    // return the "vars" array
+        //    res = mSL_baseAVars;
+        //) :
+        //(pfid === mSL_KW_locs) ? (
+        //    // return the "locs" array
+        //    res = mSL_baseOVars;
+        //):
+        (
+            res = mSL_vGet(pfid);
+        );
+    ) : (
+        // Is the first parameter the address of a table ?
+        (((addr = pfid) > 2) && ((kod = addr[-2]) >= mSL_MKey_min) && ((s = addr[-1]) > 0)
+            && (s === addr[s]) && (((k2 = addr[s+1]) === mSL_End_Mark) || (k2 === (kod ~ mSL_CC_Chksum)))) ? (
+                flg = 1; size = s;
+        ) :
+        // Is this the "raw" address of a table ?
+        (((addr = pfid + 2) > 2) && ((kod = addr[-2]) >= mSL_MKey_min) && ((s = addr[-1]) > 0)
+            && (s === addr[s]) && (((k2 = addr[s+1]) === mSL_End_Mark) || (k2 === (kod ~ mSL_CC_Chksum)))) ? (
+                flg = 1; size = s;
+        ) :
+        // Let's consider it as a simple pointer...
+        (
+            addr = pfid; // don't know much more
+            size = 0x1000000; // default access...
+        );
+
+
+        (kid) ? (
+            // look for an entry in the table
+            ip = 0; k = addr[ip];
+            (flg && ((ref === 'size') || (ref === mSL_KW_size))) ? (
+                res = size; flg = 0;
+            );
+            (flg && ((ref === 'type') || (ref === mSL_KW_type))) ? (
+                res = kod; flg = 0;
+            );
+            while (flg && (((k > mSL_Sym_Low) && (k < mSL_Sym_High)) || ((k >= mSL_MKey_min) && (k <= mSL_MKey_max)))) (
+                (ip >= size) ? (
+                    flg = 0;
+                ) :
+                (k === ref) ? (
+                    res = addr[ip+1]; flg = 0;
+                ) :
+                (
+                    ip += 2; k = addr[ip];
+                );
+            );
+        ) :
+        ((addr >= 0) && ((pt = addr + ref) >= 0)) ? (
+            (pt < mSL_lastmemory) ? (
+                res = pt[0];
+            );
+        ) :
+        (addr < 0) ? (
+            (((pt = -addr + ref) > 0) && (pt < 0x8000000)) ? (
+                res = gmem[pt];
+            );
+        );
+
+    );
+    res;
+);
+
+/*
+    Set the value of field ; return previous one
+*/
+function mSL_set(argc, argv)
+local (pfid, ref, value, force, addr, res, flg, kod, size, s, ip, k, k2, pt, kid)
+(
+
+    pfid = argv[0]; ref = argv[1]; value = argv[2]; force = argv[3];
+    res = addr = flg = 0;
+    kod = size = -1;
+    kid = (argc > 1) && (((ref > mSL_Sym_Low) && (ref < mSL_Sym_High)) || ((ref >= mSL_MKey_min) && (ref <= mSL_MKey_max)));
+
+    // is this a keyword ?
+    ((pfid > mSL_Sym_Low) && (pfid < mSL_Sym_High)) ? (
+        (FlagsTbVals[Flgs_PrOps] & 1) ? (
+            strcpy(#sZ0, mSL_id2Str(pfid));
+            sprintf(#sfc, "mSL_set[%d]  \"%s\"  \"%s\" / %d    %g",argc, #sZ0, mSL_edit_value(#sZ1, ref), kid, value);
+            mSL_log(SysLogBox, #sfc);
+        );
+        ((pfid === mSL_KW_JSFX) || (pfid === mSL_KW_jsfx_) || (pfid === mSL_KW_GM) || (pfid === mSL_KW_GM_)) ? (
+            // acces a JSFX variable
+            (argc > 2) ? (
+                res = mSL_vSet(ref, value);
+            );
+        ) :
+        (pfid === mSL_KW_ParamV) ? (
+            pid = -1; // for now
+            // Get the value of a parameter by name or by number
+            (kid) ? (
+                // look for the ident. in a table
+                ((k = mSL_getinHT(paramHashTbl, ref)) >= 0) ? (
+                    pid = mSL_getinHTaux; // use the auxiliary result
+                );
+            ) :
+            ((ref >= 0) && (ref < paramNMax)) ? (
+                pid = ref;
+            );
+            // Set the value of a parameter
+            (pid >= 0) ? (
+                pid = 0|max(0,min(paramNMax,pid));
+                res = paramValues[pid];
+                parSet(pid, value);
+            );
+        ) :
+        (
+            (argc > 1) ? (
+                res = mSL_vSet(pfid, ref);
+            );
+        );
+    ) : (
+        // Is this a table ?
+        (((addr = pfid) > 2) && ((kod = addr[-2]) >= mSL_MKey_min) && ((s = addr[-1]) > 0)
+            && (s === addr[s]) && (((k2 = addr[s+1]) === mSL_End_Mark) || (k2 === (kod ~ mSL_CC_Chksum)))) ? (
+                flg = 1; size = s;
+        ) :
+        (((addr = pfid + 2) > 2) && ((kod = addr[-2]) >= mSL_MKey_min) && ((s = addr[-1]) > 0)
+            && (s === addr[s]) && (((k2 = addr[s+1]) === mSL_End_Mark) || (k2 === (kod ~ mSL_CC_Chksum)))) ? (
+                flg = 1; size = s;
+        ) :
+        (
+            addr = pfid; // don't know much more
+            size = 0x1000000; // default access...
+        );
+
+        (((ref > mSL_Sym_Low) && (ref < mSL_Sym_High)) || ((ref >= mSL_MKey_min) && (ref <= mSL_MKey_max))) ? (
+            // look for an entry in the table
+            ip = 0; k = addr[ip];
+            (flg && ((ref === 'type') || (ref === mSL_KW_type)) && (force & 1) && (value >= mSL_MKey_min) && (value <= mSL_MKey_max)) ? (
+                flg = 0;  addr[-2] = value; addr[s+1] = value ~ mSL_CC_Chksum;
+            );
+            while (flg && (((k > mSL_Sym_Low) && (k < mSL_Sym_High)) || ((k >= mSL_MKey_min) && (k <= mSL_MKey_max)))) (
+                (k === ref) ? (
+                    res = addr[ip+1];
+                    addr[ip+1] = value;
+                    flg = 0;
+                ) :
+                (ip >= size) ? (
+                    flg = 0;
+                ) : (
+                    ip += 2; k = addr[ip];
+                );
+            );
+            (flg && (force & 1)) ? (
+                // try to create the entry
+                ip = 0; flg = 1;
+                while (flg) (
+                    (ip >= size) ? (
+                        flg = 0;
+                    ) :
+                    (addr[ip] === 0) ? (
+                        addr[ip] = ref;
+                        addr[ip+1] = res = value;
+                        flg = 0;
+                    ) :
+                    (
+                        ip += 2; k = addr[ip];
+                    );
+                );
+            );
+        ) :
+        ((addr >= 0) && ((pt = addr + ref) >= 0)) ? (
+            (pt < mSL_lastmemory) ? (
+                // but this may write anywhere in the memory !
+                res = pt[0];
+                pt[0] = value;
+            );
+        ) :
+        (addr < 0) ? (
+            (((pt = -addr + ref) > 0) && (pt < 0x8000000)) ? (
+                // but this may write anywhere in the shared memory !
+                res = gmem[pt];
+                gmem[pt] = value;
+            );
+        );
+    );
+    res;
+);
+
+
+<? include("GM-Libs/mSL_DeAsm.jsfx-inc"); ?>
+
+
+<? include("GM-Libs/mSL_Events.jsfx-inc"); ?>
+
+
+
+// Read & Compile a mSL script file
+function
+mSL_load_file_inGFX(fname)
+local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars)
+(
+    mSL_load_start = gfxStartTime;
+    mSL_errX = mSL_errC = 0;
+    ent = 0; fhd = -1;
+    //(mSL_errC === 0) ? (
+    //    SchedListEmpty(SchedInactPts) ? (
+    //        mSL_errC = 2406; // can't get a thread
+    //    );
+    //);
+
+    (FlagsTbVals[Flgs_Traces] & 4) ? (sprintf(#gfxu, "::-> Trying \"%s\"  %d", fname, mSL_errC); mSL_log(SysLogBox, #gfxu););
+
+    (mSL_errC === 0) ? (
+        fhd = GM_file_open(fname);
+        ((fhd >= 0)) ? (
+            0 ? (sprintf(#gfxu, "::-> Using \"%s\"", #tmpFname); mSL_log(SysLogBox, #gfxu););
+            // get a free thread
+            (ent = getNewThread()) ? (
+                thrd = SchedThrdPt[ent];
+                AAAAAAAA_01_cp_rtc = mSL_compile(fhd, -1, -1, 0); // we add the input in the memory
+                0 ? (sprintf(#gfxu, "::-> Compiled: %d lines   [Err:%d] [Thrd:%d/%d]", mSL_C_numLine, mSL_errC,ent,thrd);
+                     mSL_log(SysLogBox, #gfxu););
+                fhd = -1; // file has been closed by the compiler
+                (mSL_errC === 0) ? (
+                    AAAAAAAA_02_add = mSL_main_cod;
+                    // This duplicates the work made in "mSL_init_thread" - TODO!!
+                    (mSL_main_cod != 0) ? (
+                        (FlagsTbVals[Flgs_Scripts] & 1) ? (
+                            sprintf(#gfxu, "SZ(%d) %d, %d, %d", ent, (mSL_gvar+1) & mSL_NumMask, (mSL_ovar+1) & mSL_NumMask, (mSL_pvar+1) & mSL_NumMask);
+                            mSL_log(SysLogBox, #gfxu);
+                        );
+                        // Let's copy appropriate vars tables in the thread references
+                        thrd[mSL_THR_baseAVars] = mSL_baseAVars = mSL_main_cod[mSL_CC_GlbTab];
+                        thrd[mSL_THR_baseOVars] = mSL_baseOVars = mSL_main_cod[mSL_CC_OwnTab];
+                        thrd[mSL_THR_basePVars] = mSL_basePVars = mSL_main_cod[mSL_CC_PtrTab];
+                        SchedStatus[ent] |= SchThrUsed;  // now in use
+                        AAAAAAAA_ent = ent ;
+                        SchedPar1[ent] = mSL_main_cod; // the code
+                        // Keep tables info in the main code
+                        // sprintf(#gfxu, "TH: %d, %d, [%d, %d, %d]", ent, thrd, mSL_baseAVars, mSL_baseOVars, mSL_basePVars);
+                        (FlagsTbVals[Flgs_Scripts] & 1) ? (
+                            sprintf(#gfxu, "TH(%d) [%d, %d]", ent, mSL_baseAVars, mSL_baseOVars);
+                            mSL_log(SysLogBox, #gfxu);
+                        );
+                        SchedCode[ent] = KRun_mSL_Thread; // start running a thread
+                        mSL_init_thread(ent); // perform initalization
+                        // ADump(mSL_main_cod); // just a trace
+                        mSL_errX = max(mSL_errX, mSL_errC);
+                        (mSL_errX === 0) ? (
+                            (FlagsTbVals[Flgs_Scripts] & 1) ? (
+                                sprintf(#gfxu, "Load OK - Ent: %d", ent);
+                                mSL_log(SysLogBox, #gfxu);
+                            );
+                        );
+                        mSL_High_Stack = mSL_max_TOS = 0;
+                    ) : (
+                        mSL_errX = 2409; // no code generated
+                    );
+                );
+                // GMW2("D");
+            ) : (
+                mSL_errX = 2410; // no thread available
+            );
+        ) : (
+            mSL_errX = 2405; // can't open
+        );
+    );
+
+    (mSL_C_fH >= 0) ? (file_close(mSL_C_fH); mSL_C_fH = -1;);
+    (fhd >= 0) ? (file_close(fhd); fhd = -1;);
+    mSL_errX = max(mSL_errX, mSL_errC);
+
+    (mSL_errX === 0) ? (
+        (ent > 0) ? SchedInsertTail(SchedLockdPts, ent, SchETypeThrd);
+    ) : (
+        SchedFree(ent); // in case of error, free the entry
+        ent = 0;
+    );
+
+    mSL_load_end = gfxStartTime;
+    (FlagsTbVals[Flgs_Scripts] & 1) ? (
+        sprintf(#gfxu, "Fread(%d) Err:%d Dur:%.2f ms", ent, mSL_errX,
+                        1000 * (mSL_load_end - mSL_load_start));
+        mSL_log(SysLogBox, #gfxu);
+    );
+    flagShowMemory = 1;
+    mSL_errX ? (
+        sprintf(#gfxu, "ERR: %d    can't compile \"%s\".", mSL_errX, fname);
+        mSL_log(SysLogBox, #gfxu);
+    );
+    ent;
+);
+
+mSL_loc_tim = max(mSL_loc_tim - 1, 0);
+
+
+
+function
+Simple_Action(src)
+local (zz, xp, mr, ccnt, ent, s1, mpt, w1, pindx, err, p, flgs, auxKmd, auxRes,
+    par1, par2, par3, par4, par5, par6, par7, par8)
+(
+    flgs = FlagsTbVals[Flgs_Acts]; // trace flags
+);
+
+
+function Simple_Action(code, seq)
+(
+    Simple_temp[0] = 1;
+    Simple_temp[1] = code;
+    Simple_temp[2] = seq[0];
+    Simple_temp[3] = seq[1];
+    Simple_temp[4] = seq[2];
+    Simple_temp[5] = seq[3];
+    Simple_temp[6] = seq[4];
+    Simple_temp[7] = seq[5];
+    Simple_temp[8] = seq[6];
+    Simple_Action(Simple_temp);
+);
+
+function
+Set_Table(tbl)
+local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback, rd_err, pt, zpt, totsize, tout, pttr,
+    Cl_n, Cl_dB, ii, s1, s2, s3, s4, s5, ty, n, ps, cp, cnt, kct, vmin, vmax, pos, stnext, kmax, cvl, LWA, LWAsiz,
+    AddT)
+(
+    cvl = ptr = 0;
+);
+
+
+function mSL_call_ops(argc, argv)
+local(res, kw)
+(
+    // Decode the parameters - could be integers or keywords
+    0 ? (
+        sprintf(#s, "*mSL_call_ops[%d]  %18.0f   \"%s\"   \"%s\"    %g",
+            argc, argv[0], mSL_edit_value(#s1, argv[0]), mSL_edit_value(#s2, mSL_KW_SensorSize), argv[1]);
+        mSL_log(SysLogBox, #s);
+    );
+    res = Undef;
+);
+
+
+
+
+/*
+    Call operations = call a JSfX func from mSL
+*/
+function
+mSL_players_ops(argc, argv)
+local()
+(
+    Undef;
+);// mSL_players_ops
+
+
+
+/*
+    Play operations = single operation for playing in mSL
+*/
+function
+mSL_play_ops(argc, argv)
+local ()
+(
+    Undef;
+);
+
+
+/*
+    Gui operations
+*/
+function mSL_gui_ops(argc, argv)
+local ()
+(
+    Undef;
+);
+
+
+/*
+    Events management operations
+*/
+function
+mSL_event_ops(argc, argv)
+local (res, kw, ent, k, p1, p2, p3)
+(
+    res = 0;
+);
+
+
+
+/*
+    Threads management = single operation on thread
+*/
+function
+mSL_thread_ops(argc, argv)
+local (res, k, kw, ent)
+(
+    res = -1;
+    (argc > 0) ? (
+        kw = argv[0];
+        //sprintf(#ms, "** kw ** => %g  %s", kw, mSL_edit_value(#mt, kw));
+        //mSL_log(SysLogBox, #ms);
+        // we expect a keyword
+        (kw === mSL_KW_new) ? (
+            // expect : `new, func, params...
+            k = argv[1];
+            //sprintf(#ms, "** new ** => %d/%d", k, mSL_bl_check(k));
+            //mSL_log(SysLogBox, #ms);
+            ((argc > 1) && mSL_bl_check(k) && (k[mSL_CC_Key] === mSL_CC_KeyCKod)) ? (
+                // The func is supposed to have no locals and no parameters
+                ((k[mSL_CC_ParCnt] === 0) && (k[mSL_CC_LocCnt] === 0)) ? (
+                    // this is a correct func - load it in a new thread
+                    ent = getNewThread();
+                    //sprintf(#ms, "** ent ** => %d/%d", ent, KRun_mSL_Thread);
+                    // mSL_log(SysLogBox, #ms);
+                    ent ? (
+                        SchedPar1[ent] = k; // keep the code to execute
+                        SchedPar4[ent] = 0; // use std locals
+                        SchedCode[ent] = KRun_mSL_Thread; // ready to start
+                        mSL_init_thread(ent);
+                        SchedInsertTail(SchedSuspPts, ent, SchETypeThrd);
+                        res = ent[SchedPid]; // return the process ID
+                    );
+                ) : (
+                    res = -4001;
+                );
+            ) : (
+                res = -4000;
+            );
+        ) :
+        (kw === mSL_KW_run) ? (
+            // k = argv[1]; // the thread id contains the entry number
+            // ent = SchedFirstEnt + (k & SchedNMask) * SchedEntSiz; // points to "a" thread
+            ((argc > 1) && (k = argv[1])
+                && (ent = SchedFirstEnt + (k & SchedNMask) * SchedEntSiz)
+                && (k === ent[SchedPid])
+            ) ? (
+                // this is a correct reference
+                // ent is supposed to be in SchedSuspPts !
+                SchedUnchainEnt(SchedSuspPts, ent, SchETypeThrd);
+                SchedStatus[ent] |= SchThrUsed;  // now in use
+                // introduce in the active list
+                SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
+                (FlagsTbVals[Flgs_Thrds] & 4) ? ( // trace flags
+                    sprintf(#ms, "** RUN ** [%g:%g] => %d/%d", ent, SchedThrdPt[ent], (floor(k/SchedNEmax)), (k & SchedNMask));
+                    mSL_log(SysLogBox, #ms);
+                );
+                res = k; // done
+            );
+        ) :
+        (kw === mSL_KW_idt) ? (
+            ent = mSL_active_Thread[mSL_THR_SchedEnt];
+            ((ent >= SchedFirstEnt) && (ent <= SchedLastEnt)) ? (
+                res = ent[SchedPid]; // return the process ID
+            );
+        ) :
+        (kw === mSL_KW_name) ? (
+            ent = mSL_active_Thread[mSL_THR_SchedEnt];
+            ((ent >= SchedFirstEnt) && (ent <= SchedLastEnt)) ? (
+                res = ent[SchedThrName]; // return the process name
+                (argc > 1) ? (
+                    // use 2nd word as name
+                    ent[SchedThrName] = argv[1];
+                    (FlagsTbVals[Flgs_Thrds] & 4) ? (
+                        sprintf(#ms, "  --> Name : %s", mSL_edit_value(0, ent[SchedThrName]));
+                        mSL_log(SysLogBox, #ms);
+                    );
+                );
+            );
+        ) :
+        (kw === mSL_KW_status) ? (
+            k = argv[1]; // should be in SchedSuspPts !
+            res = 0; // undefined
+            ent = SchedFirstEnt + (k & SchedNMask) * SchedEntSiz; // points to "a" thread
+            ((k === ent[SchedPid]) && (argc > 1)) ? (
+                res = SchedStatus[ent]; // done
+            );
+        ) :
+        (kw === mSL_KW_find) ? (
+            p1 = p2 = p3 = 0;
+            (argc === 2) ? (
+                p1 = argv[1]; p2 = 0; p3 = 2;
+            ) :
+            (argc === 3) ? (
+                p1 = argv[1]; p2 = argv[2]; p3 = 2;
+            ) :
+            (argc >= 3) ? (
+                p1 = argv[1]; p2 = argv[2]; p3 = argv[2];
+            );
+            res = event_check_recipient(p1, p2, p3);
+        ) :
+        (kw === mSL_KW_count) ? (
+            (argc === 2) ? (
+                kw = argv[1]; ent = SchedFirstEnt; res = 0;
+                loop (SchedNEmax,
+                    (SchedThrName[ent] === kw) && (SchedStatus[ent] != 0) ? res += 1;
+                    ent += SchedEntSiz;
+                );
+            );
+        ) :
+        (
+            res = -4007;
+        );
+    );
+    res;
+);
+
+
+// Insert here the mSL interpreter
+<? include("GM-Libs/mSL_Evaluator.jsfx-inc"); ?>
+
+
+TabAddrMax = mSL_StM_FreePt; // max. address recognized for an array
+SharedHighMemory = lastmemory = make_array(2); // last use of the function
+
+
+UBuffer = mSL_StM_BlockStart('buff'); // DO NOT use make_array() after that !
+M_avail = UTmem - UBuffer - 256; // up to 64 * 2 * 2 zero-valued samples
+
+current_Memory_Mode = mSL_MMd_Dynamic;  // change allocation mode
+
+
+// Update a big number passed as parameter
+// with "key" being the "command"
+function updtBNumber(num, key, alt)
+local (cq, cx, flu, flk, kuz, zplm)
+(
+    zplm = num;
+    flu = 0; kuz = 1; cq = 1; flk = key > 0;
+    key < 0 ? key = -key;
+    ((key >= '0') && (key <= '9')) ? (
+        num = num * 10 + key - '0';
+    ) :
+    ((key === '%')||(key === 'z')) ? (
+        num = 0;
+    ) :
+    ((key === '+')||(key === '=')) ? (
+        num = num + 8;
+    ) :
+    ((key === ':')||(key === '/')) ? (
+        num = num - 8;
+    ) :
+    ((key === ';')||(key === '.')) ? (
+        num = num + 1;
+    ) :
+    ((key === ',')||(key === '?')) ? (
+        num = num - 1; cq = -1; flu = 1;
+    ) :
+    ((key === '$')) ? (
+        num = alt;
+    ) :
+    ((key === 0)||(key === 1)) ? (
+        flu = 1; // just "normalize" the value
+        cq = (key === 0) ? 1 : -1;
+    ) :
+    (ui_jmouse_cap === 0) ? (
+        ((key === 'n')||(key === 'p')||(key === 'b')||(key === 'rght')||(key === 'left')) ? (
+            cq = ((key === 'n')||(key === 'rght')) ? 1 : -1;
+            num = num + cq;
+        ) :
+        ((key === 'down')) ? (
+            num = num + 32;
+        ) :
+        ((key === 'up')) ? (
+            num = max(0, num - 32);
+        ) :
+        ((key === 'pgdn')) ? (
+            num = num + 256;
+        ) :
+        ((key === 'pgup')) ? (
+            num = max(0, num - 256);
+        ) :
+        ((key === 'home')) ? (
+            num = 0;
+        ) :
+        (
+            kuz = 0; // key has not been used
+        );
+    ) : (
+        kuz = 0; // key has not been used
+    );
+
+
+
+    num;
+);
+
+
+// Mock-up function
+function keepBlockInfos(b) ( 0; );
+gui_show_syslog = gui_show_memory = 1;
+SysLogBox[5] = 6;
+SysLogBox[6] = 0;
+mSL_log(SysLogBox, "*** Script Master initialized ***");
+
+//
+GMW2("Init MAIN");
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@block
+
+tPrecise = time_precise() + gmem[timeDelta];
+tUnix = time();
+
+/*
+// Check first words of memory, to detect eventual bugs
+((!GMW()) && (XDcount > 0)) ? (
+    sprintf(#s2, "BBB//File Player Damaged! %s %s %s %s %s %s %s %s", mSL_edit_value(#, 0[0]), mSL_edit_value(#, 0[1]),
+                mSL_edit_value(#, 0[2]), mSL_edit_value(#, 0[3]), mSL_edit_value(#, 0[4]), mSL_edit_value(#, 0[5]),
+                mSL_edit_value(#, 0[6]), mSL_edit_value(#, 0[7]));
+    mSL_log(SysLogBox, #s2);
+    GMI();
+    XDcount -= 1;
+);
+*/
+
+// every second or so...
+(second != gmem[timeSecOfDay]) ? (
+    // EVERY SECOND
+    second = gmem[timeSecOfDay];
+
+    (mSL_run_test && (mSL_run_ct <= 0)) ? (
+        mSL_run_ct = 2;
+        mem_walk(8);
+        // doMslCompile("TestPlay.mSL"); TestCount += 1;
+        //(mSL_mallocated >= 3100) ? (mSL_run_max = 1; mSL_run_test = 0;);
+        loop(mSL_run_max, z = mSL_Dyn_Alloc(1858, 'Test', 0); mSL_Dyn_Recycle(z));
+        (z <= 0) ? (
+            sprintf(#s2,"malloc returns %d [%d]", z, mSL_mallocated); mSL_log(SysLogBox, #s2); mem_walk(8);
+        );
+        mSL_run_once ? (mSL_run_once = mSL_run_test = 0);
+    );
+    mSL_run_ct =  min(0, mSL_run_ct - 1);
+
+    (lastMn != gmem[timeMinute]) ? (
+        // Edit time every minute
+        lastMn = gmem[timeMinute];
+    );
+
+
+    // Manage process counting every second
+    mSL_act = count_p_list(SchedActivPts) + (mSL_active_Thread > 0);
+    mSL_wait = count_p_list(SchedDlydPts) + count_p_list(SchedEvntPts);
+    mSL_plck = count_p_list(SchedSuspPts) + count_p_list(SchedLockdPts);
+    mSL_pmsg = count_p_list(SchedRcyclPts);
+    mSL_inactv = SchedListSize(SchedFreePts);
+    mSL_maxact = max(mSL_maxact, mSL_act);
+
+    ((mSL_Lock != 0) && (mSL_loc_tim <= 0) && (SchedLockAll === 0)) ? (
+        mSL_Lock < 0 ? mSL_Lock = - mSL_Lock;
+        atomic_add(mSL_loc_tim,20); // "gfx" ticks, so about 2"
+        atomic_set(mSL_Lock,  max(0, mSL_Lock - 1));
+    );
+
+    mSL_malloc_failed ? (
+        atomic_add(mSL_Lock,1);
+        atomic_add(mSL_loc_tim,10);
+        // run a GC
+        gc_run_phaz = 1;
+        mSL_malloc_failed = 0; // unset flag
+    );
+
+    (Schedrestart1 && (SchedLockAll === 0)) ? (
+        (SchedListNonEmpty(SchedEvntPts)) ? (
+            xgent = SchedDetachHead(SchedEvntPts);
+            SchedInsertTail(SchedLockdPts, xgent, SchETypeThrd);
+            mSL_log(SysLogBox, "SchedEvntPts  ——> SchedLockdPts");
+        ) :
+        (SchedListNonEmpty(SchedSuspPts)) ? (
+            xgent = SchedDetachHead(SchedSuspPts);
+            SchedInsertTail(SchedLockdPts, xgent, SchETypeThrd);
+            mSL_log(SysLogBox, "SchedSuspPts  ——> SchedLockdPts");
+        ) ;
+        Schedrestart1 = 0;
+    );
+
+    (uuuMslFn != 0) ? (
+        atomic_set(mSL_Lock, max(1,atomic_get(mSL_Lock)));
+    );
+
+
+    sysSampBeat = 60 / sysTempo;
+    // just recompute synchSmpls in case srate changed...
+    // (!sysPlayState) ? synchroPos = sysSampPosition;
+
+    // every tick : check our Unit number
+    (ticker != gmem[timeTick]) ? (
+        ticker = gmem[timeTick];
+        gmem[versionFReader] = version;
+        CheckNum = gmem[ticksCount];
+        gmem[UAdd+RCB_My_Track] = GMFXTrack = 1+get_host_placement(GMFXPos, GMFXFlags);
+        gmem[UAdd+RCB_My_Pos] = GMFXPos;
+        ui_GFXdoNow |= 1;
+
+        // check our Unit number
+        checkUnit();
+        UAddChs = UAdd+cbPch00; // save address of output channels
+        xPeriod = 1 + (0|((srate / samplesblock) * frand(0.8, 2.2))); // choose a specific tempo for updating
+
+        pcbZ12 = 120;
+
+        // Find an appropriate value for maxRdSize
+        frstRdsize = 24000 * (max(128, samplesblock) >> 7);
+        maxRdSize = frstRdsize * 4;
+
+        // Evaluate the ratio readsteps / clip
+        AAA_clipReadRatio =  max(1, AAA_clipSteps) / max(1, AAA_clipRead);
+        PlayMono =  floor(10 * M_avail / srate )/10;
+
+        gmem[UAdd+cbPlavail] = PlayMono;  // duration available for mono clips
+        gmem[UAdd+cbMemory] = M_avail;  // Memory available
+
+
+        // Update error display
+        (err_sys === 0) ? (
+            err_sys_ini ? (err_sys = err_sys_ini; err_sys_ini=0;)
+          : mSL_StM_Err ? (err_sys = mSL_StM_Err; mSL_StM_Err=0;)
+          : err_sys_rtm ? (err_sys = err_sys_rtm; err_sys_rtm=0;)
+          : err_sys_gfx ? (err_sys = err_sys_gfx; err_sys_gfx=0;)
+          : err_fclp ? (err_sys = err_fclp; err_fclp=0;)
+          : err_fplm ? (err_sys = err_fplm; err_fplm =0;)
+          : err_fhpc ? (err_sys = err_fhpc; err_fhpc=0;)
+          : err_fspm ? (err_sys = err_fspm; err_fspm=0;)
+          : err_fbnk ? (err_sys = err_fbnk; err_fbnk=0;)
+          : err_sdfr ? (err_sys = err_sdfr; err_sdfr=0;)
+          ;
+      );
+
+      // Signal delayed
+      GMIfsig ? ( GMW2("T"); GMIfsig = 0; );
+      ((!GMW()) && (XDcount > 0) && (GMIfsig == 0)) ? (
+        GMIfsig = 1;
+      );
+
+    );
+
+
+
+);
+
+
+
+
+// Happens once every second, but shifted in time
+(xCount <= 0) ? (
+    xCount += xPeriod;
+
+);
+xCount -= 1;
+
+
+sysPlayPosition = play_position;
+sysBeatPosition = beat_position;
+sysSampPosition = 0 | (u = 0.5 + sysPlayPosition * syssrate);
+sysSampBeatPosition = 0 | (u * sysTempo / 60);
+// currSmpl = sysSampPosition;
+
+
+
+
+
+(NState = gmem[UAdd+RCB_State_Changed]) ? (
+    gmem[UAdd+RCB_State_Changed] = 0;
+    ANState = NState;
+
+    // analyse the state change
+
+
+);
+
+
+
+
+/*
+    Some command received through the Unit Control Block ?
+*/
+((KmdIn = gmem[UAdd+RCB_Kmd]) != 0) ? (
+
+    gmem[UAdd+RCB_Kmd] = 0; // clean this one
+    BState = GSStFinal; // default next state
+    KmdLastIn = KmdIn;
+    KmdLastDate = CheckNum;
+
+
+    (KmdIn == KmdUnlock) ? (
+        (gmem[UAdd+RCB_PlaySource] == gmem[UAdd+cbP08]) ? (
+            gmem[UAdd+RCB_Cl_Flgs] &= -1 ~ 1;
+        );
+    ) :
+
+
+    (
+        0; // default do nothing
+    );
+
+
+);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@sample
+
+
+currSmpl = (floor(spl0 * T_fact)) + (floor(spl1 * T_fact)) * 16777216;
+spl0 = spl1 = 0;
+
+
+/*
+((spl_count - spl_prev_count) !== 1) ? (
+    spl_error += 1;
+    spl_errval = spl_count - spl_prev_count;
+);
+spl_prev_count = spl_count;
+
+
+// Test
+((spl_count % 480000) == 0) ? (
+    spl(UId) = 1.01;
+);
+tfact = srate * 4;
+(0 === (0|(spl_count - tfact * floor(spl_count/tfact)))) ? (
+    spl(UId) = 1.01;
+);
+*/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@gfx
+
+
+// gfxMaxDur = 0.01; // 10 ms
+gfxStrtT = time_precise() + timeD;
+
+1 ? (
+    (strlen(#dbg_trace0) != 0) ? (
+        mSL_log(SysLogBox, #dbg_trace0);
+        #dbg_trace0 = "";
+    );
+    (strlen(#dbg_trace1) != 0) ? (
+        mSL_log(SysLogBox, #dbg_trace1);
+        #dbg_trace1 = "";
+    );
+    (strlen(#dbg_trace2) != 0) ? (
+        mSL_log(SysLogBox, #dbg_trace2);
+        #dbg_trace2 = "";
+    );
+    (strlen(#dbg_trace3) != 0) ? (
+        mSL_log(SysLogBox, #dbg_trace3);
+        #dbg_trace3 = "";
+    );
+    (strlen(#dbg_trace4) != 0) ? (
+        mSL_log(SysLogBox, #dbg_trace4);
+        #dbg_trace4 = "";
+    );
+    (strlen(#dbg_trace5) != 0) ? (
+        mSL_log(SysLogBox, #dbg_trace5);
+        #dbg_trace5 = "";
+    );
+    (strlen(#dbg_trace6) != 0) ? (
+        mSL_log(SysLogBox, #dbg_trace6);
+        #dbg_trace6 = "";
+    );
+    (strlen(#dbg_trace7) != 0) ? (
+        mSL_log(SysLogBox, #dbg_trace7);
+        #dbg_trace7 = "";
+    );
+);
+
+efi = 1; idx = efs = 0;
+while (efi) (
+  (efi = gfx_getdropfile(idx, #s)) ? (
+    efs = mSL_Str_Tmp();
+    strcpy(efs, #s);
+    /*
+    mSL_log(SysLogBox, #s);
+    strcpy(#s1s, #s);
+    mSL_log(SysLogBox, #s1s);
+    sprintf(#s2s, "*[%s] %d *", #s, strlen(#s));
+    mSL_log(SysLogBox, #s2s);
+    sprintf(#s3s, "%s", #s);
+    mSL_log(SysLogBox, #s3s);
+    sprintf(#s4s, "%d", strlen(#s3s));
+    mSL_log(SysLogBox, #s4s);
+    mSL_log(SysLogBox, efs);
+    */
+    dropped_x = mouse_x; dropped_y = mouse_y;
+    //
+    (FlagsTbVals[Flgs_Traces] & 2) ? (
+        mSL_log(SysLogBox, efs);
+        sprintf(#s, "   at: %d  %d    [%x]", dropped_x, dropped_y, mouse_cap); mSL_log(SysLogBox, #s);
+    );
+    // Try to localize the file in the project
+    (strlen(#GM_Project_PathX) > 0) && match(#GM_Project_PathX, efs) ? (
+        strcpy_from(#s, efs, strlen(#GM_Project_PathX)-1);
+        // strcpy(efs, "./"); strcat(efs, #s);
+        strcpy(efs, #s);
+        mSL_log(SysLogBox, efs);
+    );
+    // mSL_log(SysLogBox, efs);
+    ui_GFXdoNow |= 1; // Make sure we react as soon as possible
+    // Is this an mSL script ?
+    (match ("*mSL", efs) || match ("*txt", efs)) ? (
+        ((mouse_cap & 8) || (dropped_y < 32)) ? (
+            sprintf(#s, "*  Compile: %s  (%d)  *", efs, strlen(efs)); mSL_log(SysLogBox, #s);
+            doMslCompile(efs); // add to compile list
+        ) : (
+            strcpy(#efs, efs); // save in #efs
+            dpi = 1; // an mSL file is available
+        );
+    ) :
+    (match ("*wav", efs) || match ("*aif", efs) || match ("*flac", efs) || match ("*mp3", efs) || match ("*aiff", efs) || match ("*ogg", efs) || match ("*wmv", efs)) ? (
+        strcpy(#efs, efs); // save in #efs
+        dpa = 1; // an audio file is available
+        //mSL_log(SysLogBox, "Matching sound file");
+    );
+    idx += 1;
+
+  ) : (
+    (efs != 0) ? gfx_getdropfile(-1);
+  );
+);
+
+
+function do_GenericKeyRead()
+(
+    (KeyedT === 0) ? (KeyedT = Keyed; Keyed = 0; );
+    (KeyedT === 0) ? (KeyedT = ui_key(); );
+    (KeyedT > 0) ? AAAA_lastKeyedT = KeyedT;
+    KeyedT;
+);
+
+mSL_loc_tim = max(mSL_loc_tim - 1, 0);
+
+(atomic_get(mSL_Lock) && (mSL_loc_tim <= 0))? (
+    // we may have a GC to run
+    (gc_run_phaz != 0) ? (
+        (gc_run_phaz === 1) ? (
+            gc_count += 1;
+            (mSL_Dyn_Tr & 4) ? ( sprintf(#gfxu, "Starting a GC [free:%d  used:%d] ", mm_show_ttf, mm_show_ttu); mSL_log(SysLogBox, #gfxu); );
+            mSL_loc_tim = max(2, mSL_loc_tim + 2); // no GC for some time
+            // Perform a GC
+            mSL_gc_start = time_precise() + timeD;
+            mSL_errX = mSL_errC = 0;
+            gc_start();
+            gc_release_unused_thread();
+            gc_mark_active();
+            gc_mark(0); // make sure the last blocks have been checked
+            // execute the sweep phase
+            gc_sweep();
+            gc_run_phaz = 3; // This is over
+            mSL_gc_end = time_precise() + timeD;
+            mSL_errX = max(mSL_errX, mSL_errC);
+            ((FlagsTbVals[Flgs_GC] & 1) && mSL_errX) ? (
+                sprintf(#gfxu, "GC Err: %d - Dur %.2f ms", mSL_errX,
+                        1000 * (mSL_gc_end - mSL_gc_start));
+                mSL_log(SysLogBox, #gfxu);
+            );
+            mSL_gc_MaxDur = max(mSL_gc_end - mSL_gc_start, mSL_gc_MaxDur);
+        );
+    ) :
+    (
+        // If we have a func to compile, do it A.S.A.P.
+        (uuuMslFn != 0) ? (
+            // Do we have enough memory to run a compilation ?
+            !((gc_run_phaz > 1) || (mm_bl_huge > 0) || (mm_bl_big > 0) || (mm_bl_large >= 4) || (mm_bl_medium >= 64)) ? (
+                // we may need a GC
+                gc_run_phaz = 1; // start it
+            ) : (
+                ((mSL_active_Thread <= 0) && (uuuMslFent === 0)) ? (
+                    // We are sure there are no active mSL thread...
+                    // or compiler structure used
+                    // and none can be started yet...
+                    // look for a file to compile
+                    uuuMslFname = 0;
+                    ig = 0; while ((uuuMslFname === 0) && (ig < uuuMslTSiz)) (
+                        (uuuMslFname = uuuMslTabs[ig]) ? (
+                            uuuMslTabs[ig] = 0;
+                        );
+                        ig += 1;
+                    );
+                    (uuuMslFname === 0) ? ( // no file found to compile
+                        uuuMslTPt = uuuMslFent = uuuMslFn = 0; // reset indicators
+                    ) : (
+                        uuuMslFent = mSL_load_file_inGFX(uuuMslFname);
+                    );
+                );
+                mSL_loc_tim += 2; // again save some time
+            );
+        );
+
+
+        // Do we have an mSL file loaded and compiled, ready to execute ?
+        (uuuMslFent != 0) ? (
+            (FlagsTbVals[Flgs_Scripts] & 1) ? (
+                (mSL_errX === 0) ? (
+                    // ready to introduce in the queue
+                    sprintf(#s, "Loaded %s", uuuMslFname);
+                ) : (
+                    sprintf(#s, "File %s: err %d", uuuMslFname, mSL_errX);
+                );
+                mSL_log(SysLogBox, #s);
+            );
+            mSL_bl_clear(mSL_GC_Protected); // free compiler's structures
+            uuuMslFent = 0;
+            uuuMslLastFname = uuuMslFname;
+            uuuMslFname = 0;
+            atomic_set(mSL_Lock,  max(0, mSL_Lock - 1));
+        );
+    );
+
+);
+
+
+
+
+// Have we just achieved a GC ?
+(gc_run_phaz > 2) ? (
+    // gc is over
+    gc_run_phaz = 0;
+    mem_walk(0);
+    (mSL_Dyn_Tr & 4) ? ( mem_show(); );
+    FlagsTbVals[Flgs_GC] = 0;
+    atomic_set(mSL_Lock,  max(0, mSL_Lock - 1));
+);
+
+
+
+//====== Scheduler management ======
+while (ent = Scheduler()) (
+    AAAA_Sch_code = code = SchedCode[ent];
+    AAAA_Sch_par1 = par1 = SchedPar1[ent];
+    AAAA_Sch_par2 = par2 = SchedPar2[ent];
+    AAAA_Sch_par3 = par3 = SchedPar3[ent];
+    AAAA_Sch_par3 = par4 = SchedPar4[ent];
+
+    // do some work...
+
+    (code & SchedWBit) ? (
+        SchedCode[ent] &= SchedWBMask ; // suppress wait bit
+        SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
+        ent = 0;
+    ) :
+    (code === 1) ? (
+        // A defered action to perform
+        (par1 === 'task') ? (
+            // introduce this task in active list
+            // par2 can be an entry number (in 1... 4096) or an entry address
+            zact = par2;
+            ((par2 > 0) && (par2 < SchedNEmax)) ? (
+                zact = SchedFirstEnt + SchedEntSiz * par2;
+            );
+            ((zact >= SchedFirstEnt) && (zact <= SchedLastEnt)) ? (
+                // This refers to an entry to execute
+                SchedInsertTail(SchedActivPts, zact, SchETypeThrd);
+            );
+            SchedPar2[ent] = 0; // ok
+        ) :
+        (par1 === 'smsg') ? (
+            // send a message to some task.
+            // par2 is supposed to be a message - this is checked by event_send_msg
+            (SchETypeMess === mSL_Mbl_check(par2)) ? (
+                SchevDateSent[par2] = 0; // clear send date
+                event_send_msg(par2);
+            );
+            SchedPar2[ent] = 0; // message has been transmitted
+        );
+    ) :
+    (code === 8) ? (
+        // Run entry "0" of tasks
+        k = 0; // should refer to a compiled code
+        mSL_errX = 0;
+        ((mSL_bl_check(k, Undef, 9793) === 0) && (k[mSL_CC_Key] === mSL_CC_KeyCKod)) ? (
+            // try to execute the gizmo
+            (ent = getNewThread()) ? (
+                SchedPar1[ent] = k; // keep the code to execute
+                SchedPar4[ent] = 0; // use current own variables
+                SchedCode[ent] = KRun_mSL_Thread; // ready to start running a thread
+                mSL_init_thread(ent);
+            ) : (
+                err_sys_rtm = 9606;
+            );
+            (mSL_errX === 0) ? (
+                SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
+                ent = 0;
+            ) : (
+                sprintf(#u, "Code 8: Ent: %d - Err: %04d", ent, mSL_errX);
+                mSL_log(SysLogBox, #u);
+                // ADump(k);
+            );
+        );
+    ) :
+    (code === 9) ? (
+        // execute a delayed list of "simple actions"
+        Simple_Action(par1);
+    ) :
+    (code === KRun_mSL_Thread)? ( // 10
+        // A delayed mSL Thread
+        // reintroduce the thread in the queue
+        SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
+
+        // GMW2("E"); // *DBG*
+        ent = 0;
+    );
+    // possibly free the entry
+    ent ? SchedFree(ent); // appropriate free operation
+);
+
+
+// Unlock all waiting processes after a "load" or a "gc"
+while (SchedListNonEmpty(SchedLockdPts) && (atomic_get(mSL_Lock) === 0)) (
+    SchX = SchedDetachHead(SchedLockdPts);
+    SchedInsertTail(SchedActivPts, SchX, SchETypeThrd);
+);
+
+
+
+XeSched = 1; // set to 1 to make sure we execute at least 1 task during each @block execution
+//============ GLOBAL Interpreter ==============
+while (SchedActive &&
+    ((((TLeft = gfxMaxDur + gfxStrtT - (gstrt = time_precise() + timeD)) > 0)) || XeSched) &&
+    ((SchX = SchedDetachHead(SchedActivPts)) != SchedNone))
+(
+    // Get some parameters
+    // Execute the action
+    XeSched = 0;
+    xop = SchedCode[SchX];   // actually, only 1 to 13 are being used
+    curr_Proc_PID = SchedPid[SchX]; // current process ident
+    curr_Proc_Name = SchedThrName[SchX]; // current process name
+    mSL_xop_cnt = (mSL_xop_cnt + 1) % 1000000;
+
+
+    (xop === 10) ? (
+        //++++10++++//
+        //====== mSL EXECUTION ======
+        // mSL_errX=10;
+        mSL_dispatch_entry = SchX;
+        atomic_get(mSL_Lock) ? (
+            // We are doing some exclusive operation. mSL Threads are not allowed to execute
+            SchedInsertTail(SchedLockdPts, SchX, SchETypeThrd); // insert the thread in locked pts
+            SchX = -1;
+        ) : (
+            tstrt = time_precise() + timeD;
+            mSL_active_Thread = SchedThrdPt[SchX]; // the thread
+            ((SchedStatus[mSL_dispatch_entry] & SchmSLThrUsed) != SchmSLThrUsed) ? (
+                (mSL_errX === 0) ? mSL_errX = 3381; // thread not noted active ?
+            );
+            mSL_load_thread(mSL_active_Thread);
+            mSL_max_TOS = mSL_active_Thread[mSL_THR_basePhStack];
+
+            (mSL_errX != 0) ? (
+                thread_error(mSL_active_Thread, mSL_errX, SchX);
+            ) : (
+                mm_xec_mm[mm_xec_ptr] -=  mSL_ICount;
+                mm_cyc_mm[mm_cyc_ptr] -=  mSL_ICount;
+                // Curr_Block_Alloc
+                AAAAAAAA_mSL_rpeat = mSL_rpeat = max(8192, min(16384, 0|(mSL_insts_per_s * TLeft * 0.35)));
+                mSL_evaluate();
+
+                //GMW2("A2");
+                AAAAAAAA_mSL_evaluate_count += 1;
+                mSL_High_Stack = max(mSL_High_Stack, mSL_max_TOS - mSL_active_Thread[mSL_THR_basePhStack]);
+                // sprintf(#uuu, "End of evaluation - CR: %d - XC: %d", mSL_CodeStop, AAAAAAAA_mSL_evaluate_count);
+                // mSL_log(SysLogBox, #uuu);
+                // GMW2("B");
+                mSL_save_thread(mSL_active_Thread);
+                ((mSL_CodeStop === 0) || (mSL_CodeStop === mSL_RC_Yield)) ? (
+                    // reintroduce the thread in the queue
+                    SchedInsertTail(SchedActivPts, SchX, SchETypeThrd);
+                    SchX = -1;
+                ) :
+                (mSL_CodeStop === mSL_RC_Wait) ? (
+                    (mSL_WaitDuration > 0) ? (
+                        // introduce the entry in the wait queue
+                        Schedule(SchedRelative, mSL_WaitDuration, 0, SchX, 0, 0, 0);
+                    ) : (
+                        // reintroduce the thread in the queue
+                        SchedInsertTail(SchedActivPts, SchX, SchETypeThrd);
+                    );
+                    SchX = -1;
+                ) :
+                (mSL_CodeStop === mSL_RC_Stop) ? (
+                    // finished, free the thread
+                    //
+                    freeSchedThread(SchX);
+                    // SchedStatus[SchX] &= SchThrNotUsed;
+                    // SchedInsertTail(SchedInactPts, SchX, SchETypeThrd);
+                    mSL_dispatch_entry = SchX = -1;
+                    flagShowMemory = 1;
+                ) :
+                (mSL_CodeStop === mSL_RC_WEvent) ? (
+                    // introduce the entry in the wait queue
+                    SchedInsertTail(SchedEvntPts, SchX, SchETypeThrd);
+                    (FlagsTbVals[Flgs_Thrds] & 2) ? ( // trace flags
+                        sprintf(#s, "Insert in Evnt : ent: %d thrd: %d siz: %d ", SchX, mSL_active_Thread, SchedListSize(SchedEvntPts));
+                        mSL_log(SysLogBox, #s);
+                    );
+                    AAAAA__Schx = Schx;
+                    AAAAA__SchxNum = ent[SchedPid] & SchedNMask;
+                    SchX = -1;
+                ) :
+                (mSL_CodeStop === mSL_RC_WAITGC) ? (
+                    // introduce in the wait for GC list
+                    SchedInsertTail(SchedLockdPts, SchX, SchETypeThrd);
+                    SchX = -1;
+                ) :
+                (
+                    //AAAAAAAA_Errx = mSL_errX;
+                    thread_error(mSL_active_Thread, mSL_errX, mSL_CodeStop);
+                    // SchedStatus[SchX] &= SchThrNotUsed;
+                    // SchedInsertTail(SchedInactPts, SchX, SchETypeThrd);
+                    // sprintf(#uuu, "End of evaluation [%d]  CR: %d  Err: %d", SchX, mSL_CodeStop, mSL_errX);
+                    // (mSL_wbl != 0) ? ( sprintf(#uuu, "Block damaged @ %d", mSL_wbl);mSL_log(SysLogBox, #uuu); );
+                    mSL_error_analysis(mSL_active_Thread);
+                    SchedFree(SchX);
+                    SchX = -1;
+                    flagShowMemory = 1;
+                    mSL_errC = 0; mSL_errX = 1717; // "error previously detected"
+                    mSL_errX = 0; // let other threads progress
+                );
+                mm_xec_mm[mm_xec_ptr] += mSL_ICount;
+                mm_cyc_mm[mm_cyc_ptr] += mSL_ICount;
+            );
+            mm_dur_mm[mm_cyc_ptr] += time_precise() + timeD - tstrt;
+        );
+        mSL_active_Thread = -1;
+
+        //++++10++++//
+    );
+
+
+
+    SchX > 0 ? SchedFree(SchX);
+);
+
+
+
+
+
+// ====== Actual GUI part ======
+
+
+function
+show_local_Infos()
+local (uix_jneed, uix_jmini, h1, k, w, siz, u_ch, ent)
+(
+    // h1 = uix_jBoxHeight(6); // non utilisé
+    uix_jneed = uix_jBoxHeight(glIsiz) + ui_jd_ctgr;
+    uix_jmini = uix_jBoxHeight(2) + ui_jd_ctgr;
+    (ui_height() >= uix_jmini) ? (
+
+        ui_split_top(uix_jneed);
+
+
+            zzmi = ui_hover();
+            (zzmi) ? (
+                ui_push();
+                    // stack is now 2 levels deep
+                    ui_color(Col_Frame);
+                    ui_border(); // draws in purple
+                ui_pop();
+                u_ch = do_GenericKeyRead();
+                (u_ch != 0) ? (
+                    sprintf(#gfx_uc, "Keyed: '%c' [%d]", u_ch, kcnt); kcnt+= 1;
+                    Keyed = KeyedT = 0;  // u_ch has not been used
+                );
+                (u_ch === 't') ? (mSL_run_test = mSL_run_test ? 0 : 1; mSL_run_max = 25);
+                (u_ch === 's') ? (mSL_run_test =  0 ; );
+                (u_ch === 'o') ? (mSL_run_once = mSL_run_once ? 0 : (mSL_run_test = 1; mSL_run_max = 1));
+                (u_ch === 'g') ? gc_run(2);
+                (u_ch === 'm') ? (mem_walk(0);mem_show(););
+                (u_ch === 'n') ? (mem_walk(8);mem_show(););
+                (u_ch === 'L') ? (gui_show_syslog = gui_show_syslog ? 0 : 1;);
+                (u_ch === 'M') ? (gui_show_memory = gui_show_memory ? 0 : 1;);
+                (u_ch === 'c') ? (mSL_Dyn_RecycleF = mSL_Dyn_RecycleF ? 0 : 1;);
+                (u_ch === 'l') ? (mm_show_limit = ((mm_show_limit * 10 + 1) % 20 )/ 10;);
+                (u_ch === 'k') ? (mSL_kill_all_thread(););
+                (u_ch === 'r') ? (
+                    ((ent = SchedDetachHead(SchedSuspPts)) != SchedNone) ? (
+                        SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
+                    );
+                );
+            );
+            control_group("Script Master Status");
+            ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+            w = gmem[UAdd+cbInacFlg];
+
+            ((k = gmem[UAdd+cbInacFlg]) > 2) ? (gmem[UAdd+cbStat] = uSUnreachable;) ;
+
+        // How many columns can we display ?
+        nbcol = floor(gfx_w/gfx_col_width); // need about that
+        glIsiz = 1;
+
+        (nbcol >= 1) ? (
+            ui_new_column(1/nbcol);
+                siz = 0;
+                siz += 1; ui_show("Up time", edTime(tUnix - tStart));
+                siz += 1; ui_show("Track/Script/U.", GMFXTrack, (1+gmem[UAdd+cbPlIdt]) * ((w > 2) ? -1 : 1), UId, "%d / %d / %d");
+                siz += 1; ui_show("State", gmem[UAdd+cbType], gmem[UAdd+cbStat], "%d / %d");
+                siz += 1; ui_show("GFX", gfx_w, gfx_h, "%d / %d");
+                siz += 1; ui_show(#clNameFormat);
+                siz += 1; ui_show(#gfx_uc);
+                siz += 1; ui_show("Err", AAA_Ferr, FErrc, "%04d  |  %04d");
+                glIsiz = max(glIsiz, siz);
+        );
+        (nbcol >= 2) ? (
+            ui_new_column();
+                siz = 0;
+                siz += 1; ui_show("Unit Addr", UAdd, "%d");
+                siz += 1; ui_show("Activity/Check", CheckNum, gmem[UAdd+cbInacFlg], "%d / %d");
+                siz += 1; ui_show("Kmds", KmdLastDate, KmdLastIn,  KmdKurrent,  "%d : %d | %d ");
+                siz += 1; ui_show("Gen", playCount,  loopCount,  genCount,  "%d  |  %d  |  %d ");
+                siz += 1; ui_show("Act. Threads", mSL_act, mSL_maxact, "%d / Max:%d");
+                siz += 1; ui_show("Inact. Threads", mSL_inactv, mSL_wait, mSL_plck,
+                                                        "F:%d / W:%d / L:%d");
+                // siz += 1;  ui_show("Rbase", Rndm_n,  "%11.0f");
+                (0[0] !== 'MAIN') ? (
+                    siz += 1;  mSL_edit_value(#s0, 0[0]); sprintf(#s1, "MAIN: %s", #s0); ui_show(#s1);
+                );
+                glIsiz = max(glIsiz, siz);
+        );
+        (nbcol >= 3) ? (
+            ui_new_column();
+                siz = 0;
+                siz += 1; ui_show("Memory", mm_show_ttu, mm_show_ttf, "%d / %d");
+                siz += 1; ui_show("Blocks", mm_show_frbl, mm_show_usbl, mm_show_flr, mm_show_dmg, "%d / %d / %d / %d");
+                siz += 1; ui_show("Alloc", AAA_C__1, AAA_M_ptw, AAA_M_bs, AAA_M_tailsize, "%d / %d / %d / %d");
+                siz += 1; ui_show("GC", gc_count, mSL_Dyn_LogCnt, mSL_Dyn_fLogCnt, mSL_Dyn_rLogCnt, "%d / %d / %d / %d");
+                siz += 1; ui_show("Options", mSL_Dyn_RecycleF, mm_show_limit, (0|(100*mm_show_ratio))/100, "rcy:%d / lim:%.2f:%.2f");
+                siz += 1; ui_show("D-Strings", mSL_Str_CFree, mSL_Str_CUsed, "%d / %d");
+                siz += 1; ui_show("P-Strings", mSL_Str_PCFree, mSL_Str_PCUsed, "%d / %d");
+                siz += 1; ui_show("T-Strings", mSL_Str_TCFree, mSL_Str_TempU, "%d / %d");
+                glIsiz = max(glIsiz, siz);
+        );
+            ui_pop();
+        ui_pop();
+    );
+    (gui_show_syslog && gui_show_memory) ? (
+        SysLogBox[4] = 20;
+        memoryBox1[17] = memoryBox2[17] = 52;
+    ) :
+    (gui_show_syslog) ? (
+        SysLogBox[4] = 80;
+    ) :
+    (gui_show_memory) ? (
+        memoryBox1[17] = memoryBox2[17] = 96;
+    );
+);
+
+
+/*
+   Display a log/trace
+*/
+function
+show_SysLog(blnb, box)
+local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, zzmi, xx, ii, u_ch, siz, dep, had, thgh)
+(
+    disps = box[4]; mini = 2;
+    h1 = uix_jBoxHeight(mini);
+    h3 = uix_jBoxHeight(disps);
+    // (box[6] <= 0) ? box[6] = ui_jd_tboxs;
+    uix_jneed = h3 + ui_jd_delta2 + ui_jd_ctgr;
+    uix_jmini = max(h1 + ui_jd_ctgr, ui_jd_min_block);
+    (ui_height() >= uix_jmini) ? (
+        ui_split_top(uix_jneed);
+            //ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
+            zzmi = ui_hover();
+            keepBlockInfos(blnb);
+            (zzmi) ? (
+                ui_push();
+                    // stack is now 2 levels deep
+                    ui_color(Col_Frame);
+                    ui_border(); // draws in purple
+                ui_pop();
+            );
+            control_group("Script Syslog");
+            ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+            ui_align(0,0);
+            as = box[2]; // array size
+            fl = box[1]; // first line
+            xx = control_jmenu(menu_uix_jlog);
+            (xx > 0) ? (
+                (xx === 1) ? (
+                    box[5] = 1;
+                ) :
+                (xx === 2) ? (
+                    box[5] = 2;
+                ) :
+                (xx === 3) ? (
+                    box[5] = 3;
+                ) :
+                (xx === 4) ? (
+                    box[5] = 4;
+                ) :
+                (xx === 5) ? (
+                    box[6] = min(20, box[6]+1);
+                ) :
+                (xx === 6) ? (
+                    box[6] = max(0, box[6]-1);
+                ) :
+                (xx === 7) ? (
+                    mSL_log(box, "");
+                ) :
+                (xx === 8) ? (
+                    ii = 0; loop(as,
+                        strcpy(fl + ii, ""); ii += 1;
+                    );
+                );
+            );
+
+            (zzmi) ? (
+                u_ch = do_GenericKeyRead();
+                (u_ch != 0) ? (
+                    sprintf(#gfx_uc, "Keyed: '%c' [%d]", u_ch, kcnt); kcnt+= 1;
+                    // mSL_log(SysLogBox, #gfx_uc);
+                    (FlagsTbVals[Flgs_Traces] & 1) ? (
+                        sprintf(#sq, "***Key  @  %d  %d  %d [%02x+%02x -> '%c']", mouse_x, mouse_y, mouse_cap, mouse_cap, u_ch, u_ch);
+                        mSL_log(SysLogBox, #sq);
+                    );
+                    ui_key_next();
+                    Keyed = 0;
+                    ((u_ch === ' ') || (u_ch ===  0x0d)) ? (mSL_log(box, " ");) :
+                    (u_ch === 'm') ? (box[6] = min(20, box[6]+1);) :
+                    (u_ch === 'l') ? (box[6] = max(0, box[6]-1);) :
+                    (u_ch === 'z') ? (box[7] = 0;) :
+                    (u_ch === 'k') ? (box[7] = max(0, box[7]-1);) :
+                    (u_ch === 'j') ? (box[7] = (box[7]+1) % box[2];) :
+                    (u_ch === 't') ? (nowTime(); mSL_log(SysLogBox, #nowis);) :
+                    //(u_ch === 'v') ? (ShowConfig();) :
+                    (u_ch === 'up') ? (box[7] = max(0, box[7]-10);) :
+                    (u_ch === 'down') ? (box[7] = (box[7]+10) % box[2];) :
+                    ((ui_jmouse_cap === 0) && (u_ch === 'left')) ? (box[7] = 0;) :
+                    ((ui_jmouse_cap === 0) && (u_ch === 'rght')) ? (box[7] = (box[7]+100) % box[2];) :
+                    (u_ch === '1') ? (box[5] = 1;) :
+                    (u_ch === '2') ? (box[5] = 2;) :
+                    (u_ch === '3') ? (box[5] = 3;) :
+                    (u_ch === '4') ? (box[5] = 4;) :
+                    (u_ch === '5') ? (box[5] = 5;) :
+                    (u_ch === '6') ? (box[5] = 6;) :
+                    (u_ch === '7') ? (box[5] = 7;) :
+                    (u_ch === '8') ? (box[5] = 8;) ;
+                    //(u_ch === 'p') ? (sysout(SysLogBox);) :
+                    Keyed = KeyedT = 0;  // u_ch has not been used
+                );
+            );
+            nc = max(1, min(8, 0|box[5])); // number of columns to show
+            nc = min(nc, floor(gfx_w/gfx_colL_width));
+
+            ui_jshow_color = ui_jcolor_text;
+            siz = box[2];
+            dep = siz - 1; had = box[6];
+            ptr = (box[3] + dep + 16*siz - box[7]) % siz; // last inserted line
+            loop (nc,
+                (nc != 0) ? ui_new_column(1/nc) : ui_new_column();
+                nc = 0;
+                ui_pad(3,0);ui_align(0, 0.5);
+                ui_pcolor(ui_jshow_color);
+                flg = 1;
+                while (flg) (
+                    /*
+                    ui_jd_tboxh = had + ui_wraptext_height(#txt);
+                    #txt = fl + ptr; // line to print
+                    twdt = ui_text_width(#txt);
+                    (twdt < wdth) ? (
+                        (ui_height() >= ui_jd_tboxh) ? (
+                            // put the string
+                            uix_javail_Bheight -= ui_split_top(ui_jd_tboxh);
+                                ui_pcolor(ui_jshow_color);
+                                ui_wraptext(#txt);
+                            ui_pop();
+                            ptr = (ptr + dep) % siz;
+                        ) : (
+                            flg = 0;
+                        );
+                    ) : (
+                    */
+                    // Mono or Multi-line text
+                    #txt = fl + ptr; // line to print
+                    (strlen(#txt) === 0) ? #txt = " ";
+                    thgh = ui_wraptext_height(#txt) + had;
+                    (ui_height() >= thgh) ? (
+                        // put the string
+                        ui_split_top(thgh);
+                            // ui_pcolor(ui_jshow_color);
+                            ui_wraptext(#txt);
+                        ui_pop();
+                        ptr = (ptr + dep) % siz;
+                    ) : (
+                        flg = 0;
+                    );
+                    /*
+                    lg = strlen(#txt);
+                    k = max(1,ceil(lg / maxl));
+                    (flg = (av = av - k) >= 0) ? (
+                        (k === 1) ? (
+                            // put the string
+                            uix_javail_Bheight -= ui_split_top(ui_jd_tboxh);
+                                ui_pcolor(ui_jshow_color);
+                                ui_wraptext(#txt);
+                            ui_pop();
+                        ) : (
+                            off = 0; sz = maxl;
+                            while (k > 0) (
+                                // cut the string in a few parts
+                                strcpy_substr(#txt1,#txt, off, sz);
+                                // put the string
+                                uix_javail_Bheight -= ui_split_top(ui_jd_tboxh);
+                                    // ui_pad(0,1,0,0);
+                                    ui_pcolor(ui_jshow_color);
+                                    ui_wraptext(#txt1);
+                                ui_pop();
+                                k -=1; off += maxl; sz = min(maxl, lg); lg -= sz;
+                            );
+                        );
+                        ptr = (ptr + dep) % siz;
+                    );
+                    */
+                );
+            );
+            ui_pop();
+
+
+        ui_pop();
+    );
+);
+
+
+
+<? include("GM-Libs/mSL_Dbg_Memory.jsfx-inc"); ?>
+
+
+(gfxMn !== lastMn) ? (
+    gfxMn = lastMn;
+    ((gfxMcnt -= 1) <= 0) ? (flagShowMemory = 1);
+    flagShowMemory ? (
+        flagShowMemory = 0;
+        gfxMcnt = 5;
+        mem_walk(8);
+    );
+    mSL_Dyn_Recycle(-1);
+    mSL_Dyn_TmpProtect(-1);
+);
+
+
+//====== GRAPHIC EXECUTION START ======
+
+must_do_gfx()
+    ? (
+
+    gfx_executed += 1; // just a trace
+    // do here the graphic stuff...
+
+    do_gfx_init ? (
+        do_gfx_init = 0; // perform only once
+        uix_default_fontsize = ui_jdefault_fontsize;
+        // uix_default_fontface = "Verdana";
+        // uix_default_fontface = "Times";
+        // uix_default_fontface = "Futura";
+        uix_default_fontface = ui_jdefault_fontface;
+    );
+
+    update_theme();
+
+    currScreen = ui_screen();
+    ui_Xtime_period = 1; // refresh screen every second
+
+
+    ui_font();
+
+    my_menu_bar(uix_jG_menuscr);
+
+
+    //SCREEN
+    ui_screen() == "Main" ? (
+        show_local_Infos();
+
+        gui_show_syslog ? show_SysLog(0, SysLogBox);
+        gui_show_memory ? (
+            (gfx_w > gfx_colM_width) ? (
+                ui_split_leftratio(0.5);
+                show_Memory(memoryBox1);
+                ui_pop();
+            );
+            show_Memory(memoryBox2);
+        );
+    ) :
+
+    //SCREEN--DEFAULT
+    (
+        control_system();
+    );
+
+/*
+    ((gfx_Pw != gfx_w) || (gfx_Ph != gfx_h)) ? (
+        gfx_PPw = gfx_Pw; gfx_PPh = gfx_Ph;
+        gfx_Pw = gfx_w; gfx_Ph = gfx_h;
+    );
+*/
+);
+
+

@@ -1,0 +1,246 @@
+
+
+// Global variables used by "mSL_pr_Kod"
+mSL_show_Kod = 0;
+mSL_show_pt = 0;
+
+// Print an mSL byte-code
+function mSL_pr_Kod(p, plnames, aVars, oVars, pVars)
+local (ip, is, cod, par)
+(
+    cod = mSL_show_Kod[ip=mSL_show_pt];
+    (cod & mSL_K_longInst) ? (
+        par = mSL_show_Kod[mSL_show_pt+1]; mSL_show_pt += 2;
+    ) : (
+        par = cod >> 10; mSL_show_pt += 1;
+    );
+    cod &= 0x3ff;
+    #st2e = mSL_op_codes[cod & 0xff];
+    (cod === mSL_K_pushShort) ? (
+        sprintf(p, "%03d    push_short    %d", ip, par);
+    ) :
+    (cod === mSL_K_pushNShort) ? (
+        sprintf(p, "%03d    push_short    -%d", ip, par);
+    ) :
+    (cod === mSL_K_ldLVar) ? (
+        sprintf(p, "%03d    ld_loc_var    %d:%s", ip, par, mSL_id2Str(plnames[par-1]));
+    ) :
+    (cod === mSL_K_ldLAddr) ? (
+        sprintf(p, "%03d    ld_loc_var&    %d:%s", ip, par, mSL_id2Str(plnames[par-1]));
+    ) :
+    (cod === mSL_K_ldGVar) ? (
+        sprintf(p, "%03d    ld_glob_var    %d:%s", ip, par, mSL_id2Str(aVars[par-1]));
+    ) :
+    (cod === mSL_K_ldGAddr) ? (
+        sprintf(p, "%03d    ld_glob_var&   %d:%s", ip, par, mSL_id2Str(aVars[par-1]));
+    ) :
+    (cod === mSL_K_ldOVar) ? (
+        sprintf(p, "%03d    ld_own_var    %d:%s", ip, par, mSL_id2Str(oVars[par-1]));
+    ) :
+    (cod === mSL_K_ldOAddr) ? (
+        sprintf(p, "%03d    ld_own_var&    %d:%s", ip, par, mSL_id2Str(oVars[par-1]));
+    ) :
+    (cod === mSL_K_ldPVar) ? (
+        sprintf(p, "%03d    ld_p_var    %d:%s", ip, par, mSL_id2Str(pVars[par-1]));
+    ) :
+    (cod === mSL_K_ldPAddr) ? (
+        sprintf(p, "%03d    ld_p_var&    %d:%s", ip, par, mSL_id2Str(pVars[par-1]));
+    ) :
+    (cod === mSL_K_pushNum) ? (
+        mSL_num2str(par);
+        sprintf(p, "%03d    push_num    %s", ip, #mSL_wS2);
+    ) :
+    (cod === mSL_K_jmpOnTruePT) ? (
+        sprintf(p, "%03d    jumpOnTrue,PT  %d", ip, par);
+    ) :
+    (cod === mSL_K_jmpOnTruePopF) ? (
+        sprintf(p, "%03d    jumpOnTrue,PF  %d", ip, par);
+    ) :
+    (cod === mSL_K_jmpOnFalsePT) ? (
+        sprintf(p, "%03d    jumpOnFalse,PT  %d", ip, par);
+    ) :
+    (cod === mSL_K_jmpOnFalsePop) ? (
+        sprintf(p, "%03d    jumpOnFalse,Pop  %d", ip, par);
+    ) :
+    (cod === mSL_K_jmpAlways) ? (
+        sprintf(p, "%03d    jump    %d", ip, par);
+    ) :
+    (cod === mSL_K_jmpAlwaysPop) ? (
+        sprintf(p, "%03d    jump,Pop    %d", ip, par);
+    ) :
+    (cod === mSL_K_JNegEP) ? (
+        sprintf(p, "%03d    jumpNeg    %d", ip, par);
+    ) :
+    (strlen(#st2e) != 0) ? (
+        sprintf(p, "%03d    %s", ip, #st2e);
+    ):
+    (
+        sprintf(p, "%03d    %d  %d", ip, cod, par);
+    );
+    p;
+);
+
+
+
+
+function mSL_pr_Cell(p, ip, add)
+local (lptr, rptr, xty, v, v1, v2, v3)
+(
+
+    lptr = mSL_getCellNum(mSL_lptr[add]) ;
+    rptr = mSL_getCellNum(mSL_rptr[add]) ;
+    xty = mSL_tyun[add]; v = mSL_valu[add];
+    (xty === mSL_tyIdent) ? (
+        #st1 = "id";
+        #st2 = mSL_id2Str(v);
+        sprintf(p, "%4d: %d]  (%s)\"%s\"  [%d", ip, lptr, #st1, #st2, rptr);
+    ) :
+    (xty === mSL_tyIdAddr) ? (
+        #st1 = "&id";
+        #st2 = mSL_id2Str(v);
+        sprintf(p, "%4d: %d]  (%s)\"%s\"  [%d", ip, lptr, #st1, #st2, rptr);
+    ) :
+    (xty === mSL_tyKeywrd) ? (
+        #st1 = "kwd";
+        #st2 = mSL_id2Str(v);
+        sprintf(p, "%4d: %d]  (%s)\"%s\"  [%d", ip, lptr, #st1, #st2, rptr);
+    ) :
+    (xty === mSL_tyPrimF) ? (
+        #st1 = "prim";
+        #st2 = mSL_id2Str(v);
+        sprintf(p, "%4d: %d]  (%s)\"%s\"   [%d", ip, lptr, #st1, #st2, rptr);
+    ) :
+    (xty === mSL_tyNum) ? (
+        #st1 = "num";
+        mSL_num2str(v); // ==> #mSL_wS2
+        sprintf(p, "%4d: %d]  (%s)%s  [%d", ip, lptr, #st1, #mSL_wS2, rptr);
+    ) :
+    (xty === mSL_tyString) ? (
+        #st1 = "str";
+        sprintf(p, "%4d: %d]  (%s)%d  [%d", ip, lptr, #st1, v, rptr);
+    ) :
+    (xty === mSL_tyHEAD) ? (
+        sprintf(p, "%4d: %d]   HEAD   [%d", ip, lptr, rptr);
+    ) :
+    (xty === mSL_tyTAIL) ? (
+        sprintf(p, "%4d: %d]   TAIL   [%d", ip, lptr, rptr);
+    ) :
+    (xty === mSL_tySubExp) ? (
+        #st1 = "exp";
+        sprintf(#st2, "%d", mSL_getCellNum(mSL_valu[add]));
+        sprintf(p, "%4d: %d]  (%s)%s  [%d", ip, lptr, #st1, #st2, rptr);
+    ) :
+    (xty === mSL_tyParExp) ? (
+        #st1 = "par";
+        sprintf(#st2, "%d", mSL_getCellNum(mSL_valu[add]));
+        sprintf(p, "%4d: %d]  (%s)%s  [%d", ip, lptr, #st1, #st2, rptr);
+    ) :
+    (xty === mSL_tyBrkExp) ? (
+        #st1 = "brk";
+        sprintf(#st2, "%d", mSL_getCellNum(mSL_valu[add]));
+        sprintf(p, "%4d: %d]  (%s)%s  [%d", ip, lptr, #st1, #st2, rptr);
+    ) :
+    (xty === mSL_tyList) ? (
+        #st1 = "lst";
+        sprintf(#st2, "%d", mSL_getCellNum(mSL_valu[add]));
+        sprintf(p, "%4d: %d]  (%s)%s  [%d", ip, lptr, #st1, #st2, rptr);
+    ) :
+    (xty & mSL_tyChZ) ? (
+        // operator / separator
+        #st1 = "op";
+        AAAAA_op_v = v;
+        ((v > mSL_Sym_Low) && (v < mSL_Sym_High)) ? (
+            strcpy(#st2, mSL_id2Str(v));
+        ) : (
+            v1 = (v >> 16) & 0x7f;
+            v2 = (v >> 8) & 0xff;
+            v3 = (v & 0xff);
+            ((v1 < 0x21) || (v1 > 0x7f)) ? v1 = 0;
+            ((v2 < 0x21) || (v2 > 0x7f)) ? v2 = 0;
+            ((v3 < 0x21) || (v3 > 0x7f)) ? v3 = 0;
+            (v2 === 0) ? (v2 = v3; v3 = 0;);
+            (v1 === 0) ? (v1 = v2; v2 = v3; v3 = 0);
+            AAAAA_op_v1 = v1;
+            AAAAA_op_v2 = v2;
+            AAAAA_op_v3 = v3;
+            (v1 === 0) ? (
+                strcpy(#st2, "undef");
+            ) :
+            ((v3 === 0) && (v2 === 0)) ? (
+                sprintf(#st2, "%c", v1);
+            ) :
+            (v3 === 0) ? (
+                sprintf(#st2, "%c%c", v1, v2);
+            ) : (
+                sprintf(#st2, "%c%c%c", v1, v2, v3);
+            );
+        );
+        /*
+        (v > 0x8000) ? (
+            sprintf(#st2, "%c%c%c", (v >> 16) & 0x7f, (v >> 8) & 0xff, (v & 0xff));
+        ) :
+        (v > 0x80) ? (
+            sprintf(#st2, "%c%c", (v >> 8), (v & 0xff));
+        ) : (
+            sprintf(#st2, "%c", v);
+        );
+        */
+        sprintf(p, "%4d: %d]  (%s)%s  [%d", ip, lptr, #st1, #st2, rptr);
+    ) :
+    (
+        sprintf(p, "%4d: %d]  %d  %d  [%d", ip,
+            lptr, mSL_tyun[add], mSL_valu[add], rptr);
+    );
+);
+
+
+
+function do_dump_block(obj)
+local (ty, s, bl, tab, u_len, ltab, avars, ovars, pvars, ip, ipmax, cell)
+(
+    sprintf(#gfxu, "Dump: %d", obj);
+    mSL_log(SysLogBox, #gfxu);
+    bl = tab = 0;
+    // Is the object a valid block ?
+    // try "obj" as content
+    (((bl=obj) > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min)
+               && (ty <= mSL_MKey_max) && (s === bl[s])
+               && (bl[s+1] === (ty ~ mSL_CC_Chksum))) ? (
+        tab = bl; // content ok
+    ) :
+    // Try "obj" as container
+    (((bl=obj+2) > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min)
+               && (ty <= mSL_MKey_max) && (s === bl[s])
+               && (bl[s+1] === (ty ~ mSL_CC_Chksum))) ? (
+        tab = bl; // content ok
+    );
+    tab ? (
+        sprintf(#gfxu, "Obj: %d,  %s", tab, mSL_edit_value(#s1, ty));
+        mSL_log(SysLogBox, #gfxu);
+        (ty === mSL_CC_KeyCKod) ? (
+            // Compiled code - try a dump of the structure
+            mSL_show_Kod = tab + tab[mSL_CC_dpCode];
+            mSL_show_pt = 0;
+            u_len = tab[mSL_CC_CodSize];
+            ltab = tab + mSL_CC_1stId; avars = tab[mSL_CC_GlbTab];
+            ovars = tab[mSL_CC_OwnTab]; pvars = tab[mSL_CC_PtrTab];
+            while (mSL_show_pt < u_len) (
+                mSL_pr_Kod(#gfxu, ltab, avars, ovars, pvars);
+                mSL_log(SysLogBox, #gfxu);
+            );
+        ) :
+        (ty === mSL_KODE_tree) ? (
+            // tree graph - try to dump it sequentially
+            ipmax = max(5, mSL_maxTrace);
+            ip = 0;
+            while (ip <= ipmax) (
+                ((cell = mSL_getCellAddr(ip)) > 0) ? (
+                    mSL_pr_Cell(#gfxu, ip, cell);
+                    mSL_log(SysLogBox, #gfxu);
+                );
+                ip += 1;
+            );
+            mSL_log(SysLogBox, "Tree end.");
+        );
+    );
+);

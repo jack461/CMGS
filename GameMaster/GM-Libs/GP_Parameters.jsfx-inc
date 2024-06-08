@@ -1,0 +1,2080 @@
+/*
+    Game Players
+
+    Parameters handling
+*/
+
+
+@init
+
+
+//====== PARAMETERS MANAGEMENT ======
+// paramCount is 256
+paramEntSize = 20; // use for each parameter
+paramNMax = paramCount - 1;
+#pUndef = "(unassigned)";
+#parEdt = "";
+
+// Parameters properties names
+pp_Name = idx = 0;
+pp_mSL_Code = (idx += 1);
+pp_Type = (idx += 1);
+pp_SFmt = (idx += 1);
+pp_MFmt = (idx += 1);
+pp_Min = (idx += 1);
+pp_Max = (idx += 1);
+pp_Def = (idx += 1);
+pp_Step = (idx += 1);
+pp_Slope = (idx += 1);
+pp_SwLim = (idx += 1);
+pp_SwFac = (idx += 1);
+pp_Gen = (idx += 1);  // unused
+pp_Action = pp_Addr = (idx += 1);
+pp_LowB = (idx += 1); // unused
+pp_mSL_Ref = (idx += 1);
+pp_Altent = (idx += 1);
+pp_SavedMax = (idx += 1);
+//
+pp_EntSize = idx+1; // 18
+pp_Value = -1;
+pp_Status = -2;
+pp_Flags = -3;
+pp_PrevValue = -4;
+
+
+
+// Parameters internal types
+pTyStdLin = idx = 0; // Default - standard linear adjustement
+
+// Parameters internal status
+pStat_Mask = 0x3FFFFF; // to keep 22 bits
+pStat_Mod = 1; // has been modified
+mStat_UnMod = pStat_Mask ~ pStat_Mod; // mask to reset Mod bit
+pStat_RMod = 4; // indirectly modified because of associated Random Gen
+pStat_Updt = 0x40; // globally force an update
+pStat_Smask = 0xFF; // all set status bits...
+
+pStat_lCol_Mask = 0x1F; // a led color mask
+// led A status position. It is shifted 14 position
+pStat_lA_Shftc = 6+8;  // color shift
+pStat_lA_Shftb = 6+8+5;  // button shift
+pStat_lA_btn = 1 << pStat_lA_Shftb; // ledA on/off button mask in situ
+pStat_lA_ResetBtn = pStat_Mask ~ pStat_lA_btn; // reset ledA button
+pStat_lA_ResetCol = pStat_Mask ~ (pStat_lCol_Mask << pStat_lA_Shftc); // reset ledA color
+pStat_lA_MaskC = pStat_lCol_Mask << pStat_lA_Shftc; // the color mask
+// led B status position. It is shifted 8 position
+pStat_lB_Shftc = 0+8;  // color shift
+pStat_lB_Shftb = 0+8+5;  // button shift
+pStat_lB_btn = 1 << pStat_lB_Shftb; // ledB on/off button mask in situ
+pStat_lB_ResetBtn = pStat_Mask ~ pStat_lB_btn; // reset ledB button
+pStat_lB_ResetCol = pStat_Mask ~ (pStat_lCol_Mask << pStat_lB_Shftc); // reset ledB color
+
+pStat_Init = pStat_Updt | pStat_Mod;
+
+pcheckGPLR = 1;
+
+// Parameters internal constraints
+pflg_ClampLimit = 8;
+pflg_DupV = 16;
+pflg_LedA = 32;
+pflg_LedB = 64;
+pflg_Led = pflg_LedA | pflg_LedB;
+pflg_ChkRead = 0x10000; // forces some specific actions on read
+pflg_ChkWrite = 0x20000; // forces some generic actions on write
+pflg_ActWrite = 0x40000; // execute some specific actions on write
+pflg_WActive = pflg_ClampLimit | pflg_ChkWrite;
+pflg_SpecEdit = 0x100000; // special edit flag
+
+// Set temporary addresses for now
+paramBlock = paramFlags = paramValues = 0;
+BKSummary = 0;
+//  paramHashNbs = paramHashIds = 0;
+paramHashTbl = 0;
+paramHSiz = 433; // prime, > 256
+paramHStep = 31;
+parLedA = parLedB = ledR1 = iledColMenu = 0;
+
+
+/*
+// Define a parameter in the hash table, with its number
+function  paramNDef (name, num)
+local (h, nt, lp, ent)
+(
+    h = floor(name / 0x1000000);
+    h = h ~ (name - h * 0x1000000); // the hascode
+    nt = h % paramHSiz;
+    lp = 1;
+    while (lp) (
+        ent = paramHashIds[nt]; // current entry
+        (ent == 0) ? (
+            // free entry
+            lp = 0;
+        ) : (
+            nt = (nt + paramHStep) % paramHSiz;
+        );
+    );
+    paramHashIds[nt] = name;
+    paramHashNbs[nt] = num;
+    // sprintf(#sfc, "paramNDef(%s, %d) => %d", mSL_id2Str(name), num, nt); mSL_log(SysLogBox, #sfc);
+    nt;
+);
+
+// Get a parameter entry
+function paramNGet(name)
+local (h, nt, lp, ent)
+(
+    h = floor(name / 0x1000000);
+    h = h ~ (name - h * 0x1000000); // the hashcode
+    nt = h % paramHSiz;
+    lp = 1;
+    while (lp) (
+        ent = paramHashIds[nt]; // current entry
+        (ent == name) ? (
+            // found, it is nt
+            lp = 0;
+        ) :
+        (ent == 0) ? (
+            // not found
+            lp = 0; nt = -1;
+        ) : (
+            nt = (nt + paramHStep) % paramHSiz;
+        );
+    );
+    nt;
+);
+*/
+
+// Unchecked get a parameter value...
+function parV(xpnum)
+(
+    paramValues[xpnum];
+);
+
+// Get a parameter value with specific conditions on read...
+function parGetV(xp)
+(
+    xp = 0|max(0,min(paramNMax,xp)); // minimalistic check
+    paramValues[xp];
+);
+
+
+
+function
+clone_parameter(dst, src)
+local(pdst, psrc)
+(
+    dst = 0|max(0,min(paramNMax,dst)); // minimalistic check
+    src = 0|max(0,min(paramNMax,src)); // minimalistic check
+    (src != dst) ? (
+        psrc = paramBlock + src * paramEntSize;
+        pdst = paramBlock + dst * paramEntSize;
+        paramValues[dst] = paramValues[src];
+        paramStatus[dst] = paramStatus[src];
+        paramFlags[dst] = paramFlags[src];
+        paramPrevValues[dst] = paramPrevValues[src];
+        pdst[pp_Name] = psrc[pp_Name];
+        pdst[pp_mSL_Code] = psrc[pp_mSL_Code];
+        pdst[pp_Type] = psrc[pp_Type];
+        pdst[pp_SFmt] = psrc[pp_SFmt];
+        pdst[pp_MFmt] = psrc[pp_MFmt];
+        pdst[pp_Min] = psrc[pp_Min];
+        pdst[pp_Max] = psrc[pp_Max];
+        pdst[pp_SavedMax] = psrc[pp_SavedMax];
+        pdst[pp_Def] = psrc[pp_Def];
+        pdst[pp_Step] = psrc[pp_Step];
+        pdst[pp_Slope] = psrc[pp_Slope];
+        pdst[pp_SwLim] = psrc[pp_SwLim];
+        pdst[pp_SwFac] = psrc[pp_SwFac];
+        pdst[pp_Gen] = psrc[pp_Gen];
+        pdst[pp_LowB] = psrc[pp_LowB];
+        pdst[pp_mSL_Ref] = psrc[pp_mSL_Ref];
+        pdst[pp_Addr] = psrc[pp_Addr];
+        pdst[pp_Altent] = psrc[pp_Altent];
+    );
+);
+
+// Get the property of a parameter
+function parGetPP(xpnum, prop)
+local (value, pp)
+(
+    xpnum = 0|max(0,min(paramNMax,xpnum)); // minimalistic check
+    value = 0;
+    ((prop >= 0) && (prop < paramEntSize)) ? (
+        pp = paramBlock + xpnum * paramEntSize;
+        value = pp[prop];
+    ) :
+    (prop == pp_Value) ? (
+        value = parGetV(xpnum);
+    ) :
+    (prop == pp_Status) ? (
+        value = paramStatus[xpnum];
+    ) :
+    (prop == pp_Flags) ? (
+        value = paramFlags[xpnum];
+    ) :
+    (prop == pp_PrevValue) ? (
+        value = paramPrevValues[xpnum];
+    );
+    value;
+);
+
+// Set a parameter with specific conditions on write
+function parSet(xop, value)
+local (f, pp, pq, pv, fspect)
+(
+    xop = 0|max(0,min(paramNMax,xop)); // minimalistic check
+    pv = paramValues[xop]; // previous value
+    pp = paramBlock + xop * paramEntSize;
+    value = max(pp[pp_Min], min(pp[pp_Max], value)); // enforce clamp limit
+    fspect = 0;
+    ((f = paramFlags[xop]) & pflg_ChkWrite) ? (
+        // Need to check some condition on write
+        //pp = paramBlock + xop * paramEntSize;
+        //(f & pflg_ClampLimit) ? (
+        //    value = max(pp[pp_Min], min(pp[pp_Max], value));
+        //);
+        // we MAY have to do some very particular action
+        ((pq = pp[pp_Addr]) != 0) ? (
+            (pq < 0) ? (
+                // Copy the value somewhere in common memory
+                gmem[- pq] = value;
+            ) :
+            (pq > 2048) ? (
+                // save the value in some element of an array
+                pq[0] = value;
+            ) :
+            (pq == 1) ? (
+                // cas particulier...
+                AAAA_tr1 = value; // used to trace a value...
+            ) :
+            (pq == 2) ? (
+                value = value >= 0 ? 1 :-1;
+            ) :
+            (pq == 3) ? (
+                fspect = 1; // set the GPLR flag
+            ) :
+            (pq == 4) ? (
+                fspect = 2; // set the GPLR flag
+                // gmem[gVolBias] = AAAAAAAAvolb = 10^(-2-value/2);
+            ) :
+            (pq == 5) ? (
+                fspect = 5; // set the GPLR flag
+            ) :
+            (pq == 6) ? (
+                pcheckGPLR = 1; // check min max consistancy
+            ) :
+            (pq == 7) ? (
+                gmem[commonGlobalVolume] = 10 ^ (value/20); // convert as a number
+            ) :
+            (pq == 8) ? (
+                MIDISensMinWRep = value; // Set value
+            ) ;
+        );
+        (f & pflg_ActWrite) ? (
+
+            (xop&0x80)?((xop&0x40)?((xop&0x20)?((xop&0x10)?((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::255:::://
+                mSL_errX=255;
+                //::::255:::://
+
+            ):(
+
+                //::::254:::://
+                mSL_errX=254;
+                //::::254:::://
+
+            );):((xop&0x1)?(
+
+                //::::253:::://
+                mSL_errX=253;
+                //::::253:::://
+
+            ):(
+
+                //::::252:::://
+                mSL_errX=252;
+                //::::252:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::251:::://
+                mSL_errX=251;
+                //::::251:::://
+
+            ):(
+
+                //::::250:::://
+                mSL_errX=250;
+                //::::250:::://
+
+            );):((xop&0x1)?(
+
+                //::::249:::://
+                mSL_errX=249;
+                //::::249:::://
+
+            ):(
+
+                //::::248:::://
+                mSL_errX=248;
+                //::::248:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::247:::://
+                mSL_errX=247;
+                //::::247:::://
+
+            ):(
+
+                //::::246:::://
+                mSL_errX=246;
+                //::::246:::://
+
+            );):((xop&0x1)?(
+
+                //::::245:::://
+                mSL_errX=245;
+                //::::245:::://
+
+            ):(
+
+                //::::244:::://
+                mSL_errX=244;
+                //::::244:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::243:::://
+                mSL_errX=243;
+                //::::243:::://
+
+            ):(
+
+                //::::242:::://
+                mSL_errX=242;
+                //::::242:::://
+
+            );):((xop&0x1)?(
+
+                //::::241:::://
+                mSL_errX=241;
+                //::::241:::://
+
+            ):(
+
+                //::::240:::://
+                mSL_errX=240;
+                //::::240:::://
+
+            ););););):((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::239:::://
+                mSL_errX=239;
+                //::::239:::://
+
+            ):(
+
+                //::::238:::://
+                mSL_errX=238;
+                //::::238:::://
+
+            );):((xop&0x1)?(
+
+                //::::237:::://
+                mSL_errX=237;
+                //::::237:::://
+
+            ):(
+
+                //::::236:::://
+                mSL_errX=236;
+                //::::236:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::235:::://
+                mSL_errX=235;
+                //::::235:::://
+
+            ):(
+
+                //::::234:::://
+                mSL_errX=234;
+                //::::234:::://
+
+            );):((xop&0x1)?(
+
+                //::::233:::://
+                mSL_errX=233;
+                //::::233:::://
+
+            ):(
+
+                //::::232:::://
+                mSL_errX=232;
+                //::::232:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::231:::://
+                mSL_errX=231;
+                //::::231:::://
+
+            ):(
+
+                //::::230:::://
+                mSL_errX=230;
+                //::::230:::://
+
+            );):((xop&0x1)?(
+
+                //::::229:::://
+                mSL_errX=229;
+                //::::229:::://
+
+            ):(
+
+                //::::228:::://
+                mSL_errX=228;
+                //::::228:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::227:::://
+                mSL_errX=227;
+                //::::227:::://
+
+            ):(
+
+                //::::226:::://
+                mSL_errX=226;
+                //::::226:::://
+
+            );):((xop&0x1)?(
+
+                //::::225:::://
+                mSL_errX=225;
+                //::::225:::://
+
+            ):(
+
+                //::::224:::://
+                mSL_errX=224;
+                //::::224:::://
+
+            );););););):((xop&0x10)?((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::223:::://
+                mSL_errX=223;
+                //::::223:::://
+
+            ):(
+
+                //::::222:::://
+                mSL_errX=222;
+                //::::222:::://
+
+            );):((xop&0x1)?(
+
+                //::::221:::://
+                mSL_errX=221;
+                //::::221:::://
+
+            ):(
+
+                //::::220:::://
+                mSL_errX=220;
+                //::::220:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::219:::://
+                mSL_errX=219;
+                //::::219:::://
+
+            ):(
+
+                //::::218:::://
+                mSL_errX=218;
+                //::::218:::://
+
+            );):((xop&0x1)?(
+
+                //::::217:::://
+                mSL_errX=217;
+                //::::217:::://
+
+            ):(
+
+                //::::216:::://
+                mSL_errX=216;
+                //::::216:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::215:::://
+                mSL_errX=215;
+                //::::215:::://
+
+            ):(
+
+                //::::214:::://
+                mSL_errX=214;
+                //::::214:::://
+
+            );):((xop&0x1)?(
+
+                //::::213:::://
+                mSL_errX=213;
+                //::::213:::://
+
+            ):(
+
+                //::::212:::://
+                mSL_errX=212;
+                //::::212:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::211:::://
+                mSL_errX=211;
+                //::::211:::://
+
+            ):(
+
+                //::::210:::://
+                mSL_errX=210;
+                //::::210:::://
+
+            );):((xop&0x1)?(
+
+                //::::209:::://
+                mSL_errX=209;
+                //::::209:::://
+
+            ):(
+
+                //::::208:::://
+                mSL_errX=208;
+                //::::208:::://
+
+            ););););):((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::207:::://
+                mSL_errX=207;
+                //::::207:::://
+
+            ):(
+
+                //::::206:::://
+                mSL_errX=206;
+                //::::206:::://
+
+            );):((xop&0x1)?(
+
+                //::::205:::://
+                mSL_errX=205;
+                //::::205:::://
+
+            ):(
+
+                //::::204:::://
+                mSL_errX=204;
+                //::::204:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::203:::://
+                mSL_errX=203;
+                //::::203:::://
+
+            ):(
+
+                //::::202:::://
+                mSL_errX=202;
+                //::::202:::://
+
+            );):((xop&0x1)?(
+
+                //::::201:::://
+                mSL_errX=201;
+                //::::201:::://
+
+            ):(
+
+                //::::200:::://
+                mSL_errX=200;
+                //::::200:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::199:::://
+                mSL_errX=199;
+                //::::199:::://
+
+            ):(
+
+                //::::198:::://
+                mSL_errX=198;
+                //::::198:::://
+
+            );):((xop&0x1)?(
+
+                //::::197:::://
+                mSL_errX=197;
+                //::::197:::://
+
+            ):(
+
+                //::::196:::://
+                mSL_errX=196;
+                //::::196:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::195:::://
+                mSL_errX=195;
+                //::::195:::://
+
+            ):(
+
+                //::::194:::://
+                mSL_errX=194;
+                //::::194:::://
+
+            );):((xop&0x1)?(
+
+                //::::193:::://
+                mSL_errX=193;
+                //::::193:::://
+
+            ):(
+
+                //::::192:::://
+                mSL_errX=192;
+                //::::192:::://
+
+            ););););););):((xop&0x20)?((xop&0x10)?((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::191:::://
+                mSL_errX=191;
+                //::::191:::://
+
+            ):(
+
+                //::::190:::://
+                mSL_errX=190;
+                //::::190:::://
+
+            );):((xop&0x1)?(
+
+                //::::189:::://
+                mSL_errX=189;
+                //::::189:::://
+
+            ):(
+
+                //::::188:::://
+                mSL_errX=188;
+                //::::188:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::187:::://
+                mSL_errX=187;
+                //::::187:::://
+
+            ):(
+
+                //::::186:::://
+                mSL_errX=186;
+                //::::186:::://
+
+            );):((xop&0x1)?(
+
+                //::::185:::://
+                mSL_errX=185;
+                //::::185:::://
+
+            ):(
+
+                //::::184:::://
+                mSL_errX=184;
+                //::::184:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::183:::://
+                mSL_errX=183;
+                //::::183:::://
+
+            ):(
+
+                //::::182:::://
+                mSL_errX=182;
+                //::::182:::://
+
+            );):((xop&0x1)?(
+
+                //::::181:::://
+                mSL_errX=181;
+                //::::181:::://
+
+            ):(
+
+                //::::180:::://
+                mSL_errX=180;
+                //::::180:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::179:::://
+                mSL_errX=179;
+                //::::179:::://
+
+            ):(
+
+                //::::178:::://
+                mSL_errX=178;
+                //::::178:::://
+
+            );):((xop&0x1)?(
+
+                //::::177:::://
+                mSL_errX=177;
+                //::::177:::://
+
+            ):(
+
+                //::::176:::://
+                mSL_errX=176;
+                //::::176:::://
+
+            ););););):((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::175:::://
+                mSL_errX=175;
+                //::::175:::://
+
+            ):(
+
+                //::::174:::://
+                mSL_errX=174;
+                //::::174:::://
+
+            );):((xop&0x1)?(
+
+                //::::173:::://
+                mSL_errX=173;
+                //::::173:::://
+
+            ):(
+
+                //::::172:::://
+                mSL_errX=172;
+                //::::172:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::171:::://
+                mSL_errX=171;
+                //::::171:::://
+
+            ):(
+
+                //::::170:::://
+                mSL_errX=170;
+                //::::170:::://
+
+            );):((xop&0x1)?(
+
+                //::::169:::://
+                mSL_errX=169;
+                //::::169:::://
+
+            ):(
+
+                //::::168:::://
+                mSL_errX=168;
+                //::::168:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::167:::://
+                mSL_errX=167;
+                //::::167:::://
+
+            ):(
+
+                //::::166:::://
+                mSL_errX=166;
+                //::::166:::://
+
+            );):((xop&0x1)?(
+
+                //::::165:::://
+                mSL_errX=165;
+                //::::165:::://
+
+            ):(
+
+                //::::164:::://
+                mSL_errX=164;
+                //::::164:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::163:::://
+                mSL_errX=163;
+                //::::163:::://
+
+            ):(
+
+                //::::162:::://
+                mSL_errX=162;
+                //::::162:::://
+
+            );):((xop&0x1)?(
+
+                //::::161:::://
+                mSL_errX=161;
+                //::::161:::://
+
+            ):(
+
+                //::::160:::://
+                mSL_errX=160;
+                //::::160:::://
+
+            );););););):((xop&0x10)?((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::159:::://
+                mSL_errX=159;
+                //::::159:::://
+
+            ):(
+
+                //::::158:::://
+                mSL_errX=158;
+                //::::158:::://
+
+            );):((xop&0x1)?(
+
+                //::::157:::://
+                mSL_errX=157;
+                //::::157:::://
+
+            ):(
+
+                //::::156:::://
+                mSL_errX=156;
+                //::::156:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::155:::://
+                mSL_errX=155;
+                //::::155:::://
+
+            ):(
+
+                //::::154:::://
+                mSL_errX=154;
+                //::::154:::://
+
+            );):((xop&0x1)?(
+
+                //::::153:::://
+                mSL_errX=153;
+                //::::153:::://
+
+            ):(
+
+                //::::152:::://
+                mSL_errX=152;
+                //::::152:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::151:::://
+                mSL_errX=151;
+                //::::151:::://
+
+            ):(
+
+                //::::150:::://
+                mSL_errX=150;
+                //::::150:::://
+
+            );):((xop&0x1)?(
+
+                //::::149:::://
+                mSL_errX=149;
+                //::::149:::://
+
+            ):(
+
+                //::::148:::://
+                mSL_errX=148;
+                //::::148:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::147:::://
+                mSL_errX=147;
+                //::::147:::://
+
+            ):(
+
+                //::::146:::://
+                mSL_errX=146;
+                //::::146:::://
+
+            );):((xop&0x1)?(
+
+                //::::145:::://
+                mSL_errX=145;
+                //::::145:::://
+
+            ):(
+
+                //::::144:::://
+                mSL_errX=144;
+                //::::144:::://
+
+            ););););):((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::143:::://
+                mSL_errX=143;
+                //::::143:::://
+
+            ):(
+
+                //::::142:::://
+                mSL_errX=142;
+                //::::142:::://
+
+            );):((xop&0x1)?(
+
+                //::::141:::://
+                mSL_errX=141;
+                //::::141:::://
+
+            ):(
+
+                //::::140:::://
+                mSL_errX=140;
+                //::::140:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::139:::://
+                mSL_errX=139;
+                //::::139:::://
+
+            ):(
+
+                //::::138:::://
+                mSL_errX=138;
+                //::::138:::://
+
+            );):((xop&0x1)?(
+
+                //::::137:::://
+                mSL_errX=137;
+                //::::137:::://
+
+            ):(
+
+                //::::136:::://
+                mSL_errX=136;
+                //::::136:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::135:::://
+                mSL_errX=135;
+                //::::135:::://
+
+            ):(
+
+                //::::134:::://
+                mSL_errX=134;
+                //::::134:::://
+
+            );):((xop&0x1)?(
+
+                //::::133:::://
+                mSL_errX=133;
+                //::::133:::://
+
+            ):(
+
+                //::::132:::://
+                mSL_errX=132;
+                //::::132:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::131:::://
+                mSL_errX=131;
+                //::::131:::://
+
+            ):(
+
+                //::::130:::://
+                mSL_errX=130;
+                //::::130:::://
+
+            );):((xop&0x1)?(
+
+                //::::129:::://
+                mSL_errX=129;
+                //::::129:::://
+
+            ):(
+
+                //::::128:::://
+                mSL_errX=128;
+                //::::128:::://
+
+            );););););););):((xop&0x40)?((xop&0x20)?((xop&0x10)?((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::127:::://
+                mSL_errX=127;
+                //::::127:::://
+
+            ):(
+
+                //::::126:::://
+                mSL_errX=126;
+                //::::126:::://
+
+            );):((xop&0x1)?(
+
+                //::::125:::://
+                mSL_errX=125;
+                //::::125:::://
+
+            ):(
+
+                //::::124:::://
+                mSL_errX=124;
+                //::::124:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::123:::://
+                mSL_errX=123;
+                //::::123:::://
+
+            ):(
+
+                //::::122:::://
+                mSL_errX=122;
+                //::::122:::://
+
+            );):((xop&0x1)?(
+
+                //::::121:::://
+                mSL_errX=121;
+                //::::121:::://
+
+            ):(
+
+                //::::120:::://
+                mSL_errX=120;
+                //::::120:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::119:::://
+                mSL_errX=119;
+                //::::119:::://
+
+            ):(
+
+                //::::118:::://
+                mSL_errX=118;
+                //::::118:::://
+
+            );):((xop&0x1)?(
+
+                //::::117:::://
+                mSL_errX=117;
+                //::::117:::://
+
+            ):(
+
+                //::::116:::://
+                mSL_errX=116;
+                //::::116:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::115:::://
+                mSL_errX=115;
+                //::::115:::://
+
+            ):(
+
+                //::::114:::://
+                mSL_errX=114;
+                //::::114:::://
+
+            );):((xop&0x1)?(
+
+                //::::113:::://
+                mSL_errX=113;
+                //::::113:::://
+
+            ):(
+
+                //::::112:::://
+                mSL_errX=112;
+                //::::112:::://
+
+            ););););):((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::111:::://
+                mSL_errX=111;
+                //::::111:::://
+
+            ):(
+
+                //::::110:::://
+                mSL_errX=110;
+                //::::110:::://
+
+            );):((xop&0x1)?(
+
+                //::::109:::://
+                mSL_errX=109;
+                //::::109:::://
+
+            ):(
+
+                //::::108:::://
+                mSL_errX=108;
+                //::::108:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::107:::://
+                mSL_errX=107;
+                //::::107:::://
+
+            ):(
+
+                //::::106:::://
+                mSL_errX=106;
+                //::::106:::://
+
+            );):((xop&0x1)?(
+
+                //::::105:::://
+                mSL_errX=105;
+                //::::105:::://
+
+            ):(
+
+                //::::104:::://
+                mSL_errX=104;
+                //::::104:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::103:::://
+                mSL_errX=103;
+                //::::103:::://
+
+            ):(
+
+                //::::102:::://
+                mSL_errX=102;
+                //::::102:::://
+
+            );):((xop&0x1)?(
+
+                //::::101:::://
+                mSL_errX=101;
+                //::::101:::://
+
+            ):(
+
+                //::::100:::://
+                mSL_errX=100;
+                //::::100:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::99:::://
+                mSL_errX=99;
+                //::::99:::://
+
+            ):(
+
+                //::::98:::://
+                mSL_errX=98;
+                //::::98:::://
+
+            );):((xop&0x1)?(
+
+                //::::97:::://
+                mSL_errX=97;
+                //::::97:::://
+
+            ):(
+
+                //::::96:::://
+                mSL_errX=96;
+                //::::96:::://
+
+            );););););):((xop&0x10)?((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::95:::://
+                mSL_errX=95;
+                //::::95:::://
+
+            ):(
+
+                //::::94:::://
+                mSL_errX=94;
+                //::::94:::://
+
+            );):((xop&0x1)?(
+
+                //::::93:::://
+                mSL_errX=93;
+                //::::93:::://
+
+            ):(
+
+                //::::92:::://
+                mSL_errX=92;
+                //::::92:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::91:::://
+                mSL_errX=91;
+                //::::91:::://
+
+            ):(
+
+                //::::90:::://
+                mSL_errX=90;
+                //::::90:::://
+
+            );):((xop&0x1)?(
+
+                //::::89:::://
+                mSL_errX=89;
+                //::::89:::://
+
+            ):(
+
+                //::::88:::://
+                mSL_errX=88;
+                //::::88:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::87:::://
+                mSL_errX=87;
+                //::::87:::://
+
+            ):(
+
+                //::::86:::://
+                mSL_errX=86;
+                //::::86:::://
+
+            );):((xop&0x1)?(
+
+                //::::85:::://
+                mSL_errX=85;
+                //::::85:::://
+
+            ):(
+
+                //::::84:::://
+                mSL_errX=84;
+                //::::84:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::83:::://
+                mSL_errX=83;
+                //::::83:::://
+
+            ):(
+
+                //::::82:::://
+                mSL_errX=82;
+                //::::82:::://
+
+            );):((xop&0x1)?(
+
+                //::::81:::://
+                mSL_errX=81;
+                //::::81:::://
+
+            ):(
+
+                //::::80:::://
+                mSL_errX=80;
+                //::::80:::://
+
+            ););););):((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::79:::://
+                mSL_errX=79;
+                //::::79:::://
+
+            ):(
+
+                //::::78:::://
+                mSL_errX=78;
+                //::::78:::://
+
+            );):((xop&0x1)?(
+
+                //::::77:::://
+                mSL_errX=77;
+                //::::77:::://
+
+            ):(
+
+                //::::76:::://
+                mSL_errX=76;
+                //::::76:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::75:::://
+                mSL_errX=75;
+                //::::75:::://
+
+            ):(
+
+                //::::74:::://
+                mSL_errX=74;
+                //::::74:::://
+
+            );):((xop&0x1)?(
+
+                //::::73:::://
+                mSL_errX=73;
+                //::::73:::://
+
+            ):(
+
+                //::::72:::://
+                mSL_errX=72;
+                //::::72:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::71:::://
+                mSL_errX=71;
+                //::::71:::://
+
+            ):(
+
+                //::::70:::://
+                mSL_errX=70;
+                //::::70:::://
+
+            );):((xop&0x1)?(
+
+                //::::69:::://
+                mSL_errX=69;
+                //::::69:::://
+
+            ):(
+
+                //::::68:::://
+                mSL_errX=68;
+                //::::68:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::67:::://
+                mSL_errX=67;
+                //::::67:::://
+
+            ):(
+
+                //::::66:::://
+                mSL_errX=66;
+                //::::66:::://
+
+            );):((xop&0x1)?(
+
+                //::::65:::://
+                mSL_errX=65;
+                //::::65:::://
+
+            ):(
+
+                //::::64:::://
+                mSL_errX=64;
+                //::::64:::://
+
+            ););););););):((xop&0x20)?((xop&0x10)?((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::63:::://
+                mSL_errX=63;
+                //::::63:::://
+
+            ):(
+
+                //::::62:::://
+                mSL_errX=62;
+                //::::62:::://
+
+            );):((xop&0x1)?(
+
+                //::::61:::://
+                mSL_errX=61;
+                //::::61:::://
+
+            ):(
+
+                //::::60:::://
+                mSL_errX=60;
+                //::::60:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::59:::://
+                mSL_errX=59;
+                //::::59:::://
+
+            ):(
+
+                //::::58:::://
+                mSL_errX=58;
+                //::::58:::://
+
+            );):((xop&0x1)?(
+
+                //::::57:::://
+                mSL_errX=57;
+                //::::57:::://
+
+            ):(
+
+                //::::56:::://
+                mSL_errX=56;
+                //::::56:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::55:::://
+                mSL_errX=55;
+                //::::55:::://
+
+            ):(
+
+                //::::54:::://
+                mSL_errX=54;
+                //::::54:::://
+
+            );):((xop&0x1)?(
+
+                //::::53:::://
+                mSL_errX=53;
+                //::::53:::://
+
+            ):(
+
+                //::::52:::://
+                mSL_errX=52;
+                //::::52:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::51:::://
+                mSL_errX=51;
+                //::::51:::://
+
+            ):(
+
+                //::::50:::://
+                mSL_errX=50;
+                //::::50:::://
+
+            );):((xop&0x1)?(
+
+                //::::49:::://
+                mSL_errX=49;
+                //::::49:::://
+
+            ):(
+
+                //::::48:::://
+                mSL_errX=48;
+                //::::48:::://
+
+            ););););):((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::47:::://
+                mSL_errX=47;
+                //::::47:::://
+
+            ):(
+
+                //::::46:::://
+                mSL_errX=46;
+                //::::46:::://
+
+            );):((xop&0x1)?(
+
+                //::::45:::://
+                mSL_errX=45;
+                //::::45:::://
+
+            ):(
+
+                //::::44:::://
+                mSL_errX=44;
+                //::::44:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::43:::://
+                mSL_errX=43;
+                //::::43:::://
+
+            ):(
+
+                //::::42:::://
+                mSL_errX=42;
+                //::::42:::://
+
+            );):((xop&0x1)?(
+
+                //::::41:::://
+                mSL_errX=41;
+                //::::41:::://
+
+            ):(
+
+                //::::40:::://
+                mSL_errX=40;
+                //::::40:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::39:::://
+                mSL_errX=39;
+                //::::39:::://
+
+            ):(
+
+                //::::38:::://
+                mSL_errX=38;
+                //::::38:::://
+
+            );):((xop&0x1)?(
+
+                //::::37:::://
+                mSL_errX=37;
+                //::::37:::://
+
+            ):(
+
+                //::::36:::://
+                mSL_errX=36;
+                //::::36:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::35:::://
+                mSL_errX=35;
+                //::::35:::://
+
+            ):(
+
+                //::::34:::://
+                mSL_errX=34;
+                //::::34:::://
+
+            );):((xop&0x1)?(
+
+                //::::33:::://
+                mSL_errX=33;
+                //::::33:::://
+
+            ):(
+
+                //::::32:::://
+                mSL_errX=32;
+                //::::32:::://
+
+            );););););):((xop&0x10)?((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::31:::://
+                mSL_errX=31;
+                //::::31:::://
+
+            ):(
+
+                //::::30:::://
+                mSL_errX=30;
+                //::::30:::://
+
+            );):((xop&0x1)?(
+
+                //::::29:::://
+                mSL_errX=29;
+                //::::29:::://
+
+            ):(
+
+                //::::28:::://
+                mSL_errX=28;
+                //::::28:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::27:::://
+                mSL_errX=27;
+                //::::27:::://
+
+            ):(
+
+                //::::26:::://
+                mSL_errX=26;
+                //::::26:::://
+
+            );):((xop&0x1)?(
+
+                //::::25:::://
+                mSL_errX=25;
+                //::::25:::://
+
+            ):(
+
+                //::::24:::://
+                mSL_errX=24;
+                //::::24:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::23:::://
+                mSL_errX=23;
+                //::::23:::://
+
+            ):(
+
+                //::::22:::://
+                mSL_errX=22;
+                //::::22:::://
+
+            );):((xop&0x1)?(
+
+                //::::21:::://
+                mSL_errX=21;
+                //::::21:::://
+
+            ):(
+
+                //::::20:::://
+                mSL_errX=20;
+                //::::20:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::19:::://
+                mSL_errX=19;
+                //::::19:::://
+
+            ):(
+
+                //::::18:::://
+                mSL_errX=18;
+                //::::18:::://
+
+            );):((xop&0x1)?(
+
+                //::::17:::://
+                mSL_errX=17;
+                //::::17:::://
+
+            ):(
+
+                //::::16:::://
+                mSL_errX=16;
+                //::::16:::://
+
+            ););););):((xop&0x8)?((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::15:::://
+                mSL_errX=15;
+                //::::15:::://
+
+            ):(
+
+                //::::14:::://
+                mSL_errX=14;
+                //::::14:::://
+
+            );):((xop&0x1)?(
+
+                //::::13:::://
+                mSL_errX=13;
+                //::::13:::://
+
+            ):(
+
+                //::::12:::://
+                mSL_errX=12;
+                //::::12:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::11:::://
+                mSL_errX=11;
+                //::::11:::://
+
+            ):(
+
+                //::::10:::://
+                mSL_errX=10;
+                //::::10:::://
+
+            );):((xop&0x1)?(
+
+                //::::9:::://
+                mSL_errX=9;
+                //::::9:::://
+
+            ):(
+
+                //::::8:::://
+                mSL_errX=8;
+                //::::8:::://
+
+            );););):((xop&0x4)?((xop&0x2)?((xop&0x1)?(
+
+                //::::7:::://
+                mSL_errX=7;
+                //::::7:::://
+
+            ):(
+
+                //::::6:::://
+                mSL_errX=6;
+                //::::6:::://
+
+            );):((xop&0x1)?(
+
+                //::::5:::://
+                mSL_errX=5;
+                //::::5:::://
+
+            ):(
+
+                //::::4:::://
+                mSL_errX=4;
+                //::::4:::://
+
+            ););):((xop&0x2)?((xop&0x1)?(
+
+                //::::3:::://
+                mSL_errX=3;
+                //::::3:::://
+
+            ):(
+
+                //::::2:::://
+                mSL_errX=2;
+                //::::2:::://
+
+            );):((xop&0x1)?(
+
+                //::::1:::://
+                mSL_errX=1;
+                //::::1:::://
+
+            ):(
+
+                //::::0:::://
+                mSL_errX=0;
+                //::::0:::://
+
+            ););););););););
+
+
+        );
+    );
+    // signal modification if necessary
+    (pv !== value) ? (
+        paramStatus[xop] |= pStat_Mod;
+        paramPrevValues[xop] = pv; // keep prev. value
+        (fspect == 1) ? (
+            pcheckGPLR = 1; // set when modified
+        ) :
+        (fspect == 2) ? (
+            //  AAAAAAAAvolb =
+            gmem[gVolBias] = 10^(-4-value/3);
+        ) :
+        (fspect == 5) ? (
+            //   AAAAAAAAtempo =
+            gmem[synchroDel] = 60000 / max(1,value);
+        );
+    );
+    // Keep a copy in paramValues, and in shared memory for the generators
+    gmem[paramGCopy+xop] = paramValues[xop] = value;
+);
+
+
+// Set a property of a parameter
+function parSetPP(xpnum, prop, value)
+local(pp)
+(
+    xpnum = 0|max(0,min(paramNMax,xpnum)); // minimalistic check
+    (prop >= 0) ? (
+        pp = paramBlock + xpnum * paramEntSize;
+        pp[prop] = value;
+    ) :
+    (prop == pp_Value) ? (
+        parSet(xpnum, value);
+    ) :
+    (prop == pp_Status) ? (
+        paramStatus[xpnum] = value;
+    ) :
+    (prop == pp_Flags) ? (
+        paramFlags[xpnum] = value;
+    ) :
+    (prop == pp_PrevValue) ? (
+        paramPrevValues[xpnum] = value;
+    );
+);
+
+
+// declare a parameter
+parDclMode = 0xf;
+function parDcl(xpnum, xpname, xmSLName, xptype, xpsfmt, xpmfmt, xpmin, xpmax,
+            xpdef, xpstep, xpslope, xpflags, xpaddr, xpswlim, xpswfact, xpgen)
+local(pp, h, pc, er)
+(
+    er = 0;
+    ((xpnum >= 0) && (xpnum < paramCount) && (xpnum == (0|xpnum))) ? (
+        pp = paramBlock + xpnum * paramEntSize;
+        ((pp[pp_Name] == 0) || (pp[pp_Name] == #pUndef)
+            || (strcmp(xpname, pp[pp_Name]) === 0)) ? ( // check it is undefined/similar, etc.
+            paramStatus[xpnum] = pStat_Init; // status modified
+            paramFlags[xpnum] = xpflags;
+            pp[pp_Name] = xpname;
+            pp[pp_mSL_Code] = pc = (xmSLName == 0 ? 0 : mSL_symbol(xmSLName));
+            pp[pp_Type] = xptype;
+            pp[pp_SFmt] = xpsfmt;
+            pp[pp_MFmt] = xpmfmt;
+            pp[pp_Min] = xpmin;
+            pp[pp_SavedMax] = pp[pp_Max] = xpmax;
+            pp[pp_Def] = xpdef;
+            pp[pp_Step] = xpstep;
+            pp[pp_Slope] = xpslope;
+            pp[pp_SwLim] = xpswlim;
+            pp[pp_SwFac] = xpswfact;
+            pp[pp_Gen] = xpgen;
+            pp[pp_LowB] = xpmin;
+            pp[pp_mSL_Ref] = 0;
+            pp[pp_Addr] = xpaddr; //  alternative address or action
+            (xpaddr != 0) ? (
+                paramFlags[xpnum] |= pflg_ChkWrite;
+            );
+            pp[pp_Altent] = 0;
+            // Actual initialize with the default value, and perform all addtl. ness. checks
+            (parDclMode & 1) ? (parSet(xpnum, xpdef));
+            // Enter the name in the hash table
+            (pc != 0) ? (
+                mSL_setinHT(paramHashTbl, pc, xpnum);
+            );
+        ) : (
+            er = 11000 + (0|xpnum); // par. num. already used
+        );
+    ) : (
+        er = 13000 + (xpnum);  // error in parDcl
+    );
+    (parDclMode & 2) ? (
+        (er != 0) ? (err_sys_ini = er;);
+    );
+    er;
+);
+
+function parReset(xpnum)
+local (pp)
+(
+    ((xpnum >= 0) && (xpnum < paramCount) && (xpnum == (0|xpnum))) ? (
+        pp = paramBlock + xpnum * paramEntSize;
+        // Reset values and limits
+        pp[pp_Max] = pp[pp_SavedMax];
+        parSet(xpnum, pp[pp_Def]);
+    );
+);
+
+function parRemove(xpnum)
+local (pp)
+(
+    ((xpnum >= 0) && (xpnum < paramCount) && (xpnum == (0|xpnum))) ? (
+        pp = paramBlock + xpnum * paramEntSize;
+        memset(pp, 0, paramEntSize);
+        paramStatus[xpnum] = paramFlags[xpnum] = paramValues[xpnum] = 0;
+    );
+);
+
+function parDcl(xpnum, xpname, xmSLName, xptype, xpsfmt, xpmfmt, xpmin, xpmax,
+            xpdef, xpstep, xpslope, xpflags, xpaddr)
+(
+    parDcl(xpnum, xpname, xmSLName, xptype, xpsfmt, xpmfmt, xpmin, xpmax,
+                xpdef, xpstep, xpslope, xpflags, xpaddr, 0, 0, 0);
+);
+
+function parDcl(xpnum, xpname, xmSLName, xptype, xpsfmt, xpmfmt, xpmin, xpmax,
+            xpdef, xpstep, xpslope, xpflags)
+(
+    parDcl(xpnum, xpname, xmSLName, xptype, xpsfmt, xpmfmt, xpmin, xpmax,
+                xpdef, xpstep, xpslope, xpflags, 0, 0, 0, 0);
+);
+
+function parDcl(xpnum, xpname, xmSLName, xptype, xpsfmt, xpmfmt, xpmin, xpmax,
+            xpdef, xpstep, xpslope)
+(
+    parDcl(xpnum, xpname, xmSLName, xptype, xpsfmt, xpmfmt, xpmin, xpmax,
+                xpdef, xpstep, xpslope, 0, 0, 0, 0, 0);
+);
+
+function parDcl(xpnum, xpname, xmSLName, xptype, xpsfmt, xpmfmt, xpmin, xpmax,
+            xpdef, xpstep)
+(
+    parDcl(xpnum, xpname, xmSLName, xptype, xpsfmt, xpmfmt, xpmin, xpmax,
+                xpdef, xpstep, 0, 0, 0, 0, 0, 0);
+);
+
+
+
+function parDclAlt(xpnum, xalt, xpswlim, xpswfact) local(pp, pa)
+(
+    ((xpnum > 0) && (xpnum < paramCount) && (xpnum == (0|xpnum))) ? (
+        ((xalt > 0) && (xalt < paramCount) && (xalt == (0|xalt))) ? (
+            pp = paramBlock + xpnum * paramEntSize;
+            pa = paramBlock + xalt * paramEntSize;
+            ((pp[pp_Name] != 0) && (pa[pp_Name] != 0) && (xpnum != xalt)) ? (
+                ((xpswlim > pp[pp_Min]) && (xpswlim < pp[pp_Max])) ? (
+                    ((xpswfact > 1) && (xpswfact <= 10000)) ? (
+                        pp[pp_SwLim] = xpswlim;
+                        pp[pp_SwFac] = xpswfact;
+                        pp[pp_Altent] = xalt;
+                    ) : (
+                        err_sys_ini = 10114;  // error in parDclAlt
+                    );
+                ) : (
+                    err_sys_ini = 10113;  // error in parDclAlt
+                );
+            ) : (
+                err_sys_ini = 10112;  // error in parDclAlt
+            );
+        ) : (
+            err_sys_ini = 10111;  // error in parDclAlt
+        );
+    ) : (
+        err_sys_ini = 10110;  // error in parDclAlt
+    );
+);
+
+
+
+// Control a parameter with a slider
+function parCtl(xpnum)
+local (r, f, c, pp, ps, val, xledA, xledB, af, app, apn)
+(
+    r = xledA = xledB = 0;
+    ((xpnum > 0) && (xpnum < paramCount)) ? (
+        pp = paramBlock + xpnum * paramEntSize;
+        ps = paramStatus[xpnum];
+        (pp[pp_Name] != 0) ? (
+            f = paramFlags[xpnum];
+            val = paramValues[xpnum]; app = pp;
+            af = ((apn = pp[pp_Altent]) != 0) && (paramValues[xpnum] >= pp[pp_SwLim]);
+            af ? (
+                app = paramBlock + apn * paramEntSize;
+                val = val / pp[pp_SwFac];
+            );
+            (f & pflg_Led) ? (
+//AA_ps1 = ps;
+                (f & pflg_LedA) ? (
+                    // Update led A from current status
+                    xledA = parLedA;
+                    xledA[ui_jled_menu1] = 3; // accept both buttons to toggle on/off
+                    xledA[ui_jled_status] = (ps & pStat_lA_btn) != 0; // set status on/off button
+                    xledA[ui_jled_alt] = (c = (ps >> pStat_lA_Shftc) & pStat_lCol_Mask) - 1; // the color...
+                    xledA[ui_jled_menu2] = 0;
+                    xledA[ui_jled_c_on] = gmem[RandomSColors + min(31,max(0,c))];
+// AA_pscol = c;
+                );
+                (f & pflg_LedB) ? (
+                    // Update led B from current status
+                    xledB = parLedB;
+                    xledB[ui_jled_menu1] = 1; // use left clic to toggle the button
+                    xledB[ui_jled_status] = (ps & pStat_lB_btn) != 0; // set status on/off button
+                    xledB[ui_jled_alt] = (c = (ps >> pStat_lB_Shftc) & pStat_lCol_Mask) - 1; // the color...
+                    xledB[ui_jled_menu2] = iledColMenu; // use our std. color menu
+                    xledB[ui_jled_c_on] = gmem[RandomSColors + min(31,max(0,c))];
+                );
+
+                r = slider_ctl_led (app[pp_MFmt], val, app[pp_Min], app[pp_Max],
+                        app[pp_Slope], app[pp_Def], app[pp_Step], xledA, xledB);
+                // did we interact with ledB ?
+
+// AA_r = r;
+// AA_ps2 = ps;
+                (r & 0xf00) ? (
+                    // did we change the on/off status ?
+                    (r & 0x100) ? (
+                        // update status from led info
+                        ps = (ps & pStat_lB_ResetBtn) | (xledB[ui_jled_status] << pStat_lB_Shftb);
+                    );
+                    // did we change the color ?
+                    (r & 0x400) ? (
+                        // update the status with new color
+                        ps = (ps & pStat_lB_ResetCol) | ((xledB[ui_jled_alt]+1) << pStat_lB_Shftc);
+                    );
+                );
+// AA_ps3 = ps;
+                // did we interact with ledA ?
+                (r & 0xf0) ? (
+                    // did we change the on/off status ?
+                    (r & 0x10) ? (
+                        // update status from led info
+                        ps = (ps & pStat_lA_ResetBtn) | (xledA[ui_jled_status] << pStat_lA_Shftb);
+                    );
+                );
+// AA_ps4 = ps;
+                paramStatus[xpnum] = ps;
+            ) : (
+                r = slider_ctl(app[pp_MFmt], val, app[pp_Min], app[pp_Max],
+                        app[pp_Slope], app[pp_Def], app[pp_Step]);
+            );
+            (r & 1) ? (
+                // we DID change the value
+                af ? (uix_jsl_val *= pp[pp_SwFac]);
+                parSet(xpnum, uix_jsl_val);
+                param_last_touched = xpnum;
+                param_touch_count += 1;
+            );
+        );
+        parCtl_V = paramValues[xpnum];
+    ) : (
+        ui_pad(0,ui_jd_slidh,0,0);
+    );
+    r;
+);
+
+

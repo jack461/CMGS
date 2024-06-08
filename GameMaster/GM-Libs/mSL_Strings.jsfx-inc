@@ -1,0 +1,109 @@
+/*
+    A dynamic string allocator
+
+    needs the "mSL_StM_Memory.jsfx-inc" library.
+*/
+@init
+
+// By default, use first strings
+mSL_Str_TempC = mSL_Str_TempF = 32; mSL_Str_TempL = 512;
+mSL_Str_TempU = 0;
+mSL_Str_Remanent = 0;
+mSL_Str_RSize = 0;
+mSL_Str_RPt = 0;
+mSL_Str_PermC = mSL_Str_PermF = mSL_Str_TempL;
+mSL_Str_PermL = 1024;
+mSL_Str_CFree = mSL_Str_CUsed = 0;
+mSL_Str_PCFree = mSL_Str_PCUsed = 0;
+mSL_Str_TCFree = 0;
+ 
+function mSL_Str_GCPRinit(size)
+(
+    mSL_Str_RSize = max(1024, min(4096, 0|size));
+    mSL_Str_Remanent = mSL_StM_Alloc(mSL_Str_Count, 'strs', mSL_StM_FlClear);
+);
+
+function mSL_Str_TInit(first, last)
+(
+    mSL_Str_TempC = mSL_Str_TempF = first; mSL_Str_TempL = last; mSL_Str_TCFree = last-first+1;
+);
+
+function mSL_Str_Tmp()
+(
+    mSL_Str_TempU += 1;
+    (mSL_Str_TempC >= mSL_Str_TempL) ? (mSL_Str_TempC = mSL_Str_TempF) : (mSL_Str_TempC += 1);
+);
+
+function mSL_Str_PInit(first, last)
+(
+    mSL_Str_PermC = mSL_Str_PermF = first; mSL_Str_PermL = last; mSL_Str_PCFree = last-first+1;
+);
+
+function mSL_Str_Perm()
+(
+    mSL_Str_PermC >= mSL_Str_PermL ? mSL_Str_Tmp() : (mSL_Str_PCUsed += 1; mSL_Str_PCFree -= 1; mSL_Str_PermC += 1);
+);
+
+function mSL_Str_Init(first, last)
+global(mSL_Str_First, mSL_Str_Last, mSL_Str_Count, mSL_Str_Use, mSL_Str_Stack, mSL_Str_Uptr,
+    mSL_Str_Default, mSL_StM_FlClear, #mSL_Str_Default, mSL_Str_CFree, mSL_Str_CUsed)
+local (i)
+(
+    mSL_Str_First = first; mSL_Str_Last = last; mSL_Str_Count = last-first+1;
+    mSL_Str_Use = mSL_StM_Alloc(mSL_Str_Count, 'stru', mSL_StM_FlClear);
+    mSL_Str_Stack = mSL_StM_Alloc(mSL_Str_Count, 'strs', 0);
+    i=0; loop(mSL_Str_Count, mSL_Str_Stack[i] = i+first; i+=1;);
+    mSL_Str_Uptr = mSL_Str_Count - 1;
+    mSL_Str_CFree = mSL_Str_Count; mSL_Str_CUsed = 0;
+    mSL_Str_Default = #mSL_Str_Default; // provide a default string
+);
+
+function mSL_Str_Alloc(val)
+global(mSL_Str_First, mSL_Str_Last, mSL_Str_Count, mSL_Str_Use, mSL_Str_Stack,
+    mSL_Str_Uptr, mSL_Str_Default, mSL_Str_CFree, mSL_Str_CUsed)
+local (s, z)
+(
+    (mSL_Str_Uptr >= 0) && ((s = mSL_Str_Stack[mSL_Str_Uptr]) >= mSL_Str_First)
+                   && (s <= mSL_Str_Last) && (mSL_Str_Use[z = s - mSL_Str_First] == 0) ? (
+        mSL_Str_Use[z] = 1;
+        mSL_Str_Uptr -= 1;
+        mSL_Str_CUsed += 1; mSL_Str_CFree -= 1;
+    ) : (
+        s = mSL_Str_Tmp(); // provide a temporary string by default
+    );
+    val == 0 ? val = "";
+    strcpy(s, val);
+    s;
+);
+
+function mSL_Str_Free(str)
+global(mSL_Str_First, mSL_Str_Last, mSL_Str_Count, mSL_Str_Use, mSL_Str_Stack,
+    mSL_Str_Uptr, mSL_Str_Default, mSL_Str_CFree, mSL_Str_CUsed)
+local (n)
+(
+    (str >= mSL_Str_First) && (str <= mSL_Str_Last) && (mSL_Str_Use[n = str - mSL_Str_First] == 1) ? (
+        mSL_Str_Use[n] = 0;
+        mSL_Str_Uptr +=1;
+        mSL_Str_Stack[mSL_Str_Uptr] = str;
+        strcpy(str, "");
+        mSL_Str_CUsed -= 1; mSL_Str_CFree += 1;
+    );
+);
+
+function mSL_isString(str)
+global(mSL_Str_First, mSL_Str_Last, mSL_Str_Count, mSL_Str_Use, mSL_Str_Stack, mSL_Str_Uptr, mSL_Str_Default)
+(
+    (str >= mSL_Str_First) && (str <= mSL_Str_Last) && (mSL_Str_Use[str - mSL_Str_First] == 1);
+);
+
+
+function mSL_Str_RAlloc(val)
+local (s)
+(
+    s = mSL_Str_Alloc(val);
+    (mSL_Str_RSize > 0) ? (
+        mSL_Str_Remanent[mSL_Str_RPt] = s;
+        mSL_Str_RPt = (mSL_Str_RPt + 1) % mSL_Str_RSize;
+    );
+    s;
+);

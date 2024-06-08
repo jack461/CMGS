@@ -1,0 +1,1959 @@
+
+//---------------------------------------------
+//    A micro Script Language for JSFX plug-ins
+//
+//    Part2: the evaluator
+//        mSL_Xlib.jsfx-inc
+//    J.J. Girardot - 3/2023
+//---------------------------------------------
+
+mfcmax = 320; // max # of "costful" operations in a cycle.
+
+//    Evaluation of an mSL expression - 2023 version
+
+function
+mSL_evaluate()
+local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
+(
+    // (mSL_current_evaluator === 0) ? (mSL_set_evaluator(mSL_new_evaluator););
+    rpeat = mSL_rpeat;
+    mSL_ICount += rpeat;
+    mfc = 0; // malloc/free/xxx count "coastful" operations
+
+    //// Inner equivalent loop
+    while ((rpeat > 0) && (mSL_errX === 0)) (
+        rpeat -= 1;
+        Xop = (XopPar = mSL_NxtOp) & 0xff;
+        mSL_PCode = mSL_CodePtr;
+        mSL_CodePtr += 1;
+        mSL_NxtOp = mSL_baseCode[mSL_CodePtr];
+        (
+
+
+
+            (xop<64)?((xop<32)?((xop<16)?((xop<8)?((xop<4)?((xop<2)?((xop<1)?(
+
+
+                //===0===//
+                // illegal instruction "0"
+                mSL_errX=1901;
+                mSL_CodePtr = mSL_PCode; // lock on current address
+                mSL_NxtOp = mSL_baseCode[mSL_CodePtr];
+                mSL_CodeStop = mSL_RC_IllInst; // illegal inst "stop" flag
+                //===0===//
+
+
+            ):(
+
+
+                //===1===//
+                // exit —
+                mSL_ExitValue = mSL_TOS[0]; // exit value
+                mSL_ICount -= rpeat; // deduce rest of count
+                rpeat = 0;
+                mSL_CodePtr = mSL_PCode; // lock on current address
+                mSL_NxtOp = mSL_baseCode[mSL_CodePtr];
+                mSL_CodeStop = mSL_RC_Stop; // set "stop" flag
+                //===1===//
+
+
+            );):((xop<3)?(
+
+
+                //===2===//
+                //======RETURN======
+                // Return from a func
+                m = mSL_TOS[0]; // returned value
+                mSL_TOS = mSL_baseTOS; // set new tos
+                mSL_CodePtr = mSL_baseAddStack[4];
+                mSL_baseCode = mSL_baseAddStack[3];
+                mSL_baseTOS = mSL_baseAddStack[2];
+                mSL_baseLocals = mSL_baseAddStack[1];
+                mSL_baseAddStack = mSL_baseAddStack[0];
+                // Do we have to restore context symbol tables ?
+                (mSL_baseAddStack[5] != 0) ? mSL_baseAVars = mSL_baseAddStack[5];
+                while (mSL_baseAVars[mSL_baseAVars[-1]-2] === mSL_Fwrd_Link)  (
+                    mSL_baseAddStack[5] = mSL_baseAVars = mSL_baseAVars[mSL_baseAVars[-1]-1];
+                    0 ? (
+                    sprintf(#sfc, "Ret.A-Forwarding to %d", mSL_baseAVars);
+                    mSL_log(SysLogBox, #sfc);
+                    );
+                );
+                (mSL_baseAddStack[6] != 0) ? mSL_baseOVars = mSL_baseAddStack[6];
+                while (mSL_baseOVars[mSL_baseOVars[-1]-2] === mSL_Fwrd_Link)  (
+                    mSL_baseAddStack[6] = mSL_baseOVars = mSL_baseOVars[mSL_baseOVars[-1]-1];
+                    0 ? (
+                    sprintf(#sfc, "Ret.O-Forwarding to %d", mSL_baseOVars);
+                    mSL_log(SysLogBox, #sfc);
+                    );
+                );
+                (mSL_baseAddStack[7] != 0) ? mSL_basePVars = mSL_baseAddStack[7];
+                while (mSL_basePVars[mSL_basePVars[-1]-2] === mSL_Fwrd_Link)  (
+                    mSL_baseAddStack[7] = mSL_basePVars = mSL_basePVars[mSL_basePVars[-1]-1];
+                    0 ? (
+                    sprintf(#sfc, "Ret.P-Forwarding to %d", mSL_basePVars);
+                    mSL_log(SysLogBox, #sfc);
+                    );
+                );
+                mSL_TOS[0] = m; // transmit the return value
+                mSL_NxtOp = mSL_baseCode[mSL_CodePtr];
+                //===2===//
+
+
+            ):(
+
+
+                //===3===//
+                // Pop : suppress TOS
+                mSL_TOS -= 1;
+                //===3===//
+
+
+            ););):((xop<6)?((xop<5)?(
+
+
+                //===4===//
+                // Set —
+                // TOS is a memory address,
+                // TOS - 1 the value
+                // keep the value
+                m = mSL_TOS[0];
+                mSL_TOS -= 1;
+                (m > 0) ? (
+                    m[0] = mSL_TOS[0];
+                ) :
+                (m < 0) ? (
+                    gmem[-m] = mSL_TOS[0];
+                ) : (
+                    mSL_errX = 1627;
+                );
+                //===4===//
+
+
+            ):(
+
+
+                //===5===//
+                // Set and Pop —
+                // TOS is a memory address,
+                // TOS - 1 the value
+                m = mSL_TOS[0];
+                mSL_TOS -= 1;
+                (m > 0) ? (
+                    m[0] = mSL_TOS[0];
+                ) :
+                (m < 0) ? (
+                    gmem[-m] = mSL_TOS[0];
+                ) : (
+                    mSL_errX = 1628;
+                );
+                mSL_TOS -= 1;
+                //===5===//
+
+
+            );):((xop<7)?(
+
+
+                //===6===//
+                // Load the value of a local variable
+                mSL_TOS += 1;
+                mSL_TOS[0] = mSL_baseLocals[(0|(XopPar / mSL_X_OpShDiv))];
+                //===6===//
+
+
+            ):(
+
+
+                //===7===//
+                // Load the address of a local variable
+                mSL_TOS += 1;
+                mSL_TOS[0] = (0|(XopPar / mSL_X_OpShDiv)) + mSL_baseLocals;
+                //===7===//
+
+
+            );););):((xop<12)?((xop<10)?((xop<9)?(
+
+
+                //===8===//
+                // Load the value of a global variable
+                mSL_TOS += 1;
+                mSL_TOS[0] = mSL_baseAVars[(0|(XopPar / mSL_X_OpShDiv))];
+                //===8===//
+
+
+            ):(
+
+
+                //===9===//
+                // Load the address of a global variable
+                mSL_TOS += 1;
+                mSL_TOS[0] = (0|(XopPar / mSL_X_OpShDiv)) + mSL_baseAVars;
+                //===9===//
+
+
+            );):((xop<11)?(
+
+
+                //===10===//
+                // Load the value of a semi-global variable
+                mSL_TOS += 1;
+                mSL_TOS[0] = mSL_baseOVars[(0|(XopPar / mSL_X_OpShDiv))];
+                //===10===//
+
+
+            ):(
+
+
+                //===11===//
+                // Load the address of a semi-global variable
+                mSL_TOS += 1;
+                mSL_TOS[0] = (0|(XopPar / mSL_X_OpShDiv)) + mSL_baseOVars;
+                //===11===//
+
+
+            ););):((xop<14)?((xop<13)?(
+
+
+                //===12===//
+                // Load the value of a pointer variable
+                mSL_TOS += 1;
+                mSL_TOS[0] = 0[mSL_basePVars[(0|(XopPar / mSL_X_OpShDiv))]];
+                //===12===//
+
+
+            ):(
+
+
+                //===13===//
+                // Load the address of a pointer variable
+                mSL_TOS += 1;
+                mSL_TOS[0] = mSL_basePVars[(0|(XopPar / mSL_X_OpShDiv))];
+                //===13===//
+
+
+            );):((xop<15)?(
+
+
+                //===14===//
+                // yield() — release control
+                mSL_TOS += 1;
+                mSL_TOS[0] = 0; // no specific return value
+                mSL_ICount -= rpeat; // deduce rest of count
+                rpeat = 0;
+                mSL_CodeStop = mSL_RC_Yield; // set "yield" flag
+                //===14===//
+
+
+            ):(
+
+
+                //===15===//
+                // wait(x)
+                mSL_WaitDuration = mSL_TOS[0];
+                mSL_ICount -= rpeat; // deduce rest of count
+                rpeat = 0;
+                mSL_CodeStop = mSL_RC_Wait; // set "wait" flag
+                //===15===//
+
+
+            ););););):((xop<24)?((xop<20)?((xop<18)?((xop<17)?(
+
+
+                //===16===//
+                // Push short - parameter becomes the new TOS
+                mSL_TOS += 1;
+                mSL_TOS[0] = 0|(XopPar / mSL_X_OpShDiv);
+                //===16===//
+
+
+            ):(
+
+
+                //===17===//
+                // Push negative short - parameter becomes the new TOS
+                mSL_TOS += 1;
+                mSL_TOS[0] = - (0|(XopPar / mSL_X_OpShDiv));
+                //===17===//
+
+
+            );):((xop<19)?(
+
+
+                //===18===//
+                // Indexing
+                p = mSL_TOS[0];
+                mSL_TOS -= 1;
+                m = mSL_TOS[0];
+                (m >= 0) ? (
+                    mSL_TOS[0] = 0[m + p];
+                ) : (
+                    mSL_TOS[0] = gmem[p - m];
+                );
+                //===18===//
+
+
+            ):(
+
+
+                //===19===//
+                // Index address
+                p = mSL_TOS[0];
+                mSL_TOS -= 1;
+                m = mSL_TOS[0];
+                (m >= 0) ? (
+                    mSL_TOS[0] = m + p;
+                ) : (
+                    mSL_TOS[0] = m - p;
+                );
+                //===19===//
+
+
+            ););):((xop<22)?((xop<21)?(
+
+
+                //===20===//
+                //=====FUNCTION CALL=====
+                // The TOS is supposed to be a func
+                (mSL_baseHighStack[0] === mSL_End_Mark) ? ( // checks near the end of the stack
+                    // AAAA_funAddr =
+                    fn = mSL_TOS[0]; // the func pointer
+                    AAAAA_y_TOS = mSL_TOS;
+                    AAAAA_y_fn = fn;
+                    AAAAA_y_rpeat = rpeat;
+                    // AAAA_fun1 = fn[0];
+                    mSL_TOS -= 1;
+                    par = mSL_TOS[0]; // arg count
+                    ((fn[-2] === mSL_CC_KeyCKod) && (fn[fn[-1]+1] === mSL_CC_KeyKEnd)) ? (
+                        ((par != fn[mSL_CC_ParCnt]) && ((fn[mSL_CC_Flags] & 1) === 0)) ? (
+                            mSL_errX=1621;
+                        ) : (
+                            (mSL_NxtOp === mSL_K_return) ? (
+                                // Doing a tail rec optimisation.
+                                AAAAA_tailrec += 1;
+                                memcpy(mSL_wa2, mSL_baseAddStack, mSL_STK_DSiz); // save previous state
+                                // install new TOS operands
+                                s = par+1;
+                                memcpy(mSL_wSt1, mSL_TOS - par, s); // save parameters in a lage area...
+                                memcpy(mSL_baseTOS, mSL_wSt1, s); // copy parameters at the base stack
+                                mSL_TOS = mSL_baseTOS + par; // add the number of parameters
+                                (fn[mSL_CC_Flags] & 1) ? (
+                                    // This is a variadic func
+                                    mSL_baseLocals = mSL_baseTOS - 1 + par;
+                                    // set the "second" parameter
+                                    mSL_baseLocals[2] = mSL_baseTOS;
+                                    mSL_TOS += 2; // add the two actual parameters of the func
+                                ) : (
+                                    mSL_baseLocals = mSL_baseTOS - 1;
+                                );
+                                mSL_TOS += fn[mSL_CC_LocCnt]; // plus the number of locals
+                                memcpy(mSL_TOS, mSL_wa2, mSL_STK_DSiz); // restore saved information
+                            ) : (
+                                // Classical func call, using the stack...
+                                s = bl = mSL_TOS - par; // points to first argument
+                                (fn[mSL_CC_Flags] & 1) ? (
+                                    // This is a variadic func
+                                    bl += par; // 1st param is the arg count
+                                    bl[1] = s; // 2nd param is the arg list
+                                    mSL_TOS = bl+2; // new TOS value
+                                );
+                                mSL_TOS += fn[mSL_CC_LocCnt];
+                                // Create the "new" baseStack
+                                mSL_TOS[0] = mSL_baseAddStack;
+                                mSL_TOS[1] = mSL_baseLocals;
+                                mSL_TOS[2] = mSL_baseTOS; // return stack pointer
+                                mSL_TOS[3] = mSL_baseCode;
+                                mSL_TOS[4] = mSL_CodePtr;
+                                while (mSL_baseAVars[mSL_baseAVars[-1]-2] === mSL_Fwrd_Link) (
+                                    mSL_baseAVars = mSL_baseAVars[mSL_baseAVars[-1]-1];
+                                    0 ? (
+                                    sprintf(#sfc, "Fct.1A-Forwarding to %d", mSL_baseAVars);
+                                    mSL_log(SysLogBox, #sfc);
+                                    );
+                                );
+                                while (mSL_baseOVars[mSL_baseOVars[-1]-2] === mSL_Fwrd_Link) (
+                                    mSL_baseOVars = mSL_baseOVars[mSL_baseOVars[-1]-1];
+                                    0 ? (
+                                    sprintf(#sfc, "Fct.1O-Forwarding to %d", mSL_baseOVars);
+                                    mSL_log(SysLogBox, #sfc);
+                                    );
+                                );
+                                while (mSL_basePVars[mSL_basePVars[-1]-2] === mSL_Fwrd_Link) (
+                                    mSL_basePVars = mSL_basePVars[mSL_basePVars[-1]-1];
+                                    0 ? (
+                                    sprintf(#sfc, "Fct.1P-Forwarding to %d", mSL_basePVars);
+                                    mSL_log(SysLogBox, #sfc);
+                                    );
+                                );
+                                mSL_TOS[5] = mSL_baseAVars; // save current global table
+                                mSL_TOS[6] = mSL_baseOVars; // save current own table
+                                mSL_TOS[7] = mSL_basePVars; // save current pointers table
+                                mSL_baseLocals = bl - 1; // new base locals
+                                mSL_baseTOS = s;
+                            );
+                            mSL_baseAddStack = mSL_TOS;
+                            mSL_TOS += mSL_STK_DSiz - 1; // New "tos"
+                            mSL_baseCode = fn + fn[mSL_CC_dpCode]; // @ code
+                            mSL_CodePtr = 0;
+                            mSL_NxtOp = mSL_baseCode[0];
+                            // Has the func its own global/own/pointers tables ?
+                            (fn[mSL_CC_GlbTab] != 0) ? mSL_baseAVars = fn[mSL_CC_GlbTab];
+                            while (mSL_baseAVars[mSL_baseAVars[-1]-2] === mSL_Fwrd_Link) (
+                                mSL_baseAVars = fn[mSL_CC_GlbTab] = mSL_baseAVars[mSL_baseAVars[-1]-1];
+                                0 ? (
+                                sprintf(#sfc, "Fct.2A-Forwarding to %d", mSL_baseAVars);
+                                mSL_log(SysLogBox, #sfc);
+                                );
+                            );
+                            (fn[mSL_CC_OwnTab] != 0) ? mSL_baseOVars = fn[mSL_CC_OwnTab];
+                            while (mSL_baseOVars[mSL_baseOVars[-1]-2] === mSL_Fwrd_Link) (
+                                mSL_baseOVars = fn[mSL_CC_OwnTab] = mSL_baseOVars[mSL_baseOVars[-1]-1];
+                                0 ? (
+                                sprintf(#sfc, "Fct.2O-Forwarding to %d", mSL_baseOVars);
+                                mSL_log(SysLogBox, #sfc);
+                                );
+                            );
+                            (fn[mSL_CC_PtrTab] != 0) ? mSL_basePVars = fn[mSL_CC_PtrTab];
+                            while (mSL_basePVars[mSL_basePVars[-1]-2] === mSL_Fwrd_Link) (
+                                mSL_basePVars = fn[mSL_CC_PtrTab] = mSL_basePVars[mSL_basePVars[-1]-1];
+                                0 ? (
+                                sprintf(#sfc, "Fct.2P-Forwarding to %d", mSL_basePVars);
+                                mSL_log(SysLogBox, #sfc);
+                                );
+                            );
+                        );
+                    ) :
+                    ((fn > mSL_Prim_Low) && (fn < mSL_Prim_High)) ? (
+                        fn = fn - mSL_Prim_Low;
+                        argc = (fn >> 12) & 0xff;
+                        (argc === mSL_TOS[0]) ? (
+                            // suppress the TOS argc
+                            mSL_TOS -= 1;
+                            // call the func by providing its code in mSL_NxtOp
+                            mSL_NxtOp = fn & 0xff;
+                            mSL_CodePtr = mSL_PCode;
+                        ) :
+                        (argc === 0xff) ? (
+                            // multiadic func - keep tos
+                            mSL_NxtOp = fn & 0xff;
+                            mSL_CodePtr = mSL_PCode;
+                        ) : (
+                            AAAAA_0622A = argc;
+                            AAAAA_0622B = mSL_TOS[0];
+                            AAAAA_0622M = fn;
+                            mSL_errX=1622;
+                        );
+                    ) :
+                    ((fn > mSL_OP_Low) && (fn < mSL_OP_High)) ? (
+                        argc = 2; // (fn & 0x800000) ? 1 : 2;
+                        par = fn & 0x3FF;
+                        ((argc === mSL_TOS[0]) && (par >= 26) && (par <= 43)) ? (
+                            // suppress the TOS argc
+                            mSL_TOS -= 1;
+                            // call the func by providing its code in mSL_NxtOp
+                            mSL_NxtOp = par;
+                            mSL_CodePtr = mSL_PCode;
+                        ) : (
+                            AAAAA_0623A = argc;
+                            AAAAA_0623B = mSL_TOS[0];
+                            AAAAA_0623M = fn;
+                            AAAAA_0623P = par;
+                            mSL_errX=1623;
+                        );
+                    ) :
+                    (
+                        AAAAA_0620M = fn;
+                        mSL_errX=1620;
+                    );
+                ) : (
+                    mSL_errX=1619; // stack overflow
+                );
+                //===20===//
+
+
+            ):(
+
+
+                //===21===//
+                // Signal an error - and stop execution
+                m = mSL_TOS[0];
+                (mSL_errX === 0) ? (mSL_errX = mSL_TOS[0] = 10000 + (m & 0x7ffff));
+                //===21===//
+
+
+            );):((xop<23)?(
+
+
+                //===22===//
+                // Monadic +
+                0; // one simple instruction - do not change the TOS
+                //===22===//
+
+
+            ):(
+
+
+                //===23===//
+                // Monadic -
+                mSL_TOS[0] = - mSL_TOS[0];
+                //===23===//
+
+
+            );););):((xop<28)?((xop<26)?((xop<25)?(
+
+
+                //===24===//
+                // Multi-adic "sum" — to be redefined later
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                mSL_TOS[0] = mSL_prim_Sum(m, mSL_TOS);
+                //===24===//
+
+
+            ):(
+
+
+                //===25===//
+                // Multi-adic "Array" : build an array from values
+                m = mSL_TOS[0]; mSL_TOS -= m;
+                // p = mSL_malloc(m, mSL_MT_Data);
+                p = mSL_Dyn_Alloc(m, mSL_MT_Data, mSL_StM_FlClear);
+                p ? memcpy(p, mSL_TOS, m);
+                mSL_TOS[0] = p;
+                //===25===//
+
+
+            );):((xop<27)?(
+
+
+                //===26===//
+                // != Not Equal
+                mSL_TOS -= 1;
+                mSL_TOS[0] = mSL_TOS[0] != mSL_TOS[1];
+                //===26===//
+
+
+            ):(
+
+
+                //===27===//
+                // == Equal
+                mSL_TOS -= 1;
+                mSL_TOS[0] = mSL_TOS[0] == mSL_TOS[1];
+                //===27===//
+
+
+            ););):((xop<30)?((xop<29)?(
+
+
+                //===28===//
+                // Greater than or equal
+                mSL_TOS -= 1;
+                mSL_TOS[0] = mSL_TOS[0] >= mSL_TOS[1];
+                //===28===//
+
+
+            ):(
+
+
+                //===29===//
+                // Right Shift
+                mSL_TOS -= 1;
+                mSL_TOS[0] = mSL_TOS[0] >> mSL_TOS[1];
+                //===29===//
+
+
+            );):((xop<31)?(
+
+
+                //===30===//
+                // Less than or equal
+                mSL_TOS -= 1;
+                mSL_TOS[0] = mSL_TOS[0] <= mSL_TOS[1];
+                //===30===//
+
+
+            ):(
+
+
+                //===31===//
+                // Left Shift
+                mSL_TOS -= 1;
+                mSL_TOS[0] = mSL_TOS[0] << mSL_TOS[1];
+                //===31===//
+
+
+            );););););):((xop<48)?((xop<40)?((xop<36)?((xop<34)?((xop<33)?(
+
+
+                //===32===//
+                // Divide — check for zero ?
+                mSL_TOS -= 1;
+                mSL_TOS[0] /= mSL_TOS[1];
+                //===32===//
+
+
+            ):(
+
+
+                //===33===//
+                // Substraction
+                mSL_TOS -= 1;
+                mSL_TOS[0] -= mSL_TOS[1];
+                //===33===//
+
+
+            );):((xop<35)?(
+
+
+                //===34===//
+                // Xclusive Or
+                mSL_TOS -= 1;
+                mSL_TOS[0] = mSL_TOS[0] ~ mSL_TOS[1];
+                //===34===//
+
+
+            ):(
+
+
+                //===35===//
+                // === Equal
+                mSL_TOS -= 1;
+                mSL_TOS[0] = mSL_TOS[0] === mSL_TOS[1];
+                //===35===//
+
+
+            ););):((xop<38)?((xop<37)?(
+
+
+                //===36===//
+                // !== Not Equal
+                mSL_TOS -= 1;
+                mSL_TOS[0] = mSL_TOS[0] !== mSL_TOS[1];
+                //===36===//
+
+
+            ):(
+
+
+                //===37===//
+                // Residute — check for zero ?
+                mSL_TOS -= 1;
+                mSL_TOS[0] %= mSL_TOS[1];
+                //===37===//
+
+
+            );):((xop<39)?(
+
+
+                //===38===//
+                // bit and
+                mSL_TOS -= 1;
+                mSL_TOS[0] &= mSL_TOS[1];
+                //===38===//
+
+
+            ):(
+
+
+                //===39===//
+                // bit Or
+                mSL_TOS -= 1;
+                mSL_TOS[0] = mSL_TOS[0] | mSL_TOS[1];
+                //===39===//
+
+
+            );););):((xop<44)?((xop<42)?((xop<41)?(
+
+
+                //===40===//
+                // Less than
+                mSL_TOS -= 1;
+                mSL_TOS[0] = mSL_TOS[0] < mSL_TOS[1];
+                //===40===//
+
+
+            ):(
+
+
+                //===41===//
+                // Greater than
+                mSL_TOS -= 1;
+                mSL_TOS[0] = mSL_TOS[0] > mSL_TOS[1];
+                //===41===//
+
+
+            );):((xop<43)?(
+
+
+                //===42===//
+                // Product
+                mSL_TOS -= 1;
+                mSL_TOS[0] *= mSL_TOS[1];
+                //===42===//
+
+
+            ):(
+
+
+                //===43===//
+                // Addition
+                mSL_TOS -= 1;
+                mSL_TOS[0] += mSL_TOS[1];
+                //===43===//
+
+
+            ););):((xop<46)?((xop<45)?(
+
+
+                //===44===//
+                mSL_TOS[0] = mSL_symbol(mSL_TOS[0]);
+                //===44===//
+
+
+            ):(
+
+
+                //===45===//
+                // ! op
+                mSL_TOS[0] = ! mSL_TOS[0];
+                //===45===//
+
+
+            );):((xop<47)?(
+
+
+                //===46===//
+                mSL_errX=46;
+                //===46===//
+
+
+            ):(
+
+
+                //===47===//
+                // mSL_TOS -= 1;
+                mSL_TOS[0] = mSL_TOS[0] -1;
+                //===47===//
+
+
+            ););););):((xop<56)?((xop<52)?((xop<50)?((xop<49)?(
+
+
+                //===48===//
+                // +=
+                m = mSL_TOS[0];
+                mSL_TOS -= 1;
+                m[0] += mSL_TOS[0];
+                mSL_TOS[0] = m[0];
+                //===48===//
+
+
+            ):(
+
+
+                //===49===//
+                // -=
+                m = mSL_TOS[0];
+                mSL_TOS -= 1;
+                m[0] -= mSL_TOS[0];
+                mSL_TOS[0] = m[0];
+                //===49===//
+
+
+            );):((xop<51)?(
+
+
+                //===50===//
+                // *=
+                m = mSL_TOS[0];
+                mSL_TOS -= 1;
+                m[0] *= mSL_TOS[0];
+                mSL_TOS[0] = m[0];
+                //===50===//
+
+
+            ):(
+
+
+                //===51===//
+                // /=
+                m = mSL_TOS[0];
+                mSL_TOS -= 1;
+                m[0] /= mSL_TOS[0];
+                mSL_TOS[0] = m[0];
+                //===51===/
+
+
+            ););):((xop<54)?((xop<53)?(
+
+
+                //===52===//
+                // %=
+                m = mSL_TOS[0];
+                mSL_TOS -= 1;
+                m[0] %= mSL_TOS[0];
+                mSL_TOS[0] = m[0];
+                //===52===//
+
+
+            ):(
+
+
+                //===53===//
+                // &=
+                m = mSL_TOS[0];
+                mSL_TOS -= 1;
+                m[0] &= mSL_TOS[0];
+                mSL_TOS[0] = m[0];
+                //===53===//
+
+
+            );):((xop<55)?(
+
+
+                //===54===//
+                // |=
+                m = mSL_TOS[0];
+                mSL_TOS -= 1;
+                m[0] |= mSL_TOS[0];
+                mSL_TOS[0] = m[0];
+                //===54===//
+
+
+            ):(
+
+
+                //===55===//
+                // ~=  Xor assign
+                m = mSL_TOS[0];
+                mSL_TOS -= 1;
+                m[0] ~= mSL_TOS[0];
+                mSL_TOS[0] = m[0];
+                //===55===//
+
+
+            );););):((xop<60)?((xop<58)?((xop<57)?(
+
+
+                //===56===//
+                // is string
+                m = mSL_TOS[0];
+                mSL_TOS[0] = (m >= mSL_Str_First) && (m <= mSL_Str_Last) && (mSL_Str_Use[m - mSL_Str_First] == 1);
+                //===56===//
+
+
+            ):(
+
+
+                //===57===//
+                // size
+                m = mSL_TOS[0];
+                mSL_TOS[0] = ((m > 2) && ((s = m[-1]) >= 0) && ((ty = m[-2]) >= mSL_MKey_min)
+                        && (ty <= mSL_MKey_max) && (s == m[s])
+                        && (m[s+1] == (ty ~ mSL_CC_Chksum))) ? s : -1;
+                //===57===//
+
+
+            );):((xop<59)?(
+
+
+                //===58===//
+                // is block
+                m = mSL_TOS[0];
+                mSL_TOS[0] =
+                    (m > 2) && ((s = m[-1]) >= 0) && ((ty = m[-2]) >= mSL_MKey_min)
+                    && (ty <= mSL_MKey_max) && (s == m[s])
+                    && (m[s+1] == (ty ~ mSL_CC_Chksum));
+                //===58===//
+
+
+            ):(
+
+
+                //===59===//
+                mSL_TOS -= 2;
+                mSL_TOS[0] = mSL_memcpy(mSL_TOS[0], mSL_TOS[1], mSL_TOS[2]);
+                //===59===//
+
+
+            ););):((xop<62)?((xop<61)?(
+
+
+                //===60===//
+                mSL_TOS += 1;
+                mSL_TOS[0] = mSL_Str_Tmp();  // strtmp()
+                //===60===//
+
+
+            ):(
+
+
+                //===61===//
+                // thread(operation, p1, p2, ..., pn)
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                mSL_TOS[0] = mSL_thread_ops(m, mSL_TOS);
+                //===61===//
+
+
+            );):((xop<63)?(
+
+
+                //===62===//
+                // edn(string, value)  — edit "best" a number inside a string
+                m = mSL_TOS[0];
+                mSL_TOS -= 1;
+                mSL_TOS[0] = mSL_edit_value(mSL_TOS[0], m)
+                //===62===//
+
+
+            ):(
+
+
+                //===63===//
+                mSL_errX=63;
+                //===63===//
+
+
+            ););););););):((xop<100)?((xop<82)?((xop<73)?((xop<68)?((xop<66)?((xop<65)?(
+
+
+                //===64===//
+                mSL_errX=64;
+                //===64===//
+
+
+            ):(
+
+
+                //===65===//
+                mSL_TOS[0] = sin(mSL_TOS[0]);
+                //===65===//
+
+
+            );):((xop<67)?(
+
+
+                //===66===//
+                mSL_TOS[0] = cos(mSL_TOS[0]);
+                //===66===//
+
+
+            ):(
+
+
+                //===67===//
+                mSL_TOS[0] = tan(mSL_TOS[0]);
+                //===67===//
+
+
+            ););):((xop<70)?((xop<69)?(
+
+
+                //===68===//
+                mSL_TOS[0] = asin(mSL_TOS[0]);
+                //===68===//
+
+
+            ):(
+
+
+                //===69===//
+                mSL_TOS[0] = acos(mSL_TOS[0]);
+                //===69===//
+
+
+            );):((xop<71)?(
+
+
+                //===70===//
+                mSL_TOS[0] = atan(mSL_TOS[0]);
+                //===70===//
+
+
+            ):((xop<72)?(
+
+
+                //===71===//
+                mSL_TOS -= 1;
+                mSL_TOS[0] = max(mSL_TOS[0], mSL_TOS[1]);
+                //===71===//
+
+
+            ):(
+
+
+                //===72===//
+                mSL_TOS -= 1;
+                mSL_TOS[0] = min(mSL_TOS[0], mSL_TOS[1]);
+                //===72===//
+
+
+            ););););):((xop<77)?((xop<75)?((xop<74)?(
+
+
+                //===73===//
+                mSL_TOS -= 1;
+                mSL_TOS[0] = atan2(mSL_TOS[0], mSL_TOS[1]);
+                //===73===//
+
+
+            ):(
+
+
+                //===74===//
+                mSL_TOS -= 1;
+                mSL_TOS[0] = pow(mSL_TOS[0], mSL_TOS[1]);
+                //===74===//
+
+
+            );):((xop<76)?(
+
+
+                //===75===//
+                mSL_TOS[0] = sqr(mSL_TOS[0]);
+                //===75===//
+
+
+            ):(
+
+
+                //===76===//
+                mSL_TOS[0] = sqrt(mSL_TOS[0]);
+                //===76===//
+
+
+            ););):((xop<79)?((xop<78)?(
+
+
+                //===77===//
+                mSL_TOS[0] = exp(mSL_TOS[0]);
+                //===77===//
+
+
+            ):(
+
+
+                //===78===//
+                mSL_TOS[0] = log(mSL_TOS[0]);
+                //===78===//
+
+
+            );):((xop<80)?(
+
+
+                //===79===//
+                mSL_TOS[0] = abs(mSL_TOS[0]);
+                //===79===//
+
+
+            ):((xop<81)?(
+
+
+                //===80===//
+                mSL_TOS[0] = sign(mSL_TOS[0]);
+                //===80===//
+
+
+            ):(
+
+
+                //===81===//
+                mSL_TOS[0] = log10(mSL_TOS[0]);
+                //===81===//
+
+
+            );););););):((xop<91)?((xop<86)?((xop<84)?((xop<83)?(
+
+
+                //===82===//
+                mSL_TOS[0] = floor(mSL_TOS[0]);
+                //===82===//
+
+
+            ):(
+
+
+                //===83===//
+                mSL_TOS[0] = ceil(mSL_TOS[0]);
+                //===83===//
+
+
+            );):((xop<85)?(
+
+
+                //===84===//
+                mSL_TOS[0] = invsqrt(mSL_TOS[0]);
+                //===84===//
+
+
+            ):(
+
+
+                //===85===//
+                mSL_TOS[0] = mSL_TOS[0] * frand();
+                //===85===//
+
+
+            ););):((xop<88)?((xop<87)?(
+
+
+                //===86===//
+                mSL_TOS += 1;
+                mSL_TOS[0] = time();
+                //===86===//
+
+
+            ):(
+
+
+                //===87===//
+                mSL_TOS += 1;
+                mSL_TOS[0] = time_precise() + timeD;
+                //===87===//
+
+
+            );):((xop<89)?(
+
+
+                //===88===//
+                mSL_TOS += 1;
+                mSL_TOS[0] = srate;
+                //===88===/
+
+
+            ):((xop<90)?(
+
+
+                //===89===//
+                mSL_TOS += 1;
+                mSL_TOS[0] = num_ch;
+                //===89===//
+
+
+            ):(
+
+
+                //===90===//
+                mSL_TOS += 1;
+                mSL_TOS[0] = tempo;
+                //===90===//
+
+
+            ););););):((xop<95)?((xop<93)?((xop<92)?(
+
+
+                //===91===//
+                // int
+                mSL_TOS[0] |= 0;
+                //===91===//
+
+
+            ):(
+
+
+                //===92===//
+                // ~ monadic : bit not
+                mSL_TOS[0] = 0xFFFFFFFF ~ mSL_TOS[0];
+                //===92===//
+
+
+            );):((xop<94)?(
+
+
+                //===93===//
+                // gmem[x] => gmem access
+                mSL_TOS[0] = gmem[mSL_TOS[0]];
+                //===93===//
+
+
+            ):(
+
+
+                //===94===//
+                // Power
+                mSL_TOS -= 1;
+                mSL_TOS[0] ^= mSL_TOS[1];
+                //===94===//
+
+
+            ););):((xop<97)?((xop<96)?(
+
+
+                //===95===//
+                // gmem[x] = y
+                mSL_TOS -= 1;
+                gmem[mSL_TOS[1]] = mSL_TOS[0];
+                //===95===//
+
+
+            ):(
+
+
+                //===96===//
+                // max memory address
+                mSL_TOS += 1;
+                mSL_TOS[0] = __memtop();
+                //===96===//
+
+
+            );):((xop<98)?(
+
+
+                //===97===//
+                // is int(x)
+                m = mSL_TOS[0]; mSL_TOS[0] = (m === floor(m));
+                //===97===//
+
+
+            ):((xop<99)?(
+
+
+                 //===98===//
+                // is fun
+                m = mSL_TOS[0];
+                mSL_TOS[0] =
+                    ((m[-2] === mSL_CC_KeyCKod) && (m[m[-1]+1] === mSL_CC_KeyKEnd))
+                    ||
+                    ((m > mSL_Prim_Low) && (m < mSL_Prim_High));
+                //===98===//
+
+
+            ):(
+
+
+                //===99===//
+                // compile("string")  //??? A réécrire
+                // q = 0; // clear any previous code
+                while (mSL_baseAVars[mSL_baseAVars[-1]-2] === mSL_Fwrd_Link)  (
+                    mSL_baseAVars = mSL_baseAVars[mSL_baseAVars[-1]-1];
+                    0 ? (
+                        sprintf(#sfc, "Str. Forwarding to %d", mSL_baseAVars);
+                        mSL_log(SysLogBox, #sfc);
+                    );
+                );
+                while (mSL_baseOVars[mSL_baseOVars[-1]-2] === mSL_Fwrd_Link)  (
+                    mSL_baseOVars = mSL_baseOVars[mSL_baseOVars[-1]-1];
+                    0 ? (
+                        sprintf(#sfc, "Str. Forwarding to %d", mSL_baseOVars);
+                        mSL_log(SysLogBox, #sfc);
+                    );
+                );
+                while (mSL_basePVars[mSL_basePVars[-1]-2] === mSL_Fwrd_Link)  (
+                    mSL_basePVars = mSL_basePVars[mSL_basePVars[-1]-1];
+                    0 ? (
+                        sprintf(#sfc, "Str. Forwarding to %d", mSL_basePVars);
+                        mSL_log(SysLogBox, #sfc);
+                    );
+                );
+                mSL_TOS[1] = mSL_baseAVars;
+                mSL_TOS[2] = mSL_baseOVars;
+                mSL_TOS[3] = mSL_basePVars;
+                AAAAA_baseCode0 = mSL_baseCode;
+                AAAAA_errX0 = mSL_errX ? mSL_errX : mSL_errC;
+                mSL_compile(-1, -1, mSL_TOS[0], 3); // compile as func ; do not clear structures
+                mSL_errX = mSL_errX ? mSL_errX : mSL_errC;
+                ///AAAAA_errX1 = mSL_errX;
+                ///AAAAA_cod = mSL_cod ;
+                ///AAAAA_cod0 = mSL_cod[0];
+                ///AAAAA_baseCode1 = mSL_baseCode;
+                AAAAA_x_errX = mSL_errX;
+
+
+
+                ((mSL_errX === 0) && (mSL_main_cod != 0) && (mSL_main_cod[-2] === mSL_CC_KeyCKod)) ? (
+                    AAAAA_x_codpt = m = mSL_main_cod ;
+                    AAAAA_x_codCheck = (m[m[-1]+1] === mSL_CC_KeyKEnd);
+                    AAAAA_x_argcnt = m[mSL_CC_ParCnt];
+                    AAAAA_x_flags = m[mSL_CC_Flags];
+                    AAAAA_x_rpeat = rpeat;
+                    while (mSL_baseAVars[mSL_baseAVars[-1]-2] === mSL_Fwrd_Link)  (
+                        mSL_baseAVars = mSL_baseAVars[mSL_baseAVars[-1]-1];
+                        0 ? (
+                            sprintf(#sfc, "Cp. Forwarding to %d", mSL_baseAVars);
+                            mSL_log(SysLogBox, #sfc);
+                        );
+                    );
+                    while (mSL_baseOVars[mSL_baseOVars[-1]-2] === mSL_Fwrd_Link)  (
+                        mSL_baseOVars = mSL_baseOVars[mSL_baseOVars[-1]-1];
+                        0 ? (
+                            sprintf(#sfc, "Cp. Forwarding to %d", mSL_baseOVars);
+                            mSL_log(SysLogBox, #sfc);
+                        );
+                    );
+                    while (mSL_basePVars[mSL_basePVars[-1]-2] === mSL_Fwrd_Link)  (
+                        mSL_basePVars = mSL_basePVars[mSL_basePVars[-1]-1];
+                        0 ? (
+                            sprintf(#sfc, "Cp. Forwarding to %d", mSL_basePVars);
+                            mSL_log(SysLogBox, #sfc);
+                        );
+                    );
+                    mSL_TOS[0] = mSL_main_cod;
+                ) : (
+                    mSL_TOS[0] = (mSL_errX = (mSL_errX ? mSL_errX : mSL_errC ? mSL_errC : 1999));
+                );
+                //===99===//
+
+
+            ););););););):((xop<118)?((xop<109)?((xop<104)?((xop<102)?((xop<101)?(
+
+
+                //===100===//
+                // malloc(size, type) or malloc(size)
+                m = mSL_TOS[0];
+                (m === 1) ? (
+                    mSL_TOS -= 1;
+                    r = mSL_Dyn_Alloc(mSL_TOS[0], 'data', mSL_StM_FlClear);
+                ) :
+                (m === 2) ? (
+                    mSL_TOS -= 2;
+                    r = mSL_Dyn_Alloc(mSL_TOS[0], mSL_TOS[1], mSL_StM_FlClear);
+                ) :
+                (m === 3) ? (
+                    mSL_TOS -= 3;
+                    r = mSL_Dyn_Alloc(mSL_TOS[0], mSL_TOS[1], mSL_TOS[2]);
+                ) :
+                (
+                    mSL_errX=1100; // incorrect malloc arity
+                );
+                ((mSL_errX === 0) && (r != 0))? (
+                        // we were able to find a block
+                        mSL_TOS[0] = r;
+                        (mfc += 2) > mfcmax ? (
+                            // stop thread temporary (as in a yield)
+                            mSL_ICount -= rpeat; // deduce rest of count
+                            rpeat = 0;
+                        );
+                ) :
+                ((mSL_errX === 1032) || ((mSL_errX === 1033)) ? (
+                    (mSL_Dyn_Tr & 2) ? ( sprintf(#sfc, "[[Error %04d - Starting a GC]]", mSL_errX); mSL_log(SysLogBox, #sfc); );
+                        mSL_errX = 0; // ignore the error once
+                        // we need a GC !
+                        mSL_TOS += m; // restore stack.
+                        // build a restart op as "malloc_retry"
+                        mSL_NxtOp = 115; // malloc retry code
+                        mSL_CodePtr = mSL_PCode; // be ready to continue
+                        // stop thread temporary (as in a yield)
+                        mSL_ICount -= rpeat; // deduce rest of count
+                        rpeat = 0;
+                        mSL_CodeStop = mSL_RC_WAITGC; // set "yield" flag
+                        // run a GC
+                        gc_run_phaz = 1;
+                        atomic_add(mSL_Lock,1);
+                        atomic_add(mSL_loc_tim,2);
+                    );
+                );
+                //===100===//
+
+
+            ):(
+
+
+                //===101===//
+                // mfree(data)
+                // mSL_TOS[0] = mSL_mfree(mSL_TOS[0]);
+                mSL_TOS[0] = mSL_Dyn_Free(mSL_TOS[0]);
+                (mfc += 1) > mfcmax ? (
+                    // stop thread temporary (as in a yield)
+                    mSL_ICount -= rpeat; // deduce rest of count
+                    rpeat = 0;
+                );
+                //===101===//
+
+
+            );):((xop<103)?(
+
+
+                //===102===//
+                // stralloc()
+                mSL_TOS += 1;
+                mSL_TOS[0] = mSL_Str_Alloc();
+                //===102===//
+
+
+            ):(
+
+
+                //===103===//
+                // strfree(string)
+                mSL_TOS[0] = mSL_Str_Free(mSL_TOS[0]);
+                //===103===//
+
+
+            ););):((xop<106)?((xop<105)?(
+
+
+                //===104===//
+                // get(obj, ref)
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                mSL_TOS[0] = mSL_get(m, mSL_TOS);
+                //===104===//
+
+
+            ):(
+
+
+                //===105===//
+                // set(obj, ref, value [,flgs]) => multiadic
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                mSL_TOS[0] = mSL_set(m, mSL_TOS);
+                //===105===//
+
+
+            );):((xop<107)?(
+
+
+                //===106===//
+                // strlen(string)
+                mSL_TOS[0] = strlen(mSL_TOS[0]);
+                //===106===//
+
+
+            ):((xop<108)?(
+
+
+                //===107===//
+                // irand(par)
+                mSL_TOS[0] = irand(mSL_TOS[0]);
+                //===107===//
+
+
+            ):(
+
+
+                //===108===//
+                mSL_TOS -= 1;
+                mSL_TOS[0] = strcpy(mSL_TOS[0], mSL_TOS[1]);
+                //===108===//
+
+
+            ););););):((xop<113)?((xop<111)?((xop<110)?(
+
+
+                //===109===//
+                mSL_TOS -= 1;
+                mSL_TOS[0] = strcat(mSL_TOS[0], mSL_TOS[1]);
+                //===109===//
+
+
+            ):(
+
+
+                //===110===//
+                mSL_TOS -= 1;
+                mSL_TOS[0] = strcmp(mSL_TOS[0], mSL_TOS[1]);
+                //===110===//
+
+
+            );):((xop<112)?(
+
+
+                //===111===//
+                mSL_TOS -= 1;
+                mSL_TOS[0] = stricmp(mSL_TOS[0], mSL_TOS[1]);
+                //===111===//
+
+
+            ):(
+
+
+                //===112===//
+                mSL_TOS -= 2;
+                mSL_TOS[0] = str_getchar(mSL_TOS[0], mSL_TOS[1], mSL_TOS[2]);
+                //===112===//
+
+
+            ););):((xop<115)?((xop<114)?(
+
+
+                //===113===//
+                mSL_TOS -= 3;
+                mSL_TOS[0] = str_setchar(mSL_TOS[0], mSL_TOS[1], mSL_TOS[2], mSL_TOS[3]);
+                //===113===//
+
+
+            ):(
+
+
+                //===114===//
+                // sprintf(str, fmt, x, x, x, x, x...
+                m = mSL_TOS[0]; // arg count
+                (m >= 1) ? (
+                    k = mSL_TOS[- m]; // the string
+                    (k === 0) ? (k = mSL_Str_Tmp(););
+                );
+                (m === 2) ? (
+                    mSL_TOS -= 2;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1]);
+                ) :
+                (m === 3) ? (
+                    mSL_TOS -= 3;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2]);
+                ) :
+                (m === 4) ? (
+                    mSL_TOS -= 4;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3]);
+                ) :
+                (m === 5) ? (
+                    mSL_TOS -= 5;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4]);
+                ) :
+                (m === 6) ? (
+                    mSL_TOS -= 6;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5]);
+                ) :
+                (m === 7) ? (
+                    mSL_TOS -= 7;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5], mSL_TOS[6]);
+                ) :
+                (m === 8) ? (
+                    mSL_TOS -= 8;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5], mSL_TOS[6], mSL_TOS[7]);
+                ) :
+                (m === 9) ? (
+                    mSL_TOS -= 9;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5], mSL_TOS[6], mSL_TOS[7], mSL_TOS[8]);
+                ) :
+                (m === 10) ? (
+                    mSL_TOS -= 10;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5], mSL_TOS[6], mSL_TOS[7], mSL_TOS[8], mSL_TOS[9]);
+                ) :
+                (m === 11) ? (
+                    mSL_TOS -= 11;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5],
+                                mSL_TOS[6], mSL_TOS[7], mSL_TOS[8], mSL_TOS[9], mSL_TOS[10]);
+                ) :
+                (m === 12) ? (
+                    mSL_TOS -= 12;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5],
+                                mSL_TOS[6], mSL_TOS[7], mSL_TOS[8], mSL_TOS[9], mSL_TOS[10], mSL_TOS[11]);
+                ) :
+                (m === 13) ? (
+                    mSL_TOS -= 13;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5],
+                                mSL_TOS[6], mSL_TOS[7], mSL_TOS[8], mSL_TOS[9], mSL_TOS[10], mSL_TOS[11],
+                                mSL_TOS[12]);
+                ) :
+                (m === 14) ? (
+                    mSL_TOS -= 14;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5],
+                                mSL_TOS[6], mSL_TOS[7], mSL_TOS[8], mSL_TOS[9], mSL_TOS[10], mSL_TOS[11],
+                                mSL_TOS[12], mSL_TOS[13]);
+                ) :
+                (m === 15) ? (
+                    mSL_TOS -= 15;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5],
+                                mSL_TOS[6], mSL_TOS[7], mSL_TOS[8], mSL_TOS[9], mSL_TOS[10], mSL_TOS[11],
+                                mSL_TOS[12], mSL_TOS[13], mSL_TOS[14]);
+                ) :
+                (m === 16) ? (
+                    mSL_TOS -= 16;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5],
+                                mSL_TOS[6], mSL_TOS[7], mSL_TOS[8], mSL_TOS[9], mSL_TOS[10], mSL_TOS[11],
+                                mSL_TOS[12], mSL_TOS[13], mSL_TOS[14], mSL_TOS[15]);
+                ) :
+                (m === 17) ? (
+                    mSL_TOS -= 17;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5],
+                                mSL_TOS[6], mSL_TOS[7], mSL_TOS[8], mSL_TOS[9], mSL_TOS[10], mSL_TOS[11],
+                                mSL_TOS[12], mSL_TOS[13], mSL_TOS[14], mSL_TOS[15], mSL_TOS[16]);
+                ) :
+                (m === 18) ? (
+                    mSL_TOS -= 18;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5],
+                                mSL_TOS[6], mSL_TOS[7], mSL_TOS[8], mSL_TOS[9], mSL_TOS[10], mSL_TOS[11],
+                                mSL_TOS[12], mSL_TOS[13], mSL_TOS[14], mSL_TOS[15], mSL_TOS[16], mSL_TOS[17]);
+                ) :
+                (m === 19) ? (
+                    mSL_TOS -= 19;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5],
+                                mSL_TOS[6], mSL_TOS[7], mSL_TOS[8], mSL_TOS[9], mSL_TOS[10], mSL_TOS[11],
+                                mSL_TOS[12], mSL_TOS[13], mSL_TOS[14], mSL_TOS[15], mSL_TOS[16], mSL_TOS[17],
+                                mSL_TOS[18]);
+                ) :
+                (
+                    sprintf(#sfc, "***** sprintf. PC %d", m);
+                    mSL_log(SysLogBox, #sfc);
+                    mSL_errX=1104; // incorrect sprintf
+                );
+                //===114===//
+
+
+            );):((xop<116)?(
+
+
+                //===115===//
+                // malloc_retry
+                (mSL_Dyn_Tr & 2) ? ( mSL_log(SysLogBox, "[[Retrying 'malloc' after a GC]]"); );
+                m = mSL_TOS[0];
+                r = 0;
+                (m === 1) ? (
+                    mSL_TOS -= 1;
+                    // r = mSL_malloc(mSL_TOS[0], 'data');
+                    r = mSL_Dyn_Alloc(mSL_TOS[0], 'data', mSL_StM_FlClear);
+                ) :
+                (m === 2) ? (
+                    mSL_TOS -= 2;
+                    // r = mSL_malloc(mSL_TOS[0], mSL_TOS[1]);
+                    r = mSL_Dyn_Alloc(mSL_TOS[0], mSL_TOS[1], mSL_StM_FlClear);
+                );
+                mSL_TOS[0] = r;
+                // mSL_log(SysLogBox, "    —- malloc retried");
+                //===115===//
+
+
+            ):((xop<117)?(
+
+
+                //===116===//
+                // Run Garbage collector gc()
+                mSL_errX=116;
+                //===116===//
+
+
+            ):(
+
+
+                //===117===//
+                // action : execute an internal action
+                m = mSL_TOS[0]; // parameter count
+                mSL_TOS -= m;
+                (m >= 1) ? (
+                    // unique code ?
+                    bl = mSL_TOS[0];
+                    0 ? (
+                        sprintf(#sfc, "117. Action %d", bl);
+                        mSL_log(SysLogBox, #sfc);
+                    );
+                    // is this a data bloc ?
+                    ((m === 1) && (bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min) && (ty <= mSL_MKey_max)
+                        && (s === bl[s]) && (bl[s+1] === (ty ~ mSL_CC_Chksum))) ? (
+                            mSL_TOS[0] = Simple_Action(bl-1);
+                    ) :
+                    (bl != 0) ? (
+                        mSL_TOS[0] = Simple_Action(bl, mSL_TOS+1);
+                    );
+                );
+                //===117===//
+
+
+            );););););):((xop<127)?((xop<122)?((xop<120)?((xop<119)?(
+
+
+                //===118===//
+                // SetTab : modify/update an internal table of the Game Master
+                m = mSL_TOS[0]; // parameter count
+                mSL_TOS -= m;
+                bl = mSL_TOS[0];
+                // is this a data bloc ?
+                ((m === 1) && (bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min) && (ty <= mSL_MKey_max)
+                    && (s === bl[s]) && (bl[s+1] === (ty ~ mSL_CC_Chksum))) ? (
+                        mSL_TOS[0] = Set_Table(bl);
+                ) : (
+                    mSL_errX=118;
+                );
+                //===118===//
+
+
+            ):(
+
+
+                //===119===//
+                mSL_errX=119;
+                //===119===//
+
+
+            );):((xop<121)?(
+
+
+                //===120===//
+                // Jump always
+                mSL_CodePtr = mSL_NxtOp; // jump
+                mSL_NxtOp = mSL_baseCode[mSL_CodePtr];
+                //===120===//
+
+
+            ):(
+
+
+                //===121===//
+                // Jump always, pop
+                mSL_CodePtr = mSL_NxtOp; // jump
+                mSL_NxtOp = mSL_baseCode[mSL_CodePtr];
+                mSL_TOS -= 1; // Pop
+                //===121===//
+
+
+            ););):((xop<124)?((xop<123)?(
+
+
+                //===122===//
+                // Jump on True, Pop True
+                (mSL_TOS[0]) ? (
+                    mSL_CodePtr = mSL_NxtOp; // jump on true
+                    mSL_TOS -= 1; // Pop
+                ) : (
+                    mSL_CodePtr += 1;
+                );
+                mSL_NxtOp = mSL_baseCode[mSL_CodePtr];
+                //===122===//
+
+
+            ):(
+
+
+                //===123===//
+                // Jump on True, Pop False
+                (mSL_TOS[0]) ? (
+                    mSL_CodePtr = mSL_NxtOp; // jump on true
+                ) : (
+                    mSL_TOS -= 1; // Pop
+                    mSL_CodePtr += 1;
+                );
+                mSL_NxtOp = mSL_baseCode[mSL_CodePtr];
+                //===123===//
+
+
+            );):((xop<125)?(
+
+
+                //===124===//
+                // Jump on false, Pop
+                (!mSL_TOS[0]) ? (
+                    mSL_CodePtr = mSL_NxtOp; // jump
+                ) : (
+                    mSL_CodePtr += 1;
+                );
+                mSL_NxtOp = mSL_baseCode[mSL_CodePtr];
+                mSL_TOS -= 1; // Pop
+                //===124===//
+
+
+            ):((xop<126)?(
+
+
+                //===125===//
+                //  mSL_K_jmpOnFalsePT
+                (mSL_TOS[0]) ? (
+                    mSL_TOS -= 1; // Pop if true
+                    mSL_CodePtr += 1;
+                ) : (
+                    mSL_CodePtr = mSL_NxtOp; // jump on false
+                );
+                mSL_NxtOp = mSL_baseCode[mSL_CodePtr];
+                //===125===//
+
+
+            ):(
+
+
+                //===126===//
+                // Jump on negative
+                (mSL_TOS[0] < 0) ? (
+                    mSL_CodePtr = mSL_NxtOp; // jump on true
+                ) : (
+                    mSL_CodePtr += 1;
+                );
+                mSL_NxtOp = mSL_baseCode[mSL_CodePtr];
+                //===126===//
+
+
+            ););););):((xop<132)?((xop<129)?((xop<128)?(
+
+
+                //===127===//
+                // Push num - parameter becomes the new TOS
+                mSL_TOS += 1;
+                mSL_TOS[0] = mSL_NxtOp;
+                mSL_CodePtr += 1;
+                mSL_NxtOp = mSL_baseCode[mSL_CodePtr];
+                //===127===//
+
+
+            ):(
+
+
+                //===128===//
+                // Multi-adic "mSL_play_ops"
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_play_ops(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_play_ops(m, mSL_TOS);
+                );
+                //===128===//
+
+
+            );):((xop<130)?(
+
+
+                //===129===//
+                // Multi-adic "mSL_event_ops"
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data bloc, pass it to the func
+                    r = mSL_event_ops(p[-1], p);
+                ) : (
+                    r = mSL_event_ops(m, mSL_TOS);
+                );
+                (SchedmSLEvWait) ? (
+                    // func has determined that we have to wait for an event
+                    mSL_TOS += m; // restore stack.
+                    mSL_NxtOp = 129; //  retry code
+                    mSL_CodePtr = mSL_PCode; // be ready to continue
+                    // stop thread temporary (as in a yield)
+                    mSL_ICount -= rpeat; // deduce rest of count
+                    rpeat = 0;
+                    mSL_CodeStop = SchedmSLEvWait; // set "exit" reason
+                    SchedmSLEvWait = 0;
+                    (FlagsTbVals[Flgs_Thrds] & 2) ? ( // trace flags
+                        sprintf(#s, "Waiting : thrd: %d ", mSL_active_Thread);
+                        mSL_log(SysLogBox, #s);
+                    );
+                ) : (
+                    mSL_TOS[0] = r;
+                );
+                //===129===//
+
+
+            ):((xop<131)?(
+
+
+                //===130===//
+                // Multi-adic "mSL_call_ops"
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_call_ops(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_call_ops(m, mSL_TOS);
+                );
+                //===130===//
+
+
+            ):(
+
+
+                //===131===//
+                // Multi-adic "mSL_players_ops"
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_players_ops(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_players_ops(m, mSL_TOS);
+                );
+                //===131===//
+
+
+            );););):((xop<134)?((xop<133)?(
+
+
+                //===132===//
+                // Multi-adic "mSL_gui_ops"
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_gui_ops(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_gui_ops(m, mSL_TOS);
+                );
+                //===132===//
+
+
+            ):(
+
+
+                //===133===//
+                // Multi-adic "mSL_133" — to be redefined later
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                mSL_TOS[0] = mSL_133(m, mSL_TOS);
+                //===133===//
+
+
+            );):((xop<135)?(
+
+
+                //===134===//
+                // Multi-adic "mSL_134" — to be redefined later
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                mSL_TOS[0] = mSL_134(m, mSL_TOS);
+                //===134===/
+
+
+            ):((xop<136)?(
+
+
+                //===135===//
+                // Multi-adic "mSL_135" — to be redefined later
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                mSL_TOS[0] = mSL_135(m, mSL_TOS);
+                //===135===//
+
+
+            ):(
+
+
+                //===136===//
+                sprintf(#s, "Z136. Xop = %d XopPar = %d", Xop, XopPar);
+                mSL_log(SysLogBox, #s);
+                mSL_errX=136;
+                //===136===//
+
+
+            ););););););););
+
+
+
+
+        );
+
+        mSL_max_TOS = max(mSL_max_TOS, mSL_TOS);
+        // xxtrace(mSL_PCode, mSL_TOS - mSL_current_stack);
+
+
+        1 ? (
+            (!GMW()) ? (
+                mSL_errX = 1666; // damaged 0 address
+                mSL_log(SysLogBox, "Locations 0-7 modified !");
+                GMW0("X-1666");
+            );
+        );
+    );
+    //// End of Inner Loop
+
+
+    // Check the various cases
+
+    (mSL_errX != 0) ? (
+        mSL_ICount -= rpeat; // deduce rest of count
+        rpeat = 0;
+        mSL_CodeStop = mSL_RC_XErr; // error "stop" flag
+
+        SchedLockAll = 1; // debug mode, temporary lock all processes
+        atomic_add(mSL_Lock,1); // lock every one
+
+
+        sprintf(#sfc, "[[Error %04d - Stopping processes]]", mSL_errX);
+        mSL_log(SysLogBox, #sfc);
+        flagShowMemory = 1;
+    );
+
+    // );
+    (mfc > 0) ? flagShowMemory = 1;
+    mSL_ICount -= rpeat;
+    mSL_result = mSL_TOS[0];
+);
+
+

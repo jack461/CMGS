@@ -1,0 +1,214 @@
+/*
+    Generic MIDI Input plug-in main code
+*/
+@init
+
+
+// Static memory management : starts after the serial block
+mSL_StM_Init(idx); // init static memory
+mSL_Str_Init(#strFirst, #strLast); // allocate strings for strings allocator
+mSL_Str_TInit(#wstrFirst, #wstrLast); // allocate strings for temporary strings
+
+
+//====== Init "ui-lib-JJ.jsfx-inc" ======
+rest = mSL_StM_BlockStart('ulib');
+GMTrack = get_host_placement();
+// Graphic set-up
+// starting at +X protects location "0" from program errors...
+ui_end = ui_setup(rest);
+mSL_StM_BlockEnd(ui_end); // stop temporary
+//====== Init "ui-lib-JJ.jsfx-inc" ======
+gfxInit();
+
+
+
+//==== Init "ui-lib-JJ-GUI.jsfx-inc"
+ui_lib_JJ_GUI_init(1);
+
+
+// Create a MIDI buffer
+midibsize = 65536;
+midibuf = make_array(midibsize);
+
+miditabsiz = 8192;
+tabPos =  make_array(miditabsiz);
+tabLen =  make_array(miditabsiz);
+
+// Use the 2000X String Array
+strA = #xstrFirst;
+strSiz = #xstrLast - strA; // # of strings
+//ii = 0; loop (strSiz, strcpy(strA+ii, ""); ii += 1; );
+
+strIdx = 0;
+
+UAdd = Undef;
+UId = Undef;
+
+
+wdth = 8; // number of MIDI bytes to display per line
+
+second = ticker = 0;
+xn = xv = 0;
+msg1 = msg2 = msg3 = 0;
+kmd = par1 = par2 = 0;
+xlen = idx = siz = ip = w = 0;
+offset = 0;
+
+#msg = "";
+#edt = "";
+
+
+UType=uMIDI_In;
+checkUnit();
+ucbMIDInit(uMIDI_MGR_In);
+
+strIdx = (strIdx+1) % strSiz;
+strcpy(strA+strIdx,"Started");
+
+
+
+
+
+
+
+
+
+@block
+
+
+
+// every second or so...
+(second != gmem[timeSecOfDay]) ? (
+    second = gmem[timeSecOfDay];
+
+
+    // every tick : check our Unit number
+    (ticker != gmem[timeTick]) ? (
+        ticker = gmem[timeTick];
+
+        // check our Unit number
+        checkUnit();
+
+        GMTrack = get_host_placement();
+        ucbMIDInit(uMIDI_MGR_In);
+
+        AAAA_UId = UId;
+        AAAA_UAdd = UAdd;
+    );
+
+
+
+);
+
+
+
+AAAA_cbChkUM = gmem[UAdd+cbChkUM];
+AAAA_cbChkGP = gmem[UAdd+cbChkGP];
+
+ucbMIDIEventsCMP1();
+
+while ((recvlen = midirecv_buf(offset,midibuf,midibsize)) > 0) (
+    xlen = recvlen; // min(recvlen, 800);  // limit length in case of large sysex
+    idx = ip = 0; siz = wdth;
+    u = midibuf[0] & 0xF0;
+    // Copy the message to our tab.
+    while (xlen > 0) (
+        tabPos[ip] = idx; w = min(xlen, siz);
+        tabLen[ip] = w;
+        idx += w; xlen -= w;
+        (siz == wdth) ? siz -= 1;
+        ip += 1;
+    );
+    // Send the message to the GM
+    (xlen <= 3) ? (
+        (Minp = ucbMIDIEntGet(MTypPCfree)) ? (
+            gmem[Minp] = midibuf[0];
+            gmem[Minp+1] = midibuf[1];
+            gmem[Minp+2] = midibuf[2];
+            gmem[Minp+3] = time_precise() + gmem[timeDelta];
+        );
+    );
+    while (ip > 0) (
+        ip -= 1;
+        idx = tabPos[ip];
+        strcpy(#msg, ((idx != 0) ? " --- " : ""));
+        w = tabLen[ip];
+        loop (w,
+            sprintf(#edt, "%02X ", midibuf[idx]);
+            strcat(#msg, #edt);
+            idx += 1;
+        );
+        t = time_precise();
+        sprintf(#edt, "   %7.3f ", t%1000 + (t-floor(t)));
+        strcat(#msg, #edt);
+        strIdx = (strIdx+1) % strSiz;
+        strcpy(strA+strIdx,#msg);
+    );
+    ui_GFXdoNow |= 1;
+);
+
+
+ucbMIDIEventsCMP2();
+
+AAAA_ucbMECurr = ucbMECurr; // trace
+AAAA_ucbMFree = ucbMFree;
+
+
+
+
+@gfx
+
+
+function show_MIDI_Infos()
+local (uix_jneed, uix_jmini, h1)
+(
+    h1 = uix_jBoxHeight(10);
+
+    control_group("MIDI In Info");
+    ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+
+    cnt = 0|((ui_height()-6)/ui_jd_tboxs);
+    ncl = max(1, 0|((ui_width()-10)/max(uix_req_w+5, ui_jd_tboxs*wdth*0.86)));
+    pt = strIdx;
+    swd = 1/ncl;
+    loop(ncl,
+        ui_new_column(swd);
+        loop(cnt,  ui_show(strA+pt); pt = (pt+strSiz-1)%strSiz;);
+        swd = 0;
+        );
+
+    ui_pop();
+);
+
+
+
+must_do_gfx() ? (
+
+    gfx_executed += 1; // just a trace
+
+    update_theme();
+
+    currScreen = ui_screen();
+    ui_Xtime_period = 1; // refresh screen every second
+
+
+    ui_font();
+
+    my_menu_bar(uix_jG_menuscr);
+
+
+    //SCREEN
+    ui_screen() == "Main" ? (
+        show_MIDI_Infos();
+    ) :
+
+    //SCREEN--DEFAULT
+    (
+        control_system();
+    );
+
+
+
+);
+
+

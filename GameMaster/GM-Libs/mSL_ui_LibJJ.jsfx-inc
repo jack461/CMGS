@@ -1,0 +1,713 @@
+/*
+
+
+ Optimize the graphic section so we execute it only when necessary
+
+ Set the appropriate color for some specific use and manage packed RGB
+
+ Add a menu control
+
+ Modifiers in "ui_jpad_lmods"
+    1: left mouse button
+    2: right mouse button
+    4: Control key (Windows), Command key (OSX)
+    8: Shift key
+    16: Alt key (Windows), Option key (OSX)
+    32: Windows key (Windows), Control key (OSX)
+    64: middle mouse button
+
+    define the "Mac" vision :
+*/
+
+
+@init
+
+/*
+
+     IMPORTANT !
+
+     Your first instruction MUST be :
+
+    res = ui_setup(X); // 1, or more : start of used memory
+
+     This will use the plugin memory, starting at address X,
+     up to but non including address res
+
+*/
+
+/*
+    Optimize the graphic section so we execute it only when necessary
+
+    Typical :
+    In "@init" or "@slider" or "@block" :
+
+    set "ui_Xframe_period = 4;" to execute the "@gfx" section only every 4 frames
+
+    and/or
+
+    set "ui_Xtime_period = 2.5;" to execute the "@gfx" section every 2.5 seconds
+
+    and/or
+
+    set "ui_XFlags = ui_XonLMC | ui_XonKeyb;" to execute the "@gfx" section when left mouse button
+                                     is clicked or released, or when a char is typed
+
+    and/or
+
+    set "ui_GFXdoNow = 1;" to execute once the "@gfx" section ASAP
+
+
+    then in the graphic section, do :
+
+
+must_do_gfx() ? (
+
+    // do here the graphic stuff...
+
+    ui_start("main"); // etc...
+    // ...
+);
+
+*/
+
+/// Utilities
+
+
+
+ui_jstring_separator = '|'; // default string separator
+ui_jbtype = 0; // position of the block type for allocated structures
+ui_jbsize = 1; // position of the block size for allocated structures
+ui_jbres = 2; // typical position of the control result
+ui_jbmmods = 3; // mouse modifiers at the moment of interaction
+ui_jbtmask = 0x3f; // mask for the block type
+ui_jbfmask = 0xffffffc0; // mask for the block flags
+ui_jmake_arraymax = 0x1FFFFF;
+ui_jmouse_cap = 0;
+ui_j_UnixTime = 0;
+ui_j_cumul_time = 0;
+ui_jmouse_buttons = 0;
+bLeftMouse = 1;
+bRightMouse = 2;
+bcmdKey = 4;
+bshiftKey = 8;
+baltKey = 16;
+bctrlKey = 32;
+bMiddleMouse = 64;
+
+// set bit "v" (left to right numbering)
+function ui_jflag(v) ( (v<0)||(v>32) ? 0 : 1 << (0|v); );
+
+
+/*
+   Explode a "sep" separated substring list "str" into an array "tab" of size "tsize"
+
+   ex:
+       str_explode(array,5,"abc|de|f|g3|d553", '|');
+*/
+function str_explode(tab,tsize,str,sep)
+local (slg, cp, it, is, dst)
+(
+    slg = strlen(str);
+    cp = it = is = 0;
+    while ((is<slg) && (it<tsize)) (
+        (sep == str_getchar(str,is)) ? (
+            dst = tab[it];
+            (dst === 0) ? dst = mSL_Str_Alloc(); // this will be a "permanent" string
+            tab[it] = strcpy_substr(dst,str,cp,is-cp);
+            cp = is+1; it += 1;
+        );
+        is += 1;
+    );
+    (it < tsize) ? (
+        dst = tab[it];
+        (dst === 0) ? dst = mSL_Str_Alloc();
+        tab[it] = strcpy_substr(dst,str,cp,slg-cp);
+    );
+);
+
+/*
+    Count the number of chars equal to "ch" in the string "str"
+*/
+function str_ch_count(str, ch)
+local (is, ct)
+(
+    lng = strlen(str);
+    is = ct = 0;
+    while (is < lng) (
+        ct += str_getchar(str,is) == ch;
+        is += 1;
+    );
+    ct;
+);
+
+/*
+    Round a number to some decimal point
+        ui_jround(x, 0.01); // rounds x to 2 decimals
+*/
+function ui_jround(num, dec) local(sign)
+(
+    sign = (num >= 0) ? 1 : -1;
+    num = num * sign;
+    dec = (dec < 0.00001) ? 0.00001 : (dec > 1000) ? 1000 : dec;
+    sign * dec * (0|(0.5 + num/dec));
+);
+
+// Round to integer
+function ui_jround(num)
+(
+    0|(num + ((num > 0) ? 0.5 : (num < 0) ? -0.5 : 0));
+);
+
+function ui_textnumber(number1, number2, format)
+local(text) (
+        sprintf(#uix_textnumber, format ? format : "%f, %f", number1, number2);
+        ui_text(#uix_textnumber);
+);
+
+
+function ui_textnumber(number1, number2, number3, format)
+local(text) (
+        sprintf(#uix_textnumber, format ? format : "%f, %f, %f", number1, number2, number3);
+        ui_text(#uix_textnumber);
+);
+
+
+function ui_textnumber(number1, number2, number3, number4, format)
+local(text) (
+        sprintf(#uix_textnumber, format ? format : "%f %f %f %f", number1, number2, number3, number4);
+        ui_text(#uix_textnumber);
+);
+
+function ui_point_in(p_x, p_y) (
+	p_x >= ui_left() && p_x < ui_right() && p_y >= ui_top() && p_y < ui_bottom();
+);
+///--------------------------------------///
+///----------  color Utilities ----------///
+
+/*
+   Some utilities to manage packed RGB colors
+*/
+
+// This is to manage the classical RGB 24 bits codification
+function uix_pack_color(r,g,b) (((r&0xff)<<16) + ((g&0xff)<<8)  + (b&0xff);) ;
+
+// A 32 bits config with a 8 bits alpha channel added
+function uix_pack_color(r,g,b,a) (
+    ((a <= 0) || (a >= 1)) ? a = 0;
+    ((r&0xff)<<16) + ((g&0xff)<<8) + (b&0xff) + ((0|(a*255))<<24);
+);
+
+uix_pblack = 0; // packed black
+uix_pwhite = 0xffffff; // packed white
+uix_pgreywhite = 0x999999; // packed grey white
+
+// Provide a contrast (white or black) color for packed color c
+// Based on the BT709 standard
+function ui_pcontrast(c) (
+    ((0.212671 * ((c >> 16) & 0xff) + 0.715160 * ((c >> 8) & 0xff) + 0.072169 * (c & 0xff)) > 128) ? uix_pblack : uix_pwhite;
+);
+
+// turn a packed color to grey
+function ui_pgreyed(c) local(x) (
+    x = 0|(0.212671 * ((c >> 16) & 0xff) + 0.715160 * ((c >> 8) & 0xff) + 0.072169 * (c & 0xff));
+    (x << 16) | (x << 8) | x;
+);
+
+// Set the graphic color variables values (in 0-1) from a 24 bits packed color
+function gfx_set_pcolor(c) (
+    gfx_r = ((c >> 16) & 0xff)/0xff;
+    gfx_g = ((c >> 8) & 0xff)/0xff;
+    gfx_b = (c & 0xff)/0xff;
+);
+
+// Set the graphic color variables values (in 0-1) from a 24 bits packed color
+function gfx_set_pcolor(c, a) (
+    gfx_r = ((c >> 16) & 0xff)/0xff;
+    gfx_g = ((c >> 8) & 0xff)/0xff;
+    gfx_b = (c & 0xff)/0xff;
+    gfx_a = a;
+);
+
+// Set current color from a 24 bits packed color
+function ui_pcolor(c,a) ( // 24 bit color, [0 .. 1] transparency
+    uix_drawconfig_current[0/*uix_DRAWCONFIG:RED*/] = (c >> 16) & 0xff;
+    uix_drawconfig_current[1/*uix_DRAWCONFIG:GREEN*/] = (c >> 8) & 0xff;
+    uix_drawconfig_current[2/*uix_DRAWCONFIG:BLUE*/] = c & 0xff;
+    uix_drawconfig_current[3/*uix_DRAWCONFIG:ALPHA*/] = a;
+    uix_setgfxcolor();
+    c;
+);
+
+// Set current color from a 32 bits packed color
+function ui_pcolor(c) local (a) (  // 32 bit color, including alpha channel
+    uix_drawconfig_current[0/*uix_DRAWCONFIG:RED*/] = (c >> 16) & 0xff;
+    uix_drawconfig_current[1/*uix_DRAWCONFIG:GREEN*/] = (c >> 8) & 0xff;
+    uix_drawconfig_current[2/*uix_DRAWCONFIG:BLUE*/] = c & 0xff;
+    a = (c >> 24) & 0xff; a == 0 ? a = 1 : a = a/255 ;
+    uix_drawconfig_current[3/*uix_DRAWCONFIG:ALPHA*/] = a;
+    uix_setgfxcolor();
+    c;
+);
+
+////  Conversions packed_RGB to HSV and back
+
+//// Algorithms from Eugene Vishnevsky (http://www.cs.rit.edu/~ncs/color/t_convert.html)
+
+//      packed_rgb to h[0 360]_s[0 1]_v[0 1]
+function prgb_to_hsv(c, h*, s*, v*)
+local (r, g, b, mi, ma, del)
+(
+    r = ((c >> 16) & 0xff)/0xff; g = ((c >> 8) & 0xff)/0xff; b = (c & 0xff)/0xff;
+    mi = min(r, min(g,b)); ma = max(r, max(g,b));
+    del = ma - mi;
+    h = s = 0; v = ma;
+    (ma > 0) ? (
+          s = del / ma;
+          (r >= ma) ? (h = (g-b)/del;) : (g >= ma) ? (h = 2 + (b-r)/del;) : (h = 4 + (r-g)/del;);
+          h = h * 60; (h < 0) ? (h += 360;);
+    );
+);
+
+//    h[0 360]_s[0 1]_v[0 1] to packed_rgb
+function hsv_to_prgb(h, s, v)
+local (i, f, p, q, t, r, g, b)
+(
+    (s == 0) ? (
+        r = g = b = v;
+    ) : (
+        h = (h < 0) ? h + 360 : (h >= 360) ? h - 360 : h;
+        h = h/60; i = floor(h); f = h-i;
+        p = v * ( 1 - s );
+        q = v * ( 1 - s * f );
+        t = v * ( 1 - s * ( 1 - f ) );
+        (i == 0) ? (
+            r = v; g = t; b = p;
+        ) : (i == 1) ? (
+            r = q; g = v; b = p;
+        ) : (i == 2) ? (
+            r = p; g = v; b = t;
+        ) : (i == 3) ? (
+            r = p; g = q; b = v;
+        ) : (i == 4) ? (
+            r = t; g = p; b = v;
+        ) : (
+            r = v; g = p; b = q;
+        );
+    );
+    // try to avoid rounding errors
+    r = 0|(r*255+0.5); g = 0|(g*255+0.5); b = 0|(b*255+0.5);
+    (r << 16) | (g << 8) | b;
+);
+
+
+// Change a color
+//    !!! uses global variables uix_jcolor_h, uix_jcolor_s, uix_jcolor_v
+function ui_pcol_change(c)
+(
+    prgb_to_hsv(c, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+    /*
+         insert here transformations on hue, saturation and value
+    */
+    hsv_to_prgb(uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+);
+
+// Fade a color by multiplying saturation
+// and value by numbers < 1
+//    ex:
+//        new_color = ui_pcol_fade(my_color, 0.8, 0.7);
+//    !!! uses global variables uix_jcolor_h, uix_jcolor_s, uix_jcolor_v
+function ui_pcol_fade(c,s,v)
+(
+     prgb_to_hsv(c, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+     hsv_to_prgb(uix_jcolor_h, min(1, max(0, s*uix_jcolor_s)), min(1, max(0, v*uix_jcolor_v)));
+);
+
+// Provide a complementary color
+function ui_pcol_comp(c)
+local (h)
+(
+     prgb_to_hsv(c, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+     h = uix_jcolor_h + 180;
+     hsv_to_prgb(h, uix_jcolor_s, uix_jcolor_v);
+);
+
+// Derive a color from a given one
+//     c is the color
+//     R is a number, a combination of
+//          1 : clicked
+//          2 : selected
+//          4 : disabled
+//          8 : Greyed
+//          16 : Lighted
+function ui_pcolor_derived(c, R)
+(
+    (R != 0) ? (
+        prgb_to_hsv(c, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+        (R & 4) ? (
+             uix_jcolor_h = uix_jcolor_h + 35;
+             uix_jcolor_s = min(0.75, max (0.4, uix_jcolor_s));
+             // uix_jcolor_v = min(0.7, max (0.3, uix_jcolor_v));
+             // uix_jcolor_v = (uix_jcolor_v > 0.5) ? uix_jcolor_v - 0.4 : uix_jcolor_v - 0.2;
+             uix_jcolor_v = 0.65 * min(0.7, max (0.3, uix_jcolor_v));
+        );
+        (R & 8) ? (
+            uix_jcolor_s = uix_jcolor_s * 0.65;
+            uix_jcolor_v = uix_jcolor_v * 0.65;
+        );
+        (R & 16) ? (
+            uix_jcolor_s = uix_jcolor_s * 1.9;
+            uix_jcolor_v = uix_jcolor_v * 1.9;
+        );
+        (R & 2) ? (
+             uix_jcolor_h = uix_jcolor_h + 30;
+             uix_jcolor_s = uix_jcolor_s * 1.2;
+             uix_jcolor_v = uix_jcolor_v * 1.1;
+        );
+        (R & 1) ? (
+             uix_jcolor_h = uix_jcolor_h + 70;
+             uix_jcolor_s = max(0.3,uix_jcolor_s * 0.7);
+             uix_jcolor_v = max(0.2,uix_jcolor_v * 0.8);
+        );
+        uix_jcolor_h >= 360 ? uix_jcolor_h -= 360;
+        c = hsv_to_prgb(uix_jcolor_h, min(1, max(0, uix_jcolor_s)), min(1, max(0, uix_jcolor_v)));
+    );
+    c;
+);
+
+// getting color from current theme as a packed color
+function uix_control_pcolor_from_theme(x, y, a) local(old_dest, r, g, b, old_x, old_y) (
+        old_x = gfx_x;
+        old_y = gfx_y;
+        old_dest = gfx_dest;
+
+        gfx_dest = uix_control_theme_buffer;
+        gfx_x = x;
+        gfx_y = y;
+        gfx_getpixel(r, g, b);
+
+        gfx_dest = old_dest;
+        gfx_x = old_x;
+        gfx_y = old_y;
+
+        uix_pack_color(r*255, g*255, b*255, a);
+);
+
+function uix_control_pcolor_from_theme(x, y) (
+        uix_control_pcolor_from_theme(x, y, 1);
+);
+
+/*
+  A "work in progress" !
+
+  Provide the appropriate color for the purpose given by the parameter
+     "text" : plain text color
+     "draw" : plain draw color
+  much more to be added :
+     "text-grey" : inactive text color
+     "draw-grey" : inactive draw color
+*/
+function uix_theme_pcolor(why)
+local (c)
+(
+    why == "text" ? (
+        uix_control_theme == 0/*uix_THEME:DEFAULT*/ ? (
+            c = uix_pblack;
+        ) :
+        uix_control_theme == 1/*uix_THEME:BLACK_AND_WHITE*/ ? (
+            c = uix_black_text;
+        ) :
+        uix_control_theme == 2/*uix_THEME:TRON*/ ? (
+            c = uix_pwhite;
+        ) :
+        uix_control_theme == 3/*uix_THEME:BITMAP_SIMPLE*/ ? (
+            c = uix_control_pcolor_from_theme(151,30,1);
+        ) :
+        c = uix_pblack;
+    ) :
+    why == "draw" ? (
+        uix_control_theme == 0/*uix_THEME:DEFAULT*/ ? (
+            c = uix_pack_color(102,102,102,0.5);
+        ) :
+        uix_control_theme == 1/*uix_THEME:BLACK_AND_WHITE*/ ? (
+            // c = uix_pack_color(255,255,255);
+            // c = uix_pgreywhite;
+            uix_black_draw = c = uix_black_border; // uix_pack_color(89,78,67);
+        ) :
+        uix_control_theme == 2/*uix_THEME:TRON*/ ? (
+            c = uix_pack_color(131,184,206); // grey pale blue
+        ) :
+        uix_control_theme == 3/*uix_THEME:BITMAP_SIMPLE*/ ? (
+            c = uix_control_pcolor_from_theme(151,30,1);
+        ) :
+        c = uix_pblack;
+    ) :
+    why == "bg" ? (
+        uix_control_theme == 0/*uix_THEME:DEFAULT*/ ? (
+            c = uix_pack_color(70,70,70);
+        ) :
+        uix_control_theme == 1/*uix_THEME:BLACK_AND_WHITE*/ ? (
+            // c = uix_pack_color(255,255,255);
+            c = uix_pgreywhite;
+        ) :
+        uix_control_theme == 2/*uix_THEME:TRON*/ ? (
+            c = uix_pack_color(131,184,206); // grey pale blue
+        ) :
+        uix_control_theme == 3/*uix_THEME:BITMAP_SIMPLE*/ ? (
+            c = uix_control_pcolor_from_theme(31,30,1);
+        ) :
+        c = uix_pwhite;
+    ) :
+    why == "bg-enabled" ? (
+        uix_control_theme == 0/*uix_THEME:DEFAULT*/ ? (
+            c = uix_pack_color(64,102,140);
+        ) :
+        uix_control_theme == 1/*uix_THEME:BLACK_AND_WHITE*/ ? (
+            // c = uix_pack_color(255,128,64);
+            // c = uix_pack_color(225,128,64);
+            c = uix_black_light;
+        ) :
+        uix_control_theme == 2/*uix_THEME:TRON*/ ? (
+            c = uix_pack_color(195,255,255); // grey pale blue
+        ) :
+        uix_control_theme == 3/*uix_THEME:BITMAP_SIMPLE*/ ? (
+            c = uix_control_pcolor_from_theme(951,30,1);
+        ) :
+        c = uix_pwhite;
+    ) :
+    why == "border" ? (
+        uix_control_theme == 0/*uix_THEME:DEFAULT*/ ? (
+            c = uix_pack_color(102,102,102,0.5);
+        ) :
+        uix_control_theme == 1/*uix_THEME:BLACK_AND_WHITE*/ ? (
+            // c = uix_pack_color(255,255,255);
+            // c = uix_pack_color(165,98,48);
+            c = uix_black_border;
+        ) :
+        uix_control_theme == 2/*uix_THEME:TRON*/ ? (
+            c = uix_pack_color(128,128,128); // grey pale blue
+        ) :
+        uix_control_theme == 3/*uix_THEME:BITMAP_SIMPLE*/ ? (
+            c = uix_control_pcolor_from_theme(151,30,0.25);
+        ) :
+        c = uix_pwhite;
+    ) :
+    c = uix_pblack;  // default
+
+    c; // return the color
+);
+
+/*
+    Fill an array with a color gradient from col1 to col2,
+    with a middle point with saturation s_mid and value v_mid
+
+    "ctab" is the array to fillÒ
+    "count" is the size of the array
+    "col1" and "col2" are packed RGB colors
+
+    Uses the shortest hue path from col1 to col2
+    if s_mid or v_mid is -1, uses a linear variation of the corresponding parameter
+    if s_mid or v_mid is in [0 1], uses this value for the mid point of the gradient
+
+    ex:
+         function set_pcolors_array(tab, 20, 0x327C14, 0xDA3287, 0.6, 0.8);
+*/
+function set_pcolors_array(ctab, count, col1, col2, s_mid, v_mid)
+local (H1, H2, H3, S1, S2, S3, V1, V2, V3, Hdel, Sdel, Vdel, i, k, u, m)
+(
+    (count >= 3) ? (
+        prgb_to_hsv(col1, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+        H1 = uix_jcolor_h; S1 = uix_jcolor_s; V1 = uix_jcolor_v;
+        prgb_to_hsv(col2, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+        H2 = uix_jcolor_h; S2 = uix_jcolor_s; V2 = uix_jcolor_v;
+        s_mid = s_mid < 0 ? (S1+S2)/2 : max(0, min(1,s_mid));
+        v_mid = v_mid < 0 ? (V1+V2)/2 : max(0, min(1,v_mid));
+        // compute Hdel
+        u = H2 - H1;
+        Hdel = (((u <= 180) && (u >= -180)) ? u : (u > 0 ? u - 360 : u + 360))
+                    / (count - 1);
+        m = 0 | ((count+1)/2); // mid point
+        i = 1; k = m-1; Sdel = (s_mid - S1)/k; Vdel = (v_mid - V1)/k;
+        H3 = H1; S3 = S1; V3 = V1;
+        loop (k,
+            H3 += Hdel; S3 += Sdel; V3 += Vdel;
+            ctab[i] = hsv_to_prgb(H3, S3, V3); i+= 1;
+        );
+        !(count & 1) ? (
+            H3 += Hdel; // 2nd middle point ; same S & V
+            ctab[i] = hsv_to_prgb(H3, S3, V3); i+= 1;
+        );
+        k = count - i; Sdel = (S2 - S3)/k; Vdel = (V2 - V3)/k;
+        loop (k-1,
+            H3 += Hdel; S3 += Sdel; V3 += Vdel;
+            ctab[i] = hsv_to_prgb(H3, S3, V3); i+= 1;
+        );
+        ctab[0] = col1;
+        ctab[count-1] = col2;
+    ) : (
+        count > 1 ? ctab[count-1] = col2;
+        count > 0 ? ctab[0] = col1;
+    );
+);
+
+/*
+   Fill an array with one color
+*/
+function set_pcolors_array(ctab, count, col) local (ii)
+(
+    loop (count,
+        ctab[ii] = col; ii += 1;
+    );
+);
+
+
+
+//// Graphic Utilities
+
+function gfx_fillrrect(x,y,w,h,r)
+(
+    r = 0 | r;
+    x = 0 | x; y = 0 | y; w = 0 | w; h = 0 | h;
+    gfx_rect(x,y+r,w,h-2*r);
+    gfx_rect(x+r,y,w-2*r,h);
+    gfx_circle(x+r, y+r, r, 1);
+    gfx_circle(x+w-r-1, y+r, r, 1);
+    gfx_circle(x+r, y+h-r-1, r, 1);
+    gfx_circle(x+w-r-1, y+h-r-1, r, 1);
+);
+
+function gfx_fillrcart(x,y,w,h)
+local (r)
+(
+    h = 2*(0|(h/2));
+    w = 2*(0|(w/2));
+    x = 0 | x; y = 0 | y;
+    (w > h) ? (
+        r = (h/2);
+        gfx_rect(x+r,y,w-2*r,h+1);
+        gfx_circle(x+r, y+r, r, 1);
+        gfx_circle(x+w-r-1, y+h-r, r, 1);
+    ) : (
+        r = (w/2);
+        gfx_rect(x,y+r,w+1,h-2*r);
+        gfx_circle(x+r, y+r, r, 1);
+        gfx_circle(x+w-r, y+h-r-1, r, 1);
+    ) ;
+);
+
+
+//// Graphic part execution management
+
+// Execute flags
+ui_XonLMC = 1; // execute on left mouse button clicked
+ui_XonRMC = 2; // execute on right mouse button clicked
+ui_XonCMC = 64; // execute on center mouse button clicked
+ui_XonAMC = ui_XonLMC | ui_XonRMC | ui_XonCMC ; // execute on any mouse button clicked
+ui_XonKeyb = 0x400; // exec. on keyboard input
+ui_Xframe_period = 0x1000000; // a large number of frames
+ui_Xtime_period = 0x1000000; // a large number of seconds
+
+ui_XGdNCnt = 0;
+ui_XGIntCnt = 0;
+ui_XUsrCnt = 0;
+ui_jerror_code = 0;
+
+// A default setting
+ui_XFlags = ui_XonAMC | ui_XonKeyb; // exec on any mouse button clicked or on key event
+ui_GFXdoNow = 1; // will do it at least once
+ui_XlocDoNow = 1; // will do it at least once
+
+// Some shared variables
+ui_jcolor_draw = -1;
+ui_jcolor_text = -1;
+ui_jcolor_draw_bg = -1;
+ui_jcolor_border = -1;
+ui_jcolor_error = 0xC62D42;
+ui_jcolor_active = 0x119358;
+
+// Should we execute now the graphic part of the plug-in ?
+//   ui_XFlags explains the reasons why we should do it
+//
+function must_do_gfx()
+local (R, prev_mouse_buttons, frame_count, prev_unix_time, prev_gfx_w, prev_gfx_h)
+(
+    // Get our start time
+    ui_j_UnixTime = time_precise();
+    // local variables keep previous status of mouse buttons, unix time, plug-in size, etc.
+    (ui_GFXdoNow != 0) ? ( ui_XGdNCnt += 1; );
+    (ui_XlocDoNow != 0) ? ( ui_XGIntCnt += 1; );
+
+    ui_XlocDoNow |= ui_GFXdoNow; // "merge" internal & external requests
+
+    // check frame_count
+    ((frame_count -= 1) < 0) ? (frame_count = ui_Xframe_period; ui_XlocDoNow |= 1; );
+
+    // check time limit
+    (ui_j_UnixTime - prev_unix_time >= ui_Xtime_period) ? (prev_unix_time = ui_j_UnixTime; ui_XlocDoNow |= 1; );
+
+    // if we accept keyboard interactions
+    (ui_XonKeyb & ui_XFlags) ? (uix_latestchar || ui_key_next()) ? ui_XlocDoNow |= 1;
+
+    ui_jmouse_cap = mouse_cap;
+    prev_mouse_buttons = ui_jmouse_buttons; ui_jmouse_buttons = ui_jmouse_cap & ui_XFlags;
+
+    // Plug-in Resized ?
+    ui_Resized = (gfx_w != prev_gfx_w) || (gfx_h != prev_gfx_h);
+    // return value :
+    R =   ui_Resized ||  ui_jmouse_buttons  // mouse buttons pressed
+        || (ui_jmouse_buttons != prev_mouse_buttons) // takes care of mouse buttons released
+    ;
+    (R != 0) ? ( ui_XUsrCnt += 1; ) ;
+    R |= ui_XlocDoNow;
+    ui_GFXdoNow = 0; // reset external requests
+    ui_XlocDoNow = max(0, ui_XlocDoNow-1); // update internal flags
+    prev_gfx_w = gfx_w; prev_gfx_h = gfx_h;
+
+    R; // return value
+);
+
+
+function ui_end_do_gfx()
+(
+    ui_j_cumul_time += time_precise() - ui_j_UnixTime;
+);
+
+function ui_show_error(altcolor)
+(
+    (ui_jerror_code != 0) ? (
+        ui_split_toptext(-1);
+            ui_pcolor(ui_jcolor_error);
+            ui_fill();
+            ui_pcolor(uix_pwhite);
+            sprintf(#errstr, "Error %d - Type %d - Reason %d", ui_jerror_code & 0xff, (ui_jerror_code >> 8) & 0xff, ui_jerror_code >> 16);
+            ui_text(#errstr);
+        ui_pop();
+    ) : (
+        ui_split_toptext(-1);
+            ui_pcolor(altcolor);
+            ui_fill();
+        ui_pop();
+    );
+);
+
+
+
+///-------------------------------------///
+///---------  System Utilities  --------///
+
+uix_protect_word = 0xCAFEFADE ;
+uix_protect_type = 0x1E;
+
+
+function make_bit_arrays()
+local (il, ib)
+(
+    uix_bit_set = make_array(32);
+    uix_bit_mask = make_array(32);
+    il = 0; ib = 1;
+    loop(32,
+        uix_bit_set[il] = ib;
+        uix_bit_mask[il] = -1 ~ ib;
+        il += 1; ib = ib << 1;
+    );
+);
+

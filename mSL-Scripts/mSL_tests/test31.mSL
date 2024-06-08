@@ -1,0 +1,65 @@
+/*
+    Gauche/Droite par slider "Dyn. xpan"
+*/
+
+// déclaration de toutes les variables
+var s, k, clip, stat, act0, act1, U;
+
+s = stralloc();
+k;
+
+// ceci fournit le numéro du clip sélectionné (in clip selection, by right-click)
+clip = get(`gm, `cellAlt);
+
+// trace
+sprintf(s, "Test 31 - Start - Clip %04d", clip); GM_Log(s);
+
+// récupération de quelques variables système 
+stat = get(`gm, `cbStat);
+
+sprintf(s, "    vars: %d, clip=%04d", stat, clip); GM_Log(s);
+
+// jeu du clip. `unit demande à récupérer comme résultat l'adresse de l'unité (le player) qui a joué le clip
+U = play(`clip, clip, `spmode, 21, `plmode, 0, `PMod, 12, `unit);
+
+sprintf(s, "Unit = %d", U); GM_Log(s);
+
+wait(0.1); // Delai obligatoire après "play"
+
+// Définition des fade-in/fade-out lors des variations du slider
+//   - ici, f = 0.001, il faut donc 1/f samples pour passer de 0 à 1, on est à 48kHz,
+//     la durée des fades est donc 1/(f * 48000), soit environ 21 ms
+//   - act1 est le code: "exécuter une opération interne du player", 
+//   - l'opération est 1, qui veut dire "définir les incréments de fade-in et fade-out"
+call(`player, U, `Imm,  3); // Reset globalvalues
+call(`player, U, `Imm,  1, 0.001, 0.001);
+call(`player, U, `Dly,  5); // let us play
+
+// Attente du début effectif de la lecture
+while ((k = gmem[U + stat ]) === 3) (
+   wait(0.01);
+);
+
+wait(0.1);
+k = gmem[U + stat];
+// Le status doit être "busy playing", soit 258
+sprintf(s, "    status = %d", k); GM_Log(s);
+
+wait(0.1);
+
+// Lancement de l'action sur le player. Dans l'ordre:
+// `player (mot clef), U (adresse du player), 
+// `KmdImm (commande "immédiate"),
+//  1, 0 (son initial à gauche, rien à droite), 2 (facteur de répétition d'une boucle interne),
+//  0 (code de l'action: on utilise le slider "Dyn.X-Pan")
+call(`player, U, `Imm, 4, 1, 0, 2, 0);
+
+wait(180);
+
+// Stop repeat
+player(U, `Dly,  8); // stop repeat
+
+// Fin de l'opération
+GM_Log("Test 31 - End", " ");
+
+strfree(s);

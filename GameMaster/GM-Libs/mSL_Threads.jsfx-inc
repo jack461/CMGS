@@ -1,0 +1,265 @@
+//====== THREADS MANAGEMENT ======//
+mSL_active_Thread = 0;
+mSL_active_SchedEnt = 0;
+mSL_dispatch_entry = 0;
+mSL_active_Task = 0;
+mSL_Thread_mark = 0;
+mSL_Thread_Seq_Idt = 0; // Unique thread idt for next allocation
+
+// Thread error
+function thread_error(thrd, errx, aux)
+local (ent, k)
+(
+    // check thread validity
+    (thrd[-2] === mSL_THR_KeyStrt) ? ( // half verification about the thread
+        ent = thrd[mSL_THR_SchedEnt];
+        ((ent < SchedFirstEnt) || (ent > SchedLastEnt)) ? (
+            sprintf(#uuu, "*** ERR: thread: %g  Error:%g Inv. disp. ref: %g aux: %g", thrd, errx, ent, aux);
+        ) : (
+            k = SchedPid[ent];
+            sprintf(#uuu, "*** ERR: thread: %d  Error:%d Ent: %d  %d  [%d/%d]",
+                    thrd, errx, ent, aux, (floor(k/SchedNEmax)), (k & SchedNMask));
+        );
+    ) : (
+        sprintf(#uuu, "*** ERR: thread: %g  Error:%g  Invalid thread   [%g]", thrd, errx, aux);
+    );
+    mSL_log(SysLogBox, #uuu);
+);
+
+
+
+// Recycle a free message
+function msg_recycle(msg, ind)
+local(res)
+(
+    ((SchETypeMess === mSL_Mbl_check(msg)) && (!SchedIsInList(SchedRcyclPts, msg))) ? (
+        res = SchedListSize(SchedRcyclPts);
+        mSL_bl_clear(msg);
+        SchedInsertTail(SchedRcyclPts, msg, SchETypeBlock);
+        0 ? (sprintf(#uuu, "  --> msg recycle  [%d] %d    %d => %d", msg, ind, res, SchedListSize(SchedRcyclPts)); mSL_log(SysLogBox, #uuu););
+    );
+);
+
+
+// Return an available thread, create a new one if necessary
+function getNewThread()
+local (ent, thrd, k, w)
+(
+    thrd = ent = 0; // default result
+    (SchedListEmpty(SchedInactPts)) ? (
+        // No free thread available
+        0 ? (
+            sprintf(#s2, "SCHED1A   ");
+            mSL_log(SysLogBox, #s2);
+        );
+        (SchedListNonEmpty(SchedFreePts)) ? (
+            // try to create one
+            thrd = mSL_make_thread();
+            0 ? (
+                sprintf(#s2, "SCHED1B  %d ", thrd);
+                mSL_log(SysLogBox, #s2);
+            );
+            (thrd > 0) ? (
+                ent = SchedDetachHead(SchedFreePts);
+
+                0 ? (
+                    b = SchedFreePts;
+                    sprintf(#s2, "SCHED2  %d ", ent);
+                    mSL_log(SysLogBox, #s2);
+                );
+                //thrd[mSL_THR_SchedEnt] = ent; // refer the thread to this ent
+                //SchedStatus[ent] = SchThreadmSL; // This will be an mSL thread
+                //SchedPar1[ent] = 0; // will be the code
+                //SchedPar3[ent] = 0;
+                //SchedPar4[ent] = 0; // unused
+                //SchedThrdPt[ent] = thrd; // address for the thread area
+            );
+        );
+    ) : (
+        ent = SchedDetachHead(SchedInactPts);
+
+        thrd = SchedThrdPt[ent]; // It already has a thread allocated
+        0 ? (
+            b = SchedFreePts;
+            sprintf(#s2, "SCHED3  %d ", ent);
+            mSL_log(SysLogBox, #s2);
+        );
+        // check that this entry has a thread
+        (!mSL_bl_check(SchedThrdPt[ent])) ? (
+            // reallocate a thread
+            thrd = mSL_make_thread();
+            (thrd > 0) ? (
+                ent = SchedDetachHead(SchedFreePts);
+                SchedThrdPt[ent] = thrd; // address for the thread area
+            ): (
+                // we can't provide a correct thread...
+                SchedInsertTail(SchedFreePts, ent, SchETypeThrd);
+                ent = 0;
+            );
+        );
+    );
+    (ent != 0) ? (
+        // reclean the scheduler entry
+        ((thrd > 0) && (thrd[-2] === mSL_THR_KeyStrt)) ? ( // quick check
+            thrd[mSL_THR_SchedEnt] = ent; // refer the thread to this ent
+            memset(ent, 0, SchedEntInSiz);
+            w = 0|((ent - SchedFirstEnt)/SchedEntSiz); // the entry number reconstituted
+            SchedStatus[ent] = SchThreadmSL | SchThrUsed;  // now in use
+            SchedThrdPt[ent] = thrd; // address for the thread area
+            // Give the process a number
+            SchedPid[ent] = k = SchedCurrPId = (SchedPnumb += 1) * SchedNEmax + w;
+            SchedThrName[ent] = 'Thrd'; // a default identification
+            SchedInitHQB(ent+SchedHQB, 'Evnt'); // and init the local HQB
+            (FlagsTbVals[Flgs_Thrds] & 1) ? ( // trace flags
+                sprintf(#ms, "** NEW ** [%g:%g] => %d/%d", ent, SchedThrdPt[ent], (floor(k/SchedNEmax)), (k & SchedNMask));
+                mSL_log(SysLogBox, #ms);
+            );
+            mSL_clean_thread(thrd); // clean the thread
+            thrd[mSL_THR_UTId] = (mSL_Thread_Seq_Idt += 1); // allocate a new id
+        ) : (
+            // Can't create for some reason
+            SchedInsertTail(SchedFreePts, ent, SchETypeThrd); // free the entry
+            ent = 0;
+        );
+    );
+    (FlagsTbVals[Flgs_Thrds] & 1) ? ( // trace flags
+        sprintf(#sfc, "   **getNewThread    %d  %d", ent, thrd);
+        mSL_log(SysLogBox, #sfc);
+    );
+    ent;
+);
+
+function freeSchedThread(ent)
+local (k, mthrd, mstak)
+(
+    (FlagsTbVals[Flgs_Thrds] & 1) ? ( // trace flags
+        sprintf(#sfc, "   **freeSchedThread    %d", ent);
+        mSL_log(SysLogBox, #sfc);
+    );
+    k = SchedPid[ent];
+    (SchedNoRecycle) ? (
+        (FlagsTbVals[Flgs_Thrds] & 1) ? ( // trace flags
+            sprintf(#ms, "** FREE/NORECYCLE ** [%g:%g] => %d/%d", ent, SchedThrdPt[ent], (floor(k/SchedNEmax)), (k & SchedNMask));
+            mSL_log(SysLogBox, #ms);
+        );
+
+        ((mthrd = ent[SchedThrdPt]) != 0) ? (
+            // mstak = 0;
+            mSL_Mbl_check(mthrd) ? (
+                // a block in dyn. memory
+                mstak = mthrd[mSL_THR_basePhStack]; // could have a stack
+                mSL_Mbl_check(mstak) ? mSL_Dyn_Recycle(mstak) : (mstak = 0;);
+                mSL_Dyn_Recycle(mthrd);
+                //sprintf(#sfc, "   **SchedFree  recycling  %d %d from ent %d", mstak, mthrd, num);
+                //mSL_log(SysLogBox, #sfc);
+            );
+            ent[SchedThrdPt] = 0;
+        );
+        SchedClearProc(ent);
+        SchedInsertTail(SchedFreePts, ent, SchETypeThrd);
+    ) : (
+        (FlagsTbVals[Flgs_Thrds] & 1) ? ( // trace flags
+            sprintf(#ms, "** FREE ** [%g:%g] => %d/%d", ent, SchedThrdPt[ent], (floor(k/SchedNEmax)), (k & SchedNMask));
+            mSL_log(SysLogBox, #ms);
+        );
+        SchedClearProc(ent);
+        SchedInsertTail(SchedFreePts, ent, SchETypeThrd);
+    );
+);
+
+
+/*
+    Free an entry - dispach to the appropriate free list - can be called with parameter "<=0"
+*/
+function
+SchedFree(ent)
+local(msg, num, mthrd, mstak)
+(
+    (ent > 0) ? (
+        ((ent >= SchedFirstEnt) && (ent <= SchedLastEnt) && ((num = (ent - SchedFirstEnt)/SchedEntSiz) >= 0)
+                && (num == (0|num)) && (num == (ent[SchedPid] & SchedNMask))) ? (
+            // The entry is supposed to be free:  not rattached to a list
+            ((SchedThList[ent] != SchedNone) || (SchedNxtEnt[ent] != SchedNone) || (SchedPrvEnt[ent] != SchedNone)) ? (
+                err_sys_rtm = 1604; // freeing an task entry attached to a list
+                sprintf(#sfc, "   **SchedFree Error %d  @  %d  ent %d", err_sys_rtm, ent, num);
+                    mSL_log(SysLogBox, #sfc);
+            ) : (
+                (SchedListSize(ent+SchedHQB) > 0) ? (
+                    // release all pending messages
+                    while (msg = SchedDetachHead(ent+SchedHQB)) (
+                        msg_recycle(msg, 1);
+                    );
+                );
+                ((msg = ent[SchedPar2]) >= mm_lowmem) ? (
+                    0 ? (
+                        sprintf(#sfc, "   **SchedFree  recycling  %d from ent %d", msg, num);
+                        mSL_log(SysLogBox, #sfc);
+                    );
+                    msg_recycle(msg, 2);
+                );
+                ((mthrd = ent[SchedThrdPt]) != 0) ? (
+                    mstak = 0;
+                    0 ? (
+                        sprintf(#sfc, "   **SchedFree  recycling  %d %d from ent %d", mstak, mthrd, num);
+                        mSL_log(SysLogBox, #sfc);
+                    );
+                    mSL_Mbl_check(mthrd) ? (
+                        // a block in dyn. memory
+                        mstak = mthrd[mSL_THR_basePhStack]; // could have a stack
+                        mSL_Mbl_check(mstak) ? mSL_Dyn_Recycle(mstak);
+                        mSL_Dyn_Recycle(mthrd);
+                        0 ? (
+                            sprintf(#sfc, "   **SchedFree  recycling  %d %d from ent %d", mstak, mthrd, num);
+                            mSL_log(SysLogBox, #sfc);
+                        );
+                    );
+                    ent[SchedThrdPt] = 0;
+                );
+                // rebuild the entry
+                memset(ent, 0, SchedEntInSiz);
+                //ent[SchedEntryN] = num; // the entry number
+                ent[SchedPid] = num; // the entry number
+                ent[SchedThrName] = 'Thrd'; // a default identification
+                SchedInitHQB(ent+SchedHQB, 'Evnt');
+                SchedInsertTail(SchedFreePts, ent, SchETypeThrd);
+            );
+        ) : (
+            err_sys_rtm = 1603; // freeing an invalid task entry
+            sprintf(#sfc, "   **SchedFree Error %d  @  %d", err_sys_rtm, ent);
+            mSL_log(SysLogBox, #sfc);
+        );
+    );
+);
+
+
+
+function count_p_list(lblk)
+local (ent, cnt, siz)
+(
+    siz = cnt = 0;
+    ent = SchedPrvEnt[lblk[SchedOtherEnd]]; // start at tail
+    while ((ent != lblk) && (siz <= SchedNEmax)) (
+        ((SchedStatus[ent] & SchmSLThrUsed) === SchmSLThrUsed) ? (
+            cnt += 1;
+        );
+        ent = SchedPrvEnt[ent];
+        siz += 1;
+    );
+    cnt;
+);
+
+
+
+function
+mSL_kill_all_thread()
+local (in, ent)
+(
+    in = 0; loop (SchedNEmax,
+        ent = SchedFirstEnt + in * SchedEntSiz;
+        (SchedCode[ent] === KRun_mSL_Thread) ? (
+            SchedUnchainEnt(ent[SchedThList], ent, SchETypeThrd);
+            freeSchedThread(ent);
+        );
+        in += 1;
+    );
+);

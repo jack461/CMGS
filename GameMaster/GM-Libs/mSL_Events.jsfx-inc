@@ -1,0 +1,234 @@
+
+
+evnt_ttl = 3600; // default time to live : 1 hour
+evnt_ttw = 3600; // default time to wait : 1 hour
+
+
+
+
+function event_ready_pid(destId)
+local (dst, n, k)
+(
+    ((destId > 0)
+    && ((n = 0|(destId - SchedNEmax*(0|(destId/SchedNEmax)))) >= 0)
+    && ((k = SchedFirstEnt + n * SchedEntSiz) <= SchedLastEnt)
+    && (SchedPid[k] === destId)
+    && (SchedStatus[k] != 0));
+);
+
+// look for the recipient from an address
+// return a thread entry, or zero
+function event_check_recipient(destId, destName, flg)
+local (dst, n, k)
+(
+    // check various cases
+    dst = 0; // not found yet
+    ((destId >= mSL_Sym_Low) && (destName < mSL_Sym_Low)) ? (
+        // exchange values
+        n = destId; destId = destName; destName = n;
+    );
+    (destId > 0) ? (
+        // Must be a valid process id, and an active one
+        n = 0|(destId - SchedNEmax*(0|(destId/SchedNEmax))); // number of the SCB
+        k = SchedFirstEnt + n * SchedEntSiz; // its address
+        ((SchedPid[k] === destId) && (SchedStatus[k] != 0)) ? dst = k;
+    ) :
+    ((destid === 0) && (destName !== 0)) ? (
+        (k = SchedHead(SchedEvntPts)) ? (
+            // we look first for an active process of name "destName" in the waiting list SchedEvntPts
+            n = 0;
+            while ((dst === 0) && (n < SchedNEmax) && (k != 0) && (k != SchedEvntPts[SchedOtherEnd])) (
+                (SchedThrName[k] === destName) ? dst = k;
+                n += 0; k = SchedNxtEnt[k];
+            );
+        ) : (
+            // else we look for a process of this name
+            k = SchedFirstEnt;
+            while ((dst === 0) && (k <= SchedLastEnt)) (
+                ((SchedThrName[k] === destName) && (SchedStatus[k] != 0)) ? dst = k;
+                k += SchedEntSiz;
+            );
+        );
+    ); // pas d'autre cas à étudier pour l'instant
+    (dst && flg) ? (
+        (flg === 1) ? (
+            // return process status
+            dst = SchedStatus[dst];
+        ) :
+        (flg === 2) ? (
+            // return process ident
+            dst = SchedPid[dst];
+        ) :
+        (flg === 3) ? (
+            // return process name
+            dst = SchedThrName[dst];
+        ) :
+        (flg === 4) ? (
+            // return process state
+            (SchedStatus[dst] === 0) ? (dst = 0;) :
+            (SchevEvntList[dst] === SchedActivPts) ? (dst = 1;) :
+            (SchevEvntList[dst] === SchedDlydPts) ? (dst = 2;) :
+            (SchevEvntList[dst] === SchedEvntPts) ? (dst = 3;) :
+            (SchevEvntList[dst] === SchedSuspPts) ? (dst = 4;) :
+            (SchevEvntList[dst] === SchedLockdPts) ? (dst = 5;) :
+            (dst = 6;);
+        );
+    );
+    dst;
+);
+
+function event_build_msg(msg, sendId, sendName, destId, destName, evName, ttw, ttl, flgs, code, seq, p1, p2)
+local (s, k, n, dst)
+(
+    ((msg > 0) && mSL_bl_check(msg) && ((s = msg[-1]) >= 16)) ? (
+        // Set type to message
+        msg[-2] = SchETypeMess; msg[s+1] = mSL_CC_Chksum ~ SchETypeMess;
+        0 ? (sprintf(#uuu, "  --> msg reuse  [%d]/%d", msg, SchedListSize(SchedRcyclPts)); mSL_log(SysLogBox, #uuu););
+        (FlagsTbVals[Flgs_Evnts] & 2) ? (
+            sprintf(#s, "  --> build_msg  set Evnt --> %d", msg); mSL_log(SysLogBox, #s);
+        );
+    ) : (
+        msg = SchedHead(SchedRcyclPts);
+        ((msg > 0) && mSL_bl_check(msg) && ((s = msg[-1]) >= 16)) ? (
+            msg = SchedDetachHead(SchedRcyclPts);
+            0 ? (sprintf(#uuu, "  --> msg extract  [%d]/%d", msg, SchedListSize(SchedRcyclPts)); mSL_log(SysLogBox, #uuu););
+            // msg[-2] = SchETypeMess; msg[s+1] = mSL_CC_Chksum ~ SchETypeMess;
+            (FlagsTbVals[Flgs_Evnts] & 2) ? (
+                sprintf(#s, "  --> build_msg  recycled Evnt --> %d", msg); mSL_log(SysLogBox, #s);
+            );
+        ) : (
+            // allocate a new one
+            // msg = mSL_malloc(16, SchETypeMess);
+            msg = mSL_Dyn_Alloc(16, SchETypeMess, mSL_StM_FlClear);
+            0 ? (sprintf(#uuu, "  --> msg allocate  [%d]/%d", msg, SchedListSize(SchedRcyclPts)); mSL_log(SysLogBox, #uuu););
+            (FlagsTbVals[Flgs_Evnts] & 2) ? (
+                sprintf(#s, "  --> build_msg  alloc --> %d", msg); mSL_log(SysLogBox, #s);
+            );
+        );
+    );
+    ((sendId >= mSL_Sym_Low) && (sendName < mSL_Sym_Low)) ? (
+        // exchange values
+        n = sendId; sendId = sendName; sendName = n;
+    );
+    ((destId >= mSL_Sym_Low) && (destName < mSL_Sym_Low)) ? (
+        // exchange values
+        n = destId; destId = destName; destName = n;
+    );
+    ((msg > 0) && ((dst = event_check_recipient(destId, destName,0)) > 0)) ? (
+        SchevEvntList[msg] = SchevNxtEnt[msg] = SchevPrvEnt[msg] = 0; // no pointer yet
+        SchevEvntName[msg] = evName;
+        SchevDateInit[msg] = k = time_precise() + timeD;
+        SchevSrcNum[msg] = (sendId === 0) ? curr_Proc_PID : sendId;
+        SchevSrcName[msg] = (sendName === 0) ? curr_Proc_Name : sendName;
+        SchevDstNum[msg] = SchedPid[dst];
+        SchevDstName[msg] = SchedThrName[dst];
+        SchevDateSent[msg] = ttw;  // time to wait before sending
+        (ttl === 0) ? ttl = thrd_Max_ttl;
+        SchevDateExp[msg] = k + max(1, min(thrd_Max_ttl * 2, ttl)); // between 1 second and 2 hours
+        SchevFlags[msg] = flgs;
+        SchevCode[msg] = code;
+        SchevSeq[msg] = seq;
+        SchevPar1[msg] = p1;
+        SchevPar2[msg] = p2;
+    );
+    (0 || (FlagsTbVals[Flgs_Evnts] & 2))  ? (
+        sprintf(#s, "  --> build_msg  --> %d", msg); mSL_log(SysLogBox, #s);
+    );
+    msg;
+);
+
+// Send an event
+function event_send_msg(msg)
+local (dst, dstId, n, k, res)
+(
+    ((msg != 0) && (SchETypeMess === mSL_Mbl_check(msg)) && ((s = msg[-1]) >= 16)) ? (
+        destId = SchevDstNum[msg];
+        (destId > 0) ? (
+            // Must be a valid process id, and an active one
+            n = 0|(destId - SchedNEmax*(0|(destId/SchedNEmax))); // number of the SCB
+            k = SchedFirstEnt + n * SchedEntSiz;
+            ((SchedPid[k] === destId) && (SchedStatus[k] != 0)) ? (
+                (SchevDateSent[msg] > 0) ? (
+                    // first, delay the event
+                    0 ? (sprintf(#s, "  --> send_dly_msg  --> %d to %d", msg, destId); mSL_log(SysLogBox, #s););
+                    Schedule(SchedRelative, SchevDateSent[msg], 1, 'smsg', msg, 0, 0); // schedule send
+                ) : (
+                    // transmit it immediately
+                    dst = k;
+                    // Now insert the message in the private list of the recipient
+                    0 ? (sprintf(#s, "  --> send_imm_msg  --> %d to %d", msg, destId); mSL_log(SysLogBox, #s););
+                    SchedInsertTail(SchedHQB + dst, msg, 0);
+                    // Was it waiting for a message ?
+                    (SchevEvntList[dst] === SchedEvntPts) ? (
+                        dst = SchedUnchainEnt(SchedEvntPts, dst, SchETypeThrd);
+                        dst ? SchedInsertTail(SchedActivPts, dst, SchETypeThrd);
+                    );
+                );
+                0; // message sent
+            ) : (
+                -4; // can't find recipient
+            );
+        );
+    ) : (
+        -3; // message invalid
+    );
+);
+
+
+// Send a message to a thread
+function event_Notify(msg, sendId, sendName, destId, destName, evName, ttw, ttl, flgs, code, seq, p1, p2)
+local (dst, n, k, s)
+(
+    (FlagsTbVals[Flgs_Evnts] & 4)  ? (sprintf(#s, "  --> Notify enter; msg: %d", msg);
+        mSL_log(SysLogBox, #s);
+    );
+    ((sendId >= mSL_Sym_Low) && (sendName < mSL_Sym_Low)) ? (
+        // exchange values
+        n = sendId; sendId = sendName; sendName = n;
+    );
+    // we first need to make sure that the recipient (dst) exists
+    ((destId >= mSL_Sym_Low) && (destName < mSL_Sym_Low)) ? (
+        // exchange values
+        n = destId; destId = destName; destName = n;
+    );
+    dst = event_check_recipient(destId, destName, 0);
+    (dst != 0) ? (
+        // build the message
+        (FlagsTbVals[Flgs_Evnts] & 4)  ? (sprintf(#s, "  --> Notify  dst:  --> %s  %d  [%d / %.1f]", mSL_edit_value(#, dst[SchedThrName]),
+                    dst[SchedPid], dst, (dst-SchedFirstEnt)/SchedEntSiz);
+            mSL_log(SysLogBox, #s);
+        );
+        msg = event_build_msg(msg, sendId, sendName, destId, destName, evName, ttw, ttl, flgs, code, seq, p1, p2);
+        /*
+        (msg > 0) ? (
+            // Now insert the message in the private list of the recipient
+            (FlagsTbVals[Flgs_Evnts] & 4)  ? (sprintf(#s, "  --> Notify msg: %d   list: %d  (%d)", msg, SchedHQB + dst,  SchedListSize(SchedHQB + dst));
+                mSL_log(SysLogBox, #s);
+            );
+            SchedInsertTail(SchedHQB + dst, msg, 0);
+            // Was it waiting for a message ?
+            (SchevEvntList[dst] === SchedEvntPts) ? (
+                (FlagsTbVals[Flgs_Evnts] & 4)  ? (sprintf(#s, "  --> Notify remove %d  from %d", dst, SchedEvntPts);
+                mSL_log(SysLogBox, #s);
+                );
+                dst = SchedUnchainEnt(SchedEvntPts, dst, SchETypeThrd);
+                dst ? SchedInsertTail(SchedActivPts, dst, SchETypeThrd);
+            );
+            (FlagsTbVals[Flgs_Evnts] & 4)  ? (sprintf(#s, "  --> Notify  msg/dst:  --> %d %d  %.1f", msg, dst, (dst-SchedFirstEnt)/SchedEntSiz);
+            mSL_log(SysLogBox, #s);
+            );
+        );
+        */
+       s = event_send_msg(msg);
+       (s != 0) ? msg = 0;
+    ) :
+    (
+        msg = 0;
+    );
+    (FlagsTbVals[Flgs_Evnts] & 4)  ? (sprintf(#s, "  --> Notify done; msg: %d", msg);
+        mSL_log(SysLogBox, #s); mSL_log(SysLogBox, "");
+    );
+    msg;
+);
+
+

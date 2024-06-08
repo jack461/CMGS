@@ -1,0 +1,1010 @@
+desc:MCBM-64 - Multi Channel Bass Manager - V0.7 May 2019 
+//               JJG - July/August 2018 / May 2019
+// Bass manager for REAPER, with up to 4 LFE channels
+
+
+slider1:0<0,79,1{1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P}>Settings for channel:
+slider2:slChTyp=0<0,6,1{Pass through,Filtered,Check tone,LFE 1,LFE 2,LFE 3,LFE 4}>Channel type:
+slider3:0<0,3,1{hp+lp,hp only,lp only,none}>Filter type:
+slider4:1<0,3,1{6dB,12dB,18dB,24dB}>Filter order:
+slider5:120<20,400,0.1>Filter frequency (Hz):
+slider6:slChGain=0<-60,20,0.01>Gain (dB):
+slider7:1<0,2,0.01>HPF/LPF overlap:
+slider8:0<-1,1,0.01>LF/HF balance:
+slider9:100<0,100,0.1>Dry/Wet Mix (%):
+slider10:0<0,64,1,{none,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64}>LFE 1 is channel:
+slider11:-120<-120,20,0.01>Send to LFE 1 at (dB):
+slider12:0<0,64,1,{none,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64}>LFE 2 is channel:
+slider13:-120<-120,20,0.01>Send to LFE 2 at (dB):
+slider14:0<0,64,1,{none,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64}>LFE 3 is channel:
+slider15:-120<-120,20,0.01>Send to LFE 3 at (dB):
+slider16:0<0,64,1,{none,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64}>LFE 4 is channel:
+slider17:-120<-120,20,0.01>Send to LFE 4 at (dB):
+slider18:0<0,1,1{normal,mute}>Channel status:
+slider19:0<0,8,1{-,init,save to target,load from target,load & next,load all channels,mute others,unmute all,recomp}>Edit operation:
+slider20:0<0,15,1{A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P}>Target channel model:
+
+
+//****************************************************************************************
+//****************************************************************************************
+//****************************************************************************************
+
+
+@init
+// We wish to keep our values
+ext_noinit=1;
+
+// Arrays used
+VArray=0; // Value Array - Size = 16*[64+10] = 0x4A0
+// Indexes in Value Array
+ChTypes=0; // Channels types 
+ChFTypes=1; // Channels Filter Types
+ChFOrders=2; // Channels Filter Orders
+ChFFreqs=3; // Channels Filter Frequencies
+ChIGains=4; // Channels input gains
+ChFOvrlp=5; // Channels Filter Overlaps
+ChTBal=6;  // LF/HF balance
+ChDWMix=7; // Channels Dry/Wet Mix
+ChToLFE1=8; // Output to LFE1
+ChToLFE2=9; // Output to LFE2
+ChToLFE3=10; // Output to LFE3
+ChToLFE4=11; // Output to LFE4
+ChSettings=13; // Channel preset source
+ChStatus=14; // Channel status
+ChReComp=15; // Recomp Flag for this channel
+
+// global(VArray, ChTypes, ChFTypes, ChFOrders, ChFFreqs, ChIGains, ChFOvrlp, ChTBal,
+//        ChDWMix, ChToLFE1, ChToLFE2, ChToLFE3, ChToLFE4, ChStatus, ChReComp)
+
+SetsArray=0x400; // An array of 16 channels models = 16*16
+
+DataSize=SetsArray+0x100; // Total data size to save 
+
+// These are not saved in the preset
+ShCh=DataSize; // 64 values to show channels models
+xChPos=ShCh+0x40; //8 values for X channels models positions
+yChPos=xChPos+0x08; // 8 values for Y channels models positions
+
+// Arrays of constants
+freqz=yChPos+0x08; // memory address of frequencies
+freqz[0]=20;     freqz[1]=25;     freqz[2]=32;
+freqz[3]=40;     freqz[4]=50;     freqz[5]=64;
+freqz[6]=80;     freqz[7]=100;    freqz[8]=125;
+freqz[9]=160;    freqz[10]=200;   freqz[11]=250;
+freqz[12]=320;   freqz[13]=400;   freqz[14]=500;
+freqz[15]=640;   freqz[16]=800;   freqz[17]=1000;
+freqz[18]=1250;  freqz[19]=1600;  freqz[20]=2000;
+freqz[21]=2500;  freqz[22]=3200;  freqz[23]=4000;
+freqz[24]=5000;  freqz[25]=6400;  freqz[26]=8000;
+freqz[27]=10000; freqz[28]=12500; freqz[29]=16000;
+
+lfadj=freqz+30; // memory address of low frequency volume adjustment
+lfadj[0]=1.01;   lfadj[1]=1.03;   lfadj[2]=1.05;
+lfadj[3]=1.07;   lfadj[4]=1.07;   lfadj[5]=1.08;
+lfadj[6]=1.08;   lfadj[7]=1.09;   lfadj[8]=1.10;
+lfadj[9]=1.11;   lfadj[10]=1.12;  lfadj[11]=1.13;
+lfadj[12]=1.14;  lfadj[13]=1.15;  lfadj[14]=1.15;
+lfadj[15]=1.16;  lfadj[16]=1.15;  lfadj[17]=1.14;
+lfadj[18]=1.13;  lfadj[19]=1.12;  lfadj[20]=1.12;
+lfadj[21]=1.11;  lfadj[22]=1.11;  lfadj[23]=1.12;
+lfadj[24]=1.12;  lfadj[25]=1.11;  lfadj[26]=1.09;
+lfadj[27]=1.07;  lfadj[28]=1.06;  lfadj[29]=1.05;
+
+hfadj=lfadj+30; // memory address of high frequency volume adjustment
+hfadj[0]=1.00;   hfadj[1]=1.00;   hfadj[2]=1.00;
+hfadj[3]=1.01;   hfadj[4]=1.02;   hfadj[5]=1.03;
+hfadj[6]=1.05;   hfadj[7]=1.05;   hfadj[8]=1.06;
+hfadj[9]=1.06;   hfadj[10]=1.06;  hfadj[11]=1.07;
+hfadj[12]=1.07;  hfadj[13]=1.08;  hfadj[14]=1.08;
+hfadj[15]=1.09;  hfadj[16]=1.09;  hfadj[17]=1.09;
+hfadj[18]=1.08;  hfadj[19]=1.07;  hfadj[20]=1.07;
+hfadj[21]=1.07;  hfadj[22]=1.07;  hfadj[23]=1.06;
+hfadj[24]=1.06;  hfadj[25]=1.05;  hfadj[26]=1.04;
+hfadj[27]=1.03;  hfadj[28]=1.02;  hfadj[29]=1.00;
+
+bcfol=hfadj+30; // cut frequency overlap
+bcfol[0]=1.15;   bcfol[1]=1.19;   bcfol[2]=1.32;
+bcfol[3]=1.43;   bcfol[4]=1.54;   bcfol[5]=1.65;
+bcfol[6]=1.76;   bcfol[7]=1.76;   bcfol[8]=1.87;
+bcfol[9]=1.87;   bcfol[10]=1.92;  bcfol[11]=1.92;
+bcfol[12]=1.98;  bcfol[13]=1.98;  bcfol[14]=1.98;
+bcfol[15]=1.98;  bcfol[16]=1.98;  bcfol[17]=2.09;
+bcfol[18]=2.09;  bcfol[19]=1.98;  bcfol[20]=1.92;
+bcfol[21]=1.92;  bcfol[22]=1.87;  bcfol[23]=1.87;
+bcfol[24]=1.76;  bcfol[25]=1.76;  bcfol[26]=1.65;
+bcfol[27]=1.54;  bcfol[28]=1.43;  bcfol[29]=1.43;
+
+// Temporary output results : 64 channels
+smplOut = bcfol+30;
+
+
+freembuf(smplOut + 65); // Free memory
+
+
+
+// Simple variables
+LFE1Ch=0; // # of LFE1, or 0 if none selected
+LFE2Ch=0;
+LFE3Ch=0;
+LFE4Ch=0;
+
+LFE1Out=0; // value to add to LFE1 channel
+LFE2Out=0;
+LFE3Out=0;
+LFE4Out=0;
+
+LFE1Vol=1;
+LFE2Vol=1;
+LFE3Vol=1;
+LFE4Vol=1;
+
+PChan=0; // Current channel number * 16 [0-63 * 16]
+pSl=cSl=0; // previous/current slider 1
+CPS=0; // curent selected preset
+
+DoRecomp=1; // some work is to do
+RecompAll=1; // "Recompute all" indicator
+
+// Constants
+ChDefaultType=0; // Default is "pass through"
+ChTypeLFe1=3;
+ChTypeLFE2=4;
+ChTypeLFE3=5;
+ChTypeLFE4=6;
+
+// Some graphic items
+DrChRct_x=10;
+DrChRct_y=10;
+dlX=46;
+dlY=20;
+DrChRct_w=dlX*9+4;
+DrChRct_h=dlY*8+4;
+DrChRct_ndx=DrChRct_x+DrChRct_w;
+DrChRct_ndy=DrChRct_y+DrChRct_h;
+Kgfx_w = Kgfx_h = 0;
+xDbg=1;
+xCnt=0;
+GAX=0;
+xDelay=20;
+MSC=0;
+MOK=0;
+
+
+
+// Reset a channel to default values
+function ReInitCh(ch) (
+  ch = ch << 4;
+  VArray[ChTypes+ch]=ChDefaultType; // Channel type : pass through, filtered, LFE, etc. 
+  VArray[ChFTypes+ch]=0;  // Filter type : std, hp only, lp only, none
+  VArray[ChFOrders+ch]=1;  // Filter ordre : 0 => -6dB, 1 => -12dB, 2 => -18dB, 3 => -24dB
+  VArray[ChFFreqs+ch]=120; // Filter frequency (hertz).
+  VArray[ChIGains+ch]=0;  // Gain (dB)
+  VArray[ChFOvrlp+ch]=1;  // HPF/LPF overlap [0 ... 2]
+  VArray[ChTBal+ch]=0;    // Tone balance [-1 ... 1]
+  VArray[ChDWMix+ch]=100;  // Dry/Wet mix [0 ... 100]
+  VArray[ChToLFE1+ch]=-120;  // db Send to LFE1
+  VArray[ChToLFE2+ch]=-120;  // db Send to LFE2
+  VArray[ChToLFE3+ch]=-120;  // db Send to LFE3
+  VArray[ChToLFE4+ch]=-120;  // db Send to LFE4
+  VArray[ChStatus+ch]=0;  // channel Mute/Normal
+  VArray[ChSettings+ch]=-1;
+  VArray[ChReComp+ch]=1;
+);
+
+
+function LoadValues(ch) (
+  ch = ch << 4;
+  slChTyp=VArray[ChTypes+ch];
+  slider3=VArray[ChFTypes+ch];
+  slider4=VArray[ChFOrders+ch];
+  slider5=VArray[ChFFreqs+ch];
+  slChGain=VArray[ChIGains+ch];
+  slider7=VArray[ChFOvrlp+ch];
+  slider8=VArray[ChTBal+ch];
+  slider9=VArray[ChDWMix+ch];
+  slider10=LFE1Ch;
+  slider11=VArray[ChToLFE1+ch];
+  slider12=LFE2Ch;
+  slider13=VArray[ChToLFE2+ch];
+  slider14=LFE3Ch;
+  slider15=VArray[ChToLFE3+ch];
+  slider16=LFE4Ch;
+  slider17=VArray[ChToLFE4+ch];
+  slider18=VArray[ChStatus+ch];
+  sliderchange(0xFFFFF);
+);
+
+
+function SaveValues(ch) local (rc) (
+  ch = ch << 4;
+  rc = 0;
+  (VArray[ChTypes+ch]!=slChTyp) ? (rc += 1; VArray[ChTypes+ch]=slChTyp;);
+  (VArray[ChFTypes+ch]!=slider3) ? (rc += 1; VArray[ChFTypes+ch]=slider3;);
+  (VArray[ChFOrders+ch]!=slider4) ? (rc += 1; VArray[ChFOrders+ch]=slider4;);
+  (VArray[ChFFreqs+ch]!=slider5) ? (rc += 1; VArray[ChFFreqs+ch]=slider5;);
+  (VArray[ChIGains+ch]!=slChGain) ? (rc += 1; VArray[ChIGains+ch]=slChGain;);
+  (VArray[ChFOvrlp+ch]!=slider7) ? (rc += 1; VArray[ChFOvrlp+ch]=slider7;);
+  (VArray[ChTBal+ch]!=slider8) ? (rc += 1; VArray[ChTBal+ch]=slider8;);
+  (VArray[ChDWMix+ch]!=slider9) ? (rc += 1; VArray[ChDWMix+ch]=slider9;);
+  (LFE1Ch!=slider10) ? (
+      rc += 1000;
+      (LFE1Ch!=0) ? (VArray[ChTypes+((LFE1Ch-1)<<4)]=ChDefaultType;);
+      LFE1Ch=slider10;
+      (LFE1Ch!=0) ? (VArray[ChTypes+((LFE1Ch-1)<<4)]=ChTypeLFE1;);
+  );
+  (VArray[ChToLFE1+ch]!=slider11) ? (rc += 1; VArray[ChToLFE1+ch]=slider11;);
+  (LFE2Ch!=slider12) ? (
+      rc += 1000;
+      (LFE2Ch!=0) ? (VArray[ChTypes+((LFE2Ch-1)<<4)]=ChDefaultType;);
+      LFE2Ch=slider12;
+      (LFE2Ch!=0) ? (VArray[ChTypes+((LFE2Ch-1)<<4)]=ChTypeLFE2;);
+  );
+  (VArray[ChToLFE2+ch]!=slider13) ? (rc += 1; VArray[ChToLFE2+ch]=slider13;);
+  (LFE3Ch!=slider14) ? (
+      rc += 1000;
+      (LFE3Ch!=0) ? (VArray[ChTypes+((LFE3Ch-1)<<4)]=ChDefaultType;);
+      LFE3Ch=slider14;
+      (LFE3Ch!=0) ? (VArray[ChTypes+((LFE3Ch-1)<<4)]=ChTypeLFE3;);
+  );
+  (VArray[ChToLFE3+ch]!=slider15) ? (rc += 1; VArray[ChToLFE3+ch]=slider15;);
+  (LFE4Ch!=slider16) ? (
+      rc += 1000;
+      (LFE4Ch!=0) ? (VArray[ChTypes+((LFE4Ch-1)<<4)]=ChDefaultType;);
+      LFE4Ch=slider16;
+      (LFE4Ch!=0) ? (VArray[ChTypes+((LFE4Ch-1)<<4)]=ChTypeLFE4;);
+  );
+  (VArray[ChToLFE4+ch]!=slider17) ? (rc += 1; VArray[ChToLFE4+ch]=slider17;);
+  (VArray[ChStatus+ch]!=slider18) ? (rc += 1; VArray[ChStatus+ch]=slider18;);
+  (rc > 0) ? (VArray[ChReComp+ch]=1;);
+  (rc >=1000) ? (RecompAll=1;);
+);
+
+
+function MuteAllBut(ch) local(i k) (
+    i=0;
+    ch=ch<<4;
+    loop(64, (
+      k = (i!=ch)&&(VArray[i+ChTypes]<ChTypeLFE1);
+      VArray[i+ChStatus]=k; i+=16;
+    ));
+    slider18=0; RecompAll=1;
+);
+
+function UnmuteAll() local(i) (
+    i=0;
+    loop(64, (
+      VArray[i+ChStatus]=0; i+=16;
+    ));
+    slider18=0; RecompAll=1;
+);
+
+// Compare two sets/presets
+function cmpEnt(a,b) local (i res) (
+    a=a<<4; b=b<<4; i=1;
+    // "same preset" if pass through or filtered, "mute" or "unmute"
+    res=(VArray[a]==VArray[b])||(VArray[a]<2 && VArray[b]<2);
+    while (res && i<13) (
+       res=(VArray[a+i]==VArray[b+i]); i+=1;
+    );
+    res; // result
+);
+
+// Find the source set of a channel
+function findSrc(ch) local(res sc pch pre) (
+   res = -1; // not found
+   pch=ch<<4; // actual position
+   // Has the channel an already "known" source ?
+   sc=VArray[pch+ChSettings];
+   ((sc>=0) && cmpEnt(sc+64,ch)) ? (res=sc;);
+   // compare loop
+   pre=64; // first preset
+   while (res<0 && pre<80) (
+       cmpEnt(ch,pre) ? (res=pre-64;); pre+=1;
+   );
+   res;
+);    
+
+// Build the channels description
+function buildChDesc() local(i z) (
+   i=0;
+   loop(64, (
+       (VArray[(i<<4)+ChTypes]>=ChTypeLFE1) ? (
+           ShCh[i]=VArray[(i<<4)+ChTypes]-ChTypeLFE1+'1';
+       ) : (
+           z=findSrc(i);
+           ((z>=0) && (VArray[(i<<4)+ChSettings]<0)) ? VArray[(i<<4)+ChSettings]=z;
+           ShCh[i]=(z<0) ? (VArray[(i<<4)+ChSettings]+'A' | 0x100) : 'A'+z;
+       );
+       i+=1;
+   ));
+);
+
+
+// Paste selected preset to a channel
+function pastPr(src,dst) local(pch) (
+    pch=dst<<4;
+    i=0; D=VArray+(src<<4); loop(13, (VArray[i+pch]=D[i]; i+=1;));
+    (src>=64) ? (VArray[ChSettings+pch]=src-64;); // keep source
+    // we keep the channel status unchanged
+    VArray[ChReComp+pch]=1; // we will have to recomp this
+    (dst==cSl) ? (LoadValues(cSl););
+    RecompAll=1; xCnt=xDelay;
+);
+
+// We have modified a channel setting ; signal it
+function isMod(ch) (
+   sliderchange(0xFFFFF); VArray[ChReComp+(ch<<4)]=1; DoRecomp=1; xCnt=xDelay;
+);
+
+// Interpolate a value from a table, using a frequency
+function interpolate(freq, tab) global(freqz) local(lb, hb, res) (
+  res = tab[0];
+  (freq >= freqz[29]) ? (res = tab[29];) : (
+    lb=0; hb=1;
+    while (freq > freqz[hb]) (lb+=1; hb+=1;);
+    res = tab[lb] + (tab[hb]-tab[lb])*(freq-freqz[lb])/(freqz[hb]-freqz[lb]);
+  );
+  res;
+);
+
+// Init a filter instance
+function finit() instance(yn yn_1 xn xn_1 a0 a1 b1) (
+  yn = yn_1 = xn = xn_1 = 0;
+  a1 = b1 = 0; a0 = 1;
+);
+
+// Apply a filter instance
+function fapply(smpl) instance(yn yn_1 xn xn_1 a0 a1 b1) (
+  yn_1 = yn; xn_1 = xn; xn = smpl;
+  yn = a0*xn + a1*xn_1 + b1*yn_1;
+);
+
+
+// Init a channel handler instance
+function init(xch)
+  instance(ch, order, hOut, hvol, lvol, cvol, dvol, vbOut1, vbOut2, vbOut3, vbOut4, lop1, lop2, lop3, lop4, hip1, hip2, hip3, hip4)
+(
+  ch=xch; // keep the channel #
+  order=0;
+  vbOut1 = vbOut2 = vbOut3 = vbOut4 = 0; 
+  hOut=ch;
+  hvol = lvol = 1.0;
+  cvol = dvol = 0.0;
+  lop1.finit(); lop2.finit(); lop3.finit(); lop4.finit();
+  hip1.finit(); hip2.finit(); hip3.finit(); hip4.finit();
+);
+
+
+function mkLop(freq)
+  instance(yn yn_1 xn xn_1 a0 a1 b1)
+  local (x)
+(
+  x = exp(-6.283185307179586*freq/srate);
+  a0 = 1-x; b1 = x; a1 = 0;
+);
+
+function mkHip(freq)
+  instance(yn yn_1 xn xn_1 a0 a1 b1)
+  local (x)
+(
+  x = exp(-6.283185307179586*freq/srate);
+  a0 = (1+x)/2; a1 = -a0; b1 = x;
+);
+
+function fltr(smpl)
+  instance(yn yn_1 xn xn_1 a0 a1 b1)
+(
+  yn_1 = yn; xn_1 = xn; xn = smpl;
+  yn = a0*xn + a1*xn_1 + b1*yn_1;
+);
+
+  
+// This is executed once for each of the 64 channels, for each set of samples
+function exec(smpl)
+  global(smplOut, LFE1Out, LFE2Out, LFE3Out, LFE4Out)
+  instance(ch, order, hOut, hvol, lvol, cvol, dvol, vbOut1, vbOut2, vbOut3, vbOut4, lop1, lop2, lop3, lop4, hip1, hip2, hip3, hip4)
+  local(high, bass)
+(
+  (order == 0) ? (
+    high = smpl;
+    bass = 0;
+  ) : (
+    (order == 1) ? (
+      high = hip1.fltr(smpl);
+      bass = lop1.fltr(smpl);
+    ) : (
+      (order == 2) ? (
+        high = hip1.fltr(hip2.fltr(smpl));
+        bass = lop1.fltr(lop2.fltr(smpl));
+      ) : (
+        (order == 3) ? (
+          high = hip1.fltr(hip2.fltr(hip3.fltr(smpl)));
+          bass = lop1.fltr(lop2.fltr(lop3.fltr(smpl)));
+        ) : (
+            high = hip1.fltr(hip2.fltr(hip3.fltr(hip4.fltr(smpl))));
+            bass = lop1.fltr(lop2.fltr(lop3.fltr(lop4.fltr(smpl))));
+        );
+      );
+    );
+  );
+  smplOut[hOut]+=high*hvol + smpl*dvol + bass*cvol;
+  LFE1Out+=bass*vbOut1;
+  LFE2Out+=bass*vbOut2;
+  LFE3Out+=bass*vbOut3;
+  LFE4Out+=bass*vbOut4;
+);
+
+/*
+   Build the channel "ch" from current control values
+*/
+function buildF()
+  instance(ch, order, hOut, hvol, lvol, cvol, dvol, vbOut1, vbOut2, vbOut3, vbOut4, lop1, lop2, lop3, lop4, hip1, hip2, hip3, hip4)
+  global(VArray, ChTypes, ChFTypes, ChFOrders, ChFFreqs, ChIGains, ChFOvrlp, ChTBal, ChDWMix, 
+         ChToLFE1, ChToLFE2, ChToLFE3, ChToLFE4, ChStatus, ChReComp, bcfol, hfadj, lfadj,
+         LFE1Vol, LFE2Vol, LFE3Vol, LFE4Vol)
+  local(xVals, ty, v, w, lFreq, hFreq)
+(
+  // "ch" got a value from "init"
+  xVals = VArray + (ch<<4); // pointer to channel description
+  // Determine the order of the channel
+  order=1+xVals[ChFOrders];
+  // Reasons to think the order is actually "0" ?
+  ty = xVals[ChTypes];
+  (ty != 1 && ty != 2) ? (order=0;); // The channel type is not "filtered" or "test"
+  v = xVals[ChFTypes];
+  (v == 3) ? (order=0;);  // The filter type is none
+  v = xVals[ChStatus];
+  (v == 1) ? (order=0;);  // The channel is muted
+  v = xVals[ChDWMix]; // mix some dry signal
+  dvol = (100-v)/100; // dry vol
+  // Computes low & high gains
+  v = 10 ^ (xVals[ChIGains]/20);
+  // Is the channel a LFE ?
+  (ty == 3) ? LFE1Vol = v;
+  (ty == 4) ? LFE2Vol = v;
+  (ty == 5) ? LFE3Vol = v;
+  (ty == 6) ? LFE4Vol = v;
+  hvol = v; // high freq. volume factor
+  lvol = v; // low freq. volume factor
+  cvol = 0.0;
+  vbOut1 = vbOut2 = vbOut3 = vbOut4 = 0;
+  // is the order != 0 ?
+  (order != 0) ? (
+    // evaluate sending to LFEs
+    ((v = xVals[ChToLFE1]) > -120) ? (vbOut1 = 10 ^ (v/20););
+    ((v = xVals[ChToLFE2]) > -120) ? (vbOut2 = 10 ^ (v/20););
+    ((v = xVals[ChToLFE3]) > -120) ? (vbOut3 = 10 ^ (v/20););
+    ((v = xVals[ChToLFE4]) > -120) ? (vbOut4 = 10 ^ (v/20););
+    // compute all filters...
+    v = xVals[ChFFreqs]; // frequency
+    w = (0.2 + xVals[ChFOvrlp]* 0.8) * interpolate(v, bcfol); // freq. overlap
+    lFreq = v*w; // actual low frequency used
+    hFreq = v/w; // actual high frequency used
+    hvol *= interpolate(v, hfadj) * 1.00; // adjust hf volume
+    lvol *= interpolate(v, lfadj) * 1.01; // adjust lf volume
+    lop1.mkLop(lFreq); lop2.mkLop(lFreq); lop3.mkLop(lFreq); lop4.mkLop(lFreq); 
+    hip1.mkHip(hFreq); hip2.mkHip(hFreq); hip3.mkHip(hFreq); hip4.mkHip(hFreq);
+    // Changes to computed values ?
+    v = xVals[ChTBal];
+    hvol *= 1+v; lvol *= 1-v; // apply tone control
+    w = sqrt(1-dvol); dvol = sqrt(dvol);
+    hvol *= w; lvol *= w; // update low & high volumes
+    (xVals[ChTypes] == 2) ? (cvol = lvol; lvol=0;); // send low & high to same channel for tests purposes
+  ) : (
+    // Order is zero
+    lvol = 0;
+  );
+  (xVals[ChFTypes] == 1) ? (cvol=lvol=0;); // high only
+  (xVals[ChFTypes] == 2) ? (hvol=0;); // low only
+  (xVals[ChTypes] == 0) ? (hvol=1; cvol=dvol=lvol=0;); // pass through : no vol. change 
+  (xVals[ChStatus] == 1) ? (cvol=dvol=hvol=lvol=0;); // channel is muted [even for pass through]
+  // Adjust final bass outs
+  vbOut1 *= lvol;
+  vbOut2 *= lvol;
+  vbOut3 *= lvol;
+  vbOut4 *= lvol;
+  // Indicate the values are updated
+  xVals[ChReComp] = 0;
+);
+
+  
+
+i=0; loop(64+16, (ReInitCh(i); ShCh[i]='A'; i+=1;)); // init channels array & models
+
+
+// Create all 64 channels handlers
+// We can't use an array, as "tab[i].fct(n)" is not a valid syntax :-(
+xF00.init(0);  xF01.init(1);  xF02.init(2);  xF03.init(3);
+xF04.init(4);  xF05.init(5);  xF06.init(6);  xF07.init(7);
+xF08.init(8);  xF09.init(9);  xF10.init(10); xF11.init(11);
+xF12.init(12); xF13.init(13); xF14.init(14); xF15.init(15);
+xF16.init(16); xF17.init(17); xF18.init(18); xF19.init(19);
+xF20.init(20); xF21.init(21); xF22.init(22); xF23.init(23);
+xF24.init(24); xF25.init(25); xF26.init(26); xF27.init(27);
+xF28.init(28); xF29.init(29); xF30.init(30); xF31.init(31);
+xF32.init(32); xF33.init(33); xF34.init(34); xF35.init(35);
+xF36.init(36); xF37.init(37); xF38.init(38); xF39.init(39);
+xF40.init(40); xF41.init(41); xF42.init(42); xF43.init(43);
+xF44.init(44); xF45.init(45); xF46.init(46); xF47.init(47);
+xF48.init(48); xF49.init(49); xF50.init(50); xF51.init(51);
+xF52.init(52); xF53.init(53); xF54.init(54); xF55.init(55);
+xF56.init(56); xF57.init(57); xF58.init(58); xF59.init(59);
+xF60.init(60); xF61.init(61); xF62.init(62); xF63.init(63);
+
+// Some value modified ; recreate all filters
+function DoRecompAll() 
+(
+  recompAllCnt += 1; // counter
+  LFE1Vol=LFE2Vol=LFE3Vol=LFE4Vol=1;
+  xF00.buildF(); xF01.buildF(); xF02.buildF(); xF03.buildF();
+  xF04.buildF(); xF05.buildF(); xF06.buildF(); xF07.buildF();
+  xF08.buildF(); xF09.buildF(); xF10.buildF(); xF11.buildF();
+  xF12.buildF(); xF13.buildF(); xF14.buildF(); xF15.buildF();
+  xF16.buildF(); xF17.buildF(); xF18.buildF(); xF19.buildF();
+  xF20.buildF(); xF21.buildF(); xF22.buildF(); xF23.buildF();
+  xF24.buildF(); xF25.buildF(); xF26.buildF(); xF27.buildF();
+  xF28.buildF(); xF29.buildF(); xF30.buildF(); xF31.buildF();
+  xF32.buildF(); xF33.buildF(); xF34.buildF(); xF35.buildF();
+  xF36.buildF(); xF37.buildF(); xF38.buildF(); xF39.buildF();
+  xF40.buildF(); xF41.buildF(); xF42.buildF(); xF43.buildF();
+  xF44.buildF(); xF45.buildF(); xF46.buildF(); xF47.buildF();
+  xF48.buildF(); xF49.buildF(); xF50.buildF(); xF51.buildF();
+  xF52.buildF(); xF53.buildF(); xF54.buildF(); xF55.buildF();
+  xF56.buildF(); xF57.buildF(); xF58.buildF(); xF59.buildF();
+  xF60.buildF(); xF61.buildF(); xF62.buildF(); xF63.buildF();
+  DoRecomp=0;
+);
+
+
+//****************************************************************************************
+//****************************************************************************************
+//****************************************************************************************
+
+
+
+
+@slider
+
+
+
+
+cSl=slider1;
+(cSl != pSl) ? (
+  (pSl>=0 && pSl<64) ?  SaveValues(pSl);
+  pSl = cSl;
+  LoadValues(cSl);
+);
+PChan = cSl << 4;
+
+
+
+
+// Select a new set ?
+Ed=slider20;
+(Ed!=CPS) ? (
+  CPS=Ed; 
+);
+
+
+
+
+// Perform edit operations if any
+Ed=slider19;
+// init
+(Ed==1) ? (ReInitCh(cSl); LoadValues(cSl););
+// copy [to selected set]
+(Ed==2) ? (
+    i=0; D=SetsArray+(CPS<<4); loop(13, (D[i]=VArray[i+PChan]; i+=1;));
+    VArray[ChSettings+PChan]=D[ChSettings]=CPS; D[ChStatus]=0; D[ChReComp]=0; slider19=0;
+);
+// paste [from selected set]
+(Ed==3) ? (
+    i=0; D=SetsArray+(CPS<<4); loop(14, (VArray[i+PChan]=D[i]; i+=1;));
+    // we keep the channel status unchanged
+    VArray[ChReComp+PChan]=1; // we will have to recomp this
+    LoadValues(cSl); RecompAll=1;
+);
+// paste & next
+(Ed==4) ? (
+    i=0; D=SetsArray+(CPS<<4); loop(14, (VArray[i+PChan]=D[i]; i+=1;));
+    VArray[ChReComp+PChan]=1;
+    slider1 = pSl = cSl = (cSl+1)%64; PChan = cSl << 4; // switch to next channel
+    LoadValues(cSl); RecompAll=1;);
+// paste on all [except LFEs]
+(Ed==5) ? (k=0; D=SetsArray+(CPS<<4);
+    loop(64, (
+         (VArray[ChTypes+k]<ChTypeLFE1) ? ( // not a LFE
+             i=0; loop(14,(VArray[i+k]=D[i]; i+=1;));
+             VArray[ChReComp+k]=1;
+         );
+         k+=16;));
+    LoadValues(cSl); RecompAll=1;);
+// mute others
+(Ed==6) ? MuteAllBut(cSl);
+// unmute all
+(Ed==7) ? UnmuteAll();
+
+
+
+
+(VArray[ChTypes+PChan]!=slChTyp) ? (
+    VArray[ChTypes+PChan]=x=slChTyp;
+    VArray[ChReComp+PChan]=1; // we will have to recomp
+    (LFE1Ch==(cSl+1)) ? (slider10=0; );
+    (x==ChTypeLFE1) ? (slider10=cSl+1; );
+    (LFE2Ch==(cSl+1)) ? (slider12=0; );
+    (x==ChTypeLFE2) ? (slider12=cSl+1; );
+    (LFE3Ch==(cSl+1)) ? (slider14=0; );
+    (x==ChTypeLFE3) ? (slider14=cSl+1; );
+    (LFE4Ch==(cSl+1)) ? (slider16=0; );
+    (x==ChTypeLFE4) ? (slider16=cSl+1; );
+);
+
+(VArray[ChFTypes+PChan]!=slider3) ? (VArray[ChFTypes+PChan]=slider3; VArray[ChReComp+PChan]=1;);
+
+(VArray[ChFOrders+PChan]!=slider4) ? (VArray[ChFOrders+PChan]=slider4; VArray[ChReComp+PChan]=1;);
+
+(VArray[ChFFreqs+PChan]!=slider5) ? (VArray[ChFFreqs+PChan]=slider5; VArray[ChReComp+PChan]=1;);
+
+(VArray[ChIGains+PChan]!=slChGain) ? (
+    VArray[ChIGains+PChan]=slChGain; VArray[ChReComp+PChan]=1;
+    // DoRecomp = 1;
+);
+
+(VArray[ChFOvrlp+PChan]!=slider7) ? (VArray[ChFOvrlp+PChan]=slider7; VArray[ChReComp+PChan]=1;);
+
+(VArray[ChTBal+PChan]!=slider8) ? (VArray[ChTBal+PChan]=slider8; VArray[ChReComp+PChan]=1;);
+
+(VArray[ChDWMix+PChan]!=slider9) ? (VArray[ChDWMix+PChan]=slider9; VArray[ChReComp+PChan]=1;);
+
+(LFE1Ch!=slider10) ? (
+    (LFE1Ch==(cSl+1)) ? (slChTyp=0;);
+    VArray[ChTypes+((LFE1Ch-1)<<4)]=ChDefaultType;
+    LFE1Ch=slider10;
+    (LFE1Ch!=0) ? (VArray[ChTypes+((LFE1Ch-1)<<4)]=ChTypeLFE1;);
+    (LFE1Ch==(cSl+1)) ? (slChTyp=ChTypeLFE1;);
+    RecompAll=1;
+);
+
+(VArray[ChToLFE1+PChan]!=slider11) ? (VArray[ChToLFE1+PChan]=slider11; VArray[ChReComp+PChan]=1;);
+
+(LFE2Ch!=slider12) ? (
+    (LFE2Ch==(cSl+1)) ? (slChTyp=0;);
+    VArray[ChTypes+((LFE2Ch-1)<<4)]=ChDefaultType;
+    LFE2Ch=slider12;
+    (LFE2Ch!=0) ? (VArray[ChTypes+((LFE2Ch-1)<<4)]=ChTypeLFE2;);
+    (LFE2Ch==(cSl+1)) ? (slChTyp=ChTypeLFE2;);
+    RecompAll=1;
+);
+
+(VArray[ChToLFE2+PChan]!=slider13) ? (VArray[ChToLFE2+PChan]=slider13; VArray[ChReComp+PChan]=1;);
+
+(LFE3Ch!=slider14) ? (
+    (LFE3Ch==(cSl+1)) ? (slChTyp=0;);
+    VArray[ChTypes+((LFE3Ch-1)<<4)]=ChDefaultType;
+    LFE3Ch=slider14;
+    (LFE3Ch!=0) ? (VArray[ChTypes+((LFE3Ch-1)<<4)]=ChTypeLFE3;);
+    (LFE3Ch==(cSl+1)) ? (slChTyp=ChTypeLFE3;);
+    RecompAll=1;
+);
+
+(VArray[ChToLFE3+PChan]!=slider15) ? (VArray[ChToLFE3+PChan]=slider15; VArray[ChReComp+PChan]=1;);
+
+(LFE4Ch!=slider16) ? (
+    (LFE4Ch==(cSl+1)) ? (slChTyp=0;);
+    VArray[ChTypes+((LFE4Ch-1)<<4)]=ChDefaultType;
+    LFE4Ch=slider16;
+    (LFE4Ch!=0) ? (VArray[ChTypes+((LFE4Ch-1)<<4)]=ChTypeLFE4;);
+    (LFE4Ch==(cSl+1)) ? (slChTyp=ChTypeLFE4;);
+    RecompAll=1;
+);
+
+(VArray[ChToLFE4+PChan]!=slider17) ? (VArray[ChToLFE4+PChan]=slider17; VArray[ChReComp+PChan]=1;);
+
+(VArray[ChStatus+PChan]!=slider18) ? (VArray[ChStatus+PChan]=slider18; VArray[ChReComp+PChan]=1;);
+
+// End of Slider handling
+// Quick LFE display update
+slider10=LFE1Ch; slider12=LFE2Ch; slider14=LFE3Ch; slider16=LFE4Ch;
+
+// Future work to do
+(RecompAll!=0) ? (i=0; loop(64, (VArray[ChReComp+i]=1; i+=16;);); RecompAll=0;);
+i=0; loop(64, ((VArray[ChReComp+i]!=0) ? DoRecomp=1; i+=16;)); // we'll recompute everything later
+(DoRecomp!=0) ? (slider19=8;);
+
+// We certainely need to redraw something, but threads being asynchronous,
+xCnt=xDelay; //  we need to delay somewhat the graphic update
+
+
+
+
+//****************************************************************************************
+//****************************************************************************************
+//****************************************************************************************
+
+
+@serialize
+
+
+// read or write in file the 16x80 array of values
+file_mem(0,0,DataSize);
+// we will always recomp the filters...
+(i=0; loop(64, (VArray[ChReComp+i]=1; i+=16;);); DoRecomp=1;);
+xCnt=xDelay;
+
+
+
+
+//****************************************************************************************
+//****************************************************************************************
+//****************************************************************************************
+
+
+@block
+
+(DoRecomp!=0) ? (
+    // Here, we need to recreate the filters structure
+    DoRecompAll(); // we systematically recompile all filters
+    i=0; loop(64, (VArray[ChReComp+i]=0;  i+=16;););
+    slider19=0; sliderchange(slider19);
+    xCnt=xDelay;
+);
+
+
+
+
+//****************************************************************************************
+//****************************************************************************************
+//****************************************************************************************
+
+
+@sample
+
+LFE1Out=LFE2Out=LFE3Out=LFE4Out=0;  // clear all LFE outputs
+
+i=0; loop(num_ch, (smplOut[i]=0;  i+=1;)); // clear all channels outputs
+
+// Perform operations
+xF00.exec(spl0);  xF01.exec(spl1);  xF02.exec(spl2);  xF03.exec(spl3);
+xF04.exec(spl4);  xF05.exec(spl5);  xF06.exec(spl6);  xF07.exec(spl7);
+xF08.exec(spl8);  xF09.exec(spl9);  xF10.exec(spl10); xF11.exec(spl11);
+xF12.exec(spl12); xF13.exec(spl13); xF14.exec(spl14); xF15.exec(spl15);
+(num_ch > 16) ? (
+  xF16.exec(spl16); xF17.exec(spl17); xF18.exec(spl18); xF19.exec(spl19);
+  xF20.exec(spl20); xF21.exec(spl21); xF22.exec(spl22); xF23.exec(spl23);
+  xF24.exec(spl24); xF25.exec(spl25); xF26.exec(spl26); xF27.exec(spl27);
+  xF28.exec(spl28); xF29.exec(spl29); xF30.exec(spl30); xF31.exec(spl31);
+  xF32.exec(spl32); xF33.exec(spl33); xF34.exec(spl34); xF35.exec(spl35);
+  xF36.exec(spl36); xF37.exec(spl37); xF38.exec(spl38); xF39.exec(spl39);
+  (num_ch > 40) ? (
+    xF40.exec(spl40); xF41.exec(spl41); xF42.exec(spl42); xF43.exec(spl43);
+    xF44.exec(spl44); xF45.exec(spl45); xF46.exec(spl46); xF47.exec(spl47);
+    xF48.exec(spl48); xF49.exec(spl49); xF50.exec(spl50); xF51.exec(spl51);
+    xF52.exec(spl52); xF53.exec(spl53); xF54.exec(spl54); xF55.exec(spl55);
+    xF56.exec(spl56); xF57.exec(spl57); xF58.exec(spl58); xF59.exec(spl59);
+    xF60.exec(spl60); xF61.exec(spl61); xF62.exec(spl62); xF63.exec(spl63);
+  );
+);
+
+// Add LFEs to Output
+(LFE1Ch>0) ? (smplOut[LFE1Ch-1]+=LFE1Out*LFE1Vol;);
+(LFE2Ch>0) ? (smplOut[LFE2Ch-1]+=LFE2Out*LFE2Vol;);
+(LFE3Ch>0) ? (smplOut[LFE3Ch-1]+=LFE3Out*LFE3Vol;);
+(LFE4Ch>0) ? (smplOut[LFE4Ch-1]+=LFE4Out*LFE4Vol;);
+
+i=0; loop(num_ch, (spl(i)=smplOut[i]; i+=1;)); // return values
+
+
+
+//****************************************************************************************
+//****************************************************************************************
+//****************************************************************************************
+
+
+@gfx 0 0
+
+function xBlack() (gfx_r = 0.0; gfx_g = 0.0; gfx_b = 0.0; gfx_a = 1.0;);
+function xDark() (gfx_r = 0.40; gfx_g = 0.35; gfx_b = 0.35;);
+function xBlue() (gfx_r = 0.1; gfx_g = 0.1; gfx_b = 1.0;);
+function xGreen() (gfx_r = 0.0; gfx_g = 0.8; gfx_b = 0.0;);
+function xRed() (gfx_r = 0.8; gfx_g = 0.0; gfx_b = 0.0;);
+
+// Minimalist work
+gfx_clear = 0xeeeeee; // light grey background color
+CCC=gfx_getchar(); // Some char entered on keyboard ?
+MSC=mouse_cap; // get mouse/modifiers status 
+((MSC & 3)==0) ? (MOK=0x3;); // now we accept left/right clicks
+(xCnt>0) ? (xCnt-=1; (xCnt<=0) ? GAX |=2;); // a delayed update ?
+GAX |= (Kgfx_w != gfx_w) || (Kgfx_h != gfx_h); // a change in window size ?
+
+
+// Most of the time, we don't execute that portion
+((CCC>0) || (MSC & MOK) || GAX) ? (
+  m_x=mouse_x; m_y=mouse_y; 
+  xBlack();
+  gfx_x = 120; gfx_y = gfx_y = DrChRct_ndy+10; // message position if any
+  (CCC>0) ? (
+    // Handle the various short cuts
+    (CCC=='n' || CCC==0x72676874) ? ( // "n" or right arrow
+       slider1 = pSl = cSl = (cSl+1)%80; PChan = cSl << 4; // switch to next channel
+       LoadValues(cSl); CCC=0;
+       gfx_drawstr("next channel "); gfx_drawnumber(cSl+1,0);
+    );
+    (CCC=='p' || CCC==0x6C656674) ? ( // "p" or left arrow
+       slider1 = pSl = cSl = (cSl+79)%80; PChan = cSl << 4; // switch to previous channel
+       LoadValues(cSl); CCC=0;
+       gfx_drawstr("previous channel "); gfx_drawnumber(cSl+1,0);
+    );
+    (CCC=='o' || CCC==0x7570) ? (  // "o" or up arrow
+       slider1 = pSl = cSl = (cSl+80-8)%80; PChan = cSl << 4; // switch to first channel
+       LoadValues(cSl); CCC=0;
+       gfx_drawstr("up channel");
+    );
+    (CCC=='q' || CCC==0x646F776E) ? ( // "q" or down arrow
+       slider1 = pSl = cSl = (cSl+8)%80; PChan = cSl << 4; // switch to last channel
+       LoadValues(cSl); CCC=0;
+       gfx_drawstr("down channel");
+    );
+    (CCC==0x686F6D65) ? (  // start arrow
+       slider1 = pSl = cSl = 0; PChan = cSl << 4; // switch to first channel
+       LoadValues(cSl); CCC=0;
+       gfx_drawstr("first channel");
+    );
+    (CCC==0x656E64) ? ( // end arrow
+       slider1 = pSl = cSl = 63; PChan = cSl << 4; // switch to last channel
+       LoadValues(cSl); CCC=0;
+       gfx_drawstr("last channel");
+    );
+    (CCC=='m') ? ( // mute all but
+        MuteAllBut(cSl); CCC=0; xCnt=xDelay;
+    );
+    (CCC=='u') ? ( // unmute all
+        UnmuteAll(); CCC=0; xCnt=xDelay;
+    );
+    (CCC=='t') ? ( // toggle pass/filtered
+        wx=VArray[ChTypes+PChan];
+        (wx<3) ? (
+            VArray[ChTypes+PChan]=wx=(wx!=0) ? 0 : 1;
+            slChTyp=wx; isMod(cSl);
+        );
+        CCC=0; 
+    );
+    (CCC=='c') ? ( // toggle pass/check 
+        wx=VArray[ChTypes+PChan];
+        (wx<3) ? (
+            VArray[ChTypes+PChan]=wx=(wx!=0) ? 0 : 2;
+            slChTyp=wx; isMod(cSl);
+        );
+        CCC=0; 
+    );
+    (CCC=='z') ? ( // mute/unmute current channel
+       wx=VArray[ChStatus+PChan];
+       VArray[ChStatus+PChan]=wx=1-wx;
+       slider18=wx; isMod(cSl);
+       CCC=0; 
+    );
+    (CCC=='s') ? ( // save to target
+        ix=0; DX=SetsArray+(CPS<<4); loop(13, (DX[ix]=VArray[ix+PChan]; ix+=1;));
+        (csl<64) ? (VArray[ChSettings+PChan]=CSL;);
+        DX[ChSettings]=CPS; DX[ChStatus]=0; DX[ChReComp]=0;
+        isMod(cSl); CCC=0;
+    );
+    (CCC=='l') ? (  // load from target
+        ix=0; DX=SetsArray+(CPS<<4); loop(14, (VArray[ix+PChan]=DX[ix]; ix+=1;));
+        (csl>=64) ? (VArray[ChSettings+PChan]=csl-64;);
+        // we keep the channel status unchanged
+        LoadValues(cSl);isMod(cSl); CCC=0;
+    );
+    (CCC=='r') ? (  // reload from model
+        fx=VArray[ChSettings+PChan]; // model
+        (fx >=0) ? (
+            ix=0; DX=SetsArray+(fx<<4); loop(13, (VArray[ix+PChan]=DX[ix]; ix+=1;));
+            // we keep the channel status unchanged
+            LoadValues(cSl);isMod(cSl);
+        );  CCC=0;
+    );
+    (CCC>='A' && CCC<='P') ? (  // "A" to "P" select a target buffer
+       CPS=CCC-'A';  CCC=0;
+       slider20=CPS; sliderchange(slider20);
+       // gfx_drawstr("select set: "); gfx_drawchar(CPS+'A');
+    );
+    (CCC!=0) ? (  // otherwise, it's an unknown command
+       gfx_drawstr("Unknown command: ");
+       fx=jx=0; loop(8, (vx=(CCC>>((7-jx)*4))&0xf; 
+          (vx!=0 || fx!=0) ? ((vx<10) ? (gfx_drawchar(vx+'0');) : (gfx_drawchar(vx-10+'A');); fx=1;);
+       jx+=1;));
+    );
+  );
+
+  (MSC & 3) ? (  // mouse left/right button pressed ?
+    MOK=0; // inhibit reusing mouse event
+    // are we in the "show channels" rectangle ?
+    ((m_x>DrChRct_x) && (m_x<DrChRct_ndx) && (m_y>DrChRct_y) && (m_y<DrChRct_ndy)) ? (
+      // Yes, compute on which channel number we clicked
+      xpos=7; loop(8, (m_x<xChPos[xpos]) ? (xpos-=1;));
+      ypos=7; loop(8, (m_y<yChpos[ypos]) ? (ypos-=1;)); chan=xpos+8*ypos; (chan<0) ? (chan=0;);
+      // gfx_drawnumber(chan+1,0); // we print it
+      wx = MSC; // get mouse & modifiers
+      (wx==9) ? ( // left, shift : mute/unmute the channel
+         fx=VArray[ChStatus+(chan<<4)]; VArray[ChStatus+(chan<<4)]=1-fx;
+         (chan==cSl) ? (slider18=1-fx;);
+         isMod(chan); wx=0;
+      );
+      (wx==17) ? ( // left, alt : toggle the channel pass/filter
+         fx=VArray[ChTypes+(chan<<4)];
+         (fx < 2) ? (
+             VArray[ChTypes+(chan<<4)]=1-fx;
+             (chan==cSl) ? (slChTyp=1-fx;);
+             isMod(chan);
+         ); wx=0;
+      );
+      (wx==25) ? ( // left alt shift : save channel in current model
+         pastPr(chan, CPS+64); VArray[ChSettings+(chan<<4)]=CPS; wx=0;
+      );
+      (wx==2 || wx==33) ? ( // right [or ctrl left] : show channel model
+         fx=VArray[ChSettings+(chan<<4)];
+         (fx>=0) ? (
+             slider1 = pSl = cSl = fx+64; PChan = cSl << 4; // switch to selected channel
+             LoadValues(cSl); 
+         ); wx=0;
+      );
+      (wx==10) ? ( // shift right clic : set "target" to the corresponding model
+         fx=VArray[ChSettings+(chan<<4)];
+         (fx>=0) ? (
+             slider20 = CPS = fx; sliderchange(slider20);
+         ); wx=0;
+      );
+      (wx==26 || wx==57) ? ( // right [or ctrl left], alt+shift : set channel to selected model
+         pastPr(CPS+64,chan); wx=0;
+      );
+      (wx!=0) ? ( // typically left, no modifiers, but any unrecognised : select channel
+         slider1 = pSl = cSl = chan; PChan = cSl << 4; // switch to selected channel
+         LoadValues(cSl); 
+      );
+    );  
+  );
+
+
+  // Display the "show channels" rectangle
+  (GAX>1) ? (buildChDesc(); gfx_x = 240; gfx_drawstr("Rebuild"););
+  gfx_r = 0.0; gfx_g = 0.0; gfx_b = 0.0; 
+  gfx_roundrect(DrChRct_x,DrChRct_y,DrChRct_w,DrChRct_h,5);
+  gfx_y = DrChRct_y+8; ix=0; iy=0;
+  loop(8, (
+      // as we display, we keep various x and y positions in xChPos and yChPos
+      wx = DrChRct_x+8; yChPos[iy]=gfx_y; iy+=1;
+      loop(2, (
+         loop(4, (
+               xChPos[ix%8]=gfx_x=wx;
+               ic=ix<<4;
+               xDark(); (VArray[ChStatus+ic]==1) ? (xRed(););
+               gfx_drawnumber(ix+1,0); 
+               xDark(); gfx_drawstr(((ShCh[ix] & 0x100) ? "#" : ":")); gfx_x=wx+24;
+               (VArray[ChTypes+ic]>=ChTypeLFE1) ? ( // 
+                   xBlue();
+               );
+               (VArray[ChTypes+ic]==1) ? (
+                   xGreen();
+               );
+               gfx_drawchar(ShCh[ix] & 0xFF); wx=wx+dlX;
+               ix+=1; 
+         )); wx+=dlX;
+      ));
+      gfx_y+=dlY;    
+  ));
+  xBlack();
+  // Display a rectangle around the current channel 
+  (cSl<64) ? (ix=(cSl&0x7); ix+=(ix>3); ix=ix*dlX+DrChRct_x+3; iy=(cSl>>3)*dlY+DrChRct_y+3; gfx_roundrect(ix,iy,dlX-3,dlY-3,3););
+  // Show the currently selected channel model
+  gfx_x = 30; gfx_y = DrChRct_ndy+30; gfx_drawstr("set: "); gfx_drawchar(CPS+'A');
+  (xDbg) ? (
+    gfx_x = 120; gfx_drawstr("Mouse ");
+    gfx_drawnumber(m_x,0); gfx_drawstr(" ");gfx_drawnumber(m_y,0); gfx_drawstr(" "); gfx_drawnumber(MSC,0);
+  );
+  GAX=(GAX>0) ? GAX-1 : 0; Kgfx_w=gfx_w; Kgfx_h=gfx_h;
+);
+
+//****************************************************************************************
+//****************************************************************************************
+//****************************************************************************************
+

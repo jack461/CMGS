@@ -1,0 +1,863 @@
+/*
+    The clip manager globals
+    (c)Jean-Jacques Girardot
+    2018-2023
+*/
+
+<? in_eel != 0 ? _suppress=1; ?>
+@init
+<? _suppress=0; ?>
+
+//======== 0x00 to 0xFF
+// MAKE SURE TO CHECK COMPATIBILITY WITH GMAuxiliary.eel !
+//======================================================
+
+
+// Use this to check than no one is writing by mistake in gmem[0]...
+// like : "gmem[idnex] = x+2;" where "idnex" is a typo :-(
+loczerovalue = 0x7FDA;
+
+versionGMaster = 0x07; // Version du Game Master
+versionFReader = 0x08; // Version des Readers
+sensorsPadState = 0x09; // Etat des sensors
+flagInited = 0x0A; // set when inited
+flagIDate = 0x0B; // date when inited
+flagSect = 0x0C;
+flagSubS = 0x0D;
+flagGInited = 0x0E;
+versionGMScript = 0x0F; // Version du script auxiliaire
+
+timeYear = 0x10;
+timeMonth = 0x11;
+timeDay = 0x12;
+timeHour = 0x13;
+timeMinute = 0x14;
+timeSecond = 0x15;
+timeDofWeek = 0x16;
+timeSecOfDay = 0x17;
+timeSecOfRun = 0x18;
+timeTick = 0x19;
+timeYisBissext = 0x1A;
+timeDofYear = 0x1B;
+timeStartUp = 0x1C;
+timeUnix = 0x1D;
+timeSubsec = 0x1E;
+timeDelta = 0x1F;
+
+clPlAvail = 0x20;  // Player memory available
+clRdMaxSize = 0x21;  // Max clip size to read
+idAlloc = 0x22; // for ID allocation
+comPlCnt = 0x23; // current active players count
+comPlClips = 0x24; // total clips played up to now
+comPlErrs = 0x25; // total clip errors found -- mostly clips too large
+comPlClLast = 0x26; // last played clip
+gmemLastUsed = 0x27; // memory limit
+gVolBias = 0x28;
+recLogCnt = 0x29;
+playLogRef = 0x2A; // pointer in play log
+pprimecnt = 0x2B; // how many primes do we have ?
+dirChange = 0x2C; // set when Dir has changed...
+playLogDate = 0x2D;
+ticksCount = 0x2E; // ticksCount
+dynGlFlags = 0x2F; // global dynamic flags
+
+//  Script communication area
+//    GM <==> Script
+dateRqst = idxpt = 0x30;
+dateCfrm = (idxpt += 1);
+dateStrt = (idxpt += 1);
+dateDone = (idxpt += 1);
+cmndKode = (idxpt += 1);
+cmndPar1 = (idxpt += 1);
+cmndPar2 = (idxpt += 1);
+cmndPar3 = (idxpt += 1);
+//
+scptTrcs = (idxpt += 1);
+scptLock = (idxpt += 1);
+workToDo = (idxpt += 1);
+scptErrc = (idxpt += 1);
+scptDone = (idxpt += 1);
+thrdRqst = (idxpt += 1);
+scptPar1 = (idxpt += 1);
+scptPar2 = (idxpt += 1);
+scptPar3 = (idxpt += 1);
+//
+lastScRun = (idxpt += 1);
+rtrnVal1 = (idxpt += 1);
+rtrnVal2 = (idxpt += 1);
+rtrnVal3 = (idxpt += 1);
+rtrnVal4 = (idxpt += 1);
+auxFTask = (idxpt += 1); // auxiliary ftask active/not
+//
+//  Global Parameters
+// Flag : some change in global controls
+gctlChange = (idxpt += 1);
+// clips mgr
+clipSerial = (idxpt += 1);
+cmClipLow = (idxpt += 1);
+cmClipHigh = (idxpt += 1);
+speedBase = (idxpt += 1); // in [0.01 .. 5]
+tempoSync = (idxpt += 1);
+looperMass = (idxpt += 1);
+synchroDel = (idxpt += 1);
+commonGlobalVolume = (idxpt += 1);
+
+APCdispvalue = (idxpt += 1);
+ModulAlgo = (idxpt += 1);
+ModDepth = (idxpt += 1);
+ModWidth = (idxpt += 1);
+ModFreq = (idxpt += 1);
+
+ModTR1 = (idxpt += 1);
+ModTR2 = (idxpt += 1);
+ModTR3 = (idxpt += 1);
+ModTR4 = (idxpt += 1);
+ModTR5 = (idxpt += 1);
+
+ModulAlgoPl = (idxpt += 1);
+ModPl = (idxpt += 1);
+
+ModSWav = (idxpt += 1);
+ModWidthL = (idxpt += 1);
+
+// chars string exploded
+expldwstr = (idxpt += 1); // up to 0xFF
+explavail = 0xff - expldwstr;
+
+// Exchange strings between JSFX effects
+/*
+   Convert an array of ASCII codes of characters (in gmem[expldwstr+i])
+   to a string in #sct, also returned by the function
+*/
+function getexpldstr(str,src)
+local (ux, vz, lm)
+(
+    (str == 0) ? str = #sct;
+    strcpy(str, "");
+    lm = 256;
+    (src == 0) ? (src = expldwstr; lm = explavail-1; gmem[src+lm] = 0;);
+    (gmem[src] == 'strx') ? (
+        src += 1;
+        ux = 0; vz = gmem[src];
+        while ((vz != 0) && (lm > 0)) (
+            str_setchar(str, -0.25, vz, 'uc');
+            lm -= 1; ux +=1; vz = gmem[src+ux];
+        );
+    );
+    str;
+);
+
+function setexpldstr(str, dst, siz)
+local (ux, lg)
+(
+    (dst == 0) ? (dst = expldwstr; siz = explavail;);
+    lg = min(siz - 1,strlen(str));
+    gmem[dst] = 'strx'; ux = 0; dst += 1;
+    loop (lg,
+        gmem[dst+ux] = str_getchar(str, ux, 'uc');
+        ux += 1;
+    );
+    gmem[dst+ux] = 0;
+);
+
+
+// Pack a string in a gmem array, 6 chard/word
+function
+mSL_g6packStr(dst, str, ptre, ptmx, flnl)
+local (pt, nk, pkg, fct, ch)
+(
+    pt = 0; nk = 6; pkg = 0; fct = 1;
+    while (((ch = str_getchar(str, pt, 'cu')) != 0) && (ptre < ptmx - 4))  (
+        //sprintf(#s, "       >>>  %c  %x  %d", ch, ch, ch); mSL_log(SysLogBox, #s);
+        (nk <= 0) ? (
+            (pkg != 0) ? (gmem[dst+ptre] = pkg; ptre += 1;) ;
+            nk = 6; pkg = 0; fct = 1;
+        );
+        pkg += ch * fct; nk -= 1; fct *= 256; pt += 1;
+    );
+    (pkg != 0) ? (gmem[dst+ptre] = pkg; ptre += 1;);
+    (flnl != 0) ? (
+        // 4: suppress trailing spaces
+        while ((flnl & 4) && (gmem[dst+ptre-1] === ' ')) (ptre -= 1;);
+        // 2: no more than 2 consecutive empty lines or single space line
+        ((flnl & 2) && (gmem[dst+ptre-1] === ' ') && (gmem[dst+ptre-2] === '\n')
+                    && (gmem[dst+ptre-3] === ' ') && (gmem[dst+ptre-4] === '\n')
+                    && (gmem[dst+ptre-5] === ' ') && (gmem[dst+ptre-6] === '\n')) ? (ptre -= 2;);
+        ((flnl & 2) && (gmem[dst+ptre-1] === '\n') && (gmem[dst+ptre-2] === '\n') && (gmem[dst+ptre-3] === '\n')) ? (ptre -= 1;);
+        // 1: add a line feed after the string
+        (flnl & 1) ? (gmem[dst+ptre] = '\n'; ptre += 1;);
+    );
+    gmem[dst+ptre] = 0;
+    ptre;
+);
+
+
+// Unpack a string from a gmem array, 6 chars/word
+function mSL_g6unpackArray(str, array, ptin)
+local (src, ch)
+(
+    (str === 0) ? str = #;
+    strcpy(str, "");
+    while ((src = gmem[array+ptin]) != 0) (
+        while (src != 0) (
+            ch = src - 256 * floor(src / 256);
+            str_setchar(str, -0.25, ch, 'cu');
+            src = floor(src/256);
+        );
+        ptin += 1;
+    );
+    str;
+);
+
+//======================================================>
+
+/*
+   Protected "gmem[add] = val" operation
+   signal if "add == 0"
+*/
+function gmset(add,val)
+(
+    (add == 0) ? (
+        gmset_lg = min(23, strlen(#section));
+        gmset_ix = 0;
+        loop (gmset_lg,
+            gmem[expldwstr+gmset_ix] = str_getchar(#section, gmset_ix, 'c');
+            gmset_ix += 1;
+        );
+        gmem[expldwstr+gmset_ix] = 0;
+        gmem[flagSubS] = SubSection;
+    );
+    gmem[add]=val;
+);
+//================================================================ 0x100 to 0x1FF
+// Some shared arrays
+addPlayer = 0x100;
+countPlayersMax = 96;
+addPlayerLast = addPlayer + countPlayersMax - 1;
+
+primeCount = 131;
+somePrimes = addPlayer + countPlayersMax;
+
+paramDynSiz = 28;
+paramType = paramDynSiz - 1;
+dynParams = somePrimes + primeCount; // list of dynamic parameters
+
+gmemlast1 = dynParams + paramDynSiz;
+gmemfree1 = 0x200 - gmemlast1;
+//================================================================ 0x200 to 0x2FF
+
+pCommonG = 0x200; // "countPlayersMax" Player parameters curtomizable for the application
+                  // and 128 destination channels
+idx = pCommonG + 0x80;
+errSignal = (idx += 1); // to signal an error
+iBErrSignal = (idx += 1); // error info block
+errSFlag = (idx += 1); // an error flag
+playerAvail = (idx += 1); // number of available players
+playerCurrent = (idx += 1); // last used player
+playerFLGS = (idx += 1); // Players Flags
+primeCurrent = (idx += 1); // current prime
+chnCount = (idx += 1); // number of channels in players tracks
+paramDynAct = (idx += 1); // Actual number of dyn parameters
+// Shared variables between scripts
+shvar0 = (idx += 1);
+shvar1 = (idx += 1);
+shvar2 = (idx += 1);
+shvar3 = (idx += 1);
+shvar4 = (idx += 1);
+shvar5 = (idx += 1);
+shvar6 = (idx += 1);
+shvar7 = (idx += 1);
+shvar8 = (idx += 1);
+shvar9 = (idx += 1);
+
+gmemlast2 = (idx += 1);
+gmemfree2 = 0x300 - gmemlast2;
+
+//================================================================ 0x300 and up...
+/*
+
+   Memory for the Unit Control Block - UCB
+
+   start at UGAddr, end at UGAddrLast - 1
+
+   currently uCnt entries x UCBSize elements
+
+*/
+
+// Various unit control blocks
+UGAddr = 0x300; // units global addresses in shared memory
+UCBSize = 400; // 388; // size of a unit Control block description
+uCnt = 128; // // unit count
+UGAddrLast = UGAddr + UCBSize * uCnt;
+// Global vars for Unit control
+UId = UAdd = UType = UnewId = UIrId = -1;
+plIDNT = 'fsnd'; // frozen sound identification
+//  New Read Control Block Description
+RCB_Saved_Size = 80; // Size of the RCB block
+// Lay out :
+// RCB                   FSND
+// usage                 |  constant 'fsnd'
+   RCB_RMode =           RCB_FSND =            idxpt = 0;
+// Address in gmem       |  Reference couter
+   RCB_Rec_Entry =       RCB_RefCnt =          (idxpt += 1);
+// Addresse in GM        |  unused
+   RCB_Log_Entry =                             (idxpt += 1);
+playLogHdrSize = idxpt + 1; // specific HDR in gmem
+playLogCopySize = RCB_Saved_Size - playLogHdrSize; // size of infos to save
+// =============== 1st field  @ 3
+RCB_Random_seed = (idxpt += 1); // seed for player local random number
+RCB_Kmd = (idxpt += 1); // # command for unit
+RCB_KmdAlt = (idxpt += 1); // # alternative command for unit
+RCB_KmdVar = (idxpt += 1); // # command variation for unit
+RCB_PBFlgs = (idxpt += 1); // # Flags for the command
+RCB_PlyerFlgs = (idxpt += 1); // # Debug Flags for the players
+RCB_Cl_Flgs = (idxpt += 1); // Clip play mode Flags : loop, mute, etc.
+RCB_ClipNb = (idxpt += 1); // # Clip Number to read
+RCB_ClpName = (idxpt += 1); // clip name is aliased.
+// Speed Play conditions
+RCB_SpeedAbs_u = (idxpt += 1); // Asked Speed by the Game Master
+RCB_SpeedMod1_u = (idxpt += 1); // # Speed Modifier 1
+RCB_SpeedMod2_u = (idxpt += 1); // Speed Modifier 2
+RCB_Speed_Dir_u = (idxpt += 1); // Speed direction 1/-1
+// Volume
+RCB_VolumeTarget_dB = (idxpt += 1); // "Target" Volume
+RCB_StdVol = (idxpt += 1); // std clip playing volume
+RCB_VolBias = (idxpt += 1); // volume change coefficiant
+RCB_VolumeMod1_u = (idxpt += 1); // Volume Modifier 1
+RCB_VolumeMin_dB = (idxpt += 1); // Volume low value
+RCB_VolumeMax_dB = (idxpt += 1); // Volume high value
+// Global Fades
+RCB_FadeIn_ms = (idxpt += 1); // # Fade-in in milliseconds
+RCB_FadeOut_ms = (idxpt += 1); // # Fade-out in milliseconds
+RCB_PlayTime_sec = (idxpt += 1); // # Play Time in seconds
+// Looper Add. infos
+RCB_MinGrains_ms = (idxpt += 1); // # Min. Grains duration, milliseconds
+RCB_MaxGrains_ms = (idxpt += 1); // # Max. Grains duration, milliseconds
+RCB_MinNGrains_u = (idxpt += 1); // # Min. Grains depth
+RCB_MaxNGrains_u = (idxpt += 1); // # Max. Grains depth
+RCB_GrFdIn_ms = (idxpt += 1); // # Grains Fade-in in milliseconds
+RCB_GrFdOut_ms = (idxpt += 1); // # Grains Fade-Out in milliseconds
+// Space management algos
+RCB_SP_Algo = (idxpt += 1); // SM algo
+RCB_SP_Aux = (idxpt += 1); // SM algo parameter
+// Generator Channel Count
+RCB_MinChCnt = (idxpt += 1);
+RCB_MaxChCnt = (idxpt += 1);
+//--- Dynamic parameters copy ---
+RCB_DynPar = (idxpt += 1); idxpt += paramDynSiz;
+RCB_PM_Flgs1 = RCB_DynPar + 1; // Flags from the play mode (static)
+RCB_PM_Flgs2 = RCB_DynPar + 2; // Flags from the play mode (dynamic)
+// Output Channels
+RCB_Channels_cnt_used1 = (idxpt += 1); // # Number of used output channels in cnf 1
+RCB_Channels_cnt_used2 = (idxpt += 1); // # Number of used output channels in cnf 2
+RCB_Channels_cnt_min = (idxpt += 1); // # min Number of output channels to use
+RCB_Channels_cnt_max = (idxpt += 1); // # max Number of output channels to use
+RCB_Channels_flgs = (idxpt += 1); // # Flags for output channels
+RCB_Channels_density = (idxpt += 1); // # Density asked for output channels
+//RCB_ChSet1_set = (idxpt += 1); // # Output channels Set 1
+//RCB_ChSet2_set = (idxpt += 1); // # Output channels Set 2
+//RCB_ChSet3_set = (idxpt += 1); // # Output channels Set 3
+//RCB_ChSet4_set = (idxpt += 1); // # Output channels Set 4
+RCB_PClass = (idxpt += 1); // Class of the partiel
+// --
+RCB_ActiveSize = idxpt + 1;
+// --
+//
+// Other unnecessary informations
+// Sent, but currently unused
+RCB_CGrp_nbr = (idxpt += 1); // Clip Group Number
+RCB_CBnk_nbr = (idxpt += 1); // Clip Bank Number
+RCB_CPart_nbr = (idxpt += 1); // Clip Partial Number
+RCB_CPlMd_nbr = (idxpt += 1); // Clip Play Mode
+RCB_CSpMd_nbr = (idxpt += 1); // Clip space Mode
+RCB_PmMdSpd1 = (idxpt += 1); // speed field 1 from Play Mode
+RCB_PmMdSpd2 = (idxpt += 1); // speed field 2 from Play Mode
+RCB_PmMdSpd3 = (idxpt += 1); // speed field 3 from Play Mode
+RCB_Transpose_u = (idxpt += 1); // # Speed transpose
+RCB_Algo_enu = (idxpt += 1); // #  Algorithm variant
+RCB_AlParam = (idxpt += 1); // # Algorithm Parameter
+RCB_Gr_FdType = (idxpt += 1); // Grains Fade Type
+RCB_PmMdDur1 = (idxpt += 1); // duration field 1 from Play Mode
+RCB_PmMdDur2 = (idxpt += 1); // duration field 2 from Play Mode
+//-----------------
+RCB_PlaySource = (idxpt += 1); // detailed play command
+RCB_SmpPStart = (idxpt += 1); // start date as a sample number
+RCB_Channels_conf1 = (idxpt += 1); // channels 1 configuration
+RCB_Channels_conf2 = (idxpt += 1); // channels 2 configuration
+RCB_Synchro_source = (idxpt += 1); // source for synchronisation
+RCB_Serial = (idxpt += 1); // this play number [session relative]
+RCB_Color = (idxpt += 1); // color for this player
+//
+// Locally (in FilePlayer) computed informations
+RCB_CFty_enu = (idxpt += 1); // Clip File Type, an internal enumeration
+RCB_CSiz_smp = (idxpt += 1); // Clip total Size, in Samples
+RCB_CSiz_tpl = (idxpt += 1); // Clip Size, in Tuples
+RCB_CCCC = (idxpt += 1); // Clip Channel count
+RCB_CFreq_sps = (idxpt += 1); // Clip sampling frequency, Hz
+RCB_CFrCorr_u = (idxpt += 1); // Clip Frequency correction (v.s. srate)
+RCB_GrXpect = (idxpt += 1); // number of grains expected
+RCB_StartIndex = (idxpt += 1); // Play start index
+RCB_CPStart_tim = (idxpt += 1); // Clip Play Start (ptime)
+RCB_CPStop_tim = (idxpt += 1); // Clip Play Stop (ptime)
+RCB_ClStart = (idxpt += 1); // Clip Play Start Location (% of sample)
+RCB_ClEnd = (idxpt += 1); // Clip Play End Location (% of sample)
+RCB_CKstart_tim = (idxpt += 1); // Command Start Time (ptime)
+//
+RCB_Errc = (idxpt += 1); // RCB Error code
+RCB_ClipDup = (idxpt += 1); // # Duplicate of the clip number
+RCB_Channels_cnfDup = (idxpt += 1); // channels configuration
+RCB_cbCKmd = (idxpt += 1); // current command - copy
+//
+// This doesn't really need to be saved
+RCB_Gr_Size = (idxpt += 1); // an info
+RCB_Info1 = (idxpt += 1); // an info
+RCB_Mem_Avail = (idxpt += 1); // memory available
+RCB_State_Changed = (idxpt += 1); // External State Change... Do something !
+RCB_Item_Changed = (idxpt += 1); // External State Change... Do something !
+RCB_Rec_Time = (idxpt += 1); // "Record Time" When started
+RCB_Rec_Last = (idxpt += 1); // "Record Time" When started
+RCB_Rec_Duration = (idxpt += 1); // Duration time
+RCB_FX1_a = (idxpt += 1);
+RCB_FX1_b = (idxpt += 1);
+RCB_FX2_a = (idxpt += 1);
+RCB_FX2_b = (idxpt += 1);
+RCB_Rec_Flag  = (idxpt += 1); // Flag "ready to reinsert"
+RCB_Pan_Src = (idxpt += 1); // pan source
+RCB_Pan = (idxpt += 1); // actual pan value
+cbPch00 = (idxpt += 1); // list of output chan. description
+idxpt += 65; // size for 64 channels + 1 limit
+// Other information
+cbPtrPos = (idxpt += 1);
+
+pcbVSpl0 = (idxpt += 1); // volume array for 64 channels
+idxpt += 64;
+// Last entry
+RCB_Alias_Name = (idxpt += 1); // Array for ext. file name
+idxpt += 64;
+
+UCBparCnt = (idxpt += 1); // last
+
+RCB_ActualSize = (idxpt += 1); // RCB Actual Size
+// --
+
+// Keep last few words as unique non zeroed part of the UCB
+// This doesn't need to be saved as part of the preset
+idxpt = UCBSize; // restart from the end !
+//
+cbLocPrime = (idxpt -= 1); // a given prime, last entry
+cbRUniq = (idxpt -= 1); // Unique device identification
+cbType = (idxpt -= 1); // Unit type
+cbUSt = (idxpt -= 1); // last Use time
+cbStat = (idxpt -= 1); // unit global status
+cbDclass = (idxpt -= 1); // MIDI units
+cbChkUM = (idxpt -= 1);
+cbChkGP = (idxpt -= 1);
+cbInacFlg = (idxpt -= 1); // inactive flag
+cbUnitIdt = (idxpt -= 1); // Unique Unit number
+cbERR = (idxpt -= 1); // Error return code
+cbLKmd = (idxpt -= 1); // last command
+cbP08 = (idxpt -= 1); // add. cmd info
+cbClipCnt = (idxpt -= 1); // Clip count
+cbErC = (idxpt -= 1); // err counter
+RCB_My_Track = (idxpt -= 1); // The track I'm on
+RCB_My_Pos = (idxpt -= 1); // My position in the track
+cbPlIdt = (idxpt -= 1); // Player number in the player list
+// cbPadUnitIdt = (idxpt -= 1); // Pad UNIT Id
+cbPlavail = (idxpt -= 1); // available mplayer memory (seconds)
+cbMemory = (idxpt -= 1); // available mplayer memory (words)
+cbClipLoop = (idxpt -= 1); // alt/clip loop flags
+RCB_Repl_Src  = (idxpt -= 1); // Source of a replay
+RCB_GClipSeq  = (idxpt -= 1); // global clip sequence
+RCB_GenCnt  = (idxpt -= 1); // number of generated channels
+RCB_Sample_Start = (idxpt -= 1); // Sample to play
+RCB_SM_ParA = (idxpt -= 1); // Parameter from the space mode
+RCB_SM_Par9 = (idxpt -= 1); // Parameter from the space mode
+RCB_SM_Par8 = (idxpt -= 1); // Parameter from the space mode
+RCB_SM_Par7 = (idxpt -= 1); // Parameter from the space mode
+RCB_SM_Par6 = (idxpt -= 1); // Parameter from the space mode
+RCB_SM_Par5 = (idxpt -= 1); // Parameter from the space mode
+RCB_SM_Par4 = (idxpt -= 1); // Parameter from the space mode
+RCB_SM_Par3 = (idxpt -= 1); // Parameter from the space mode
+RCB_SM_Par2 = (idxpt -= 1); // Parameter from the space mode
+RCB_SM_Par1 = (idxpt -= 1); // Parameter from the space mode
+RCB_SM_Par0 = (idxpt -= 1); // Parameter from the space mode
+RCB_alt_parm = (idxpt -= 1); // alternate parameter
+RCB_alt_parl = (idxpt -= 1); // alternate parameter
+RCB_alt_park = (idxpt -= 1); // alternate parameter
+RCB_alt_parj = (idxpt -= 1); // alternate parameter
+RCB_alt_pari = (idxpt -= 1); // alternate parameter
+RCB_alt_parh = (idxpt -= 1); // alternate parameter
+RCB_alt_parg = (idxpt -= 1); // alternate parameter
+RCB_alt_parf = (idxpt -= 1); // alternate parameter
+RCB_alt_pare = (idxpt -= 1); // alternate parameter
+RCB_alt_pard = (idxpt -= 1); // alternate parameter
+RCB_alt_parc = (idxpt -= 1); // alternate parameter
+RCB_alt_parb = (idxpt -= 1); // alternate parameter
+RCB_alt_para = (idxpt -= 1); // alternate parameter
+RCB_alt_par9 = (idxpt -= 1); // alternate parameter
+RCB_alt_par8 = (idxpt -= 1); // alternate parameter
+RCB_alt_par7 = (idxpt -= 1); // alternate parameter
+RCB_alt_par6 = (idxpt -= 1); // alternate parameter
+RCB_alt_par5 = (idxpt -= 1); // alternate parameter
+RCB_alt_par4 = (idxpt -= 1); // alternate parameter
+RCB_alt_par3 = (idxpt -= 1); // alternate parameter
+RCB_alt_par2 = (idxpt -= 1); // alternate parameter
+RCB_alt_par1 = (idxpt -= 1); // alternate parameter
+RCB_alt_par0 = (idxpt -= 1); // alternate parameter
+alt_par_siz = RCB_alt_parm - RCB_alt_par0 + 1;
+UCBparHCnt = (idxpt -= 1); // last
+
+
+// std commands
+KmdNone = 0; // no command
+KmdInq1 = 1; // Inquiry 1
+KmdInq2 = 2; // Inquiry 2
+KmdQStop = 3; // stop playing ASAP
+KmdStop = 4; // stop playing
+KmdKStop = 5; // parameterd stop
+KmdSlowStop = 6; // very slow stop playing (with delay)
+KmdAct = 7; // action 1
+KmdImm = 8; // action 2
+KmdDly = 9; // action 2
+/*
+*/
+KmdSpF1 = 10; // special function 1
+KmdKeepBusy = 11; // special function 2
+KmdLock = 12; // lock player
+KmdUnlock = 13; // unlock player
+KmdDrone = 14; // experimental player type...
+KmdCClear = 15; // counters clear
+
+KmdPlay = 16; // start playing
+KmdLoop = 17; // start looping
+KmdPlItem = 18; // play "item"
+// ...
+KmdPlHigh = 31;
+
+
+FLdoForcePlay = 0x100000; // force play flags
+FLdoForceLoop = 0x200000;
+FLdoForceRead = 0x400000;
+FLdoForceLock = 0x080000; // play and lock
+MskForcePlay = FLdoForceLoop | FLdoForceRead;
+MskdoKeepKmnd = 0x0003ffff;
+MskdoKeepHgFlgs = 0x7ffc0000;
+FLdoForceIntegral = 0x1; // play full clip
+FLdoForceFadesSL = 0x2; // short fade-in, long fade-out
+FLdoForceSpeed1 = 0x4;  // play at speed 1
+FLdoForcePFS = 0x8;  // play from start
+FLdoForceFChs = 0x10;  // do not randomize channels
+FLdoForceVol = 0x20;  // play at fixed volume
+FLdoForceKeep = 0x40;  // keep it always playing
+FlgnoInterrupt = 0x40; // keep it always playing
+FLdoForceChCnt = 0x80;  // use CCCC as channel count
+FLdoClipRpeat = 0x100; // force clip repeat
+
+
+// Std unit types
+uPlayer = 1;
+uSpacer = 2;
+uVolume = 3;
+uGen = 4;
+uMainMixer = 5;
+uCalibrator = 6;
+uSoundGen = 7;
+uSrcDelay = 8;
+uDetector = 9;
+uTracer = 10;
+uScripter = 11;
+uCmdMgr = 17;
+
+uMIDI = 32;
+uMIDI_In = 32;
+uMIDI_Out = 33;
+
+// MIDI Specifics
+uAPCmini_In = 34;
+uAPCmini_Out = 35;
+nanoPAD2_In = 36;
+nanoPAD2_Out = 37;
+
+uMIDI_MGR = 1024;
+uMIDI_MGR_In = 1024;
+uMIDI_MGR_Out = 1025;
+
+
+// Std unit status
+uSWorking = 0x100;
+uSUnused = 0;
+uSReady = 1;
+uSBusy = 2 | uSWorking;
+uSStarting = 3;
+uSDone = 4; // not used
+uSError = 5;
+uSInited = 6; // not used
+uSReserved = 7;
+uSHalting = 8  | uSWorking;
+uSEditing = 10 | uSWorking;
+uSSaving = 11 | uSWorking;
+uSDummy = 12;
+uSUnreachable = 13;
+uSSError = 14;
+
+// Std player flags and infos
+highPSpeed = 10; // max. read positive speed
+highNSpeed = - highPSpeed; // max. read negative speed
+lowPSpeed = 0.01; // min. read positive speed
+lowNSpeed = - lowPSpeed; // min. read negative speed
+
+
+// Add a dummy block for now
+UGDummy = UGAddrLast; // a dummy block
+
+
+
+
+//// **WARNING**
+// DO CHECK coherency between :
+//    --- numbers declared here
+//    --- sliders numbers in GamePlayer.jsfx
+//    --- parameters in various " parDcl() " delarations
+//
+//  Entry 0 is unused / used as a security in case of errors
+//  Parameters 1 to 64 correspond to the 64 potential sliders in a JSFX plugin
+//
+//  Parameters 65 to 80 are reserved for alternative representation of some parameters
+//
+
+
+/*
+
+    Description of common parameters
+
+*/
+
+
+paramCount = 256; // The count of master/looper/players adjustable parameters
+// Flags for the c. parameters
+i_M_Siz = 0x020000;
+i_M_Spd = 0x040000;
+i_M_Vol = 0x080000;
+i_M_HPc = 0x100000;
+i_M_Rst = 0x200000; // restart player
+i_M_Upd = 0x400000; // update player parameters
+i_M_Rcd = 0x000100; // modify recorded version
+
+i_UB = 0x01000; // Control accessed in the Unit Control Block Management
+i_SP = 0x02000; // show this parameter in slider blocks
+i_RG = 0x04000; // show this in random generators
+i_Si = i_M_Siz | i_UB; // Control influences the size of the played parts
+i_Vm = i_M_Spd | i_UB; // Control influences the speed of the played part
+i_dB = i_M_Vol | i_UB; // Control influences the volume of the played part
+i_HP = i_M_HPc | i_UB; // About the HP Count
+
+i_Ma = i_M_Siz | i_M_Spd | i_M_Vol |i_M_HPc ;
+i_eTyp = 0xF0000; // Mask for type
+
+
+// Random Generators amplitudes
+p_rgenA1 = 1;
+p_rgenA2 = 2;
+p_rgenA3 = 3;
+p_rgenA4 = 4;
+p_rgenA5 = 5;
+p_rgenA6 = 6;
+p_rgenA7 = 7;
+p_rgenA8 = 8;
+// Random generators frequencies
+p_rgenP1 = 9;
+p_rgenP2 = 10;
+p_rgenP3 = 11;
+p_rgenP4 = 12;
+p_rgenP5 = 13;
+p_rgenP6 = 14;
+p_rgenP7 = 15;
+p_rgenP8 = 16;
+// ------------
+
+p_maxGenerators = 20; // max number of simultaneously active generators
+p_maxPlayers = 21;
+p_maxLoopers = 22;
+p_ratioReadLoop = 23;
+p_SchActive = 24;
+p_GvAutoMd = 25;
+p_GvChnUse = 26;  // output chan. in use
+p_maxClSize = 27; // max clip size to read
+p_RateCtl = 28; //playing rate control
+p_autoFreq = 29; // auto frequency slider
+p_playDur = 30; // play duration
+p_loopDur = 31;  // loop duration
+p_PlGain = 32; // player mode output gain -- Out_gain_dB_Pl
+p_LpGain = 33; // looper mode output gain -- Out_gain_dB_Lp
+p_fadeIPlTime = 34;
+p_fadeOPlTime = 35;
+p_fadeILpTime = 36;
+p_fadeOLpTime = 37;
+p_GrfadeILpTime = 38;
+p_GrfadeOLpTime = 39;
+
+p_HP_Density = 40;
+p_GRP_Switch = 41;
+p_playVar = 42; // play time variation
+p_loopVar = 43;  // loop time variation
+
+p_Randomness = 65;  // temporary random slider
+
+p_fadeIPlTimeB = 70; // alternate to p_fadeIPlTime
+p_fadeILpTimeB = 71; // alternate to p_fadeILpTime
+p_fadeOPlTimeB = 72; // alternate to p_fadeOPlTime
+p_fadeOLpTimeB = 73; // alternate to p_fadeOLpTime
+
+pidx = 80 ; // last reserved
+
+p_PlayStart = (pidx+=1);
+p_uix_jtheme = (pidx+=1);
+p_sysSynchro = (pidx+=1);
+p_sysSynchroB = (pidx+=1);
+p_mass = (pidx+=1);
+
+p_GrFadeInTime = (pidx+=1);
+p_GrFadeOutTime = (pidx+=1);
+p_GrFadeInTimeB = (pidx+=1);
+p_GrFadeOutTimeB = (pidx+=1);
+
+p_VMod1u = (pidx+=1);
+p_Tempo_Sync = (pidx+=1);
+p_Tempo_Rate = (pidx+=1);
+p_RDirSwitch = (pidx+=1);
+
+p_GrainSizMax = (pidx+=1);
+p_GrainSizMaxB = (pidx+=1);
+p_GrainSizMin = (pidx+=1);
+p_GrainSizMinB = (pidx+=1);
+
+p_ChnlUse = (pidx+=1);
+p_GrDsty = (pidx+=1);
+
+p_ClStart = (pidx+=1);
+p_ClEnd = (pidx+=1);
+
+p_LocSpeed2 = (pidx+=1);
+
+p_GFade_In = (pidx+=1);
+p_GFade_Out = (pidx+=1);
+
+p_Vol_SwtchTime = (pidx+=1);
+p_Gen_SwtchTime = (pidx+=1);
+
+p_Gen_VariVal = (pidx+=1);
+p_Vol_VariVal = (pidx+=1);
+p_Grp_VariVal = (pidx+=1);
+
+p_Gen_MinCnt = (pidx+=1);
+p_Gen_MaxCnt = (pidx+=1);
+
+p_Vol_MinVal = (pidx+=1);
+p_Vol_MaxVal = (pidx+=1);
+
+p_VolGlobBias = (pidx+=1);
+p_Vol_Global = (pidx+=1);
+p_Play_Max = (pidx+=1);
+p_HP_Algo = (pidx+=1);
+
+p_XPmode  = (pidx+=1);
+p_XModDepth = (pidx+=1);
+p_XModWidth = (pidx+=1);
+p_XModFreq = (pidx+=1);
+
+p_SenMinTime = (pidx+=1);
+
+p_VirtualTime = (pidx+=1);
+p_VirtTimSpeed = (pidx+=1);
+
+p_ScriptPar1 = (pidx+=1);
+p_ScriptPar2 = (pidx+=1);
+p_ScriptPar3 = (pidx+=1);
+p_ScriptPar4 = (pidx+=1);
+p_ScriptPar5 = (pidx+=1);
+
+// Dynamic parameters : for now, last reserved as a "type" value
+p_Dyn_First = p_Dyn_Type = (pidx+=1);
+p_Dyn_Flgs1 = (pidx+=1);
+p_Dyn_Flgs2 = (pidx+=1);
+p_Dyn_Vol = (pidx+=1);
+p_Dyn_GS = (pidx+=1);
+p_Dyn_Rate = (pidx+=1);
+p_Transpose = (pidx+=1);
+p_Dyn_Direct = (pidx+=1);
+p_Dyn_Slant = (pidx+=1);
+p_Dyn_GTWd = (pidx+=1);
+p_Dyn_GrFISh = (pidx+=1);
+p_Dyn_GrFOSh = (pidx+=1);
+p_Dyn_PlPos = (pidx+=1);
+p_Dyn_PlLat = (pidx+=1);
+p_Dyn_PlMass = (pidx+=1);
+p_Dyn_Asynch = (pidx+=1);
+p_Harmonic_Shape = (pidx+=1);
+p_Inharmonicity = (pidx+=1);
+p_Dyn_XPan = (pidx+=1);
+p_Dyn_P19 = (pidx+=1);
+p_Dyn_P20 = (pidx+=1);
+p_Dyn_P21 = (pidx+=1);
+p_Dyn_P22 = (pidx+=1);
+p_Dyn_P23 = (pidx+=1);
+p_Dyn_P24 = (pidx+=1);
+p_Dyn_P25 = (pidx+=1);
+p_Dyn_P26 = (pidx+=1);
+p_Dyn_P27 = (pidx+=1);
+//
+p_Interact = (pidx+=1); //
+p_Interpol = (pidx+=1); //
+//
+p_OvlpSize = (pidx+=1); //
+p_XtndFact = (pidx+=1); //
+
+p_XPar0 = (pidx+=1); //
+p_XPar1 = (pidx+=1); //
+p_XPar2 = (pidx+=1); //
+p_XPar3 = (pidx+=1); //
+p_XPar4 = (pidx+=1); //
+p_XPar5 = (pidx+=1); //
+p_XPar6 = (pidx+=1); //
+p_XPar7 = (pidx+=1); //
+//
+p_ActSize = (pidx+=1);  // LAST -- counts the number of parameters
+// Flags for dynamic parameters management
+smUFlagVol =     0x00001; // Should update volume ?
+smUFlagWidth =   0x00002; // Should update width ?
+smUFlagGspeed =  0x00004; // ? Grain Speed
+smUFlagDGspeed = 0x00008; // ? Transpose
+smUFlagGSize =   0x00010; // ? Grain size
+smUFlagGSlant =  0x00020; // ? Grain slant
+smUFlagGShape =  0x00040; // ? Grain shape
+smUFlagGSust =   0x00080; // ? Grain sustain phase
+smUFlagGPos =    0x00100; // ? Grain start position
+smUFlagGPVar =   0x00200; // ? Grain start variation
+smUFlagGMass =   0x00400; // ? Mass variation
+smUFlagAsync =   0x00800; // ? Asynchronicity
+smUFlagDDir  =   0x01000; // ? Direction sensibility
+smUFlagInharm  = 0x02000; // ? inharmonicity for grains
+smUFlagHarmShp = 0x04000; // ? inharmonicity shape
+smUFlagGrISh  =  0x08000; // ? grains fade in shape
+smUFlagGrOSh  =  0x10000; // ? grains fade out shape
+smUFlagXPan  =  0x20000; // ? Dynamic X Pan
+//
+DPInitMode    =  0x80000; // 0: default, 1:dynamic
+
+pmFlagRepeat =   0x00001; // Should keep repeating clip
+
+
+// All blocks references
+blockCurrMod = 0;
+blockModules = blockMainInfos = blockPlayPad = blockPlayControls =
+blockSlidersA = blockSlidersB = blockSlidersC = blockSlidersD =
+blockSlidersE = blockSlidersF = blockSlidersG = blockSlidersH =
+blockDisplayerA = blockDisplayerB = blockDisplayerC = blockDisplayerD =
+blockMemory1 = blockMemory2 = blockBanksDef = blockRandStates =
+blockUnits = blockClips = blockScheduler = blockHPConfig =
+blockPlayModes = blockSpaceModes = blockClipsSettings = blockSensors =
+blockSysLinks = blockSettings = blockScriptsMgr = blockPreset =
+blockPlayLog = blockSysLog = blockUsrLog = blockDynPars =
+blockUsrFirst = blockUsrLast = blockDispITC = 0;
+
+

@@ -1,0 +1,841 @@
+/*
+
+    A JSFX Scheduler  --  JJG - 2020-07-02
+    v2. Change structure - JJg - 2021-11-01
+
+
+    do :
+
+        size = SchedSetup(); // compute needed size for "SchedNEmax" entries,provide memory and create structure
+
+    then
+
+        Schedule(SchedRelative, 10, 3, 12.23, 11.13);
+
+     to schedule in 10 seconds from now event code 3 with parameter 12.23 and 11.13
+
+
+     Finally, in the @block, do :
+
+     while (ent = Scheduler()) (
+         code = SchedCode[ent];
+         par1 = SchedPar1[ent];
+         par2 = SchedPar2[ent];
+         par3 = SchedPar3[ent];
+         par4 = SchedPar4[ent];
+         // do some work...
+     );
+*/
+
+@init
+twoPow32 = 2^32;
+ListSzmax = 262144; // 131072;
+// Number of bits used for the entry number
+SchedNBits = 12;
+SchedNEmax = 2 ^ SchedNBits;  // tasks count - a power of 2
+SchedNMask = SchedNEmax - 1; // mask for the entry number
+SchedWBit = 0x10000;
+SchedWBMask = SchedWBit - 1;
+SchedArea = 0; // address of the allocated block for lists
+SchedRelative = 0xFFFFFFFC;
+SchedFromLast = 0xFFFFFFFB;
+SchedAbsolute = 0xFFFFFFFA;
+SchedAdjust = 0.0005; // 0.5 ms adjustment
+SchedNone = 0; // "null" pointer
+SchedActive = 0; // inactive by default
+SchedControl = 0; // global scheduler control : on/off, etc.
+SchedNeeds = 0; // needed size, unknown
+SchETypeThrd = 1;
+SchETypeBlock = 2;
+// limits of 8 words blocks allocatable area
+SchBlcksStart = 0;
+SchBlcksEnd = 0;
+// Data structures of size SchedNEmax (to be allocated at init time)
+// Uses 24 words for a process
+SchedEntInSiz = 24; // Inner Size of an entry
+SchedEntSiz = 24; // Size needed for an entry
+
+// Lists "K-ident"
+idx = -1;
+LC008idx = (idx += 1);
+LC016idx = (idx += 1);
+LC024idx = (idx += 1);
+LC032idx = (idx += 1);
+LC040idx = (idx += 1);
+LC064idx = (idx += 1);
+LC080idx = (idx += 1);
+LC088idx = (idx += 1);
+LC128idx = (idx += 1);
+LC512idx = (idx += 1);
+LC01kidx = (idx += 1);
+LC02kidx = (idx += 1);
+ListCellMax = idx ;
+ListFrHTQBidx = (idx += 1);
+SchedFreeidx = (idx += 1);
+ListEndidx = idx;
+
+// TASK description
+// Process Fields
+SchedNxtEnt = 0; // pointers to next event/entry
+SchedPrvEnt = 1; // pointers to previous event/entry
+SchedThrName = 2; // thread name + class
+SchedThList = 3; // thread list membership
+SchedDly = 4; // 8; // delay to next event
+SchedTailEnt = 5; // last ent in the HQB.
+SchedPid = 5; // process id
+SchedCode = 6; // 9; // code of action
+SchedStatus = 7; //6; // status du processus
+SchedThrdPt = 8; //7; // associated thread block
+SchedEntryN = 9; // entry number
+SchedPar1 = 10; // parameters / Mem. addresses
+SchedPar2 = 11; // parameters / Mem. addresses
+SchedPar3 = 12; // parameters / Mem. addresses
+SchedPar4 = 13; // parameters / Mem. addresses
+SchedPar5 = 14; // parameters
+SchedPar6 = 15; // parameters
+SchedHQB = 16; // Event HQB for this thread up to 23.
+//
+//
+// Data structure of an event
+SchETypeMess = 'mess'; // -2
+SchevEntSiz = 16; // -1 Size minimal of an entry
+// Event Fields
+SchevNxtEnt = 0; // pointers to next event/entry
+SchevPrvEnt = 1; // pointers to previous event/entry
+SchevEvntName = 2; // event name
+SchevEvntList = 3; // event list membership
+SchevDateInit = 4; // creation date of the event
+SchevDateExp = 5; // expiration date of the event
+SchevDateSent = 6; // sent date of the event
+SchevFlags = 7; // Event  Flags
+SchevSrcNum = 8; // Pid Number of the sender
+SchevSrcName = 9; // Symbolic identification of the sender
+SchevDstNum = 10; // Number/codification of the recipient
+SchevDstName = 11; // Symbolic identification of the recipient
+SchevCode = 12; // Event code
+SchevSeq = 13; // Event Sequence
+SchevPar1 = 14; // parameter 1
+SchevPar2 = 15; // parameter 2
+
+// Global timer variables
+Sched_TStart = 0;  // Scheduler start time this session
+Sched_TimeLast = 0;
+Sched_TimeNow = 0;
+SchedDelay = 0;
+// lists "structures" handling
+SchedLPtrs = Undef; // array of list pointers
+SchedLstCnt = 32; // number of different lists
+SchedLstSiz = 8; // size of a list
+SchedFreePts = 0; // Non allocated task blocks
+SchedInactPts = 0; // Non allocated mSL threads entries
+SchedActivPts = 0; // active processes
+SchedDlydPts = 0;  // delayed processes
+SchedEvntPts = 0; // event waiting processes
+SchedSuspPts = 0;  // suspended processes
+SchedLockdPts = 0; // Locked mSL processes
+SchedRcyclPts = 0; // recycled messages
+// ... each composed of 2 * 4 entries
+SchedDlydTailPts = 0;  // delayed processes tail
+SchedListIdt = 2; // the identification of the list
+SchedOtherEnd = 3; // pointer to the "other end" of the list
+// Other references
+SchedFirstEnt = -1;
+SchedLastEnt = -1;
+SchedPnumb = 32; //  1st process number allocated for users threads
+SchedCurrPId = 0; // current process id
+Schedrestart1 = 0; // restart a locked process
+SchedLockAll = 0; // lock all processes
+SchedNoRecycle = 1; // do not try to recycle unused threads
+SchedmSLEvWait = 0; // flag: event to wait for...
+
+// Flags use in SchedStatus
+SchThreadmSL = 1; // this is an mSL Thread (flag)
+SchThrUsed = 0x8; // the thread is in use
+SchThrNotUsed = -1 ~ SchThrUsed; // the thread is not in use
+SchmSLThrUsed = SchThreadmSL | SchThrUsed;
+
+// Initialize an HQB with ident.
+function SchedInitHQB(addr, ident)
+(
+    // All HQB are created as initially empty
+    ident += twoPow32;
+    addr[0] = addr+4; addr[1] = 0; addr[2] = ident; addr[3] = addr+4;
+    addr[4] = 0; addr[5] = addr; addr[6] = -ident; addr[7] = addr;
+    addr;
+);
+
+function group(A,B) (B + twoPow32 * A);
+
+function SchedListEmpty(lblk)
+(
+    lblk[SchedNxtEnt] === lblk[SchedOtherEnd];
+);
+
+function SchedListNonEmpty(lblk)
+(
+    lblk[SchedNxtEnt] !== lblk[SchedOtherEnd];
+);
+
+function SchedHead(lblk)
+(
+    lblk[SchedNxtEnt] === lblk[SchedOtherEnd] ? (
+        0;
+    ) : (
+        lblk[SchedNxtEnt];
+    );
+);
+
+function SchedListSize(lblk)
+local (ent, siz)
+(
+    siz = 0;
+    (lblk != 0) ? (
+        ent = SchedPrvEnt[lblk[SchedOtherEnd]]; // start at tail
+        while ((ent != lblk) && (ent >= SchedFirstEnt) && (siz <= ListSzmax)) (
+            siz += 1;
+            ent = SchedPrvEnt[ent];
+        );
+        siz > ListSzmax ? (err_sys_rtm = 1602; siz = -1);
+    );
+    siz;
+);
+
+
+function SchedIsInList(lblk, blk)
+local (ent, siz)
+(
+    ((lblk != 0) && (lblk != 0)) ? (
+        siz = 0;
+        ent = SchedPrvEnt[lblk[SchedOtherEnd]]; // start at tail
+        while ((ent !== blk) && (ent !== lblk) && (ent >= SchedFirstEnt) && (siz <= ListSzmax)) (
+            siz += 1;
+            ent = SchedPrvEnt[ent];
+        );
+        ent === blk;
+    ) : (
+        0;
+    );
+);
+
+// Double chained lists management
+/*
+    Insert an entry
+    as the head of the list
+*/
+function SchedInsertHead(lblk, ent, flg)
+local (w)
+(
+    ((lblk != 0) && (((flg & 1) === 0) || (((flg & 1) === 1) && (ent >= SchedFirstEnt) && (ent <= SchedLastEnt)))) ? (
+        w = lblk[SchedNxtEnt]; // previous first OR tail
+        ent[SchedPrvEnt] = lblk;
+        ent[SchedNxtEnt] = w;
+        lblk[SchedNxtEnt] = ent;
+        w[SchedPrvEnt] = ent;
+        ent[SchedThList] = lblk;
+    ) : (
+        mSL_errX=4621;
+        Sched_Err_Ent = ent;
+    );
+    ent;
+);
+
+/*
+    Insert an entry
+    as the tail of the list
+*/
+function SchedInsertTail(lblk, ent, flg)
+local (tail, w)
+(
+    ((ent != 0) && (lblk != 0)
+    &&  (((flg & 1) === 0) || (((flg & 1) === 1) && (ent >= SchedFirstEnt) && (ent <= SchedLastEnt)))) ? (
+        tail = lblk[SchedOtherEnd]; // the end of the list
+        w = tail[SchedPrvEnt]; // preceeding OR head
+        ent[SchedPrvEnt] = w;
+        ent[SchedNxtEnt] = tail;
+        w[SchedNxtEnt] = ent;
+        tail[SchedPrvEnt] = ent;
+        ent[SchedThList] = lblk;
+    ) : (
+        ((flg & 2) === 0) ? (
+            mSL_errX=4622;
+            Sched_Err_Ent = ent;
+            ent = 0;
+        );
+    );
+    ent;
+);
+
+/*
+    Remove the Head of a list
+*/
+function SchedDetachHead(lblk)
+local (ent, w)
+(
+    ent = 0;
+    ((lblk != 0) && (lblk[SchedNxtEnt] !== lblk[SchedOtherEnd])) ? (
+        // list is non empty
+        ent = lblk[SchedNxtEnt]; // we detach this one
+        w = ent[SchedNxtEnt]; // next, or tail
+        lblk[SchedNxtEnt] = w;
+        w[SchedPrvEnt] = lblk;
+        ent[SchedNxtEnt] = ent[SchedPrvEnt] = ent[SchedThList] = SchedNone;
+    );
+    ent;
+);
+
+/*
+    Remove the Tail of a list
+    // for completion, the function is currently not used
+*/
+function SchedDetachTail(lblk)
+local (ent, tail, w)
+(
+    ent = 0;
+    (lblk[SchedNxtEnt] !== (tail = lblk[SchedOtherEnd])) ? (
+        // list is non empty
+        ent = tail[SchedPrvEnt];
+        w = ent[SchedPrvEnt];
+        w[SchedNxtEnt] = tail;
+        tail[SchedPrvEnt] = w;
+        ent[SchedNxtEnt] = ent[SchedPrvEnt] = ent[SchedThList] = SchedNone;
+    );
+    ent;
+);
+
+/*
+    Remove entry ent from a list
+    // lblk: Currently  used only as a test
+    // flg: 1 to test the ent is a process
+    // flg: 2 to avoid error
+*/
+function SchedUnchainEnt(lblk, ent, flg)
+local (z, n, p)
+(
+    ((ent != 0)
+    && (((flg & 1) === 0) || (((flg & 1) === 1) && (ent >= SchedFirstEnt) && (ent <= SchedLastEnt)))
+    && ((nxt = ent[SchedNxtEnt]) != SchedNone)
+    && ((prv = ent[SchedPrvEnt]) != SchedNone) && (ent[SchedThList] === lblk) ) ? (
+        prv[SchedNxtEnt] = nxt;
+        nxt[SchedPrvEnt] = prv;
+        ent[SchedNxtEnt] = ent[SchedPrvEnt] = ent[SchedThList] = SchedNone;
+    ) : (
+        ((flg & 2) === 0) ? (
+            mSL_errX=4626;
+            Sched_Err_Ent = ent;
+            ent = 0;
+        );
+    );
+    ent;
+);
+
+/*
+    Insert entry "ent" before "pos"
+    "pos" must be an SCB in some list.
+    In this version, "lblk" is only used as a marker
+*/
+function SchedInsertBefore(ent, pos, flg)
+local (prv, lblk)
+(
+    ((((flg & 1) === 0) || (((flg & 1) === 1) &&
+        (ent >= SchedFirstEnt) && (ent <= SchedLastEnt) && (pos >= SchedFirstEnt) && (pos <= SchedLastEnt)))
+    && ((prv = pos[SchedPrvEnt]) != SchedNone)
+    && (pos[SchedNxtEnt] != SchedNone)
+    ) ? (
+        pos[SchedPrvEnt] = ent;
+        prv[SchedNxtEnt] = ent;
+        ent[SchedNxtEnt] = pos;
+        ent[SchedPrvEnt] = prv;
+        ent[SchedThList] = pos[SchedThList];
+    ) : (
+        Sched_Err_Ent = ent;
+        mSL_errX=4623;
+        sprintf(#dbg_trace2, "SCH: %04d  %d/%.1f   %d/%.1f", mSL_errX,  ent, (SchedFirstEnt - ent) / SchedEntSiz,
+            pos, (SchedFirstEnt - pos) / SchedEntSiz);
+    );
+);
+
+/*
+   Reset to "0" all entries
+   with code "Ecode" in list lblk
+*/
+function SchedRemove(lblk, Ecode)
+local (ent, tail, siz)
+(
+    siz = 0;
+    ent = lblk[SchedNxtEnt]; tail = lblk[SchedOtherEnd];
+    while ((ent != tail) && (siz <= ListSzmax)) (
+        (SchedCode[ent] == Ecode) ? (
+            SchedCode[ent] = 0;
+        );
+        ent = SchedNxtEnt[ent];
+        siz += 1;
+    );
+);
+
+
+/*
+   Reset to "0" all entries
+   with code "Ecode" and parameter "1" value "Eval"
+*/
+function SchedRemove(lblk, Ecode, Eval)
+local (ent, tail, siz)
+(
+    siz = 0;
+    ent = lblk[SchedNxtEnt]; tail = lblk[SchedOtherEnd];
+    while ((ent != tail) && (siz <= ListSzmax)) (
+        ((SchedCode[ent] == Ecode) && (SchedPar1[ent] == Eval)) ? (
+            SchedCode[ent] = 0;
+        );
+        ent = SchedNxtEnt[ent];
+        siz += 1;
+    );
+);
+
+
+function SchedClearProc(ent)
+local (num, msg)
+(
+    // quick check that this is a process
+    ((ent >= SchedFirstEnt) && (ent <= SchedLastEnt) && ((num = (ent - SchedFirstEnt)/SchedEntSiz) >= 0)
+            && (num == (0|num)) && (num == (ent[SchedPid] & SchedNMask))) ? (
+        (SchedListSize(ent+SchedHQB) > 0) ? (
+            // reset all events and clear them
+            while (msg = SchedDetachHead(ent+SchedHQB)) (
+                mSL_bl_clear(msg);
+            );
+        );
+        // rebuild the entry
+        memset(ent, 0, SchedEntInSiz);
+        //ent[SchedEntryN] = num; // the entry number is a part of the future process id
+        ent[SchedPid] = num; // the entry number is a part of the future process id
+        ent[SchedThrName] = 'Thrd'; // a default identification
+        SchedInitHQB(ent+SchedHQB, 'Evnt'); // and the local HQB
+    );
+);
+
+
+/*
+    Create the data structure
+
+
+*/
+
+function SchedSetup()
+local (i, ent, mm, idx)
+(
+    // Sched_TStart = time_precise() + gmem[timeDelta];
+    Sched_TStart = 0;  // Scheduler start time this session
+    Sched_TimeLast = Sched_TimeNow = 0;
+    SchedDelay = 0;
+    i = 0; while (((mSL_StM_FreePt + 2 + i) % 8) != 0) (i+= 1;);
+    mm = make_array(ListSzmax * 8 + i, 'LSTS'); // a large block, zeroed
+    SchBlcksEnd = mm + mm[-1]; // first non allocatable
+    // Align to a frontier of 8
+    while (i > 0) (mm[0] = 'fill'; mm += 1; i -= 1;);
+    SchedArea = mm ;
+    // Create permanent lists
+    SchedLElSizes = mm; mm += SchedLstCnt; // Space for list elements sizes
+    SchedLPtrs = mm; mm += SchedLstCnt; // Space for list heads
+    i = 0;
+    loop (SchedLstCnt,
+        SchedLPtrs[i] = mm; SchedLElSizes[i] = 0; mm += SchedLstSiz; i += 1;
+    );
+    // Some lists already have names
+    ListCell008 = SchedLPtrs[LC008idx]; SchedInitHQB(ListCell008, 'C008'); SchedLElSizes[LC008idx] = 8; // k = 0
+    ListCell016 = SchedLPtrs[LC016idx]; SchedInitHQB(ListCell016, 'C016'); SchedLElSizes[LC016idx] = 16;// k = 1
+    ListCell024 = SchedLPtrs[LC024idx]; SchedInitHQB(ListCell024, 'C024'); SchedLElSizes[LC024idx] = 24;// k = 2
+    ListCell032 = SchedLPtrs[LC032idx]; SchedInitHQB(ListCell032, 'C032'); SchedLElSizes[LC032idx] = 32;// k = 3
+    ListCell040 = SchedLPtrs[LC040idx]; SchedInitHQB(ListCell040, 'C040'); SchedLElSizes[LC040idx] = 40;// k = 4
+    ListCell064 = SchedLPtrs[LC064idx]; SchedInitHQB(ListCell064, 'C064'); SchedLElSizes[LC064idx] = 64;// k = 5
+    ListCell080 = SchedLPtrs[LC080idx]; SchedInitHQB(ListCell080, 'C080'); SchedLElSizes[LC080idx] = 80;// k = 6
+    ListCell088 = SchedLPtrs[LC088idx]; SchedInitHQB(ListCell088, 'C088'); SchedLElSizes[LC088idx] = 88;// k = 7
+    ListCell128 = SchedLPtrs[LC128idx]; SchedInitHQB(ListCell128, 'C128'); SchedLElSizes[LC128idx] = 128;// k = 8
+    ListCell512 = SchedLPtrs[LC512idx]; SchedInitHQB(ListCell512, 'C512'); SchedLElSizes[LC512idx] = 512;// k = 9
+    ListCell01k = SchedLPtrs[LC01kidx]; SchedInitHQB(ListCell01k, 'C01K'); SchedLElSizes[LC01kidx] = 1024;// k = 10
+    ListCell02k = SchedLPtrs[LC02kidx]; SchedInitHQB(ListCell02k, 'C02K'); SchedLElSizes[LC02kidx] = 2048;// k = 11
+    // Some lists, (now empty) with various elements in them
+    ListFrHTQB = SchedLPtrs[ListFrHTQBidx]; SchedInitHQB(ListFrHTQB, 'HTQB'); SchedLElSizes[iListFrHTQBidxdx] = 8;
+    SchedFreePts = SchedLPtrs[SchedFreeidx]; SchedInitHQB(SchedFreePts, 'Free'); SchedLElSizes[SchedFreeidx] = 24;
+    idx = ListEndidx;
+    SchedDlydPts = SchedLPtrs[idx += 1]; SchedInitHQB(SchedDlydPts, 'Dlay'); SchedLElSizes[idx] = 24; SchedDlydTailPts = SchedDlydPts + 4; // tail
+    SchedActivPts = SchedLPtrs[idx += 1]; SchedInitHQB(SchedActivPts, 'Actv'); SchedLElSizes[idx] = 24;
+    SchedInactPts = SchedLPtrs[idx += 1]; SchedInitHQB(SchedInactPts, 'Fthr'); SchedLElSizes[idx] = 24;
+    SchedEvntPts = SchedLPtrs[idx += 1]; SchedInitHQB(SchedEvntPts, 'Wait'); SchedLElSizes[idx] = 24;
+    SchedSuspPts =  SchedLPtrs[idx += 1]; SchedInitHQB(SchedSuspPts, 'Pndg'); SchedLElSizes[idx] = 24;
+    SchedLockdPts = SchedLPtrs[idx += 1]; SchedInitHQB(SchedLockdPts, 'Lckd'); SchedLElSizes[idx] = 24;
+    SchedNxtBlPts = SchedLPtrs[idx += 1]; SchedInitHQB(SchedNxtBlPts, 'DlNx'); SchedLElSizes[idx] = 24;
+    SchedRcyclPts = SchedLPtrs[idx += 1]; SchedInitHQB(SchedRcyclPts, 'Rcyc'); SchedLElSizes[idx] = 24;
+    PlLogFree = SchedLPtrs[idx += 1]; SchedInitHQB(PlLogFree, 'PLFR'); SchedLElSizes[idx] = 8;
+    PlLogMain = SchedLPtrs[idx += 1]; SchedInitHQB(PlLogMain, 'PLLM'); SchedLElSizes[idx] = 8;
+    PlLogAlt1 = SchedLPtrs[idx += 1]; SchedInitHQB(PlLogAlt1, 'PLA1'); SchedLElSizes[idx] = 8;
+    PlLogAlt2 = SchedLPtrs[idx += 1]; SchedInitHQB(PlLogAlt2, 'PLA2'); SchedLElSizes[idx] = 8;
+    i = idx + 1;
+    while (i < SchedLstCnt) ( SchedInitHQB(SchedLPtrs[i], 'undf'); i += 1; );
+    SchedFirstEnt = mm;
+    SchedLastEnt = SchBlcksEnd - 8;
+    // Create tasks - All tasks are contiguous in memory and use SchedEntSiz (24) words
+    i = 0; loop(SchedNEmax,  // 4096
+        ent = mm;
+        //ent[SchedEntryN] = i; // the entry number
+        ent[SchedPid] = i; // the entry number
+        ent[SchedThrName] = (SchedFreeidx * 2^32) + 'task'; // a default identification
+        SchedInitHQB(ent+SchedHQB, 'Evnt'); // and the local HQB
+        SchedInsertTail(SchedFreePts, ent, SchETypeThrd); // insert entry in free list
+        i += 1;
+        mm += SchedEntSiz;
+    );
+    // Create a first set of 8 cells words
+    loop (128,
+        SchedInsertTail(ListCell008, mm, 0); mm += 8;
+    );
+    SchBlcksStart = mm; // first allocatable
+//  sprintf(#dbg_trace4, "LSTS: [%d   %d   %d]", SchedArea, SchBlcksStart, SchBlcksEnd);
+//  sprintf(#dbg_trace5,"FREE TASKS: %d (%d/%d) ", SchedListSize(SchedFreePts), SchedListNonEmpty(SchedFreePts), SchedListEmpty(SchedFreePts));
+//  sprintf(#dbg_trace6,"FREE CELLS: %d (%d/%d) ", SchedListSize(ListCell008), SchedListNonEmpty(ListCell008), SchedListEmpty(ListCell008));
+//  sprintf(#dbg_trace7,"Unused TASKS: %d (%d/%d) ", SchedListSize(SchedInactPts), SchedListNonEmpty(SchedInactPts), SchedListEmpty(SchedInactPts));
+
+);
+
+
+
+// Get a block of class "k", give it type "T"
+function getLstBlock(k, T)
+local (bl, lblk, sz)
+(
+    bl = 0;
+    ((k >= 0) && (k <= ListCellMax)) ? (
+        SchedListNonEmpty(lblk = SchedLPtrs[k]) ? (
+            //
+            bl = SchedDetachHead(lblk);
+        ) : (
+            // create a new block
+            sz = SchedLElSizes[k];
+            (SchBlcksStart + sz < SchedLastEnt) ? (
+                bl = SchBlcksStart;
+                SchBlcksStart += sz;
+            );
+        );
+        bl ? bl[SchedThrName] = (k * 2^32) + ((T === 0) ? lblk[2] : T);
+    );
+    bl;
+);
+
+
+// Get a block of size "size", give it type "T"
+function getSizBlock(size, T)
+local (bl, k, lblk, sz)
+(
+    bl = 0;
+    k = 0; while ((k <= ListCellMax) && (size > SchedLElSizes[k])) (
+        k += 1;
+    );
+    ((k <= ListCellMax)) ? (
+        SchedListNonEmpty(lblk = SchedLPtrs[k]) ? (
+            //
+            bl = SchedDetachHead(lblk);
+        ) : (
+            // create a new block
+            sz = SchedLElSizes[k];
+            (SchBlcksStart + sz < SchedLastEnt) ? (
+                bl = SchBlcksStart;
+                SchBlcksStart += sz;
+            );
+        );
+        bl ? bl[SchedThrName] = (k * 2^32) + ((T === 0) ? lblk[2] : T);
+    );
+    bl;
+);
+
+
+// free a block
+
+function freeLstBlock(ent)
+local (k)
+(
+    ((ent >= SchedFirstEnt) && (ent < SchBlcksStart) && ((ent & 0x7) === 0)) ? (
+        // on suppose qu'il s'agit d'un block valide
+        k = floor(ent[SchedThrName] / 2^32);
+        ((k >= 0) && (k <= ListCellMax)) ? (
+            SchedInsertTail(SchedLPtrs[k], ent, 0);
+        );
+    );
+);
+
+
+function getBlockSize(ent)
+local (bl, i, k, siz)
+(
+    bl = ent[2]; // block label
+    i = 0; siz = k = -1;
+    loop (SchedLstCnt,
+        bk = SchedLPtrs[i]; (bk[2] === bl) ? k = i;
+        i += 1;
+    );
+    (k < 0) ? (
+        bk = 0 | (bk / twoPow32);
+        ((bk >= 0) && (bk <  SchedLstCnt)) ? k = bk;
+    );
+    (k >= 0) ? (
+        siz = SchedLElSizes[k];
+    );
+    siz;
+);
+
+
+function copyBlock(ent)
+local (bl, res, i, k, siz)
+(
+    res = i = 0; k = -1;
+    (ent > 0) ? (
+        bl = ent[2]; // block label
+        loop (SchedLstCnt,
+            bk = SchedLPtrs[i]; (bk[2] === bl) ? k = i;
+            i += 1;
+        );
+        (k < 0) ? (
+            bk = 0 | (bl / twoPow32);
+            ((bk >= 0) && (bk <  SchedLstCnt)) ? k = bk;
+        );
+        (k >= 0) ? (
+            res = getLstBlock(k, id = ent[2]%twoPow32);
+            (res != 0) ? (
+                siz = SchedLElSizes[k];
+                memcpy(res, ent, siz);
+            );
+        );
+    );
+    res;
+);
+
+//*/
+//*/
+/*
+    Schedule an action to be delayed for "Edelay" seconds
+    all "time" used are relative to "Sched_TStart", starting date of the scheduler
+*/
+function Schedule(Edate, Edelay, Ecode, Epar1, Epar2, Epar3, Epar4, Epar5, Epar6)
+local (ent, p, pp, aDly, siz)
+(
+    Sched_TimeLast = Sched_TimeNow; // relative
+    Sched_TimeNow = time_precise() + gmem[timeDelta] - Sched_TStart; // relative
+    ent = SchedNone; // no entry yet defined.
+    SchedActive ? (
+        (Ecode === 0) ? (
+            // An entry is provided as 1st aux
+            ent = Epar1; aDly = SchedDly[ent];
+            // Is there a valid "last time" ?
+            ((aDly > 0) && (aDly <= Sched_TimeNow)) ? (Sched_TimeLast = aDly;);
+        ) : (
+            // Entry available ?
+            ent = SchedDetachHead(SchedFreePts);
+        );
+        (ent === 0) ? (
+            err_sys_rtm = 1601; // no free task entry
+        ) : (
+            (Ecode != 0) ? (
+                // Keep the data
+                SchedStatus[ent] |= SchThrUsed;  // now in use
+                SchedCode[ent] = Ecode;
+                SchedPar1[ent] = Epar1;
+                SchedPar2[ent] = Epar2;
+                SchedPar3[ent] = Epar3;
+                SchedPar4[ent] = Epar4;
+                SchedPar5[ent] = Epar5;
+                SchedPar6[ent] = Epar6;
+            //) : (
+            //    // Use Epar2 as code
+            //    SchedCode[ent] = Epar2;
+            );
+            // Compute Event date
+            (Edate == SchedAbsolute) ? (
+                Edate = Edelay - Sched_TStart; // now relative to "Sched_TStart"
+            ) :
+            (Edate == SchedRelative) ? (
+                Edate = Edelay + Sched_TimeNow; // relative to "Sched_TStart"
+            ) :
+            (Edate == SchedFromLast) ? (
+                Edate = Edelay + Sched_TimeLast; // relative to "Sched_TStart"
+            ) : (
+                Edate += Edelay; // not sure what this means
+            );
+            // Compute actual relative date
+            SchedDly[ent] = Edate;
+            // Where shall we chain the event ?
+            // Is the event list empty ?
+            p = SchedDlydPts[SchedNxtEnt];
+            (p == SchedDlydTailPts) ? (
+                // case 1: queue empty. insert in head
+                SchedInsertHead(SchedDlydPts, ent, SchETypeThrd);
+                SchedDelay = Edate;
+            ) : (
+                // p is the first event in the queue
+                pp = SchedDlydPts; // preceding "event" : the HEAD of the queue
+                siz = 0;
+                while ((p != SchedDlydTailPts) && (SchedDly[p] < Edate) && (siz <= ListSzmax)) (
+                    // the new event is posterior
+                    pp = p; // previous p
+                    p = SchedNxtEnt[p]; // next event
+                    siz += 1;
+                );
+                (pp == SchedDlydPts) ? (
+                    // case 2: at least 1 event in queue, but new event
+                    // is nearer in time than first event in queue
+                    // ==> insert in head
+                    SchedDelay = Edate;
+                    SchedInsertHead(SchedDlydPts, ent, SchETypeThrd);
+                ) : (
+                    // case 3: the new event[ent] occurs before the current[p] one
+                    // and after pp, which is really an event
+                    // insert the new event in chain between pp and p
+                    // if p i the queue of the list, insert in it
+                    (p[SchedNxtEnt] == SchedNone) ? (
+                        SchedInsertTail(SchedDlydPts, ent, SchETypeThrd);
+                    ) : (
+                        SchedInsertBefore(ent, p, SchETypeThrd);
+                    );
+                );
+            );
+        );
+    );
+    ent;
+);
+
+function Schedule(Edate, Edelay, Ecode, Epar1, Epar2, Epar3, Epar4, Epar5)
+(
+    Schedule(Edate, Edelay, Ecode, Epar1, Epar2, Epar3, Epar4, Epar5, 0);
+);
+
+function Schedule(Edate, Edelay, Ecode, Epar1, Epar2, Epar3, Epar4)
+(
+    Schedule(Edate, Edelay, Ecode, Epar1, Epar2, Epar3, Epar4, 0, 0);
+);
+
+function Schedule(Edate, Edelay, Ecode, Epar1, Epar2, Epar3)
+(
+    Schedule(Edate, Edelay, Ecode, Epar1, Epar2, Epar3, 0, 0, 0);
+);
+
+function Schedule(Edate, Edelay, Ecode, Epar1, Epar2)
+(
+    Schedule(Edate, Edelay, Ecode, Epar1, Epar2, 0, 0, 0, 0);
+);
+
+function Schedule(Edate, Edelay, Ecode, Epar1)
+(
+    Schedule(Edate, Edelay, Ecode, Epar1, 0, 0, 0, 0, 0);
+);
+
+function Schedule(Edate, Edelay, Ecode)
+(
+    Schedule(Edate, Edelay, Ecode, 0, 0, 0, 0, 0, 0);
+);
+
+/*
+    Add an immediate (non delayed) task
+*/
+function SchedAddTask(code, p1, p2, p3, p4, p5, p6)
+local (ent)
+(
+    ((ent = SchedDetachHead(SchedFreePts)) != 0) ? (
+        SchedStatus[ent] |= SchThrUsed;  // now in use
+        SchedCode[ent] = code;
+        SchedPar1[ent] = p1;
+        SchedPar2[ent] = p2;
+        SchedPar3[ent] = p3;
+        SchedPar4[ent] = p4;
+        SchedPar5[ent] = p5;
+        SchedPar6[ent] = p6;
+        SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
+    );
+    ent;
+);
+
+
+/*
+    Add an immediate urgent task
+*/
+function SchedAddUrgent(code, p1, p2, p3, p4, p5, p6)
+local (ent)
+(
+    ((ent = SchedDetachHead(SchedFreePts)) != 0) ? (
+        SchedStatus[ent] |= SchThrUsed;  // now in use
+        SchedCode[ent] = code;
+        SchedPar1[ent] = p1;
+        SchedPar2[ent] = p2;
+        SchedPar3[ent] = p3;
+        SchedPar4[ent] = p4;
+        SchedPar5[ent] = p5;
+        SchedPar6[ent] = p6;
+        SchedInsertHead(SchedActivPts, ent, SchETypeThrd);
+    );
+    ent;
+);
+
+/*
+    Add a "delayed" task
+*/
+function SchedAddDefered(Edate, Edelay, code, p1, p2, p3, p4, p5, p6)
+local (ent)
+(
+    ((ent = SchedDetachHead(SchedFreePts)) != 0) ? (
+        SchedStatus[ent] |= SchThrUsed;  // now in use
+        SchedCode[ent] = code;
+        SchedPar1[ent] = p1;
+        SchedPar2[ent] = p2;
+        SchedPar3[ent] = p3;
+        SchedPar4[ent] = p4;
+        SchedPar5[ent] = p5;
+        SchedPar6[ent] = p4;
+        Schedule(Edate, Edelay, 1, ent, 0, 0, 0, 0, 0);
+    );
+    ent;
+);
+
+/*
+    Get next event, or
+    "0" if none is ready
+*/
+function Scheduler()
+local (evt, act, xent, siz)
+(
+    Sched_TimeNow = time_precise() + gmem[timeDelta] - Sched_TStart;
+    SchedControl ? (
+        act = SchedControl; SchedControl = 0;
+        xent = SchedDlydPts[SchedNxtEnt];
+        (act == 1) ? (
+            // skip current (head) entry
+            (xent != SchedDlydTailPts) ? (
+                SchedCode[xent] = 0; // inhibit code
+                SchedDly[xent] = Sched_TimeNow;
+            );
+        ) :
+        (act == 2) ? (
+            // execute "now" the next event
+            (xent != SchedDlydTailPts) ? (
+                SchedDly[xent] = Sched_TimeNow;
+            );
+        ) :
+        (act == 3) ? (
+            SchedActive = 0; // set scheduler inactive
+        ) :
+        (act == 4) ? (
+            SchedActive = 1; // set scheduler active
+        ) :
+        (act == 5) ? (
+            siz = 0;
+            while ((xent != SchedDlydTailPts) && (siz <= ListSzmax))  (
+                SchedCode[xent] = 0; // inhibit code
+                xent = SchedNxtEnt[xent];
+                siz += 1;
+            );
+        );
+    );
+    evt = 0;
+    SchedActive ? (
+        // Some event in queue, & delay expired ?
+        (((xent = SchedDlydPts[SchedNxtEnt]) != SchedDlydTailPts) && (Sched_TimeNow  >= SchedDly[xent])) ? (
+            evt = SchedDetachHead(SchedDlydPts); // The event
+        );
+    );
+    evt;
+);

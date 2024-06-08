@@ -1,0 +1,467 @@
+// The Garbage Collector code
+// We use a conservative one, where anything that looks like a memory bock can be marked "active"...
+
+
+// Enter a "verified" block in the "protect" area
+function gc_protect(obj)
+local (ty, s)
+(
+    ((obj > mm_lowblocks) && (obj < mm_highblocks) && ((ty = obj[-2]) >= mSL_MKey_min)
+        && (ty <= mSL_MKey_max) && ((s = obj[-1]) >= 0) && (s <= mm_sizmem)
+        && (s === obj[s]) && (obj[s+1] === (ty ~ mSL_CC_Chksum))) ? (
+            mm_rem_mm[mm_rem_in] = obj; mm_rem_in = min(mm_rem_siz - 1, mm_rem_in + 1);
+        );
+);
+
+
+// Check if some object is in the hash table
+//        flg & 1 : put the object in the list
+//        flg & 2 : already checked the object is a valid block
+function gc_check(obj, flg)
+local (ent, cnt, k, ty, s)
+(
+    ((flg & 2) || // (obj > mm_lowblocks) && // this condition is always tested before calling gc_check
+      ((obj < mm_highblocks) // no address less that that can be an object
+        && ((s = obj[-1]) >= 0) && (s <= mm_sizmem) && (s === obj[s])
+        && ((ty = obj[-2]) >= mSL_MKey_min) && (ty <= mSL_MKey_max)
+        && (obj[s+1] === (ty ~ mSL_CC_Chksum)))) ? (
+        cnt = mm_hash_siz;
+        ent = obj % mm_hash_siz;
+        while (((k = mm_hash_mm[ent]) != 0) && (cnt > 0)) (
+            (k === obj) ? cnt = -1;
+            ent = (ent + 191) % mm_hash_siz;
+            cnt -= 1;
+        );
+        (k === 0) ? (
+            // enter the object at this location
+            mm_hash_mm[ent] = obj;
+            (flg & 1) ? (
+                // and in the list
+                mm_list_mm[mm_list_in] = obj;  mm_list_in = (mm_list_in + 1) % mm_list_siz; ((mm_list_cnt += 1) > mm_list_mxc) ? mm_list_mxc =  mm_list_cnt;
+                cnt = mm_Knew;
+                (FlagsTbVals[Flgs_GC] & 32) ? (
+                    sprintf(#ms, "* Enter: %d", obj);
+                    mSL_log(SysLogBox, #ms);
+                );
+            );
+        );
+    );
+);
+
+
+// Mark an object when it is first encountered
+function gc_mark(obj)
+local (xo, ty, s, s2, pt, cnt, p, pl, pty)
+(
+    (obj > mm_lowblocks) ? gc_check(obj, 1); // will put the object in the mm_list_mm if necessary
+    while ((xo = mm_list_mm[mm_list_pt]) != 0) (
+        mm_list_mm[mm_list_pt] = 0; mm_list_pt = (mm_list_pt + 1) % mm_list_siz; mm_list_cnt -= 1;
+        // Is the object a valid bloc ?
+        ty = xo[-2]; s = xo[-1];
+        (FlagsTbVals[Flgs_GC] & 16) ? (
+            sprintf(#ms, "* Study: %d  ty:'%c%c%c%c'", xo, 0xff & (ty >> 24), 0xff & (ty >> 16), 0xff & (ty >> 8), 0xff & ty);
+            mSL_log(SysLogBox, #ms);
+        );
+        ((ty >= mSL_MKey_min) && (ty <= mSL_MKey_max) && (s >= 0) && (s <= mm_sizmem)) ? (
+            s2 = xo[s];
+            ((s === s2) && (xo[s+1] === (ty ~ mSL_CC_Chksum))) ? (
+                (FlagsTbVals[Flgs_GC] & 8) ? (
+                    sprintf(#ms, "* A block: %d  ty:'%c%c%c%c'", xo, 0xff & (ty >> 24), 0xff & (ty >> 16), 0xff & (ty >> 8), 0xff & ty) ;
+                    mSL_log(SysLogBox, #ms);
+                );
+                // The object is a valid block. Is this furthermore a dynamic bloc ?
+                ((xo >= mm_lowmem) && (xo < mm_highmem)) ? (
+                    // we "mark" the object by inverting its length
+                    xo[s] = min(-1, -s); // return a "-1" for blocks of size "0"
+                    (FlagsTbVals[Flgs_GC] & 4) ? (
+                        sprintf(#ms, "* Mark @:%d ty:'%c%c%c%c' sz:%d", xo, 0xff & (ty >> 24), 0xff & (ty >> 16), 0xff & (ty >> 8), 0xff & ty, s);
+                        mSL_log(SysLogBox, #ms);
+                    );
+                );
+                // is the object a "memory consistant" object - namely, that may content other blocks ?
+                pt = xo; cnt = s;
+                while (cnt > 0) (
+                    p = pt[0];
+                    ((p > mm_lowblocks) && (p < mm_highblocks) && ((pl = p[-1]) >= 0) && (pl <= mm_sizmem) && ((pty = p[-2]) >= mSL_MKey_min)
+                        && (pty <= mSL_MKey_max) && (pl === p[pl]) && (p[pl+1] === (pty ~ mSL_CC_Chksum))) ? (
+                            // Mark this one too...
+                            gc_check(p, 3);
+                    );
+                    pt += 1; cnt -= 1;
+                );
+
+            );
+        );
+    );
+);
+
+
+
+
+function gc_start()
+local (i, obj, ptr)
+(
+    gc_run_count += 1;
+    mSL_Dyn_ReClean(); // clean recycle bin
+    memset(mm_hash_mm, 0, mm_hash_siz); // very large hash table for objects
+    memset(mm_list_mm, 0, mm_list_siz); // large circular list of objects to examine
+    memset(mm_tmp_mm, 0, mm_tmp_siz); // small list of objects to free
+    mm_tmp_in = mm_list_pt = mm_list_in = 0;
+    // Decide the empty tables are already known and do not need any further processing
+    // Also objects we DO NOT WISH to process...
+    // gc_check(mSL_EmptyAVars, 0);
+    // gc_check(mSL_EmptyOVars, 0);
+    // gc_check(mSL_EmptyPVars, 0);
+    gc_check(mSL_current_memory, 0);
+    //
+    AAAGC_Filler = 0;
+    AAAGC_Freed = 0;
+    AAAGC_Blocks = 0;
+    AAAGC_Marked = 0;
+    AAAGC_lwd = 0;
+    AAAGC_lwd0 = 0;
+    AAAGC_mpt = 0;
+    AAAGC_mpt0 = 0;
+    // Enter all the "protected" objects
+    i = 0; loop(mm_rem_siz,
+        obj = mm_rem_mm[i]; i+= 1;
+        (obj > mm_lowblocks) ? gc_mark(obj);
+    );
+    // Enter the "temporary" protected objects
+    ptr = mSL_current_memory + mSL_current_memory[mSL_MM_TPBuff];
+    i = 0; loop(mSL_MM_TPBSize, gc_mark(ptr[i]); i += 1;);
+);
+
+
+/*
+    Mark every mSL process in a process list
+*/
+function gc_mark_list(lblk)
+local (ent, siz, mss, msq, smg)
+(
+    ent = SchedPrvEnt[lblk[SchedOtherEnd]]; // start at tail
+    siz = 0;
+    while ((ent != lblk) && (siz <= SchedNEmax)) (
+        // should we "mark" this one ?
+        (FlagsTbVals[Flgs_GC] & 1) ? (
+            sprintf(#ms, "Sched mark: %d [%d %d %d]", ent, SchedStatus[ent], SchedThrdPt[ent], SchedPar1[ent]);
+            mSL_log(SysLogBox, #ms);
+        );
+        gc_mark(SchedThrdPt[ent]);
+        gc_mark(SchedPar1[ent]); // yes but why ?
+        gc_mark(SchedPar2[ent]); // potentially a message
+        gc_mark(SchedPar3[ent]); //
+        gc_mark(SchedPar5[ent]); //
+        gc_mark(SchedPar6[ent]); //
+        AAAGC_Marked += 1;
+        // Mark the message queue ?
+        msq = ent+SchedHQB; smg = 0; // internal message queue
+        while (((mss = SchedPrvEnt[msq[SchedOtherEnd]]) != msq)
+                  && (mss >= SchedFirstEnt) && (smg <= SchedNEmax)) (
+            gc_mark(mss); // mark it
+            smg += 1; mss = SchedPrvEnt[mss];
+        );
+        /*
+        (SchedListSize(ent+SchedHQB) > 0) ? (
+            // There is at least a message in the queue
+            gc_mark(SchedHQB[ent]);
+        );
+        */
+        ent = SchedPrvEnt[ent];
+        siz += 1;
+    );
+);
+
+
+function gc_mark_active()
+local (ent, siz)
+(
+    (FlagsTbVals[Flgs_GC] & 1) ? ( mSL_log(SysLogBox, "Mark Protected."); );
+    gc_mark(mSL_GC_Protected);
+    (FlagsTbVals[Flgs_GC] & 1) ? ( mSL_log(SysLogBox, "Mark User Defined Objects"); );
+    gc_mark(mm_usr_prot);
+    (FlagsTbVals[Flgs_GC] & 1) ? ( mSL_log(SysLogBox, "Mark ActivPts."); );
+    gc_mark_list(SchedActivPts);
+    (FlagsTbVals[Flgs_GC] & 1) ? ( mSL_log(SysLogBox, "Mark InActivPts."); );
+    gc_mark_list(SchedInactPts);
+    (FlagsTbVals[Flgs_GC] & 1) ? ( mSL_log(SysLogBox, "Mark DlydPts."); );
+    gc_mark_list(SchedDlydPts);
+    (FlagsTbVals[Flgs_GC] & 1) ? ( mSL_log(SysLogBox, "Mark EvntPts."); );
+    gc_mark_list(SchedEvntPts);
+    (FlagsTbVals[Flgs_GC] & 1) ? ( mSL_log(SysLogBox, "Mark SuspPts."); );
+    gc_mark_list(SchedSuspPts);
+    (FlagsTbVals[Flgs_GC] & 1) ? ( mSL_log(SysLogBox, "Mark LockdPts."); );
+    gc_mark_list(SchedLockdPts);
+    (FlagsTbVals[Flgs_GC] & 1) ? ( mSL_log(SysLogBox, "Mark RcyclPts."); );
+    // Better to release all the unused messages. Do this just by reinitializing the SchedRcyclPts list
+    SchedInitHQB(SchedRcyclPts, 'Rcyc');
+    (FlagsTbVals[Flgs_GC] & 1) ? ( mSL_log(SysLogBox, "Mark Curr_entry."); );
+    (mSL_dispatch_entry > 0) ? (
+        ((SchedStatus[mSL_dispatch_entry] & SchmSLThrUsed) != SchmSLThrUsed) ? (
+            sprintf(#ms, "!!Active thread mark: %d",  SchedStatus[mSL_dispatch_entry]);
+        );
+        gc_mark(SchedPar1[mSL_dispatch_entry]);
+        gc_mark(SchedPar2[mSL_dispatch_entry]); // potentially a message
+        gc_mark(SchedThrdPt[mSL_dispatch_entry]);
+        (SchedListSize(mSL_dispatch_entry+SchedHQB) > 0) ? (
+            // There is at least a message in the queue; it's enough to mark one
+            gc_mark(SchedHQB[mSL_dispatch_entry]);
+        );
+        mSL_Thread_mark = mSL_dispatch_entry;
+    );
+
+);
+
+function gc_release_unused_thread()
+local (ent)
+(
+    while (SchedListNonEmpty(SchedInactPts)) (
+        // get head
+        ent = SchedDetachHead(SchedInactPts);
+        // release thread stucture - they will be gc'd later
+        SchedStatus[ent] = 0;
+        SchedThrdPt[ent] = 0;
+        SchedPid[ent] &= SchedNMask;
+        // enter in free list
+        SchedInsertTail(SchedFreePts, ent, SchETypeThrd);
+    );
+);
+
+function gc_run(p)
+(
+    gc_run_phaz = 1;
+    FlagsTbVals[Flgs_GC] = p;
+    atomic_add(mSL_Lock,1);
+    atomic_add(mSL_loc_tim,mSL_loc_tadd);
+);
+
+/*
+    This sweeps the whole allocatable memory
+    free the unmarked blocks
+    and unmark the surviving ones
+*/
+function gc_sweep()
+local (mpt, lwd, ty, s, s2, ub)
+(
+    mm_show_ttf = 0;
+    mm_show_ttu = 0;
+    mm_show_frbl = 0;
+    mm_show_usbl = 0;
+    mm_show_flr = 0;
+    AAAGC_mpt0 = mpt = mSL_new_memory+mSL_MM_1BKey; // Point to the 1st block in memory.
+    AAAGC_lwd0 = lwd = mm_highmem;
+    while (mpt < lwd) (
+        ty = mpt[0]; s= mpt[1];
+        (ty === mSL_Filler) ? (
+            mpt += 1; // skip to next
+            AAAGC_Filler += 1;
+            mm_show_ttf += 1; mm_show_flr += 1;
+        ) :
+        (
+            // Let's check the block
+            ((ty >= mSL_MT_FreeSt) && (ty <= mSL_MKey_max) && (s >= 0) && (mpt[s+3] === (ty ~ mSL_CC_Chksum))
+            && ((s === (s2 = mpt[s+2])) || (s === - s2) || ((s === 0) && (s2 === -1)))) ? (
+                // The block is correct. Should it be freed ?
+                AAAGC_Blocks += 1;
+                (ty === mSL_MT_FreeSt) ? (
+                    mm_show_ttf += s; mm_show_frbl += 1;
+                ) :
+                ((s2 >= 0)) ? (
+                    // it must be freed
+                    // but we can't free it now, since it could be merged with the next block,
+                    // and we would be loosing track of this one...
+                    (FlagsTbVals[Flgs_GC] & 1) ? (
+                        sprintf(#ms, "mfree(%d) '%c%c%c%c' %d", mpt+2, 0xff & (ty >> 24), 0xff & (ty >> 16), 0xff & (ty >> 8), 0xff & ty, s);
+                        mSL_log(SysLogBox, #ms);
+                    );
+                    ub = mm_tmp_mm[mm_tmp_in]; mm_tmp_mm[mm_tmp_in] = mpt+2; // provide address of the content
+                    mm_tmp_in = (mm_tmp_in + 1) % mm_tmp_siz;
+                    (ub != 0) ? ( mSL_Dyn_Free(ub); AAAGC_Freed += 1; );
+                    mm_show_ttf += s; mm_show_frbl += 1;
+                ) : (
+                    // else, unmark it
+                    mpt[s+2] = s; // reset the correct length in the tail of the block
+                    mm_show_ttu += s; mm_show_usbl += 1;
+                );
+                mpt += s + 4; // skip to next block
+            ) : (
+                mSL_errX = 3333; // GC error
+                lwd = -1; // stop loop
+            );
+        );
+    );
+    (mSL_errX === 0) ? (
+        // free all remaining blocks
+        loop (mm_tmp_siz,
+            ub = mm_tmp_mm[mm_tmp_in];
+            (ub != 0) ? (mSL_Dyn_Free(ub); mm_tmp_mm[mm_tmp_in] = 0; AAAGC_Freed += 1; );
+            mm_tmp_in = (mm_tmp_in + 1) % mm_tmp_siz;
+        );
+    );
+    AAAGC_lwd = lwd;
+    AAAGC_mpt = mpt
+);
+
+mm_mpt = 0;
+mm_wk_errC = 0;
+
+function mem_wk_signal(msg)
+(
+    sprintf(#ms, "Err: %s @ %d", msg, mm_mpt);
+    mSL_log(SysLogBox, #ms);
+    mm_wk_errC += 1;
+);
+
+
+function
+mem_walk(flg)
+local (m, lwd, ty, s, s2, ub, dmf, dmgb, chk)
+(
+    // Check the memory
+    m = mSL_new_memory;
+
+    chk = (((s = m[-1]) > 32767) && (m[-2] === mSL_KODE_memory) && (m[s]===s) && (m[s+1] === (mSL_KODE_memory ~ mSL_CC_Chksum))
+            && (m[s-1]===mSL_End_Mark) && (m[mSL_MM_LowAd]===(mm_lowmem-mSL_new_memory))
+            && (m[mSL_MM_HighAd]===(mm_highmem-mSL_new_memory)) && (m[mSL_MM_MemSiz]===mm_sizmem) && GMW());
+    !chk ? (
+        (s < 65536) ? (
+            sprintf(#ms, "** Hdr Size incorrect %d", s);
+            mSL_log(SysLogBox, #ms);
+        ) :
+        (m[-2] != mSL_KODE_memory) ? (
+            sprintf(#ms, "** Hdr Code incorrect %d", m[-2]);
+            mSL_log(SysLogBox, #ms);
+        ) :
+        (m[s]!=s) ? (
+            sprintf(#ms, "** Sizes mismatch %d %d", s, m[s]);
+            mSL_log(SysLogBox, #ms);
+        ) :
+        (m[s+1] != (mSL_KODE_memory ~ mSL_CC_Chksum)) ? (
+            sprintf(#ms, "** Trl Code incorrect %d", m[s+1]);
+            mSL_log(SysLogBox, #ms);
+        ) :
+        (m[s-1]!=mSL_End_Mark) ? (
+            sprintf(#ms, "** Trl Mark incorrect %d", m[s-1]);
+            mSL_log(SysLogBox, #ms);
+        ) :
+        (!GMW()) ? (
+            sprintf(#ms, "** Low memory damaged");
+            mSL_log(SysLogBox, #ms);
+            GMW0("Mem walk check");
+            GMI();
+        ) : (
+            mSL_log(SysLogBox, "** Memory damaged **");
+        );
+
+    ) : (
+        mm_mpt = mSL_new_memory+mSL_MM_1BKey; // Point to the 1st block in memory.
+        lwd = mm_highmem;
+        mm_show_flr = 0;
+        mm_show_usbl = 0;
+        mm_show_dmg = 0;
+        mm_show_frbl = 0;
+        mm_show_ttf = 0;
+        mm_show_ttu = 0;
+        mm_bl_huge = 0;
+        mm_bl_big = 0;
+        mm_bl_large = 0;
+        mm_bl_medium = 0;
+        mm_bl_mini = 0;
+        mm_wk_errC = 0;
+
+        while ((mm_mpt < lwd) && (mm_wk_errC < 16)) (
+            ty = mm_mpt[0]; s= mm_mpt[1];
+            (ty != floor(ty)) ? (
+                mem_wk_signal("Block Type");
+                mm_mpt += 1;
+            ) :
+            (ty === mSL_Filler) ? (
+                mm_mpt += 1; // skip to next
+                mm_show_flr += 1;
+                mm_show_ttf += 1;
+            ) :
+            (
+                // Let's check the block
+                s2 = 0;
+                (ty === mSL_MT_FreeSt) ? (
+                    ((s >= 0) && (s === mm_mpt[s+2]) && (mm_mpt[s+3] === mSL_MT_FreeNd)) ? (
+                        mm_show_frbl += 1; mm_show_ttf += s; // update total size
+                        (s >= 1048576) ? ( mm_bl_huge += 1; ) :
+                        (s >= 262144) ? ( mm_bl_big += 1; ) :
+                        (s >= 32768) ? ( mm_bl_large += 1; ) :
+                        (s >= 4096) ? ( mm_bl_medium += 1; ) : mm_bl_mini += 1;
+                        (flg & 1) ? (
+                            sprintf(#ms, "Free @:%d %d", mm_mpt, s);
+                            mSL_log(SysLogBox, #ms);
+                        );
+                        mm_mpt += s + 4; // skip to next block
+                    ) : (
+                        (dmf === 0) ? (
+                            mm_show_dmg += 1;
+                            dmgb = mm_mpt; // keep block address
+                            sprintf(#ms, "*FrDmg @:%d", mm_mpt);
+                            mSL_log(SysLogBox, #ms);
+                            mm_wk_errC += 1;
+                        );
+                        dmf = 1; mm_mpt += 1;
+                    );
+                ) :
+                ((ty >= mSL_MKey_min) && (ty <= mSL_MKey_max) && (s >= 0) && (mm_mpt[s+3] === (ty ~ mSL_CC_Chksum))
+                && ((s === (s2 = mm_mpt[s+2])) || (s === - s2) || ((s === 0) && (s2 === -1)))) ? (
+                    mm_show_usbl += 1; mm_show_ttu += s; // update used
+                    (flg & 1) ? (
+                        sprintf(#ms, "Blk @:%d '%c%c%c%c' %d", mm_mpt, 0xff & (ty >> 24), 0xff & (ty >> 16), 0xff & (ty >> 8), 0xff & ty, s);
+                        mSL_log(SysLogBox, #ms);
+                    );
+
+                    (dmf > 0) ? (
+                        // Previous block was damaged - let's correct it
+                        // dmgb[dmgs-2] = dmgb[1] = mm_mpt - dmgb - 4;
+                        // dmgb[dmgs-1] = (dmgb[0] = 'DMGB') ~ mSL_CC_Chksum;
+                        dmf = 0;
+                    );
+                    mm_mpt += s + 4; // skip to next block
+                ) : (
+                    (dmf === 0) ? (
+                        mm_show_dmg += 1;
+                        dmgb = mm_mpt; // keep block address
+                        sprintf(#ms, "*Dmg @:%d '%c%c%c%c' %d", mm_mpt, 0xff & (ty >> 24), 0xff & (ty >> 16), 0xff & (ty >> 8), 0xff & ty, s);
+                        mSL_log(SysLogBox, #ms);
+                        sprintf(#ms, " ==> %d %x~%x=~%x", s2, ty, (ty ~ mSL_CC_Chksum), mm_mpt[s+3]);
+                        mSL_log(SysLogBox, #ms);
+                        mm_wk_errC += 1;
+                    );
+                    dmf = 1; mm_mpt += 1;
+                );
+
+            );
+        );
+        mSL_Dyn_Dispo = mm_show_ttf;
+        mm_show_ratio = min(99, (1+mm_show_ttf)/(1+mm_show_ttu));
+        (flg & 8) ? (
+            // check available memory
+            ((mm_show_ratio < mm_show_limit) && (gc_run_phaz === 0)) ? (
+                // run a GC
+                (mSL_Dyn_Tr & 4) ? ( sprintf(#dbg_trace4, "Ratio free/used: %.4f", ((1+mm_show_ttf)/(1+mm_show_ttu))); );
+                gc_run(2);
+            );
+        );
+    );
+);
+
+
+function mem_show()
+(
+    sprintf(#ms, "Blocks:  fr:%d  us:%d  fl:%d  dm:%d", mm_show_frbl, mm_show_usbl, mm_show_flr, mm_show_dmg);
+    mSL_log(SysLogBox, #ms);
+    sprintf(#ms, "Free: %d  %.2f %%", mm_show_ttf, 100 * mm_show_ttf/mm_sizmem);
+    mSL_log(SysLogBox, #ms);
+    sprintf(#ms, "Used: %d  %.2f %%", mm_show_ttu, 100 * mm_show_ttu/mm_sizmem);
+    mSL_log(SysLogBox, #ms);
+);
+
+
+(mSL_StM_FreePt >= fmemmax) ? (
+    err_sys_ini = 9988;
+);
+

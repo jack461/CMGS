@@ -1,0 +1,701 @@
+/*
+
+
+The Game Master Auxiliary Script
+
+(c) 2023-2024 - J.J. Girardot
+
+*/
+
+
+//@gmem=GM_SHM
+
+<? in_eel=1; ?>
+
+<? include("GM-Libs/mSL_Constants.jsfx-inc"); ?>
+
+0[0] = 'GMAX'; // "Game Manager AuXiliary script"
+
+
+wArea = 0x100; // an array to keep infos.
+
+versionGMS=0x000104;
+
+
+<? include("GM-Libs/mSL_clip_map.jsfx-inc"); ?>
+
+gMemFree = UGDummy + UCBSize;
+
+
+
+function detectProjectPath()
+local(ws,st,lg,ls)
+(
+    // Is the path ending in "/Audio" ?
+    st = "/Audio"; lg = strlen(st);
+    GetProjectPath(#buf); ls = strlen(#buf);
+    ws = #;
+    strcpy_from(ws, #buf, ls - lg);
+    (strcmp(ws, st) === 0) ? (
+        // Suppress this part
+        strncpy(ws, #buf, ls - lg);
+        strcpy(#buf, ws);
+    );
+    #buf;
+);
+//======================================================>
+
+// Reset Script own global variables
+repeatExec = 1;  // Repeat script flag
+Cmd = 0; // global value
+
+gmem[dateRqst] = gmem[dateCfrm] = gmem[versionGMScript] = 0;
+gmem[dateStrt] = gmem[dateDone] = 0;
+gmem[cmndKode] = gmem[cmndPar1] = gmem[cmndPar2] = gmem[cmndPar3] = 0;
+gmem[scptTrcs] = 0;
+gmem[workToDo] = 0;
+
+sprintf(#st, "GMA %d.%d.%d started: %4d/%02d/%02d %2dh%02d'%02d\"\n",
+    versionGMS >> 16, (versionGMS >> 8) & 0xff, versionGMS & 0xff,
+    gmem[timeYear], gmem[timeMonth], gmem[timeDay], gmem[timeHour], gmem[timeMinute], gmem[timeSecond]);
+ShowConsoleMsg(#st);
+detectProjectPath();
+strcpy(#ppath, #buf);
+sprintf(#st, "Path %s\n", #buf);
+ShowConsoleMsg(#st);
+// Export path in gmem
+setexpldstr(#buf, 0, 0);
+//getexpldstr(0,0);
+//sprintf(#st, "---- %s\n", #sct);
+//ShowConsoleMsg(#st);
+// Signal the project path is available
+gmem[thrdRqst] = 'Path';
+gmem[scptPar1] = expldwstr;
+
+
+/*
+
+//  Try string limits algo
+ShowConsoleMsg("***STRING TEST***\n");
+#AZ0 = "0123456789ABCDEF";
+#AZ1 = "";
+loop (16,
+    strcat(#AZ0, #AZ1);
+    strcat(#AZ1, #AZ0);
+    sprintf(#s, "Sizes : %d, %d\n", strlen(#AZ0), strlen(#AZ1));
+    ShowConsoleMsg(#s);
+);
+
+ShowConsoleMsg("***STRING TEST END***\n");
+*/
+
+
+/*
+    Main Script Function
+    Called at ReaScript/GUI rate
+*/
+function doWork()
+(
+    gmem[lastScRun] = currTime = time_precise() + gmem[timeDelta];
+    gmem[versionGMScript] = versionGMS;
+    ((gmem[dateCfrm] > gmem[dateDone]) && (gmem[dateCfrm] >= gmem[dateRqst]) && (currTime >= gmem[dateCfrm])) ? (
+        // confirmed, not executed yet
+        // There is some work to do
+        (gmem[dateStrt] < gmem[dateCfrm]) ? (
+            gmem[dateStrt] = currTime; // we have started to work
+            gmem[workToDo] = 0; // work will probably be done at the end unless some delay is necessary
+            gmem[scptLock] = 1; // lock it util done
+            Err=0;
+            // get and execute the function.
+            Cmd = gmem[cmndKode];
+            gmem[rtrnVal1] = Par1 = gmem[cmndPar1]; Par2 = gmem[cmndPar2]; Par3 = gmem[cmndPar3];
+
+            (gmem[scptTrcs] & 1) ? (sprintf(#st, "Command: %d (%d %d %d)\n", Cmd, Par1, Par2, Par3); ShowConsoleMsg(#st););  // trace
+        );
+
+        (Cmd<64)?((Cmd<32)?((Cmd<16)?((Cmd<8)?((Cmd<4)?((Cmd<2)?((Cmd<1)?(
+            //===0===//
+            Err=0; // act as a null operation
+            //===0===//
+        ):(
+            //===1===//
+            gmem[rtrnVal1] = gmem[scptTrcs]; // get previous Script trace
+            gmem[scptTrcs] = gmem[cmndPar1]; // set new trace
+            //===1===//
+        );):((Cmd<3)?(
+            //===2===//
+            // Jump to a marker in read order - Par1 is the marker number
+            GoToMarker(0, Par1, 1);
+            //===2===//
+        ):(
+            //===3===//
+            // Jump to a marker in markers order - Par1 is the marker number
+            GoToMarker(0, Par1, 0);
+            //===3===//
+        ););):((Cmd<6)?((Cmd<5)?(
+            //===4===//
+            OnPlayButton(); // Starts playing at edit-cursor. Will stop recording, when executed during recording.
+            //===4===//
+        ):(
+            //===5===//
+            OnStopButton(); // Stops playing/recording.
+            //===5===//
+        );):((Cmd<7)?(
+            //===6===//
+            OnPauseButton(); // Toggles pause/play during play or pause/rec during recording in the current project. When stopped, it will start paused play.
+            //===6===//
+        ):(
+            //===7===//
+            gmem[rtrnVal1] = GetPlayPosition(); // the playposition in seconds
+            //===7===//
+        );););):((Cmd<12)?((Cmd<10)?((Cmd<9)?(
+            //===8===//
+            gmem[rtrnVal1] = GetPlayPosition2(); // returns position of next audio block being processed
+            //===8===//
+        ):(
+            //===9===//
+            gmem[rtrnVal1] = GetPlayState(); // returns, in which play-state the current project is &1=playing,&2=pause,&=4 is recording
+            // 0, stop ; 1, play ; 2, paused play ; 5, recording ; 6, paused recording
+            //===9===//
+        );):((Cmd<11)?(
+            //===10===//
+            gmem[rtrnVal1] = GetCursorPosition(); // the editcursor-position in seconds
+            //===10===//
+        ):(
+            //===11===//
+            SetEditCurPos(Par1, 0, 0); // Change the position of the edit-cursor in the current project. keep old position
+            //===11===//
+        ););):((Cmd<14)?((Cmd<13)?(
+            //===12===//
+            SetEditCurPos(Par1, 0, 1); // Change the position of the edit-cursor in the current project. play at new position
+            //===12===//
+        ):(
+            //===13===//
+            CSurf_GoStart(); // Moves the cursor to the start of the project.
+            //===13===//
+        );):((Cmd<15)?(
+            //===14===//
+            gmem[rtrnVal1] = Master_GetPlayRate(0); // Get the playrate of the project.
+            //===14===//
+        ):(
+            //===15===//
+            Main_OnCommand(Par1, 0); // Perform a specific action
+            //===15===//
+        ););););):((Cmd<24)?((Cmd<20)?((Cmd<18)?((Cmd<17)?(
+            //===16===//
+            Main_OnCommand(Par1, 0); // Perform a specific action
+            //===16===//
+        ):(
+            //===17===//  // Open a dialog box
+            // Open a dialog box
+            gmem[rtrnVal1] = res = MB("msg", "title", 2);
+            (gmem[scptTrcs] & 2) ? (sprintf(#st, "MB: %d\n", res); ShowConsoleMsg(#st);); // trace
+            //===17===//
+        );):((Cmd<19)?(
+            //===18===//  aka 0x12 : stop script
+            repeatExec = 0;  //
+            gmem[versionGMScript] = 0; // script no longer active
+            (gmem[scptTrcs] & 2) ? (ShowConsoleMsg("Stopping now.\n"););
+            //===18===//
+        ):(
+            //===19===//   // Stop delaying the script
+            // Stop delaying the script
+            gmem[workToDo] = 0; Cmd = 0;
+            //===19===//
+        ););):((Cmd<22)?((Cmd<21)?(
+            //===20===//
+            // Delay next work by some frames
+            gmem[workToDo] += max(Par1, 36000); Cmd = 0;
+            //===20===//
+        ):(
+            //===21===//  // Get project path
+            GetProjectPath(#buf);
+            setexpldstr(#buf, 0, 0);
+            //===21===//
+        );):((Cmd<23)?(
+            //===22===//
+            Err=22;
+            //===22===//
+        ):(
+            //===23===//
+            Err=23;
+            //===23===//
+        );););):((Cmd<28)?((Cmd<26)?((Cmd<25)?(
+            //===24===//
+            Err=24;
+            //===24===//
+        ):(
+            //===25===//
+            Err=25;
+            //===25===//
+        );):((Cmd<27)?(
+            //===26===//
+            Err=26;
+            //===26===//
+        ):(
+            //===27===//
+            Err=27;
+            //===27===//
+        ););):((Cmd<30)?((Cmd<29)?(
+            //===28===//
+            Err=28;
+            //===28===//
+        ):(
+            //===29===//
+            Err=29;
+            //===29===//
+        );):((Cmd<31)?(
+            //===30===//
+            // Err=30;
+            // output a file with name provided in gmem[xplStr2], content in gmem[infoBStarts]
+            mSL_g6unpackArray(#fn, gmem[scptPar2], 0);
+
+            //sprintf(#st, "File name %s\n", #fn);
+            //ShowConsoleMsg(#st);
+            strcpy(#ffn, #ppath);
+            strcat(#ffn, "/");
+            strcat(#ffn, #fn);
+            //sprintf(#st, "Full file name %s\n", #ffn);
+            // ShowConsoleMsg(#st);
+            rpt = 1; ptin = 0; add = gmem[scptPar3];
+            // mSL_g6unpackArray(#fc, add, ptin);
+
+            // sprintf(#st, "Text size [add:%d] %d\n", add, strlen(#fc));
+            // ShowConsoleMsg(#st);
+            // Open the file
+            gmem[rtrnVal3] = fp = fopen(#ffn, "w");
+            sprintf(#st, "Open cr %d\n", fp);
+            ShowConsoleMsg(#st);
+            (fp > 0) ? (
+                // write a string
+
+                while (rpt) (
+                ptin = mSL_g6unpackArray(#fc, add, ptin);
+                fr = fwrite(fp, #fc, 0);
+                rpt = gmem[add + ptin] != 0;
+                sprintf(#st, "Write %d  => cr  %d // %d\n", strlen(#fc), fr, rpt);
+                ShowConsoleMsg(#st);
+                );
+
+                gmem[rtrnVal4] = fq = fclose(fp);
+                //sprintf(#st, "Close cr %d\n", fq);
+                //ShowConsoleMsg(#st);
+            );
+            //===30===//
+        ):(
+            //===31===//
+            Err=31;
+            //===31===//
+        );););););):((Cmd<48)?((Cmd<40)?((Cmd<36)?((Cmd<34)?((Cmd<33)?(
+            //===32===//
+            Err=32;
+            //===32===//
+        ):(
+            //===33===//
+            Err=33;
+            //===33===//
+        );):((Cmd<35)?(
+            //===34===//
+            Err=34;
+            //===34===//
+        ):(
+            //===35===//
+            Err=35;
+            //===35===//
+        ););):((Cmd<38)?((Cmd<37)?(
+            //===36===//
+            Err=36;
+            //===36===//
+        ):(
+            //===37===//
+            Err=37;
+            //===37===//
+        );):((Cmd<39)?(
+            //===38===//
+            Err=38;
+            //===38===//
+        ):(
+            //===39===//
+            Err=39;
+            //===39===//
+        );););):((Cmd<44)?((Cmd<42)?((Cmd<41)?(
+            //===40===//
+            Err=40;
+            //===40===//
+        ):(
+            //===41===//
+            Err=41;
+            //===41===//
+        );):((Cmd<43)?(
+            //===42===//
+            Err=42;
+            //===42===//
+        ):(
+            //===43===//
+            Err=43;
+            //===43===//
+        ););):((Cmd<46)?((Cmd<45)?(
+            //===44===//
+            Err=44;
+            //===44===//
+        ):(
+            //===45===//
+            Err=45;
+            //===45===//
+        );):((Cmd<47)?(
+            //===46===//
+            Err=46;
+            //===46===//
+        ):(
+            //===47===//
+            Err=47;
+            //===47===//
+        ););););):((Cmd<56)?((Cmd<52)?((Cmd<50)?((Cmd<49)?(
+            //===48===//
+            Err=48;
+            //===48===//
+        ):(
+            //===49===//
+            Err=49;
+            //===49===//
+        );):((Cmd<51)?(
+            //===50===//
+            Err=50;
+            //===50===//
+        ):(
+            //===51===//
+            Err=51;
+            //===51===//
+        ););):((Cmd<54)?((Cmd<53)?(
+            //===52===//
+            Err=52;
+            //===52===//
+        ):(
+            //===53===//
+            Err=53;
+            //===53===//
+        );):((Cmd<55)?(
+            //===54===//
+            Err=54;
+            //===54===//
+        ):(
+            //===55===//
+            Err=55;
+            //===55===//
+        );););):((Cmd<60)?((Cmd<58)?((Cmd<57)?(
+            //===56===//
+            Err=56;
+            //===56===//
+        ):(
+            //===57===//
+            Err=57;
+            //===57===//
+        );):((Cmd<59)?(
+            //===58===//
+            Err=58;
+            //===58===//
+        ):(
+            //===59===//
+            Err=59;
+            //===59===//
+        ););):((Cmd<62)?((Cmd<61)?(
+            //===60===//
+            Err=60;
+            //===60===//
+        ):(
+            //===61===//
+            Err=61;
+            //===61===//
+        );):((Cmd<63)?(
+            //===62===//
+            Err=62;
+            //===62===//
+        ):(
+            //===63===//
+            Err=63;
+            //===63===//
+        ););););););):((Cmd<96)?((Cmd<80)?((Cmd<72)?((Cmd<68)?((Cmd<66)?((Cmd<65)?(
+            //===64===//
+            Err=64;
+            //===64===//
+        ):(
+            //===65===//
+            Err=65;
+            //===65===//
+        );):((Cmd<67)?(
+            //===66===//
+            Err=66;
+            //===66===//
+        ):(
+            //===67===//
+            Err=67;
+            //===67===//
+        ););):((Cmd<70)?((Cmd<69)?(
+            //===68===//
+            Err=68;
+            //===68===//
+        ):(
+            //===69===//
+            Err=69;
+            //===69===//
+        );):((Cmd<71)?(
+            //===70===//
+            Err=70;
+            //===70===//
+        ):(
+            //===71===//
+            Err=71;
+            //===71===//
+        );););):((Cmd<76)?((Cmd<74)?((Cmd<73)?(
+            //===72===//
+            Err=72;
+            //===72===//
+        ):(
+            //===73===//
+            Err=73;
+            //===73===//
+        );):((Cmd<75)?(
+            //===74===//
+            Err=74;
+            //===74===//
+        ):(
+            //===75===//
+            Err=75;
+            //===75===//
+        ););):((Cmd<78)?((Cmd<77)?(
+            //===76===//
+            Err=76;
+            //===76===//
+        ):(
+            //===77===//
+            Err=77;
+            //===77===//
+        );):((Cmd<79)?(
+            //===78===//
+            Err=78;
+            //===78===//
+        ):(
+            //===79===//
+            Err=79;
+            //===79===//
+        ););););):((Cmd<88)?((Cmd<84)?((Cmd<82)?((Cmd<81)?(
+            //===80===//
+            Err=80;
+            //===80===//
+        ):(
+            //===81===//
+            Err=81;
+            //===81===//
+        );):((Cmd<83)?(
+            //===82===//
+            Err=82;
+            //===82===//
+        ):(
+            //===83===//
+            Err=83;
+            //===83===//
+        ););):((Cmd<86)?((Cmd<85)?(
+            //===84===//
+            Err=84;
+            //===84===//
+        ):(
+            //===85===//
+            Err=85;
+            //===85===//
+        );):((Cmd<87)?(
+            //===86===//
+            Err=86;
+            //===86===//
+        ):(
+            //===87===//
+            Err=87;
+            //===87===//
+        );););):((Cmd<92)?((Cmd<90)?((Cmd<89)?(
+            //===88===//
+            Err=88;
+            //===88===//
+        ):(
+            //===89===//
+            Err=89;
+            //===89===//
+        );):((Cmd<91)?(
+            //===90===//
+            Err=90;
+            //===90===//
+        ):(
+            //===91===//
+            Err=91;
+            //===91===//
+        ););):((Cmd<94)?((Cmd<93)?(
+            //===92===//
+            Err=92;
+            //===92===//
+        ):(
+            //===93===//
+            Err=93;
+            //===93===//
+        );):((Cmd<95)?(
+            //===94===//
+            Err=94;
+            //===94===//
+        ):(
+            //===95===//
+            Err=95;
+            //===95===//
+        );););););):((Cmd<112)?((Cmd<104)?((Cmd<100)?((Cmd<98)?((Cmd<97)?(
+            //===96===//
+            Err=96;
+            //===96===//
+        ):(
+            //===97===//
+            Err=97;
+            //===97===//
+        );):((Cmd<99)?(
+            //===98===//
+            Err=98;
+            //===98===//
+        ):(
+            //===99===//
+            Err=99;
+            //===99===//
+        ););):((Cmd<102)?((Cmd<101)?(
+            //===100===//
+            Err=100;
+            //===100===//
+        ):(
+            //===101===//
+            Err=101;
+            //===101===//
+        );):((Cmd<103)?(
+            //===102===//
+            Err=102;
+            //===102===//
+        ):(
+            //===103===//
+            Err=103;
+            //===103===//
+        );););):((Cmd<108)?((Cmd<106)?((Cmd<105)?(
+            //===104===//
+            Err=104;
+            //===104===//
+        ):(
+            //===105===//
+            Err=105;
+            //===105===//
+        );):((Cmd<107)?(
+            //===106===//
+            Err=106;
+            //===106===//
+        ):(
+            //===107===//
+            Err=107;
+            //===107===//
+        ););):((Cmd<110)?((Cmd<109)?(
+            //===108===//
+            Err=108;
+            //===108===//
+        ):(
+            //===109===//
+            Err=109;
+            //===109===//
+        );):((Cmd<111)?(
+            //===110===//
+            Err=110;
+            //===110===//
+        ):(
+            //===111===//
+            Err=111;
+            //===111===//
+        ););););):((Cmd<120)?((Cmd<116)?((Cmd<114)?((Cmd<113)?(
+            //===112===//
+            Err=112;
+            //===112===//
+        ):(
+            //===113===//
+            Err=113;
+            //===113===//
+        );):((Cmd<115)?(
+            //===114===//
+            Err=114;
+            //===114===//
+        ):(
+            //===115===//
+            Err=115;
+            //===115===//
+        ););):((Cmd<118)?((Cmd<117)?(
+            //===116===//
+            Err=116;
+            //===116===//
+        ):(
+            //===117===//
+            Err=117;
+            //===117===//
+        );):((Cmd<119)?(
+            //===118===//
+            Err=118;
+            //===118===//
+        ):(
+            //===119===//
+            Err=119;
+            //===119===//
+        );););):((Cmd<124)?((Cmd<122)?((Cmd<121)?(
+            //===120===//
+            Err=120;
+            //===120===//
+        ):(
+            //===121===//
+            Err=121;
+            //===121===//
+        );):((Cmd<123)?(
+            //===122===//
+            Err=122;
+            //===122===//
+        ):(
+            //===123===//
+            Err=123;
+            //===123===//
+        ););):((Cmd<126)?((Cmd<125)?(
+            //===124===//
+            Err=124;
+            //===124===//
+        ):(
+            //===125===//
+            Err=125;
+            //===125===//
+        );):((Cmd<127)?(
+            //===126===//
+            repeatExec = 0;  // aka 7E
+            gmem[versionGMScript] = 0; // script no longer active
+            ShowConsoleMsg("Stopping now.\n");
+            //===126===//
+        ):(
+            //===127===//
+            Err=127; // catch all error: 127 or more
+            //===127===//
+        );););););););
+
+        ((gmem[workToDo] -= 1) <= 0) ? (
+            gmem[dateDone] = time_precise() + gmem[timeDelta];
+            gmem[workToDo] = 0;
+            gmem[scptErrc] = - Err;
+            gmem[thrdRqst] = 'Done';
+            gmem[scptDone] = 1;
+        );
+    );
+
+    (repeatExec) ? (
+        defer("doWork();");
+    );
+);
+
+function doEnd()
+(
+    repeatExec = 0;  // aka 7E
+    gmem[versionGMScript] = 0; // script no longer active
+    ShowConsoleMsg("Stopping by 'doEnd'.\n");
+);
+
+atexit("doEnd();");
+
+doWork();
+

@@ -1,0 +1,62 @@
+desc:Synchronizer
+
+/*
+   Allows sample precise synchronization between JSFX effects
+
+    1/ Put Synchronizer.jsfx on a single stereo track -- lets name it "synchro"
+
+    It generates in its outputs, spl0 and spl1,
+    an accurate representation of the
+    current sample number.
+
+    In the "Route" dialog box of the "synchro" track,
+        - disable "master send"
+        - add a new send to all the tracks you want to synchronize
+
+    2/ In every JSFX effect you want to synchronize,
+
+        -add, in @init :
+
+            spl_count = -1; T_fact = 4096 * 4096 * 4096 * 4096  ; // 2^48
+
+        - add, at the beginning of @sample :
+
+            spl_count = (0|(spl0 * T_fact)) + (0|(spl1 * T_fact)) * 16777216;
+            spl0 = spl1 = 0; // reset samples.
+
+        spl_count is now the actual number of the current sample
+        since the start of reaper.
+        This value is accurate to 48 bits, and, at 48kHz,
+        is precise for sessions of up to about 6000 days...
+
+        - if you need in @block the number of the first sample of the incoming
+        buffer, use "(spl_count + 1)" -- this is why the initial value is set to -1.
+*/
+
+option:no_meter
+
+@init
+ext_noinit = 1;
+ext_nodenorm = 1; // don't forget this one !
+// Current sample number is T0 + 2^24 * T1
+// T0 and T1 are represented by S0 and S1, with
+// S0 = T0 / 2^48, and S1 = T1 / 2^48
+// S0 and S1 are sent using spl0 and spl1 in @sample
+T0 = T1 = S0 = S1 = 0;
+maxk = 4096 * 4096 ; // 2^24 = 16777216  Exact value
+T_fact = 4096 * 4096 * 4096 * 4096  ; // 2^48  Exact value
+T_div = 1 / T_fact; // 2^-48 Exact value
+
+@block
+
+(T0 >= maxk) ? (
+    T0 = T0 - maxk;
+    T1 += 1; // we don't really care for overflows in T1 :-)
+    S1 = T1 * T_div;
+);
+
+@sample
+
+spl0 = T0 * T_div; // spl0 is also S0, not used.
+spl1 = S1;
+T0 += 1;

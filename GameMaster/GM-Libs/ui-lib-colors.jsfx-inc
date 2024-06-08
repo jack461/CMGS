@@ -1,0 +1,212 @@
+/*
+
+    Color managing additions to the ui-jsfx lib  -- Part 3
+    J.J. Girardot - a.k.a. jack461 - August 2019
+
+*/
+
+@init
+
+/*
+
+    Color gradient control block
+
+*/
+
+ui_jcgrad_jty = ui_jbtype; // block type
+ui_jcgrad_possz = ui_jbsize; // 1 : block size
+ui_jcgrad_gflgs = 2; // flags
+ui_jcgrad_gvmin = 3;
+ui_jcgrad_gvmax = 4;
+ui_jcgrad_gcmin = 5;
+ui_jcgrad_gcmax = 6;
+ui_jcgrad_gbtab = 10;
+ui_jcgrad_gmxcc = 10;
+ui_jcgrad_size = 50; // size of the color gradiant block
+
+// Cration types & flags
+ui_jcgrad_grad = 9;
+ui_jcgrad_gpw2 = 0x40;
+ui_jcgrad_gpw2b = 0x80;
+ui_jcgrad_grev = 0x100;
+
+function make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, v1, c2, v2, c3, v3, c4, v4, c5, v5, c6, v6, c7, v7, c8, v8, c9)
+local (mem, ii, v, btab, htab, stab, vtab)
+(
+    mem = mSL_StM_Alloc(ui_jcgrad_size, 'grad', 0)
+    // check color count
+    (clow < 0) || (clow > uix_pwhite) ? (clow = uix_pwhite;); // invalid color : use white
+    (chigh < 0) || (chigh > uix_pwhite) ? (chigh= uix_pwhite;); // invalid color : use white
+    mem[ui_jcgrad_jty] = ui_jcgrad_grad;
+    mem[ui_jcgrad_possz] = ui_jcgrad_size;
+    mem[ui_jcgrad_gflgs] = flags;
+    mem[ui_jcgrad_gvmin] = binf;
+    (bsup <= binf) ? (bsup = binf + 1;);
+    mem[ui_jcgrad_gvmax] = bsup;
+    mem[ui_jcgrad_gcmin] = clow;
+    mem[ui_jcgrad_gcmax] = chigh;
+    btab = mem + ui_jcgrad_gbtab;
+    btab[0] = 0;
+    btab[1] = v1;
+    btab[2] = v2;
+    btab[3] = v3;
+    btab[4] = v4;
+    btab[5] = v5;
+    btab[6] = v6;
+    btab[7] = v7;
+    btab[8] = v8;
+    btab[9] = 1;
+    ii = v = 0;
+    while (v < 1)  (
+        ii += 1;
+        v = btab[ii];
+        ((v<0) || (v>1) || (v<= btab[ii-1])) ? (btab[ii] = v = 1;);
+    );
+    btab[ii] = 1;
+    // build HSV tables
+    htab = btab + ui_jcgrad_gmxcc;
+    stab = htab + ui_jcgrad_gmxcc;
+    vtab = stab + ui_jcgrad_gmxcc;
+    ii = 0; prgb_to_hsv(c1 & 0xffffff, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+    htab[ii] = uix_jcolor_h; stab[ii] = uix_jcolor_s; vtab[ii] = uix_jcolor_v;
+    ii = 1; prgb_to_hsv(c2 & 0xffffff, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+    htab[ii] = uix_jcolor_h; stab[ii] = uix_jcolor_s; vtab[ii] = uix_jcolor_v;
+    ii = 2; prgb_to_hsv(c3 & 0xffffff, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+    htab[ii] = uix_jcolor_h; stab[ii] = uix_jcolor_s; vtab[ii] = uix_jcolor_v;
+    ii = 3; prgb_to_hsv(c4 & 0xffffff, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+    htab[ii] = uix_jcolor_h; stab[ii] = uix_jcolor_s; vtab[ii] = uix_jcolor_v;
+    ii = 4; prgb_to_hsv(c5 & 0xffffff, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+    htab[ii] = uix_jcolor_h; stab[ii] = uix_jcolor_s; vtab[ii] = uix_jcolor_v;
+    ii = 5; prgb_to_hsv(c6 & 0xffffff, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+    htab[ii] = uix_jcolor_h; stab[ii] = uix_jcolor_s; vtab[ii] = uix_jcolor_v;
+    ii = 6; prgb_to_hsv(c7 & 0xffffff, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+    htab[ii] = uix_jcolor_h; stab[ii] = uix_jcolor_s; vtab[ii] = uix_jcolor_v;
+    ii = 7; prgb_to_hsv(c8 & 0xffffff, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+    htab[ii] = uix_jcolor_h; stab[ii] = uix_jcolor_s; vtab[ii] = uix_jcolor_v;
+    ii = 8; prgb_to_hsv(c9 & 0xffffff, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+    htab[ii] = uix_jcolor_h; stab[ii] = uix_jcolor_s; vtab[ii] = uix_jcolor_v;
+    ii = 9; prgb_to_hsv(chigh & 0xffffff, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+    htab[ii] = uix_jcolor_h; stab[ii] = uix_jcolor_s; vtab[ii] = uix_jcolor_v;
+    // correct hue variations
+    ii = 0; loop (ui_jcgrad_gmxcc - 1,
+        v = htab[ii] - htab[ii+1]; ii += 1;
+        while (v <= -180) (htab[ii] -= 360; v += 360;);
+        while (v > 180) ? (htab[ii] += 360; v -= 360;);
+    );
+    mem;
+);
+
+function make_jcgradient(flags, binf, bsup, clow, chigh, c1, c2, c3, c4, c5, c6, c7, c8, c9)
+(
+   make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, 0.125, c2, 0.25, c3, 0.375,
+        c4, 0.5, c5, 0.625, c6, 0.75, c7, 0.875, c8, 1, c9);
+);
+
+function make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, v1, c2, v2, c3, v3, c4, v4, c5, v5, c6, v6, c7, v7, c8)
+(
+    make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, v1, c2, v2, c3, v3, c4, v4, c5, v5, c6, v6, c7, v7, c8, 1, 0);
+);
+
+function make_jcgradient(flags, binf, bsup, clow, chigh, c1, c2, c3, c4, c5, c6, c7, c8)
+(
+    make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, 0.14285714, c2, 0.28571428, c3, 0.42857142,
+        c4, 0.57142857, c5, 0.71428571, c6, 0.85714285, c7, 1, c8, 1, 0);
+);
+
+function make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, v1, c2, v2, c3, v3, c4, v4, c5, v5, c6, v6, c7)
+(
+    make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, v1, c2, v2, c3, v3, c4, v4, c5, v5, c6, v6, c7, 1, 0, 1, 0);
+);
+
+function make_jcgradient(flags, binf, bsup, clow, chigh, c1, c2, c3, c4, c5, c6, c7)
+(
+    make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, 0.16666666, c2, 0.33333333, c3, 0.5, 
+        c4, 0.66666666, c5, 0.83333333, c6, 1, c7, 1, 0, 1, 0);
+);
+
+function make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, v1, c2, v2, c3, v3, c4, v4, c5, v5, c6)
+(
+    make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, v1, c2, v2, c3, v3, c4, v4, c5, v5, c6, 1, 0, 1, 0, 1, 0);
+);
+
+function make_jcgradient(flags, binf, bsup, clow, chigh, c1, c2, vc3, c4, c5, c6)
+(
+    make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, 0.2, c2, 0.4, c3, 0.6, c4, 0.8, c5, 1, c6, 1, 0, 1, 0, 1, 0);
+);
+
+function make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, v1, c2, v2, c3, v3, c4, v4, c5)
+(
+    make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, v1, c2, v2, c3, v3, c4, v4, c5, 1, 0, 1, 0, 1, 0, 1, 0);
+);
+
+function make_jcgradient(flags, binf, bsup, clow, chigh, c1, c2, c3, c4, c5)
+(
+    make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, 0.25, c2, 0.5, c3, 0.75, c4, 1, c5, 1, 0, 1, 0, 1, 0, 1, 0);
+);
+
+function make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, v1, c2, v2, c3, v3, c4)
+(
+    make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, v1, c2, v2, c3, v3, c4, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0);
+);
+
+function make_jcgradient(flags, binf, bsup, clow, chigh, c1, c2, c3, c4)
+(
+    make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, 0.33333, c2, 0.66666, c3, 1, c4, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0);
+);
+
+function make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, v1, c2, v2, c3)
+(
+    make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, v1, c2, v2, c3, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0);
+);
+
+function make_jcgradient(flags, binf, bsup, clow, chigh, c1, c2, c3)
+(
+    make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, 0.5, c2, 1, c3, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0);
+);
+
+function make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, v1, c2)
+(
+    make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, v1, c2, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0);
+);
+
+function make_jcgradient(flags, binf, bsup, clow, chigh, c1, c2)
+(
+    make_jcgradient_v(flags, binf, bsup, clow, chigh, c1, 1, c2, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0);
+);
+
+function get_jg_color(bcs, ix)
+local (cc, ii, btab, htab, stab, vtab, hue, sat, val)
+(
+    cc = 0;
+    ((bcs[ui_jbtype] & ui_jbtmask) == ui_jcgrad_grad) ? (
+        ix = (ix - bcs[ui_jcgrad_gvmin]) / (bcs[ui_jcgrad_gvmax] - bcs[ui_jcgrad_gvmin]);
+        (ix < 0) ? (
+            cc = bcs[ui_jcgrad_gcmin];
+        ) : 
+        (ix > 1) ? (
+            cc = bcs[ui_jcgrad_gcmax];
+        ) : (
+            // apply transformations
+            (bcs[ui_jcgrad_gflgs] & ui_jcgrad_grev) ? ix = 1 - ix;
+            (bcs[ui_jcgrad_gflgs] & ui_jcgrad_gpw2) ? ix = ix * ix;
+            (bcs[ui_jcgrad_gflgs] & ui_jcgrad_gpw2b) ? ix = ix * ix;
+            (bcs[ui_jcgrad_gflgs] & ui_jcgrad_grev) ? ix = 1 - ix;
+            // look for the interpolate range
+            btab = bcs + ui_jcgrad_gbtab;
+            htab = btab + ui_jcgrad_gmxcc;
+            stab = htab + ui_jcgrad_gmxcc;
+            vtab = stab + ui_jcgrad_gmxcc;
+            ii = 0; while (ix > btab[ii+1]) (ii += 1;);
+            // interpolate
+            ix = (ix - btab[ii]) / (btab[ii+1] - btab[ii]);
+            hue = htab[ii+1] * ix + htab[ii] * (1 - ix);
+            sat = stab[ii+1] * ix + stab[ii] * (1 - ix);
+            val = vtab[ii+1] * ix + vtab[ii] * (1 - ix);
+            while (hue < 0) (hue += 360;);
+            while (hue >= 360) (hue -= 360;);
+            cc = hsv_to_prgb(hue, sat, val);
+        );
+    );
+    cc;
+);
+

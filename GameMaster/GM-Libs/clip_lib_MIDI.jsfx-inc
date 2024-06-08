@@ -1,0 +1,190 @@
+/*
+
+
+    MIDI Standard Interface for plug-in dedicated to some hardware controller
+
+    using :
+	ui-lib.jsfx-inc
+	ui-lib-JJ.jsfx-inc
+    clip_lib.jsfx-inc
+
+*/
+
+
+@init
+
+MTypPCfree = 32; // entry free
+MTypPCused = 33; // entry used by the plugin/control
+MTypPCsent = 34; // entry "sent" to the Game Player
+MTypPCrcvd = 35; // entry "received" by the Game Player
+MTypGPfree = 36; // entry free for the Game Player
+MTypGPused = 37; // entry being used by the Game Player
+MTypGPsent = 38; // entry "sent" by the Game Player
+MTypGPrvcd = 39; // entry received by the plugin/control
+
+ucbMECurr = MTEntFirst = 8;
+MTEntSiz = 6;
+MTEntCnt = 0| ((UCBSize-8-16)/MTEntSiz) ; // remove 8 first and 16 last words
+MTEntLast = MTEntFirst + MTEntCnt * MTEntSiz;
+
+ErrEnt = 444;
+MDUflgs = 0;
+// We use the first word of each block of MTEntSiz words as a control
+// The other can be used
+//==== Init the MIDI Control bloc
+function ucbMIDInit(devType)
+local (pt)
+(
+    ((UAdd >= UGAddr) && (UAdd < UGAddrLast)) ? (
+        ((gmem[UAdd+cbStat] != uSReady) || (gmem[UAdd+cbDclass] != devType)) ? (
+            // We suppose the bloc is ok
+            inb = MTEntCnt; // max(2, min(MTEntCnt-2, inb)); // inb in [2 -- 12]
+            // We use the inner  blocks to communicate
+            gmem[Uadd + RCB_Kmd] = KmdNone; // reset the Kmd entry of the UCB
+            pt = MTEntFirst;
+            loop (inb, gmem[Uadd + pt] = MTypPCfree; pt += MTEntSiz; ); // UM => GP
+            loop (MTEntCnt-inb, gmem[Uadd + pt] = MTypGPfree; pt += MTEntSiz; ); // GP => UM
+            gmem[UAdd+cbStat] = uSReady; gmem[UAdd+cbDclass] = devType; 
+            gmem[UAdd+cbChkUM] = 1 ; gmem[UAdd+cbChkGP] = 0; 
+            MDUflgs |= 1;
+            MDUnit = UAdd;
+            ErrEnt = 0;
+            ucbMECurr = MTEntFirst;
+        );
+    ) : (
+        ErrEnt |= 10000;
+    );
+);
+
+// Get (and mark "used") an entry of some type
+function ucbMIDIEntGet(entType)
+local (pt, res)
+(
+    res = 0; cnt = MTEntCnt;
+    pt = ucbMECurr;
+    while ((res == 0) && (cnt > 0)) (
+        (gmem[UAdd+pt] == entType) ? (
+            gmem[UAdd+pt] = entType | 1; // mark the entry used
+            res = UAdd+pt+1; 
+        );
+        cnt -= 1; pt += MTEntSiz; (pt >= MTEntLast) ? pt = MTEntFirst;
+    );
+    (res == 0) ? (
+        entType |= 1; cnt = MTEntCnt; // reuse an oldest entry
+        while ((res == 0) && (cnt > 0)) (
+            (gmem[UAdd+pt] == entType) ? (
+                res = UAdd+pt+1;  
+            );
+            cnt -= 1; pt += MTEntSiz; (pt >= MTEntLast) ? pt = MTEntFirst;
+        );
+    );
+    ucbMECurr = pt; // keep current pointer
+    res;
+);
+
+
+function ucbMIDIEventsCMP1()
+local (pt)
+(
+    MCnt = gmem[UAdd+cbChkUM];
+    AAAA_MCState = MCState = (MCnt == gmem[UAdd+cbChkGP]);
+    MCState ? (
+        // The GP has done its work, we can liberate some entries
+        pt = MTEntFirst; loop(MTEntCnt, 
+            (gmem[UAdd+pt] == MTypPCrcvd) ? gmem[UAdd+pt] = MTypPCfree;
+            pt += MTEntSiz;
+        );
+    );
+    // do we have commands from the GM ?
+    pt = MTEntFirst; loop(MTEntCnt, 
+        (gmem[UAdd+pt] == MTypGPsent) ? (
+            // handle here the command
+            gmem[UAdd+pt] = MTypGPrvcd; // we have received the command
+            MCnt += 1; // we'll update later
+        );
+        pt += MTEntSiz;
+    );
+);
+
+// Final 
+function ucbMIDIEventsCMP2()
+local (pt, v)
+(
+    ucbMFree = 0;
+    ucbMUsed = 0;
+    ucbMSent = 0;
+    ucbMRcvd = 0;
+    ucbMRest = 0;
+    ucbMinvl = 0;
+    //  Mark "to send" all temporary items
+    //  Count free entries
+    pt = MTEntFirst; loop(MTEntCnt, 
+        v =gmem[UAdd+pt];
+        (v == MTypPCused) ? (
+            ucbMUsed += 1;
+            gmem[UAdd+pt] = MTypPCsent; MCnt += 1;
+        ) :
+        (v == MTypPCfree) ? (
+            ucbMFree += 1;
+        ) :
+        (v == MTypPCsent) ? (
+            ucbMSent += 1;
+        ) :
+        (v == MTypPCrcvd) ? (
+            ucbMRcvd += 1;
+        ) : 
+        (
+            ((v >= MTypPCfree) && (v <= MTypGPrvcd)) ? (
+                ucbMRest += 1;
+            ) : (
+                ucbMinvl += 1;
+            );
+        );
+        pt += MTEntSiz;
+    );
+    gmem[UAdd+cbChkUM] = MCnt % 1024;
+);
+
+
+// Reset Events getters
+function ucbMIDIstart()
+(
+    UaCu = UGAddr;
+    UaPt = MTEntFirst;
+);
+
+
+// Get an Event from a MIDI Device manager
+function ucbMIDIget() local (zRes)
+(
+    zRes = 0;
+    while ((zRes == 0) && (UaCu < UGAddrLast)) (
+        // Is this a MIDI device ?
+        ((gmem[UaCu+cbType] >= uMIDI) && (gmem[UaCu+cbDclass] & uMIDI_MGR)) ? (
+            // Is it willing to deliver a MIDI command ?
+            (gmem[UaCu+cbChkUM] != gmem[UaCu+cbChkGP]) ? (
+                // Check the "current" entry
+                (UaPt < MTEntLast) ? (
+                    (gmem[UaCu+UaPt] == MTypPCsent) ? (
+                        // we got a command
+                        zRes = UaCu + UaPt + 1; // the pointer to the bloc.
+                        gmem[UaCu+UaPt] = MTypPCrcvd; // notify well received
+                    );
+                    UaPt += MTEntSiz; // next entry
+                ) : (
+                    // finished with this unit
+                    gmem[UaCu+cbChkGP] = gmem[UaCu+cbChkUM]; // signal it
+                    UaPt = MTEntFirst; // reset pointer entry
+                    UaCu += UCBSize; // next unit
+                );
+            ) : (
+                UaCu += UCBSize; // next unit
+            );
+        ) : (
+            UaCu += UCBSize; // next unit
+        );
+    );
+    zRes; // return entry or 0
+);
+
+

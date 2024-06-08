@@ -1,0 +1,210 @@
+desc:MIDIduino
+//version:0.0.1
+//author: Jean-Jacques Girardot
+//licence: GPL
+//compatibility: GamePlayer 1,3,20
+
+
+in_pin:none
+out_pin:none
+
+options:no_meter
+
+
+// Declare a name for the shared memory
+options:gmem=GM_SHM
+// import clip library
+
+import GM-Libs/mSL_Constants.jsfx-inc
+import GM-Libs/mSL_StM_Memory.jsfx-inc
+import GM-Libs/mSL_string_list_10000.jsfx-inc
+import GM-Libs/mSL_string_list_2000W.jsfx-inc
+import GM-Libs/mSL_Strings.jsfx-inc
+import GM-Libs/ui-lib.jsfx-inc
+import GM-Libs/mSL_ui_LibJJ.jsfx-inc
+import GM-Libs/mSL_ui_Menus.jsfx-inc
+import GM-Libs/mSL_ui_Pads.jsfx-inc
+import GM-Libs/mSL_clip_map.jsfx-inc
+import GM-Libs/mSL_clip_lib.jsfx-inc
+import GM-Libs/ui-lib-JJ-GUI.jsfx-inc
+import GM-Libs/clip_lib_MIDI.jsfx-inc
+
+filename:0,GM-Libs/themes/theme-cyan.png
+
+
+
+
+@init
+
+ext_noinit = 1;
+
+
+// Static memory management : starts after the serial block
+mSL_StM_Init(idx); // init static memory
+mSL_Str_Init(#strFirst, #strLast); // allocate strings for strings allocator
+mSL_Str_TInit(#wstrFirst, #wstrLast); // allocate strings for temporary strings
+
+
+//====== Init "ui-lib-JJ.jsfx-inc" ======
+rest = mSL_StM_BlockStart('ulib');
+GMTrack = get_host_placement();
+// Graphic set-up
+// starting at +X protects location "0" from program errors...
+ui_end = ui_setup(rest);
+mSL_StM_BlockEnd(ui_end); // stop temporary
+//====== Init "ui-lib-JJ.jsfx-inc" ======
+gfxInit();
+
+
+//==== Init "ui-lib-JJ-GUI.jsfx-inc"
+ui_lib_JJ_GUI_init(2);
+
+//==== Init the MIDI Control bloc
+
+UAdd = Undef;
+UId = Undef;
+
+second = ticker = 0;
+xn = xv = 0;
+msg1 = msg2 = msg3 = 0;
+kmd = par1 = par2 = 0;
+start = time();
+
+UType = nanoPAD2_In;
+checkUnit();
+ucbMIDInit(uMIDI_MGR_In);
+
+@block
+
+// every second or so...
+(second != gmem[timeSecOfDay]) ? (
+    second = gmem[timeSecOfDay];
+
+
+    // every tick : check our Unit number
+    (ticker != gmem[timeTick]) ? (
+        ticker = gmem[timeTick];
+
+        // check our Unit number
+        checkUnit();
+
+        GMTrack = get_host_placement();
+        ucbMIDInit(uMIDI_MGR_In);
+
+        AAAA_UId = UId;
+        AAAA_UAdd = UAdd;
+    );
+
+
+
+);
+
+
+AAAA_cbChkUM = gmem[UAdd+cbChkUM];
+AAAA_cbChkGP = gmem[UAdd+cbChkGP];
+
+ucbMIDIEventsCMP1();
+
+while (midirecv(offset,msg1,msg2,msg3)) (
+    AAAA_msg1 = kmd = msg1;
+    AAAA_msg2 = par1 = msg2;
+    AAAA_msg3 = par2 = msg3;
+    AAAA_msg_offset = offset;
+
+    // Send only "note on" for now
+    ((kmd & 0xf0) == 0x90) ? (
+        (Minp = ucbMIDIEntGet(MTypPCfree)) ? (
+            gmem[Minp] = kmd; gmem[Minp+1] = par1 % 12;
+            gmem[Minp+2] = par2;
+            gmem[Minp+3] = par3 = time_precise() + gmem[timeDelta];
+            MCnt += 1;
+        ) : (
+            ErrEnt += 1;
+        );
+    );
+    ui_GFXdoNow |= 1;
+);
+
+ucbMIDIEventsCMP2();
+
+AAAA_ucbMECurr = ucbMECurr; // trace
+
+AAAA_ucbMFree = ucbMFree;
+
+
+
+
+
+
+
+@gfx
+
+
+function
+show_MIDI_Infos()
+local (uix_jneed, uix_jmini, h1)
+(
+    h1 = uix_jBoxHeight(10);
+
+    control_group("Arduino In MIDI Info");
+    ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+
+    ui_new_column(0.5);
+        ui_show("Track / Unit", 1+GMTrack, UId, "%d / %d / %d");
+        ui_show("MIDI Kmd", kmd, "0x%02x");
+        ui_show("MIDI p1", par1, "0x%02x");
+        ui_show("MIDI p2", par2, "0x%02x");
+        ui_show("Entry", Minp, "%d");
+        ui_show("Date", par3-start, "%.2f");
+        ui_show();
+        ui_show("S-Flags", MDUflgs, "%x");
+        ui_show("Error", ErrEnt, "%d");
+        ui_show();
+        ui_show("Unit", AAAA_UId, "%d");
+    ui_new_column();
+        ui_show("Unit Addr", UAdd, "%d");
+        ui_show("Send Status", (gmem[UAdd+cbChkUM] + 1024 - gmem[UAdd+cbChkGP]) % 1024, "%d");
+        ui_show("Send Count", gmem[UAdd+cbChkUM], "%d");
+        ui_show("Free ents", ucbMFree, "%d");
+        ui_show("Used ents", ucbMUsed, "%d");
+        ui_show("Sent ents", ucbMSent, "%d");
+        ui_show("Rcvd ents", ucbMRcvd, "%d");
+        ui_show("Other", ucbMRest, "%d");
+        ui_show("Invalid", ucbMinvl, "%d");
+    ui_pop();
+);
+
+
+
+must_do_gfx() ? (
+
+    gfx_executed += 1; // just a trace
+    // do here the graphic stuff...
+
+    update_theme();
+
+    currScreen = ui_screen();
+    ui_Xtime_period = 1; // refresh screen every second
+
+
+    ui_font();
+
+    my_menu_bar(uix_jG_menuscr);
+
+
+    //SCREEN
+    ui_screen() == "Main" ? (
+        ui_Xtime_period = 1; // refresh screen every second
+        show_MIDI_Infos();
+    ) :
+
+    //SCREEN--DEFAULT
+    (
+        control_system();
+    );
+
+
+
+);
+
+
