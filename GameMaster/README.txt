@@ -1,0 +1,1 @@
+This document should be present in the GameMaster directory.

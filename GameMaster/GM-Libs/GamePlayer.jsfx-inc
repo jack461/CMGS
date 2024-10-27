@@ -1,7 +1,7 @@
 /*
     The GAME MASTER main procedures
     (c)Jean-Jacques Girardot
-    2018-2023
+    2018-2024
 */
 
 
@@ -11,9 +11,10 @@
 
 //    What do you see here ? =>      ⌘ ⌥ ⇧
 // GetProjectPath(#pp); // This would be so nice !
-GameMasterVersion = ui_version(1,7,6);
-#CreationDate = "Mai 31, 2024";
+GameMasterVersion = ui_version(1,7,8);
+#CreationDate = "October 6, 2024";
 the_host = mSL_KW_GameMaster;
+MACHINE_Type = 'Undf'; F_SEP = '?'; #DIR_SEP = "?";
 
 // Evaluate an approximation of time_precise vs time
 tSUnix = time(); tPLoc = time_precise(); timeD = tSUnix - tPLoc;
@@ -38,7 +39,7 @@ locT.DTG_update(tUnix); // update with time
 timeGMemUpdate(); // accurate day
 
 
-Rndm_n = 1 + tStart % 1000000007; // the random seed of the moment...
+iRndm_n = Rndm_n = 1 + tStart % 1000000007; // the random seed of the moment...
 T0 = T1 = S0 = S1 = 0;
 T_div = 1 / T_fact; // 2^-48 Exact value
 currSmpl = 0; // current sample
@@ -95,16 +96,18 @@ mSL_Script_Tgl = 0;
 #gstring = "";
 gvar = #gstring;
 // The Directory default location for files
-#Def_GL_Directory = #D_GL_Directory = "GM-Libs/";
+#Def_GLib_Directory = "GM-Libs/";
 // The Directory default location for scripts
-// #Def_GM_Scripts = #D_GM_Scripts = "Scripts/";
 #Def_GM_Scripts = #D_GM_Scripts = "Scripts/";
-// #Def_GM_Scripts = #D_GM_Scripts = "../Scripts/";
+// The typical file to be found in GLib
+#Def_Str_README = "README.txt";
+// The typical intermediate directory
+#Def_Str_GM = "GameMaster/";
 // The name of the Game Player mSL ini file
+#Def_GM_mSL_ini = #D_GM_mSL_ini = "GM_mSL_ini.mSL"; // Main mSL script
 #Def_GM_mSL_set = #D_GM_mSL_set = "GM_mSL_scripts.txt"; // The list of available scripts files
 #Def_GM_txt_set = #D_GM_txt_set = "GM_txt_configs.txt"; // The list of available configurations files
 #Def_Script_Name = #D_Script_Name = "GenPlayScript.txt"; // Not used anymode
-#Def_GM_mSL_ini = #D_GM_mSL_ini = "GM_mSL_ini.mSL"; // Main mSL script
 #Def_InSens_Name = #D_InSens_Name = "config-Sensors.mSL"; // sensors / configurations & actions
 #Def_ClipsModifiers = #D_ClipsModifiers = "config-Clips.mSL";
 #Def_PlayModes = #D_PlayModes = "config-PModes.mSL";
@@ -114,17 +117,24 @@ gvar = #gstring;
 #Def_BanksDefs = #D_BanksDefs = "config-Banks.mSL";
 #Def_clDirectory = #D_clDirectory = "WAVES";
 #Def_AudioDir = #D_GM_audioDir = "Audio";
+
+#Def_ClipsList = "Clips.txt";
+#Def_ClipsListX = "*"; strcat(#Def_ClipsListX, #Def_ClipsList);
 #D_GM_Project_Path = ""; // unknown for now
+#D_GM_Project_Init_WAV = #D_GM_Project_Path_WAV = ""; // unknown for now
+/*
 #D_GM_Project_Name = ""; // unknown for now
 #D_GM_Project_Path_FX = ""; // unknown for now
-#D_GM_Project_Path_WAV = ""; // unknown for now
 #D_GM_Project_Path_SCR = ""; // unknown for now
+#D_GM_Project_Path_SCRplus = ""; // unknown for now
 #D_GM_Project_Path_SNDS = ""; // unknown for now
+#D_GM_Project_Path_SNDSplus = ""; // unknown for now
 #D_GM_Project_Path_GLib = ""; // unknown for now
 #D_GM_Alt_Path = ""; // unknown for now
+*/
 #Def_clEdFormat = #D_clEdFormat = "clip1%04d.%s";
 strcpy(#D_clNameFormat, #D_clDirectory);
-strcat(#D_clNameFormat, "/");
+strcat(#D_clNameFormat, #DIR_SEP);
 strcat(#D_clNameFormat, #D_clEdFormat);
 GM_Project_Path = idx = 0;
 GM_Project_Path_FX = (idx += 1);
@@ -140,6 +150,7 @@ flag_ld_Bnks = 8; // should we load the banks definition file ?
 flag_ld_Clips= 0x10; // should we load the clips definition file ?
 flag_ld_Sensrs= 0x20; // should we load the sensors definition file ?
 flag_ld_ClSets= 0x40; // should we load the clipsets definition file ?
+flag_chk_clips = 0x200; // should we recheck clips ?
 flag_ld_Profile = 0x1000; // should we load the profile ?
 
 flagHPCRload = 1;
@@ -149,10 +160,12 @@ flagBKRload = 1;
 flagClVRload = 1;
 flagClSetload = 1;
 flagSnsrRload = 1;
+flagClipsCheck = 1;
 flagGM_mSL_ini = 1;
 flagDoLoadScripts = 1;
 flagStdRload = 1;
 
+flagRunClipsCheck = 0;
 
 // Proportion of the max allowed execution time of a block
 // we decide to use for this plug-in
@@ -208,6 +221,7 @@ showClNbrs = 0;
 showStates = 4;
 
 #efs = "";
+#afs = "";
 
 // some globals "little" variables
 dpa = dpi = efs = afs = efi = idx = gerr = kerr = 0;
@@ -215,6 +229,13 @@ delayLoad = 2;
 delayLdInt = 0.5;
 flagShowMemory = 1;
 TabAddrMax = TabAddrMin = 0;
+dLoc = dDur = dCnt = 0;
+fDur = fCnt = 0;
+dLoc = time_precise();
+i = 0; lSum = 0;
+loop(1000, loop(1000, loop(1000, i +=1; lSum += 1/i; ); ); );
+lDur = time_precise() - dLoc;
+
 // Global infos, used in the "notify" primitive.
 curr_Proc_PID = 0; // current process number
 curr_Proc_Name = 0; // name of current process
@@ -330,6 +351,23 @@ mSL_Init_Keywords();
 mSL_Init_long_Keywords();
 init_log_boxes();
 
+
+function guess_machine_type()
+(    // Try to determine current machine type
+    (MACHINE_Type === 'Undf') ? (
+        (strlen(#D_GM_Project_Path) != 0) ? (
+            (str_getchar(#D_GM_Project_Path, 0, 'cu') === '/') ? (
+                MACHINE_Type = 'Mac'; F_SEP = '/'; #DIR_SEP = "/";
+            ) :
+            (str_getchar(#D_GM_Project_Path, 1, 'cu') === ':') ? (
+                MACHINE_Type = 'PC'; F_SEP = '\\'; #DIR_SEP = "\\";
+            ) : (
+                MACHINE_Type = 'Undf'; F_SEP = '?'; #DIR_SEP = "?";
+            );
+        );
+    );
+);
+
 function init_paths_strings()
 local ()
 (
@@ -364,6 +402,9 @@ Pr7_Project_WAV = (idx += 1);
 Pr7_Project_SNDS = (idx += 1);
 Pr7_Project_FX = (idx += 1);
 Pr7_Project_GLib = (idx += 1);
+Pr7_Project_FXplus = (idx += 1);
+Pr7_Project_SNDSplus = (idx += 1);
+Pr7_Project_SCRplus = (idx += 1);
 idx = 48;
 // 48 to 64 are for scripts names in settings
 namScriptfiles = savedStrings + idx;
@@ -830,6 +871,481 @@ function getrandelt(list, siz)
     siz <= 1 ? list[0] : list[irand(siz)];
 );
 
+
+function markClips404(flgs)
+local (ii)
+(
+    ii = 0; loop(clTSize,
+        ((gmem[clClAlias+ii] === 0) || (flgs & 2)) ? (
+            gmem[clInfStart+ii] = -404;
+            gmem[clClSizes + ii] = 0;
+            gmem[clClInfos + ii] = 0;
+            gmem[clClVolumes + ii] = clVolumeBias;
+            gmem[clClDurations + ii] = 0;
+        );
+        ii += 1;
+    );
+);
+
+
+
+function updClBk(u)
+local(ix, cused, cunav, cplyd, z)
+(
+    ((u >= 0) && (u < clNBanks)) ? (
+        cused = cunav = cplyd = 0;
+        ix = u * clInBank;
+        loop (clInBank,
+            z = gmem[clInfStart + ix];
+            (z < 0) ? (cunav += 1;) :
+            ((z > 0) || ((z === 0) && (gmem[clClInfos + ix] > 0))) ? (cused += 1; cplyd += z;);
+            ix += 1;
+        );
+        aclnBused[u] = cused;
+        aclnBunav[u] = cunav;
+        aclnBplyd[u] = cplyd;
+    );
+);
+
+function updClSel(offset, count)
+local (ix, iy, z)
+(
+    ix = offset; iy = offset + count;
+    clipsUsed = clipsUnAvail = clipsPlyd = 0;
+    while ((ix >=0) && (ix < iy) && (ix < clTSize))   (
+        z = gmem[clInfStart + ix];
+        (z < 0) ? ( clipsUnAvail += 1; ) :
+        (z > 0) ? ( clipsUsed += 1; clipsPlyd += z; );
+        ix += 1;
+    );
+);
+
+
+function
+getClipName(clNum, strset)
+local (als, str, strsize, pts, ch, lge, fFo)
+(
+    #fname = "";
+    ((clNum >= 0) && (clNum < clTSize) && (strset != 0)) ? (
+        // Is this an "alias" ?
+        ((als = gmem[clClAlias+clNum]) != 0) ? (
+            str = strset[als >> 16]; // string holding the alias
+            strsiz = strlen(str);
+            pts = als & 0xffff; // pointer in the string
+            // Decode the string segment : "    lng    name    "
+            ch = ' ';
+            while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
+                ch = str_getchar(str, pts, 'cu'); pts += 1;
+            );
+            // decode length
+            lge = 0;
+            while ((pts < strsiz) && (ch >= '0') && (ch <= '9')) (
+                lge = lge * 10 + ch - '0'; ch = str_getchar(str, pts, 'cu'); pts += 1;
+            );
+            // skip spaces
+            while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
+                ch = str_getchar(str, pts, 'cu'); pts += 1;
+            );
+            // get actual name
+            strcpy_substr(#fname, str, pts - 1, lge);
+            // Is this a relative name to the "sound" directory?
+            ((match("./*", #fname)) || (match(".\\*", #fname))) ? (
+                // sprintf(#s, "Relative name: %s", #fname); mSL_log(SysLogBox, #s);
+                strcpy_from(#ws, #fname, 2);
+                strcpy(#fname, #D_GM_Project_Path_SNDS);
+                strcat(#fname, #ws)
+            );
+        ) : (
+            // It's a simple clip
+            // Do we already know the file format ?
+            fFo = (gmem[clClInfos+clNum] >> 8) & 0xf;
+            (fFo != 0) ? (
+                sprintf(#fname, #D_clNameFormat, clNum, fFormats[fFo]);
+            );
+        );
+    );
+    #fname;
+);
+
+
+function
+enterClipName(name, clNum, strset)
+local (namlg, id, cn, idlg, bc, cs, l, clId, acnt)
+(
+    // First, build the description
+    namlg = strlen(name);
+    id = #; sprintf(id, "%d ", clNum); idlg = strlen(id);
+    cn = #; sprintf(cn, "%d %s ", namlg, name);
+    strcat(id, cn); nlg = strlen(id);
+    // Look for a string
+    clId = cs = 0; bc = 1;
+    acnt = 0;
+    while (bc) (
+        cs = strset[acnt];
+        (cs === 0) ? (strset[acnt] = cs = mSL_Str_Alloc(""); );
+        (((l = strlen(cs)) + nlg) >= 16380) ? (
+            acnt += 1; // skip to next
+        ) : (
+            clId = (acnt << 16) + l + idlg;
+            strcat(cs, id);
+            bc = 0;
+            (TRC & 0x1000) ? (
+                sprintf(#s, "[%06x <<<< %s", clId, name); mSL_log(SysLogBox, #s);
+            );
+            (TRC & 0x2000) ? (
+                sprintf(#s, "[%06x <<<< %s", clId, strset[aliasesStrCount]); mSL_log(SysLogBox, #s);
+            );
+        );
+    );
+    aliasesStrCount = max(aliasesStrCount, acnt);
+    clId;
+);
+
+// Explore all aliases to recreate their codification
+// This cleans the representation
+function
+recreateAliases()
+local(ii, clNum, nc, s)
+(
+    aliasesStrCount = aliasesCount = clNum = 0;
+    // First, clean newAliases if necessary
+    ii = 0; loop (K_aclnAliasesCnt,
+        ((s = newAliases[ii]) != 0) ? (mSL_Str_Free(s));
+        ii += 1;
+    );
+    loop (clTSize,
+        (gmem[clClAlias + clNum] != 0) ? (
+            // this is an alias
+            getClipName(clNum, aclnAliases);
+            (strlen(#fname) != 0) ? (
+                // If the name is in current Sounds directory, simplify it
+                (strlen(#D_GM_Project_Path_SNDSplus) > 0) && match(#D_GM_Project_Path_SNDSplus, #fname) ? (
+                    strcpy_from(#s, #fname, strlen(#D_GM_Project_Path_SNDSplus)-1);
+                    strcpy(#fname, "./");
+                    strcat(#fname, #s);
+                );
+                // save the name in new string set
+                nc = enterClipName(#fname, clNum, newAliases);
+                // update the reference
+                gmem[clClAlias + clNum] = nc;
+                // Force to recheck this clip
+                gmem[clInfStart+clnb] = 0;
+                gmem[clClSizes+clnb] = 0;
+                gmem[clClInfos+clnb] = 0;
+                gmem[clClVolumes+clnb] = clVolumeBias;
+                gmem[clClDurations+clnb] = 0;
+                aliasesCount += 1;
+            ) : (
+                sprintf(#s, "Can't find an ident for %04d : %06X", clNum, gmem[clClAlias + clNum]);
+                mSL_log(SysLogBox, #s);
+            )
+        );
+        clNum += 1;
+    );
+    // release previous strings
+    ii = 0; loop (K_aclnAliasesCnt,
+        ((s = aclnAliases[ii]) != 0) ? (mSL_Str_Free(s));
+        aclnAliases[ii] = newAliases[ii];
+        newAliases[ii] = 0;
+        ii += 1;
+    );
+    // ((aliasesCount === 0) && (aclnAliases[0] === 0)) ? (aclnAliases[0] = mSL_Str_Alloc(""));
+);
+
+function
+removeAliases()
+local(ii, s)
+(
+    ii = 0; loop (clTSize, gmem[clClAlias + ii] = 0; ii += 1;);
+    ii = 0; loop (K_aclnAliasesCnt,
+        ((s = aclnAliases[ii]) != 0) ? (mSL_Str_Free(s));
+        ii += 1;
+    );
+    aliasesStrCount = aliasesCount = 0;
+);
+
+
+//  After a load preset, reinstall all aliases in clClAlias
+function
+rebuildAllaliases()
+local(ii, strsrc, pts, strsiz, ch, clNum, lge, namepos, x, j)
+(
+    aliasesStrCount = aliasesCount = clNum = 0;
+    ii = 0; loop (clTSize, gmem[clClAlias + ii] = 0; ii += 1;);
+    ii = 0; loop (K_aclnAliasesCnt,
+        ((strsrc = aclnAliases[ii]) != 0) ? (
+            aliasesStrCount += 1;
+            strsiz = strlen(strsrc);
+            (MACHINE_Type === 'Mac') ? (
+                // replace all "\" by "/"
+                j = 0; loop(strsiz, ch = str_getchar(strsrc, j, 'cu');
+                    (ch === '\\') ? str_setchar(strsrc, j, '/');
+                    j += 1;
+                );
+            ) :
+            (MACHINE_Type === 'PC') ? (
+                // replace all "/" by "\"
+                j = 0; loop(strsiz, ch = str_getchar(strsrc, j, 'cu');
+                    (ch === '/') ? str_setchar(strsrc, j, '\\');
+                    j += 1;
+                );
+            ) ;
+            ch = ' '; pts = 0;
+            while ((pts < strsiz) && (clNum <= clTSize))  (
+                // skip spaces
+                while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
+                    ch = str_getchar(strsrc, pts, 'cu'); pts += 1;
+                );
+                // decode clip number
+                clNum = 0;
+                while ((pts < strsiz) && (ch >= '0') && (ch <= '9')) (
+                    clNum = clNum * 10 + ch - '0'; ch = str_getchar(strsrc, pts, 'cu'); pts += 1;
+                );
+                // skip spaces
+                while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
+                    ch = str_getchar(strsrc, pts, 'cu'); pts += 1;
+                );
+                lge = 0; namepos = pts - 1;
+                // decode length
+                while ((pts < strsiz) && (ch >= '0') && (ch <= '9')) (
+                    lge = lge * 10 + ch - '0'; ch = str_getchar(strsrc, pts, 'cu'); pts += 1;
+                );
+                // skip spaces
+                while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
+                    ch = str_getchar(strsrc, pts, 'cu'); pts += 1;
+                );
+                // get string
+                (lge > 0) ? (
+                    pts = pts - 1 + lge;
+                    ch = ' ';
+                    // skip end spaces
+                    while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
+                        ch = str_getchar(strsrc, pts, 'cu'); pts += 1;
+                    );
+                    // build the alias
+                    gmem[clClAlias+clNum] = x = (ii << 16) + namepos;
+                    aliasesCount += 1;
+                    // Force to recheck this clip
+                    gmem[clInfStart+clNum] = 0;
+                    gmem[clClSizes+clNum] = 0;
+                    gmem[clClInfos+clNum] = 0;
+                    gmem[clClVolumes+clNum] = clVolumeBias;
+                    gmem[clClDurations+clNum] = 0;
+                    (TRC & 0x1000) ? (
+                        sprintf(#s, "[< Clip(%d) => %06x  %d", clNum, x, lge); mSL_log(SysLogBox, #s);
+                    );
+                );
+            );
+        );
+        ii += 1;
+    );
+);
+
+
+function
+checkClip(clNum, flg)
+local (fH, ip, err, nch, ch, frate, fsize, als, str, pts, lge)
+(
+    ((clNum >= 0) && (clNum < clTSize)) ? (
+        fH = -1;
+        (((gmem[clClInfos+clNum] === 0) && (gmem[clInfStart+clNum] === 0)) || (flg)) ? (
+            err = ip = 0;
+            als = gmem[clClAlias+clNum];
+            getClipName(clNum, aclnAliases);
+            (strlen(#fname) != 0) ? (
+                // Open file
+                // Is this a relative name to the "sound" directory?
+                /*
+                (match("./*", #fname)) ? (
+                    sprintf(#s, "Relative name: %s", #fname); mSL_log(SysLogBox, #s);
+                    strcpy_from(#ws, #fname, 2);
+                    strcpy(#fn, #D_GM_Project_Path_SNDS);
+                    strcat(#fn, #ws);
+                    fH = file_open(#fn);
+                ) : (
+                    fH = file_open(#fname);
+                );
+                */
+                //*++!
+                dLoc = time_precise();
+                fH = file_open(#fname);
+                fDur += time_precise() - dLoc; fCnt += 1;
+                // fH = -1;
+                (TRC & 0x400) ? (
+                    sprintf(#s, "   checking file %06X  \"%s\"  => %d", als, #fname, fH);
+                    mSL_log(SysLogBox, #s);
+                );
+            ) : (
+                // Clips names : "clip1%04d.%s"
+                // fFormats, from 0 to 15, are :
+                //   "?" "wav" "aiff" "flac" "mp3" "ogg" "aif"
+                //   "wmv" "mp4" "mov" 0 0 0 0 0 0
+                fH = -1; ip = 0; dLoc = time_precise();
+                while ((fH < 0) && (ip < 15) && (fFormats[ip+1] != 0)) (
+                    ip += 1;
+                    sprintf(#fname, #D_clNameFormat, clNum, fFormats[ip]);
+                    fH = file_open(#fname);
+                );
+                dDur += time_precise() - dLoc; dCnt += 1;
+            );
+            (fH < 0) ? (
+                // file not found [probably]
+                err = -0404;
+                gmem[clClAlias+clNum] = 0; // if it was an alias
+            ) : (
+                file_riff(fH, nch, frate);
+                (nch < 1) ? (
+                    err = -0421; // not supported
+                ) :
+                (nch > 48) ? (
+                    err = -0448; // not supported
+                ) :
+                ((frate < 1000) || (frate > 400000)) ? (
+                    err = -0496; // not supported
+                ) :
+                (
+                    fsize = file_avail(fH);
+                    (fsize <= 48) ? (
+                         err = -0468; // too short
+                    );
+                );
+            );
+            (err != 0) ? (
+                gmem[clInfStart+clNum] = err;
+                gmem[clClDurations+clNum] = 0;
+                gmem[clClInfos+clNum] = gmem[clClSizes+clNum] = 0;
+                (TRC & 0x400) ? (
+                    sprintf(#s, "   checkClip(%d) => err %d", clNum, err);
+                    mSL_log(SysLogBox, #s);
+                );
+            ) : (
+                gmem[clClInfos+clNum] = nch + (ip << 8) + (frate << 12);
+                gmem[clClSizes+clNum] = fsize;
+                gmem[clClDurations+clNum] = fsize / (frate * nch) ; // std. duration
+                (flg) ? (
+                    gmem[clInfStart+clNum] = 0; // reset counting
+                );
+                (gmem[clClDurations+clNum] === 0) ? (
+                    (TRC & 0x400) ? (
+                        sprintf(#s, "   checkClip(%d) => %d   [%d / %d * %d]", clNum, gmem[clClDurations+clNum], fsize, frate, nch);
+                        mSL_log(SysLogBox, #s);
+                    );
+                );
+            );
+        );
+        (fH >= 0) ? file_close(fH);
+    );
+
+);
+
+
+
+function clearClipsCharacteristics()
+local (ii)
+(
+    ClipConfigVersion = ClMEntries = ClLEntry = 0;
+    ii = 0; loop(clTSize, gmem[clClVolumes+ii]=clVolumeBias; ii+=1;); // reset all to 0dB
+);
+
+
+
+function installClipSet(clNum, strFList)
+local (pts, aln, strsiz, ch, clnb, lge, namepos, newstr, x)
+(
+    // Instal all the entries of strFList in the clClAlias table.
+    // Format is " ccc lll NNNNNNNNNNNNN ccc lll NNNNNNNN ccc lll NNNNNNNNNNN .... ccc lll NNNNNNNN "
+    // with "ccc" 1st clip number or 10000, "lll" length of name, "NNNN..." name of the file
+    // each Alias entry points to a lll NNNNNNN
+    //(aclnAliases[aliasesStrCount] != 0) ? (aliasesStrCount += 1;);
+    // aclnAliases[aliasesStrCount] = newstr = mSL_Str_Alloc("");
+
+    pts = 0; strsiz = strlen(strFList); clNum = 0 | max(clNum, 0);
+    ch = ' ';
+    while ((pts < strsiz) && (clNum < clTSize))  (
+        // skip spaces
+        while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
+            ch = str_getchar(strFList, pts, 'cu'); pts += 1;
+        );
+        // decode clip number
+        clnb = 0;
+        while ((pts < strsiz) && (ch >= '0') && (ch <= '9')) (
+            clnb = clnb * 10 + ch - '0'; ch = str_getchar(strFList, pts, 'cu'); pts += 1;
+        );
+        // skip spaces
+        while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
+            ch = str_getchar(strFList, pts, 'cu'); pts += 1;
+        );
+        lge = 0; namepos = pts - 1;
+        // decode length
+        while ((pts < strsiz) && (ch >= '0') && (ch <= '9')) (
+            lge = lge * 10 + ch - '0'; ch = str_getchar(strFList, pts, 'cu'); pts += 1;
+        );
+        // skip spaces
+        while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
+            ch = str_getchar(strFList, pts, 'cu'); pts += 1;
+        );
+        // get string
+        (lge > 0) ? (
+            ptname = pts - 1;
+            pts = ptname + lge;
+            ch = ' ';
+            // skip end spaces
+            while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
+                ch = str_getchar(strFList, pts, 'cu'); pts += 1;
+            );
+            // what should we do ?
+            (clnb >= clTSize) ? (clnb = clNum; clNum += 1;); // actual clip number
+            strcpy_substr(#y, strFList, ptname, lge);
+            gmem[clClAlias+clnb] = x = enterClipName(#y, clnb, aclnAliases);
+            // keep name in newstr
+            // first the clip number
+            //sprintf(#ws, "%d ", clnb); strcat(newstr, #ws); namepos = strlen(newstr);
+            // define the alias
+            //gmem[clClAlias+clnb] = x = (aln << 16) + namepos;
+            // Enter length and name
+            //sprintf(#ws, "%d ", lge); strcat(newstr, #ws); pz = strlen(newstr);
+            // strcat(newstr, #y);
+            // Force to recheck this clip
+            gmem[clInfStart+clnb] = 0;
+            gmem[clClSizes+clnb] = 0;
+            gmem[clClInfos+clnb] = 0;
+            gmem[clClVolumes+clnb] = clVolumeBias;
+            gmem[clClDurations+clnb] = 0;
+            aliasesCount += 1;
+            (TRC & 0x800) ? (
+                sprintf(#s, " Clip(%d) => %06x  %d %s  [%d]", clnb, x, lge, #y, newstr); mSL_log(SysLogBox, #s);
+            );
+            checkClip(clnb, 1);
+        );
+     );
+
+);
+
+
+function declareclip(clNum, ctype, flg)
+local ()
+(
+    ((clNum >= 0) && (clNum < clTSize)) ? (
+        // Preserve external references ?
+        (gmem[clClAlias+clNum] != 0) ? (
+            gmem[clClVolumes+clnb] = clVolumeBias;
+        ) :
+        (((gmem[clClInfos+clNum] === 0) &&
+          ((gmem[clInfStart+clNum] === 0) || (gmem[clInfStart+clNum] === -404)) )
+          || (flg & 1)
+        ) ? (
+            gmem[clInfStart+clnb] = 0;
+            gmem[clClSizes+clnb] = 0;
+            gmem[clClInfos+clnb] = 0;
+            gmem[clClVolumes+clnb] = clVolumeBias;
+            gmem[clClDurations+clnb] = 0;
+
+            checkClip(clNum, 1);
+        );
+    );
+);
+
+
 function
 updatePaths()
 (
@@ -843,63 +1359,315 @@ updatePaths()
         strcpy(#WS, #D_GM_Project_Path_SCR); strcat(#WS, #Def_ClipSetConf); strcpy(#D_ClipSetConf, #WS);
         strcpy(#WS, #D_GM_Project_Path_SCR); strcat(#WS, #Def_BanksDefs); strcpy(#D_BanksDefs, #WS);
         strcpy(#WS, #D_GM_Project_Path_WAV); strcat(#WS, #Def_clEdFormat); strcpy(#D_clNameFormat, #WS);
-        strcpy(#WS, #D_GM_Project_Path_FX); strcat(#WS, #Def_GL_Directory); strcpy(#D_GL_Directory, #WS);
-        strcpy(#WS, #D_GM_Project_Path_FX); strcat(#WS, #Def_GL_Directory); strcpy(#D_GM_Project_Path_GLib, #WS);
+        sprintf(#str, "** Machine : %s -- Path : %s", (MACHINE_Type === 'Mac' ? "Mac" : MACHINE_Type === 'PC' ? "PC" : "Undefined"), #D_GM_Project_Path);
+        mSL_log(SysLogBox, #str);    // Define clips names
+        strcpy(#D_clNameFormat, #D_clDirectory);
+        strcat(#D_clNameFormat, #DIR_SEP);
+        strcat(#D_clNameFormat, #D_clEdFormat);
     );
 );
 
 
 function
 SetNewProjectPath (pth)
+local (tmppath, fhd)
 (
-    // Is the path ending in ".RPP" ?
-    match("%{gvar}s/*.RPP", pth) ? (
-        strcpy(#D_GM_Project_Name, pth);
-        strcpy(#D_GM_Project_Path, gvar);
-        strcat(#D_GM_Project_Path, "/");
-        strcpy(#D_GM_Project_Path_FX, #D_GM_Project_Path); strcat(#D_GM_Project_Path_FX, "Effects/");
-        strcpy(#D_GM_Project_Path_SCR, #D_GM_Project_Path); strcat(#D_GM_Project_Path_SCR,"Data/Scripts/");
-        strcpy(#D_GM_Project_Path_WAV, #D_GM_Project_Path); strcat(#D_GM_Project_Path_WAV,"Data/WAVES/");
-        strcpy(#D_GM_Project_Path_SNDS, #D_GM_Project_Path); strcat(#D_GM_Project_Path_SNDS,"Data/Sounds/");
-        mSL_log(SysLogBox, #D_GM_Project_Path);
-        //mSL_log(SysLogBox, #D_GM_Project_Path_FX);
-        updatePaths();
+    // Mac or Windows ?
+    (str_getchar(pth, 0, 'cu') === '/') ? (
+        MACHINE_Type = 'Mac'; F_SEP = '/'; #DIR_SEP = "/";
+    ) :
+    (str_getchar(pth, 1, 'cu') === ':') ? (
+        MACHINE_Type = 'PC'; F_SEP = '\\'; #DIR_SEP = "\\";
+    ) : (
+        MACHINE_Type = 'Undf'; F_SEP = '?'; #DIR_SEP = "?";
     );
+
+    (MACHINE_Type === 'Mac') ? (
+        // Is the path ending in ".RPP" ?
+        match("%{gvar}s/*.RPP", pth) ? (
+            #Def_GLib_Directory = "GM-Libs/";
+            #Def_GM_Scripts = #D_GM_Scripts = "Scripts/";
+            #Def_Str_GM = "GameMaster/";
+            #Def_clDirectory = #D_clDirectory = "WAVES";
+            strcpy(#D_GM_Project_Name, pth);
+            strcpy(#D_GM_Project_Path, gvar);
+            strcat(#D_GM_Project_Path, "/");
+            strcpy(#D_GM_Project_Path_FX, #D_GM_Project_Path); strcat(#D_GM_Project_Path_FX, "Effects/");
+            strcpy(#D_GM_Project_Path_FXplus, #D_GM_Project_Path); strcat(#D_GM_Project_Path_FXplus, "Effects/+");
+            strcpy(#D_GM_Project_Path_SCR, #D_GM_Project_Path); strcat(#D_GM_Project_Path_SCR,"Data/Scripts/");
+            strcpy(#D_GM_Project_Path_SCRplus, #D_GM_Project_Path); strcat(#D_GM_Project_Path_SCRplus,"Data/Scripts/+");
+            strcpy(#D_GM_Project_Path_WAV, #D_GM_Project_Path); strcat(#D_GM_Project_Path_WAV,"Data/WAVES/");
+            strcpy(#D_GM_Project_Path_SNDS, #D_GM_Project_Path); strcat(#D_GM_Project_Path_SNDS,"Data/Sounds/");
+            strcpy(#D_GM_Project_Path_SNDSplus, #D_GM_Project_Path); strcat(#D_GM_Project_Path_SNDSplus,"Data/Sounds/+");
+            mSL_log(SysLogBox, #D_GM_Project_Path);
+            //mSL_log(SysLogBox, #D_GM_Project_Path_FX);
+            // What is the actual GameMaster directory ?
+            tmppath = #;
+            strcpy(tmppath,#D_GM_Project_Path_FX);
+            strcat(tmppath,#Def_Str_README);
+            fhd = file_open(tmppath);
+            (fhd >= 0) ? (
+                strcpy(#WS, #D_GM_Project_Path_FX); strcat(#WS, #Def_GLib_Directory);
+                strcpy(#D_GM_Project_Path_GLib, #WS);
+            ) : (
+                strcpy(tmppath,#D_GM_Project_Path_FX);
+                strcat(tmppath,#Def_Str_GM);
+                strcat(tmppath,#Def_Str_README);
+                fhd = file_open(tmppath);
+                (fhd >= 0) ? (
+                    strcpy(#WS, #D_GM_Project_Path_FX); strcat(#WS, #Def_Str_GM); strcat(#WS, #Def_GLib_Directory);
+                    strcpy(#D_GM_Project_Path_GLib, #WS);
+                );
+            );
+            (fhd >= 0) ? file_close(fhd);
+            updatePaths();
+        );
+    ) :
+    (MACHINE_Type === 'PC') ? (
+        // Is the path ending in ".RPP" ?
+        match("%{gvar}s\\*.RPP", pth) ? (
+            #Def_GLib_Directory = "GM-Libs\\";
+            #Def_GM_Scripts = #D_GM_Scripts = "Scripts\\";
+            #Def_Str_GM = "GameMaster\\";
+            #Def_clDirectory = #D_clDirectory = "WAVES";
+            strcpy(#D_GM_Project_Name, pth);
+            strcpy(#D_GM_Project_Path, gvar);
+            strcat(#D_GM_Project_Path, "\\");
+            strcpy(#D_GM_Project_Path_FX, #D_GM_Project_Path); strcat(#D_GM_Project_Path_FX, "Effects\\");
+            strcpy(#D_GM_Project_Path_FXplus, #D_GM_Project_Path); strcat(#D_GM_Project_Path_FXplus, "Effects\\+");
+            strcpy(#D_GM_Project_Path_SCR, #D_GM_Project_Path); strcat(#D_GM_Project_Path_SCR,"Data\\Scripts\\");
+            strcpy(#D_GM_Project_Path_SCRplus, #D_GM_Project_Path); strcat(#D_GM_Project_Path_SCRplus,"Data\\Scripts\\+");
+            strcpy(#D_GM_Project_Path_WAV, #D_GM_Project_Path); strcat(#D_GM_Project_Path_WAV,"Data\\WAVES\\");
+            strcpy(#D_GM_Project_Path_SNDS, #D_GM_Project_Path); strcat(#D_GM_Project_Path_SNDS,"Data\\Sounds\\");
+            strcpy(#D_GM_Project_Path_SNDSplus, #D_GM_Project_Path); strcat(#D_GM_Project_Path_SNDSplus,"Data\\Sounds\\+");
+            mSL_log(SysLogBox, #D_GM_Project_Path);
+            //mSL_log(SysLogBox, #D_GM_Project_Path_FX);
+            // What is the actual GameMaster directory ?
+            tmppath = #;
+            strcpy(tmppath,#D_GM_Project_Path_FX);
+            strcat(tmppath,#Def_Str_README);
+            fhd = file_open(tmppath);
+            (fhd >= 0) ? (
+                strcpy(#WS, #D_GM_Project_Path_FX); strcat(#WS, #Def_GLib_Directory);
+                strcpy(#D_GM_Project_Path_GLib, #WS);
+            ) : (
+                strcpy(tmppath,#D_GM_Project_Path_FX);
+                strcat(tmppath,#Def_Str_GM);
+                strcat(tmppath,#Def_Str_README);
+                fhd = file_open(tmppath);
+                (fhd >= 0) ? (
+                    strcpy(#WS, #D_GM_Project_Path_FX); strcat(#WS, #Def_Str_GM); strcat(#WS, #Def_GLib_Directory);
+                    strcpy(#D_GM_Project_Path_GLib, #WS);
+                );
+            );
+            (fhd >= 0) ? file_close(fhd);
+            updatePaths();
+        );
+    );
+
 );
 
-// Try to open a file somewhere
-function GM_file_open(fname, flgs)
-local (fhd)
+
+function SetClipsList(cfn, flgs)
+local (cpath, i, j, state, clNum, serr)
 (
-    strcpy(#tmpFname, fname);
-    0 ? (sprintf(#gfxu, "::-> Trying \"%s\"  %d", #tmpFname, mSL_errC); mSL_log(SysLogBox, #gfxu););
-    fhd = file_open(#tmpFname);
-    (fhd < 0) ? (
-        // is the file in current directory ?
-        strcpy(#tmpFname, #D_GL_Directory); strcat(#tmpFname, fname);
-        0 ? (sprintf(#gfxu, "::-> Trying \"%s\"  %d", #tmpFname, mSL_errC); mSL_log(SysLogBox, #gfxu););
-        fhd = file_open(#tmpFname);
-        (fhd < 0) ? (
-            // is the file in the script directory ?
-            strcpy(#tmpFname, #D_GM_Scripts); strcat(#tmpFname, fname);
-            0 ? (sprintf(#gfxu, "::-> Trying \"%s\"  %d", #tmpFname, mSL_errC); mSL_log(SysLogBox, #gfxu););
-            fhd = file_open(#tmpFname);
-            (fhd < 0) ? (
-                strcpy(#tmpFname, #D_GL_Directory); strcat(#tmpFname, #D_GM_Scripts); strcat(#tmpFname, fname);
-                0 ? (sprintf(#gfxu, "::-> Trying \"%s\"  %d", #tmpFname, mSL_errC); mSL_log(SysLogBox, #gfxu););
-                // is the file is Libs/Scripts
-                fhd = file_open(#tmpFname);
-                (fhd < 0) ? (
-                    strcpy(#tmpFname, #D_GM_Project_Path); strcat(#tmpFname, #D_GM_Scripts); strcat(#tmpFname, fname);
-                    0 ? (sprintf(#gfxu, "::-> Trying \"%s\"  %d", #tmpFname, mSL_errC); mSL_log(SysLogBox, #gfxu););
-                    fhd = file_open(#tmpFname);
-                );
+    (mSL_C_fH >= 0) ? (file_close(mSL_C_fH); mSL_C_fH = -1;);
+    //
+    sprintf(#s, "*  Clips list: \"%s\"  (%d)  m:%d *", cfn, strlen(cfn), flgs); mSL_log(SysLogBox, #s);
+    sprintf(#w, "%s%s*%s", "%{gvar}s", #DIR_SEP, #Def_ClipsList);
+    // Can we open the file ?
+    (match(#w, cfn) && ((mSL_C_fH = file_open(cfn)) >= 0)) ? (
+        // OK !
+        sprintf(#s, "Opening %s in %s", #Def_ClipsList, gvar); mSL_log(SysLogBox, #s);
+        // Clean the directory first ?
+        (flgs & 1) ? markClips404(flgs);
+
+        #sch = " ";
+        // We will be using the "comp_lib" functions
+        (mSL_C_fH >= 0) ? (
+            // Read the file in memory
+            mSL_C_cavail = 0;
+            mSL_C_chcurr = 0;
+            mSL_C_numLine = 1;
+            mSL_C_chPos = 0;
+            serr=0;
+            // Syntax analysis
+            state = 1; // init state
+            while (state > 0) (
+                (mSL_C_chcurr === 0) ? (mSL_C_chcurr = mSL_getchar(0));
+                ch = mSL_C_chcurr;
+
+
+                (state<8)?((state<4)?((state<2)?((state<1)?(
+                    //===0===//
+                    serr=0;
+                    //===0===//
+                ):(
+                    //===1===//
+                    // Initial state
+                    (ch === 'c') ? (
+                        state = 2;
+                    ) :
+                    (ch === '#') ? (
+                        state = 13;
+                    ) :
+                    (ch < 0) ? (
+                        // End of file
+                        state = 0;
+                    ) : (
+                        state = 1;
+                    );
+                    mSL_C_chcurr = 0;
+                    //===1===//
+                );):((state<3)?(
+                    //===2===//
+                    (ch === 'l') ? (
+                        state = 3;
+                    ) : (
+                        state = 1;
+                    );
+                    mSL_C_chcurr = 0;
+                    //===2===//
+                ):(
+                    //===3===//
+                    (ch === 'i') ? (
+                        state = 4;
+                    ) : (
+                        state = 1;
+                    );
+                    mSL_C_chcurr = 0;
+                    //===3===//
+                ););):((state<6)?((state<5)?(
+                    //===4===//
+                    (ch === 'p') ? (
+                        state = 5;
+                    ) : (
+                        state = 1;
+                    );
+                    mSL_C_chcurr = 0;
+                    //===4===//
+                ):(
+                    //===5===//
+                    (ch === '1') ? (
+                        state = 6;
+                    ) : (
+                        state = 1;
+                    );
+                    mSL_C_chcurr = 0;
+                    //===5===//
+                );):((state<7)?(
+                    //===6===//
+                    ((ch >= '0') && (ch <= '9')) ? (
+                        state = 7; clNum = ch - '0';
+                    ) : (
+                        state = 1;
+                    );
+                    mSL_C_chcurr = 0;
+                    //===6===//
+                ):(
+                    //===7===//
+                    ((ch >= '0') && (ch <= '9')) ? (
+                        state = 8; clNum = (clNum * 10) + ch - '0';
+                    ) : (
+                        state = 1;
+                    );
+                    mSL_C_chcurr = 0;
+                    //===7===//
+                );););):((state<12)?((state<10)?((state<9)?(
+                    //===8===//
+                    ((ch >= '0') && (ch <= '9')) ? (
+                        state = 9; clNum = (clNum * 10) + ch - '0';
+                    ) : (
+                        state = 1;
+                    );
+                    mSL_C_chcurr = 0;
+                    //===8===//
+                ):(
+                    //===9===//
+                    ((ch >= '0') && (ch <= '9')) ? (
+                        state = 10; clNum = (clNum * 10) + ch - '0';
+                    ) : (
+                        state = 1;
+                    );
+                    mSL_C_chcurr = 0;
+                    //===9===//
+                );):((state<11)?(
+                    //===10===//
+                    (ch === '.') ? (
+                        state = 11;
+                        #stype = "";
+                    ) : (
+                        state = 1;
+                    );
+                    mSL_C_chcurr = 0;
+                    //===10===//
+                ):(
+                    //===11===//
+                    (  ((ch >= '0') && (ch <= '9')) ||
+                        ((ch >= 'A') && (ch <= 'Z')) ||
+                        ((ch >= 'a') && (ch <= 'z')) ) ? (
+                        state = 11;
+                        str_setchar(#sch, 0, ch, 'cu');
+                        strcat(#stype, #sch);
+                    ) : (
+                        state = 12;
+                    );
+                    mSL_C_chcurr = 0;
+                    //===11===//
+                ););):((state<14)?((state<13)?(
+                    //===12===//
+                    // We have a clip !
+                    // sprintf(#s, #Def_clEdFormat, clNum, #stype);
+                    // mSL_log(SysLogBox, #s);
+                    declareclip(clNum, ctype, flg);
+                    state = 1;
+                    //===12===//
+                ):(
+                    //===13===//
+                    ((ch === '\r') || (ch === '\n')) ? (
+                        state = 1;
+                    );
+                    mSL_C_chcurr = 0;
+                    //===13===//
+                );):((state<15)?(
+                    //===14===//
+                    serr=14;
+                    //===14===//
+                ):((state<16)?(
+                    //===15===//
+                    serr=15;
+                    //===15===//
+                ):(
+                    //===16===//
+                    serr=16;
+                    //===16===//
+                );););););
+
+
+            );
+        );
+        // Start updating clipset
+        (parV(p_FODlay) <= 0) ? (
+            (MACHINE_Type === 'Mac') ? (
+                parSet(p_FODlay, 1.00);
+            ) : (
+                parSet(p_FODlay, 0.01);
             );
         );
     );
-    fhd;
+    (mSL_C_fH >= 0) ? (file_close(mSL_C_fH); mSL_C_fH = -1;);
 );
 
+
+function OpenClipList()
+local()
+(
+    // Is the WAVES path defined, with a clip list file ?
+    (strlen(#D_GM_Project_Path_WAV) > 0) ? (
+        strcpy(#cp, #D_GM_Project_Path_WAV); strcat(#cp, #Def_ClipsList);
+        SetClipsList(#cp, 1);
+    );
+);
 
 //====== PLAY LOG MANAGEMENT ======
 
@@ -1252,6 +2020,7 @@ Pr7_SensorSize = 23;
 Pr7_SensorNum = 24;
 Pr7_FStrAliasesNum = 25;
 Pr7_FStrAliasesCnt = 26;
+Pr7_MACH_Type = 27;
 Pr7_Partial0 = 32; // size: BKEsize = 12 values
 
 BKEsize = 12; // size of a bank entry
@@ -3070,389 +3839,6 @@ padVlclrs[VlpRld] = Col_InfoC;
 padVllabs[VlpRld] = "Reload";
 
 
-function updClBk(u)
-local(ix, cused, cunav, cplyd, z)
-(
-    ((u >= 0) && (u < clNBanks)) ? (
-        cused = cunav = cplyd = 0;
-        ix = u * clInBank;
-        loop (clInBank,
-            z = gmem[clInfStart + ix];
-            (z < 0) ? (cunav += 1;) :
-            ((z > 0) || ((z === 0) && (gmem[clClInfos + ix] > 0))) ? (cused += 1; cplyd += z;);
-            ix += 1;
-        );
-        aclnBused[u] = cused;
-        aclnBunav[u] = cunav;
-        aclnBplyd[u] = cplyd;
-    );
-);
-
-function updClSel(offset, count)
-local (ix, iy, z)
-(
-    ix = offset; iy = offset + count;
-    clipsUsed = clipsUnAvail = clipsPlyd = 0;
-    while ((ix >=0) && (ix < iy) && (ix < clTSize))   (
-        z = gmem[clInfStart + ix];
-        (z < 0) ? ( clipsUnAvail += 1; ) :
-        (z > 0) ? ( clipsUsed += 1; clipsPlyd += z; );
-        ix += 1;
-    );
-);
-
-
-function
-getClipName(clNum, strset)
-local (als, str, strsize, pts, ch, lge, fFo)
-(
-    #fname = "";
-    ((clNum >= 0) && (clNum < clTSize) && (strset != 0)) ? (
-        // Is this an "alias" ?
-        ((als = gmem[clClAlias+clNum]) != 0) ? (
-            str = strset[als >> 16]; // string holding the alias
-            strsiz = strlen(str);
-            pts = als & 0xffff; // pointer in the string
-            // Decode the string segment : "    lng    name    "
-            ch = ' ';
-            while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
-                ch = str_getchar(str, pts, 'cu'); pts += 1;
-            );
-            // decode length
-            lge = 0;
-            while ((pts < strsiz) && (ch >= '0') && (ch <= '9')) (
-                lge = lge * 10 + ch - '0'; ch = str_getchar(str, pts, 'cu'); pts += 1;
-            );
-            // skip spaces
-            while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
-                ch = str_getchar(str, pts, 'cu'); pts += 1;
-            );
-            // get actual name
-            strcpy_substr(#fname, str, pts - 1, lge);
-        ) : (
-            // It's a simple clip
-            // Do we already know the file format ?
-            fFo = (gmem[clClInfos+clNum] >> 8) & 0xf;
-            (fFo != 0) ? (
-                sprintf(#fname, #D_clNameFormat, clNum, fFormats[fFo]);
-            );
-        );
-    );
-    #fname;
-);
-
-
-function
-enterClipName(name, clNum, strset)
-local (namlg, id, cn, idlg, bc, cs, l, clId, acnt)
-(
-    // First, build the description
-    namlg = strlen(name);
-    id = #; sprintf(id, "%d ", clNum); idlg = strlen(id);
-    cn = #; sprintf(cn, "%d %s ", namlg, name);
-    strcat(id, cn); nlg = strlen(id);
-    // Look for a string
-    clId = cs = 0; bc = 1;
-    acnt = 0;
-    while (bc) (
-        cs = strset[acnt];
-        (cs === 0) ? (strset[acnt] = cs = mSL_Str_Alloc(""); );
-        (((l = strlen(cs)) + nlg) >= 16380) ? (
-            acnt += 1; // skip to next
-        ) : (
-            clId = (acnt << 16) + l + idlg;
-            strcat(cs, id);
-            bc = 0;
-            (TRC & 0x1000) ? (
-                sprintf(#s, "[%06x <<<< %s", clId, name); mSL_log(SysLogBox, #s);
-            );
-            (TRC & 0x2000) ? (
-                sprintf(#s, "[%06x <<<< %s", clId, strset[aliasesStrCount]); mSL_log(SysLogBox, #s);
-            );
-        );
-    );
-    aliasesStrCount = max(aliasesStrCount, acnt);
-    clId;
-);
-
-// Explore all aliases to recreate their codification
-// This cleans the representation
-function
-recreateAliases()
-local(ii, clNum, nc, s)
-(
-    aliasesStrCount = aliasesCount = clNum = 0;
-    // First, clean newAliases if necessary
-    ii = 0; loop (K_aclnAliasesCnt,
-        ((s = newAliases[ii]) != 0) ? (mSL_Str_Free(s));
-        ii += 1;
-    );
-    loop (clTSize,
-        (gmem[clClAlias + clNum] != 0) ? (
-            // this is an alias
-            getClipName(clNum, aclnAliases);
-            (strlen(#fname) != 0) ? (
-                // save the name in new string set
-                nc = enterClipName(#fname, clNum, newAliases);
-                // update the reference
-                gmem[clClAlias + clNum] = nc;
-                // Force to recheck this clip
-                gmem[clInfStart+clnb] = 0;
-                gmem[clClSizes+clnb] = 0;
-                gmem[clClInfos+clnb] = 0;
-                gmem[clClVolumes+clnb] = clVolumeBias;
-                gmem[clClDurations+clnb] = 0;
-                aliasesCount += 1;
-            ) : (
-                sprintf(#s, "Can't find an ident for %04d : %06X", clNum, gmem[clClAlias + clNum]);
-                mSL_log(SysLogBox, #s);
-            )
-        );
-        clNum += 1;
-    );
-    // release previous strings
-    ii = 0; loop (K_aclnAliasesCnt,
-        ((s = aclnAliases[ii]) != 0) ? (mSL_Str_Free(s));
-        aclnAliases[ii] = newAliases[ii];
-        newAliases[ii] = 0;
-        ii += 1;
-    );
-    // ((aliasesCount === 0) && (aclnAliases[0] === 0)) ? (aclnAliases[0] = mSL_Str_Alloc(""));
-);
-
-function
-removeAliases()
-local(ii, s)
-(
-    ii = 0; loop (clTSize, gmem[clClAlias + ii] = 0; ii += 1;);
-    ii = 0; loop (K_aclnAliasesCnt,
-        ((s = aclnAliases[ii]) != 0) ? (mSL_Str_Free(s));
-        ii += 1;
-    );
-    aliasesStrCount = aliasesCount = 0;
-);
-
-
-//  After a load preset, reinstall all aliases in clClAlias
-function
-rebuildAllaliases()
-local(ii, strsrc, pts, strsiz, ch, clNum, lge, namepos, x)
-(
-    aliasesStrCount = aliasesCount = 0;
-    ii = 0; loop (clTSize, gmem[clClAlias + ii] = 0; ii += 1;);
-    ii = 0; loop (K_aclnAliasesCnt,
-        ((strsrc = aclnAliases[ii]) != 0) ? (
-            aliasesStrCount += 1;
-            pts = 0; strsiz = strlen(strsrc);
-            ch = ' ';
-            while ((pts < strsiz) && (clNum <= clTSize))  (
-                // skip spaces
-                while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
-                    ch = str_getchar(strsrc, pts, 'cu'); pts += 1;
-                );
-                // decode clip number
-                clNum = 0;
-                while ((pts < strsiz) && (ch >= '0') && (ch <= '9')) (
-                    clNum = clNum * 10 + ch - '0'; ch = str_getchar(strsrc, pts, 'cu'); pts += 1;
-                );
-                // skip spaces
-                while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
-                    ch = str_getchar(strsrc, pts, 'cu'); pts += 1;
-                );
-                lge = 0; namepos = pts - 1;
-                // decode length
-                while ((pts < strsiz) && (ch >= '0') && (ch <= '9')) (
-                    lge = lge * 10 + ch - '0'; ch = str_getchar(strsrc, pts, 'cu'); pts += 1;
-                );
-                // skip spaces
-                while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
-                    ch = str_getchar(strsrc, pts, 'cu'); pts += 1;
-                );
-                // get string
-                (lge > 0) ? (
-                    pts = pts - 1 + lge;
-                    ch = ' ';
-                    // skip end spaces
-                    while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
-                        ch = str_getchar(strsrc, pts, 'cu'); pts += 1;
-                    );
-                    // build the alias
-                    gmem[clClAlias+clNum] = x = (ii << 16) + namepos;
-                    aliasesCount += 1;
-                    // Force to recheck this clip
-                    gmem[clInfStart+clNum] = 0;
-                    gmem[clClSizes+clNum] = 0;
-                    gmem[clClInfos+clNum] = 0;
-                    gmem[clClVolumes+clNum] = clVolumeBias;
-                    gmem[clClDurations+clNum] = 0;
-                    (TRC & 0x1000) ? (
-                        sprintf(#s, "[< Clip(%d) => %06x  %d", clNum, x, lge); mSL_log(SysLogBox, #s);
-                    );
-                );
-            );
-        );
-        ii += 1;
-    );
-);
-
-
-function
-checkClip(clNum, flg)
-local (fH, ip, err, nch, ch, frate, fsize, als, str, pts, lge)
-(
-    ((clNum >= 0) && (clNum < clTSize)) ? (
-        fH = -1;
-        (((gmem[clClInfos+clNum] === 0) && (gmem[clInfStart+clNum] === 0)) || (flg)) ? (
-            err = ip = 0;
-            als = gmem[clClAlias+clNum];
-            getClipName(clNum, aclnAliases);
-            (strlen(#fname) != 0) ? (
-                // Open file
-                fH = file_open(#fname);
-                (TRC & 0x400) ? (
-                    sprintf(#s, "   check file %06X  \"%s\"  => %d", als, #fname, fH);
-                    mSL_log(SysLogBox, #s);
-                );
-            ) : (
-                while ((fH < 0) && (ip < 15) && (fFormats[ip+1] != 0)) (
-                    ip += 1;
-                    sprintf(#fname, #D_clNameFormat, clNum, fFormats[ip]);
-                    fH = file_open(#fname);
-                );
-            );
-            (fH < 0) ? (
-                // file not found [probably]
-                err = -0404;
-            ) : (
-                file_riff(fH, nch, frate);
-                (nch < 1) ? (
-                    err = -0421; // not supported
-                ) :
-                (nch > 48) ? (
-                    err = -0448; // not supported
-                ) :
-                ((frate < 1000) || (frate > 400000)) ? (
-                    err = -0496; // not supported
-                ) :
-                (
-                    fsize = file_avail(fH);
-                    (fsize <= 48) ? (
-                         err = -0468; // too short
-                    );
-                );
-            );
-            (err != 0) ? (
-                gmem[clClDurations+clNum] = 0;
-                gmem[clInfStart+clNum] = err;
-                gmem[clClInfos+clNum] = gmem[clClSizes+clNum] = 0;
-                (gmem[clClDurations+clNum] === 0) ? (
-                    (TRC & 0x400) ? (
-                        sprintf(#s, "   checkClip(%d) => %d   [%d]", clNum, gmem[clClDurations+clNum], err);
-                        mSL_log(SysLogBox, #s);
-                    );
-                );
-            ) : (
-                gmem[clClInfos+clNum] = nch + (ip << 8) + (frate << 12);
-                gmem[clClSizes+clNum] = fsize;
-                gmem[clClDurations+clNum] = fsize / (frate * nch) ; // std. duration
-                (flg) ? (
-                    gmem[clInfStart+clNum] = 0; // reset counting
-                );
-                (gmem[clClDurations+clNum] === 0) ? (
-                    (TRC & 0x400) ? (
-                        sprintf(#s, "   checkClip(%d) => %d   [%d / %d * %d]", clNum, gmem[clClDurations+clNum], fsize, frate, nch);
-                        mSL_log(SysLogBox, #s);
-                    );
-                );
-            );
-        );
-        (fH >= 0) ? file_close(fH);
-    );
-
-);
-
-
-
-function clearClipsCharacteristics()
-local (ii)
-(
-    ClipConfigVersion = ClMEntries = ClLEntry = 0;
-    ii = 0; loop(clTSize, gmem[clClVolumes+ii]=clVolumeBias; ii+=1;); // reset all to 0dB
-);
-
-
-function installClipSet(clNum, strFList)
-local (pts, aln, strsiz, ch, clnb, lge, namepos, newstr, x)
-(
-    // Instal all the entries of strFList in the clClAlias table.
-    // Format is "cc lll NNNNNNNNNNNNN ccc lll NNNNNNNN ccc lll NNNNNNNNNNN .... ccc lll NNNNNNNN "
-    // with "cccc" 1st clip number or 10000, "lll" length of name, "NNNN..." name of the file
-    // each Alias entry points to a lllNNNNNNN
-    //(aclnAliases[aliasesStrCount] != 0) ? (aliasesStrCount += 1;);
-    // aclnAliases[aliasesStrCount] = newstr = mSL_Str_Alloc("");
-
-    pts = 0; strsiz = strlen(strFList); clNum = 0 | max(clNum, 0);
-    ch = ' ';
-    while ((pts < strsiz) && (clNum < clTSize))  (
-        // skip spaces
-        while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
-            ch = str_getchar(strFList, pts, 'cu'); pts += 1;
-        );
-        // decode clip number
-        clnb = 0;
-        while ((pts < strsiz) && (ch >= '0') && (ch <= '9')) (
-            clnb = clnb * 10 + ch - '0'; ch = str_getchar(strFList, pts, 'cu'); pts += 1;
-        );
-        // skip spaces
-        while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
-            ch = str_getchar(strFList, pts, 'cu'); pts += 1;
-        );
-        lge = 0; namepos = pts - 1;
-        // decode length
-        while ((pts < strsiz) && (ch >= '0') && (ch <= '9')) (
-            lge = lge * 10 + ch - '0'; ch = str_getchar(strFList, pts, 'cu'); pts += 1;
-        );
-        // skip spaces
-        while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
-            ch = str_getchar(strFList, pts, 'cu'); pts += 1;
-        );
-        // get string
-        (lge > 0) ? (
-            ptname = pts - 1;
-            pts = ptname + lge;
-            ch = ' ';
-            // skip end spaces
-            while ((pts < strsiz) && ((ch === ' ') || (ch === '\n') || (ch === '\r') || (ch === '\t'))) (
-                ch = str_getchar(strFList, pts, 'cu'); pts += 1;
-            );
-            // what should we do ?
-            (clnb >= clTSize) ? (clnb = clNum; clNum += 1;); // actual clip number
-            strcpy_substr(#y, strFList, ptname, lge);
-            gmem[clClAlias+clnb] = x = enterClipName(#y, clnb, aclnAliases);
-            // keep name in newstr
-            // first the clip number
-            //sprintf(#ws, "%d ", clnb); strcat(newstr, #ws); namepos = strlen(newstr);
-            // define the alias
-            //gmem[clClAlias+clnb] = x = (aln << 16) + namepos;
-            // Enter length and name
-            //sprintf(#ws, "%d ", lge); strcat(newstr, #ws); pz = strlen(newstr);
-            // strcat(newstr, #y);
-            // Force to recheck this clip
-            gmem[clInfStart+clnb] = 0;
-            gmem[clClSizes+clnb] = 0;
-            gmem[clClInfos+clnb] = 0;
-            gmem[clClVolumes+clnb] = clVolumeBias;
-            gmem[clClDurations+clnb] = 0;
-            aliasesCount += 1;
-            (TRC & 0x800) ? (
-                sprintf(#s, " Clip(%d) => %06x  %d %s  [%d]", clnb, x, lge, #y, newstr); mSL_log(SysLogBox, #s);
-            );
-            checkClip(clnb, 1);
-        );
-     );
-
-);
-
 //====== UNITS ======
 paduNl = 0|(uCnt/8);
 padcNl_Units = 1; // Currently used number of lines in Units pad
@@ -5151,9 +5537,9 @@ local (v)
     );
     sprintf(#s, "Project name:    \"%s\"", #D_GM_Project_Name);   mSL_log(SysLogBox, #s);
     sprintf(#s, "Project path:    \"%s\"", #D_GM_Project_Path);   mSL_log(SysLogBox, #s);
-    sprintf(#s, "Libs directory:    \"%s\"", #D_GL_Directory);   mSL_log(SysLogBox, #s);
-    sprintf(#s, "Sounds directory:    \"%s\"", #D_GM_Project_Path_SNDS);   mSL_log(SysLogBox, #s);
-    sprintf(#s, "Scripts directory:    \"%s\"", #D_GM_Project_Path_SCR);   mSL_log(SysLogBox, #s);
+    sprintf(#s, "Libs directory:    \"%s\"", #D_GM_Project_Path_GLib);   mSL_log(SysLogBox, #s);
+    sprintf(#s, "Sounds directory:    \"%s\"", #D_GM_Project_Path_SNDSplus);   mSL_log(SysLogBox, #s);
+    sprintf(#s, "Scripts directory:    \"%s\"", #D_GM_Project_Path_SCRplus);   mSL_log(SysLogBox, #s);
     sprintf(#s, "Clips directory:    \"%s\"", #D_GM_Project_Path_WAV);   mSL_log(SysLogBox, #s);
     sprintf(#s, "Clips names:    \"%s\"", #D_clNameFormat);   mSL_log(SysLogBox, #s);
     sprintf(#s, "HP Config:    \"%s\"", #D_HPConfigs);   mSL_log(SysLogBox, #s);
@@ -5167,7 +5553,8 @@ local (v)
     sprintf(#s, "Scripts list:    \"%s\"", #D_GM_mSL_set);   mSL_log(SysLogBox, #s);
     sprintf(#s, "Profile:    \"%s\"", #D_GM_mSL_ini);   mSL_log(SysLogBox, #s);
     mSL_log(SysLogBox, "System Files:");
-    mSL_log(SysLogBox, #GMversion);
+    sprintf(#s, "%s - %s", #GMversion, (MACHINE_Type === 'Mac' ? "Mac" : MACHINE_Type === 'PC' ? "PC" : "Machine undefined"));
+    mSL_log(SysLogBox, #s);
 );
 
 //================ Links MANAGEMENT ==================
@@ -7574,7 +7961,7 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     // Unused
     parDcl(p_Tempo_Sync, "Tempo Sync.", "TmpoSync", i_Vm|i_SP, "%d", "Tempo Sync.: %d",   0,   1,    0,  1, 0, pflg_WActive, -tempoSync);
     parDcl(p_Tempo_Rate, "Tempo", "Tempo", i_Vm|i_SP, "%.1f", "Tempo: %.1f",   0.1,   480,  60,  0.1, 3, pflg_WActive, 5);
-
+    parDcl(p_FODlay, "F/I Delay", "FIDelay", i_SP, "%.2f", "F/I Delay: %.2f", 0, 10, 1, 0.01, 4);
 
     // Volume modification bias
     parDcl(p_VolGlobBias, "Vol.glob.bias", "VolGlbB", i_SP, "%.1f", "Vol.glob.bias: %.1f", 0, 10, 3, 0.1, 0, pflg_WActive, 4);
@@ -8165,7 +8552,7 @@ mm_limit_a = make_array(2);
 mm_limit_a[0] = 'STRT'; mm_limit_a[1] = 'MEMR';
 
 // Memory size :
-C_memrSize = 28 * 1024 * 1024; // size : X x 1MW - was 14
+C_memrSize = 37 * 1024 * 1024; // size : X x 1MW - was 14
 C_memrArea = make_array(C_memrSize); // THE MEMORY !
 
 mm_limit_b = make_array(2);
@@ -8263,7 +8650,7 @@ local (fhd, w)
 (
     // menu_Scripts = 0;
     scripts_cnt = 0;
-    fhd = GM_file_open(#D_GM_mSL_set, 0);
+    fhd = GM_file_open(#D_GM_mSL_set, FFlagsTxt);
     // mSL_log(SysLogBox, #tmpFname);
     (fhd >= 0) ? (
         // mSL_log(SysLogBox, "File opened!");
@@ -8297,7 +8684,7 @@ local (fhd, ss, w)
 (
     configs_cnt = 0;
     // menu_Config = 0;
-    fhd = GM_file_open(#D_GM_txt_set, 0);
+    fhd = GM_file_open(#D_GM_txt_set, FFlagsTxt);
     // mSL_log(SysLogBox, #tmpFname);
     (fhd >= 0) ? (
         // mSL_log(SysLogBox, "File opened!");
@@ -8342,7 +8729,7 @@ local (ii)
     (newDir != 0) ? strcpy(#D_clDirectory, newDir);
     (newFmt != 0) ? strcpy(#D_clEdFormat, newFmt);
     strcpy(#D_clNameFormat, #D_clDirectory);
-    strcat(#D_clNameFormat, "/");
+    strcat(#D_clNameFormat, #DIR_SEP);
     strcat(#D_clNameFormat, #D_clEdFormat);
     // Send the new format to the filereaders
     setexpldstr(#D_clNameFormat, 0, 0);
@@ -8367,7 +8754,7 @@ local (ii)
     // sprintf(#s, "Clip Dir: %s", #D_clDirectory);
     // mSL_log(SysLogBox, #s);
     //
-    sprintf(#s, "Cl.Dir: %s (%d)", #D_clNameFormat, strlen(#D_clNameFormat));
+    sprintf(#s, "Cl.Names: %s (%d)", #D_clNameFormat, strlen(#D_clNameFormat));
     //
     mSL_log(SysLogBox, #s);
 );
@@ -8450,6 +8837,8 @@ memoryBox1[14] = memoryBox2[14] = 0;
 
 
 
+
+// Sounds unit menu
 //AGMW180 = GMW();
 //============== Record/Replay Operations ===============
 
@@ -8583,9 +8972,9 @@ function
 Set_Table(tbl)
 local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback, rd_err, pt, zpt, totsize, tout, pttr,
     Cl_n, Cl_dB, ii, s1, s2, s3, s4, s5, ty, n, ps, cp, cnt, kct, vmin, vmax, pos, stnext, kmax, cvl, LWA, LWAsiz,
-    AddT)
+    xp1, xp2, AddT)
 (
-    cvl = ptr = 0;
+    xp1 = xp2 = cvl = ptr = 0;
     LWA = 0; LWAsiz = 32000; // a large work area
     itc = tbl[-1]; // item count
     xmct = 2 * itc; // max loop count
@@ -10217,7 +10606,7 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
                 ClMEntries = ii = 0; loop(clTSize,
                     ((gmem[clClVolumes+ii] & clVolumeMask) != clVolumeBias) ? ClMEntries +=1; ii+=1;
                 ); // Count module. entries
-                sprintf(#s, "%d Entries != %d\n",ClMEntries,clVolumeBias);mSL_log(SysLogBox, #s);
+                //sprintf(#s, "%d Entries != %d\n",ClMEntries,clVolumeBias);mSL_log(SysLogBox, #s);
                 st = 1; ptr +=1; // finished
             ) :
             (
@@ -10290,7 +10679,7 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
                 // Reset the clip volume area
                 ii = 0; loop(clTSize, gmem[clClVolumes+ii] = clVolumeBias; ii+=1;); // reset all to 0dB
                 ptr +=1;
-                sprintf(#s, "Reset %d clips in %d to %d \n",clTSize, clClVolumes,clVolumeBias);mSL_log(SysLogBox, #s);
+                // sprintf(#s, "Reset %d clips in %d to %d \n",clTSize, clClVolumes,clVolumeBias);mSL_log(SysLogBox, #s);
             ) :
             (cwd === mSL_KW_End) ? (
                 st = 45; // skip to 45
@@ -10696,6 +11085,7 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
                 (HPPTab[cid] != 0) ? (
                     // The configuration already exists
                     STBerr = 0747; // conf. exists
+                    xp1 = cid; xp2 = HPPTab[cid]; xp3 = xp2[0];
                 ) :
                 (HPApt + cnt + 3 >= HPASize) ? (
                     STBerr = 0748; // table overflow
@@ -11350,7 +11740,7 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
 
     ((flgs & 2) || (rd_err != 0)) ? (
         // print the final status
-        sprintf(#s, "EndState %d - %d/%d/%d - Input: %s - Err: %d", st, ptr, itc, cvl, mSL_edit_value(#u, cwd), rd_err);
+        sprintf(#s, "EndState %d - %d/%d/%d | %d/%d/%d - Input: %s - Err: %d", st, ptr, itc, cvl, xp1, xp2, xp3, mSL_edit_value(#u, cwd), rd_err);
         mSL_log(SysLogBox, #s);
     );
 
@@ -13487,6 +13877,7 @@ local (i, j, k, l, m, dst, ss, bsiz, s1st)
 
 /*
     Events management operations
+    mSL: event(cmdIdt, parameters...)
 */
 function
 mSL_event_ops(argc, argv)
@@ -13767,7 +14158,7 @@ local (kw, ksiz, clip, cllow, clhigh, par, pflgs, do_it, res, rty)
             (par === Default) ? (
                 par = 0;
             );
-            (do_it = ((argc > 1) && (par >= -48) && (par <= 12))) ? (
+            (do_it = ((argc > 1) && (par >= -64) && (par <= 12))) ? (
                 reSelectVolume = par;
             );
         ) :
@@ -15072,23 +15463,34 @@ function define_loaded()
     flagClVRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_Clips;
     flagClSetload = FlagsTbVals[Flgs_TblUpd] & flag_ld_ClSets;
     flagSnsrRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_Sensrs;
+    flagClipsCheck = FlagsTbVals[Flgs_TblUpd] & flag_chk_clips;
     flagGM_mSL_ini = FlagsTbVals[Flgs_TblUpd] & flag_ld_Profile;
 );
 
-// execute this after a preser load
+// execute this after a preset load
 function after_load_actions()
 (
+    guess_machine_type();
+    (MACHINE_Type === 'Undf') ? (
+        sprintf(#s, "Path: %s   Machine: Undefined", #D_GM_Project_Path);
+        mSL_log(SysLogBox, #s);
+    ) : (
+        strcpy(#D_clNameFormat, #D_clDirectory);
+        strcat(#D_clNameFormat, #DIR_SEP);
+        strcat(#D_clNameFormat, #D_clEdFormat);
+    );
     // +++ Temporary flags setting while debugging
     FlagsTbVals[Flgs_Inits] = 3;
     FlagsTbVals[Flgs_Play] = 0; // 0xf;
     FlagsTbVals[Flgs_Plyers] = 0;
     FlagsTbVals[Flgs_TblUpd] |= 0xffff;
     FlagsTbVals[Flgs_ConfLd] |= flag_ld_PlMd | flag_ld_SpMd | flag_ld_Bnks | flag_ld_HPC
-                            | flag_ld_Clips | flag_ld_ClSets | flag_ld_Sensrs | flag_ld_Profile;
+                            | flag_ld_Clips | flag_ld_ClSets | flag_ld_Sensrs | flag_chk_clips | flag_ld_Profile;
     flagDoLoadScripts = 1;
     define_loaded();
     //sprintf(#dbg_trace2, "Flags:  0x%X  0x%X  0x%X  0x%X", FlagsTbVals[Flgs_Play], FlagsTbVals[Flgs_Plyers],
     //                      FlagsTbVals[Flgs_ConfLd],FlagsTbVals[Flgs_TblUpd] );
+    //  OpenClipList(); // reconstitute clips
 );
 
 //sprintf(#dbg_trace0, "Memory1: %d  %s  %s  %s", blockMemory1, MM1, blockDispNames[blockMemory1], memoryBox1[5]);
@@ -15096,7 +15498,7 @@ function after_load_actions()
 
 GMW2("Init MAIN");
 
-
+// OpenClipList();
 
 
 // Attempt to create a pair of users modules
@@ -15108,6 +15510,73 @@ blockUsrRefs[4] = mSL_Dyn_Alloc(8, 'umod', mSL_StM_FlClear);
 checkUsrMods(); // valid blocks
 mkModuleMenu();// rebuild the menu
 */
+
+/*
+sprintf(#dbg_trace2, "Rndm:  %.0f  %.0f  %.0f  %.0f", tStart, iRndm_n, 1000000007, 0x7FFFFFFF);
+
+sprintf(#dbg_trace3, "%.0f %% %.0f ==> %.0f", 2639467851, 1000000007, 2639467851 % 1000000007);
+*/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -15440,8 +15909,8 @@ timeFlag0 = timeFlag1 = timeFlag2 = timeFlag3 = 0;
         */
         strcpy(#D_GM_Project_Path, #s); strcat(#D_GM_Project_Path, "/");
         mSL_log(SysLogBox, #D_GM_Project_Path);
-        strcpy(#D_GM_Project_Path_FX, #D_GM_Project_Path); strcat(#D_GM_Project_Path_FX, "Effects/*");
-        mSL_log(SysLogBox, #D_GM_Project_Path_FX);
+        strcpy(#D_GM_Project_Path_FX, #D_GM_Project_Path); strcat(#D_GM_Project_Path_FXplus, "Effects/+");
+        mSL_log(SysLogBox, #D_GM_Project_Path_FXplus);
     );
 );
 
@@ -16384,6 +16853,29 @@ timeFlag2 ? (
     (delayLoad > 0) ? (
         delayLoad -= 1;
     ) : (
+
+        (flagClVRload != 0) && (flagDoLoadScripts != 0) ? (
+            (FlagsTbVals[Flgs_Inits] & 1) ? (
+                sprintf(#s, "::About to load: \"%s\"", #D_ClipsModifiers); mSL_log(SysLogBox, #s);
+            );
+            flagClVRload = 0;
+            (FlagsTbVals[Flgs_ConfLd] & flag_ld_Clips) ? (
+                (match("*.mSL", #D_ClipsModifiers)) ? (
+                    doMslCompile(#D_ClipsModifiers);
+                    delayLoad += delayLdInt;
+                ) : (
+                    (strlen(#D_ClipsModifiers) != 0) ? (
+                        sprintf(#s, "Clips Modifiers: \"%s\" is not a loadable file", #D_ClipsModifiers);
+                        mSL_log(SysLogBox, #s);
+                    );
+                );
+            ) : (
+                clearClipsCharacteristics();
+                mSL_log(SysLogBox, "Clips Modifiers reinitialized");
+                flagRunClipsCheck = 30;
+            );
+        ) :
+
         (flagClSetload != 0) && (flagDoLoadScripts != 0) ? (
             (FlagsTbVals[Flgs_Inits] & 1) ? (
                 sprintf(#s, "::About to load: \"%s\"", #D_ClipSetConf); mSL_log(SysLogBox, #s);
@@ -16408,26 +16900,7 @@ timeFlag2 ? (
                 0 ? mSL_log(SysLogBox, "Set flagBKRload in clearClipSets()");
             );
         ) :
-        (flagClVRload != 0) && (flagDoLoadScripts != 0) ? (
-            (FlagsTbVals[Flgs_Inits] & 1) ? (
-                sprintf(#s, "::About to load: \"%s\"", #D_ClipsModifiers); mSL_log(SysLogBox, #s);
-            );
-            flagClVRload = 0;
-            (FlagsTbVals[Flgs_ConfLd] & flag_ld_Clips) ? (
-                (match("*.mSL", #D_ClipsModifiers)) ? (
-                    doMslCompile(#D_ClipsModifiers);
-                    delayLoad += delayLdInt;
-                ) : (
-                    (strlen(#D_ClipsModifiers) != 0) ? (
-                        sprintf(#s, "Clips Modifiers: \"%s\" is not a loadable file", #D_ClipsModifiers);
-                        mSL_log(SysLogBox, #s);
-                    );
-                );
-            ) : (
-                clearClipsCharacteristics();
-                mSL_log(SysLogBox, "Clips Modifiers reinitialized");
-            );
-        ) :
+
         (flagHPCRload != 0) && (flagDoLoadScripts != 0) ? (
            (FlagsTbVals[Flgs_Inits] & 1) ? (
                 sprintf(#s, "::About to load: \"%s\"", #D_HPConfigs); mSL_log(SysLogBox, #s);
@@ -16451,6 +16924,7 @@ timeFlag2 ? (
                 mSL_log(SysLogBox, "HP Configs reinitialized");
             );
         ) :
+
         (flagSPRload != 0) && (flagDoLoadScripts != 0)? (
             (FlagsTbVals[Flgs_Inits] & 1) ? (
                 sprintf(#s, "::About to load: \"%s\"", #D_SpaceModes); mSL_log(SysLogBox, #s);
@@ -16471,6 +16945,7 @@ timeFlag2 ? (
                 mSL_log(SysLogBox, "Space Modes reinitialized");
             );
         ) :
+
         (flagPMRload != 0) && (flagDoLoadScripts != 0) ? (
             (FlagsTbVals[Flgs_Inits] & 1) ? (
                 sprintf(#s, "::About to load: \"%s\"", #D_PlayModes); mSL_log(SysLogBox, #s);
@@ -16492,6 +16967,7 @@ timeFlag2 ? (
                 mSL_log(SysLogBox, "Play Modes reinitialized");
             );
         ) :
+
         (flagBKRload != 0) && (flagDoLoadScripts != 0) ? (
             (FlagsTbVals[Flgs_Inits] & 1) ? (
                 sprintf(#s, "::About to load: \"%s\"", #D_BanksDefs); mSL_log(SysLogBox, #s);
@@ -16513,6 +16989,7 @@ timeFlag2 ? (
                 0 ? mSL_log(SysLogBox, "Banks reinitialized");
             );
         ) :
+
         (flagSnsrRload != 0) && (flagDoLoadScripts != 0) ? (
             (FlagsTbVals[Flgs_Inits] & 1) ? (
                 sprintf(#s, "::About to load: \"%s\"", #D_InSens_Name); mSL_log(SysLogBox, #s);
@@ -16532,6 +17009,7 @@ timeFlag2 ? (
                 SensorsClear();
             );
         ) :
+
         (flagGM_mSL_ini != 0) && (flagDoLoadScripts != 0) ? (
            (FlagsTbVals[Flgs_Inits] & 1) ? (
                 sprintf(#s, "::About to load: \"%s\"", #D_GM_mSL_ini); mSL_log(SysLogBox, #s);
@@ -16549,7 +17027,14 @@ timeFlag2 ? (
                     );
                 );
             );
+            delayLoad += 30;
         ) :
+
+        (flagClipsCheck != 0) && (flagDoLoadScripts != 0) ? (
+            flagClipsCheck = 0;
+            flagRunClipsCheck = 34;
+        ) :
+
         (
             delayLoad += 60;
         );
@@ -16738,17 +17223,15 @@ while (SchedListNonEmpty(SchedLockdPts) && (atomic_get(mSL_Lock) === 0)) (
 );
 
 
-/*
-    New actions interpreter
-*/
+// ========== New actions interpreter
 
 
 
 lstrt = time_precise() + timeD;
 XeSched = 1; // set to 1 to make sure we execute at least 1 task during each @block execution
-/*
-=== GLOBAL Interpreter ===
-*/
+
+//  === GLOBAL Interpreter ===
+
 while (SchedActive &&
     ((((TLeft = ptBlockLimit - (gstrt = time_precise() + timeD)) > TLeftMin)) || XeSched) &&
     ((SchX = SchedDetachHead(SchedActivPts)) != SchedNone))
@@ -17718,6 +18201,19 @@ T0 += 1;
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
 @serialize
 //
 //===== PRESETS ======
@@ -17734,9 +18230,8 @@ pcheckGPLR = 1; // check parameters coherency
 
 loadMode ? (
 
-    /*
-    ===LOAD===
-    */
+    // ===LOAD===
+
     doLoad = 1;
     // First, load the block
     // file_mem(0, serialBlock, serialSize);
@@ -17851,9 +18346,12 @@ loadMode ? (
         (strlen(savedStrings[Pr7_Project_Path]) !== 0) ? strcpy(#D_GM_Project_Path, savedStrings[Pr7_Project_Path]);
         (strlen(savedStrings[Pr7_Project_Name]) !== 0) ? strcpy(#D_GM_Project_Name, savedStrings[Pr7_Project_Name]);
         (strlen(savedStrings[Pr7_Project_SCR]) !== 0) ? strcpy(#D_GM_Project_Path_SCR, savedStrings[Pr7_Project_SCR]);
+        (strlen(savedStrings[Pr7_Project_SCRplus]) !== 0) ? strcpy(#D_GM_Project_Path_SCRplus, savedStrings[Pr7_Project_SCRplus]);
         (strlen(savedStrings[Pr7_Project_WAV]) !== 0) ? strcpy(#D_GM_Project_Path_WAV, savedStrings[Pr7_Project_WAV]);
         (strlen(savedStrings[Pr7_Project_SNDS]) !== 0) ? strcpy(#D_GM_Project_Path_SNDS, savedStrings[Pr7_Project_SNDS]);
+        (strlen(savedStrings[Pr7_Project_SNDSplus]) !== 0) ? strcpy(#D_GM_Project_Path_SNDSplus, savedStrings[Pr7_Project_SNDSplus]);
         (strlen(savedStrings[Pr7_Project_FX]) !== 0) ? strcpy(#D_GM_Project_Path_FX, savedStrings[Pr7_Project_FX]);
+        (strlen(savedStrings[Pr7_Project_FXplus]) !== 0) ? strcpy(#D_GM_Project_Path_FXplus, savedStrings[Pr7_Project_FXplus]);
         (strlen(savedStrings[Pr7_Project_GLib]) !== 0) ? strcpy(#D_GM_Project_Path_GLib, savedStrings[Pr7_Project_GLib]);
         (strlen(savedStrings[Pr7_PlayModes]) !== 0) ? strcpy(#D_PlayModes, savedStrings[Pr7_PlayModes]);
         (strlen(savedStrings[Pr7_SpaceModes]) !== 0) ? strcpy(#D_SpaceModes, savedStrings[Pr7_SpaceModes]);
@@ -17872,6 +18370,7 @@ loadMode ? (
             );
         );
 
+        guess_machine_type();
         //ShowConfig();
         //mSL_log(SysLogBox, "After preset load");
         //mSL_log(SysLogBox, #D_GM_Project_Path);
@@ -17908,23 +18407,22 @@ loadMode ? (
         //sprintf(#s, "Preset Loaded, saved — %s", savedStrings[Pr7_Date]); mSL_log(SysLogBox, ""); mSL_log(SysLogBox, #s);
     );
 
-    /*
-    (AGMXXX === 0) ? AGMW200 = GMW();
-    (AGMXXX === 1) ? AGMW210 = GMW();
-    (AGMXXX === 2) ? AGMW220 = GMW();
-    (AGMXXX === 3) ? AGMW230 = GMW();
-    (AGMXXX === 4) ? AGMW240 = GMW();
-    (AGMXXX === 5) ? AGMW250 = GMW();
-    */
+
+    //(AGMXXX === 0) ? AGMW200 = GMW();
+    //(AGMXXX === 1) ? AGMW210 = GMW();
+    //(AGMXXX === 2) ? AGMW220 = GMW();
+    //(AGMXXX === 3) ? AGMW230 = GMW();
+    //(AGMXXX === 4) ? AGMW240 = GMW();
+    //(AGMXXX === 5) ? AGMW250 = GMW();
+
 
 
     after_load_actions();
     delayLoad = -8; // force actions to start ASAP
 ) : (
 
-    /*
-    ===SAVE===
-    */
+    //  ===SAVE===
+
     // First, copy values to preset area
 
     // Subblocks 0 and 1
@@ -17967,9 +18465,12 @@ loadMode ? (
     strcpy(savedStrings[Pr7_Script_Name], #D_Script_Name);
     strcpy(savedStrings[Pr7_clDirectory], #D_clDirectory);
     strcpy(savedStrings[Pr7_Project_SCR], #D_GM_Project_Path_SCR);
+    strcpy(savedStrings[Pr7_Project_SCRplus], #D_GM_Project_Path_SCRplus);
     strcpy(savedStrings[Pr7_Project_WAV], #D_GM_Project_Path_WAV);
     strcpy(savedStrings[Pr7_Project_SNDS], #D_GM_Project_Path_SNDS);
+    strcpy(savedStrings[Pr7_Project_SNDSplus], #D_GM_Project_Path_SNDSplus);
     strcpy(savedStrings[Pr7_Project_FX], #D_GM_Project_Path_FX);
+    strcpy(savedStrings[Pr7_Project_FXplus], #D_GM_Project_Path_FXplus);
     strcpy(savedStrings[Pr7_Project_GLib], #D_GM_Project_Path_GLib);
 
 
@@ -18032,14 +18533,14 @@ loadMode ? (
 
     //sprintf(#s, "Preset Saved — %s", savedStrings[Pr7_Date]); mSL_log(SysLogBox, ""); mSL_log(SysLogBox, #s);
 
-    /*
-    (AGMXXX === 0) ? AGMW300 = GMW();
-    (AGMXXX === 1) ? AGMW310 = GMW();
-    (AGMXXX === 2) ? AGMW320 = GMW();
-    (AGMXXX === 3) ? AGMW330 = GMW();
-    (AGMXXX === 4) ? AGMW340 = GMW();
-    (AGMXXX === 5) ? AGMW350 = GMW();
-    */
+
+    //(AGMXXX === 0) ? AGMW300 = GMW();
+    //(AGMXXX === 1) ? AGMW310 = GMW();
+    //(AGMXXX === 2) ? AGMW320 = GMW();
+    //(AGMXXX === 3) ? AGMW330 = GMW();
+    //(AGMXXX === 4) ? AGMW340 = GMW();
+    //(AGMXXX === 5) ? AGMW350 = GMW();
+
 
     //sprintf(#s, "saved Banks: %s", savedStrings[Pr7_BanksDefs]); mSL_log(SysLogBox, #s);
     //sprintf(#s, "saved Name:  %s", savedStrings[Pr7_Project_Name]); mSL_log(SysLogBox, #s);
@@ -18445,65 +18946,6 @@ do_GenericTabEnd()
 );
 );
 
-GMTrack = get_host_placement();
-efi = 1; idx = 0;
-#audio = "";
-while (efi) (
-  (efi = gfx_getdropfile(idx, #s)) ? (
-    efs = mSL_Str_Tmp(); // get a temporary string
-    strcpy(efs, #s);
-    dropped_x = mouse_x; dropped_y = mouse_y;
-    //
-    (FlagsTbVals[Flgs_GFXTrcs] & 2) ? (
-        mSL_log(SysLogBox, efs);
-        sprintf(#s, "   at: %d  %d    [%x]", dropped_x, dropped_y, mouse_cap); mSL_log(SysLogBox, #s);
-    );
-    // Try to localize the file in the project
-    (strlen(#D_GM_Project_Path_FX) > 0) && match(#D_GM_Project_Path_FX, efs) ? (
-        strcpy_from(#s, efs, strlen(#D_GM_Project_Path_FX)-1);
-        // strcpy(efs, "./"); strcat(efs, #s);
-        strcpy(efs, #s);
-        // mSL_log(SysLogBox, efs);
-    );
-    // mSL_log(SysLogBox, efs);
-    ui_GFXdoNow |= 1; // Make sure we react as soon as possible
-    // Is this an mSL script ?
-    (match ("*mSL", efs) || match ("*txt", efs)) ? (
-        //
-        sprintf(#s, "*  Compile: %s  (%d)  %d *", efs, strlen(efs), mouse_cap); mSL_log(SysLogBox, #s);
-        ((mouse_cap & altCap) || (dropped_y < 32)) ? (
-            doMslCompile(efs); // add to compile list
-        ) : (
-            strcpy(#efs, efs); // save in #efs
-            dpi = 1; // an mSL file is available
-        );
-    ) :
-    (match ("*.wav", efs) || match ("*.aif", efs) || match ("*.flac", efs) || match ("*.mp3", efs) || match ("*.aiff", efs) || match ("*.ogg", efs) || match ("*.wmv", efs) || match ("*.mp4", efs) || match ("*.mov", efs)) ? (
-        strcpy(#efs, efs); // save in #efs
-        dpa = 1; // an audio file is available
-        (afs === 0) ? (afs = #afs; strcpy(afs, ""); ); // use a perf string
-        // accumulate in afs ; use a dummy clip number for now
-        sprintf(#aw, " 10000 %d %s ", strlen(efs), efs);
-        strcat(afs, #aw);
-        //mSL_log(SysLogBox, "Matching sound file");
-    ) :
-    (match ("*.RPP", efs)) ? (
-        sprintf(#s, "*  Received: %s  (%d)  %d *", efs, strlen(efs), mouse_cap); mSL_log(SysLogBox, #s);
-        SetNewProjectPath (efs);
-    ) :
-    (match ("*WAVES", efs)) ? (
-        sprintf(#s, "*  WAVES: %s  (%d)  %d *", efs, strlen(efs), mouse_cap); mSL_log(SysLogBox, #s);
-    ) :
-    (match ("*Scripts", efs)) ? (
-        sprintf(#s, "*  Scripts: %s  (%d)  %d *", efs, strlen(efs), mouse_cap); mSL_log(SysLogBox, #s);
-    );
-    idx += 1;
-
-  ) : (
-    (efs != 0) ? gfx_getdropfile(-1);
-  );
-);
-
 
 function ui_dropped_in() (
 	// (efs !=0) && dropped_x >= ui_left() && dropped_x < ui_right() && dropped_y >= ui_top() && dropped_y < ui_bottom();
@@ -18514,13 +18956,92 @@ function doneDroppedFile() (
     dpa = dpi = efs = afs = 0; dropped_x = dropped_y = -1;
 );
 
+// Drop File
+GMTrack = get_host_placement();
+efi = 1; idx = 0;
+#audio = "";
+while (efi) (
+  (efi = gfx_getdropfile(idx, #s)) ? (
+    efs = mSL_Str_Tmp(); // get a temporary string
+    strcpy(efs, #s);
+    dropped_x = mouse_x; dropped_y = mouse_y; dropped_cap = mouse_cap;
+    //
+    (FlagsTbVals[Flgs_GFXTrcs] & 2) ? (
+        mSL_log(SysLogBox, efs);
+        sprintf(#s, "   at: %d  %d    [%x]", dropped_x, dropped_y, dropped_cap); mSL_log(SysLogBox, #s);
+    );
+    // mSL_log(SysLogBox, efs);
+    ui_GFXdoNow |= 1; // Make sure we react as soon as possible
+    // Is this an mSL script ?
+    //(match ("*mSL", efs) || match ("*txt", efs)) ? (
+    (match ("*mSL", efs)) ? (
+        //
+        1? (sprintf(#s, "*  Script: %s  (%d)  %d *", efs, strlen(efs), dropped_cap); mSL_log(SysLogBox, #s););
+        ((dropped_cap & altCap) || (dropped_y < 32)) ? (
+            doMslCompile(efs); // add to compile list
+        ) : (
+            // If the name is in current Sounds directory, simplify it
+            (strlen(#D_GM_Project_Path_SCRplus) > 0) && match(#D_GM_Project_Path_SCRplus, efs) ? (
+                strcpy_from(#s, efs, strlen(#D_GM_Project_Path_SCRplus)-1);
+                strcpy(efs, "./");
+                strcat(efs, #s);
+                1?(sprintf(#s, "*  Script2: %s  (%d)  %d *", efs, strlen(efs), dropped_cap); mSL_log(SysLogBox, #s););
+            );
+            strcpy(#efs, efs); // save in #efs
+            dpi = 1; // an mSL file is available
+        );
+    ) :
+    (match ("*.wav", efs) || match ("*.aif", efs) || match ("*.flac", efs) || match ("*.mp3", efs) || match ("*.aiff", efs) || match ("*.ogg", efs) || match ("*.wmv", efs) || match ("*.mp4", efs) || match ("*.mov", efs)) ? (
+        // Le fichier provient-il du dossier Sounds du projet ?
+        //mSL_log(SysLogBox, "Testing sound file against Sounds path");
+        (strlen(#D_GM_Project_Path_SNDSplus) > 0) && match(#D_GM_Project_Path_SNDSplus, efs) ? (
+            strcpy_from(#s, efs, strlen(#D_GM_Project_Path_SNDSplus)-1);
+            strcpy(efs, "./");
+            strcat(efs, #s);
+        );
+        strcpy(#efs, efs); // save in #efs
+        dpa = 1; // an audio file is available
+        (afs === 0) ? (#afs = ""; afs = #afs; ); // use a perf string
+        // accumulate in afs ; use a dummy clip number for now
+        sprintf(#aw, " 10000 %d %s ", strlen(efs), efs);
+        strcat(afs, #aw);
+        //mSL_log(SysLogBox, "Matching sound file");
+    ) :
+    (match ("*.RPP", efs)) ? (
+        sprintf(#s, "*  Project Path: \"%s\"  (%d)  %d *", efs, strlen(efs), mouse_cap); mSL_log(SysLogBox, #s);
+        SetNewProjectPath (efs);
+    ) :
+    (match (#Def_ClipsListX, efs)) ? (
+        // sprintf(#s, "*  Clips list: \"%s\"  (%d)  m:%d *", efs, strlen(efs), mouse_cap); mSL_log(SysLogBox, #s);
+        SetClipsList(efs, 1);
+        // doneDroppedFile();
+    ) :
+    (match ("*WAVES", efs)) ? (
+        sprintf(#s, "*  WAVES: %s  (%d)  %d *", efs, strlen(efs), mouse_cap); mSL_log(SysLogBox, #s);
+        // TODO
+    ) :
+    (match ("*Scripts", efs)) ? (
+        sprintf(#s, "*  Scripts: %s  (%d)  %d *", efs, strlen(efs), mouse_cap); mSL_log(SysLogBox, #s);
+        // TODO
+    );
+    idx += 1;
+
+  ) : (
+    (efs != 0) ? gfx_getdropfile(-1);
+  );
+);
+
+flagRunClipsCheck ? (
+    ((flagRunClipsCheck -= 1) <= 0) ? OpenClipList();
+);
+
 // Read & Print a text file
 function doMslTxtPrint(fname)
 local (fhd, lct, el, flg, i1, i2, l1, l2)
 (
     // sprintf(#mSLine, "Trying File: \"%s\"", fname);  mSL_log(SysLogBox, #mSLine);
     l1 = SysLogBox[3];
-    fhd = GM_file_open(fname, 0); el = lct = 0; flg = 1;
+    fhd = GM_file_open(fname, FFlagsTxt); el = lct = 0; flg = 1;
     ((fhd >= 0)) ? (
         i1 = file_text(fhd);
         i2 = file_avail(fhd);
@@ -18559,7 +19080,7 @@ local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars)
     (FlagsTbVals[Flgs_GFXTrcs] & 4) ? (sprintf(#gfxu, "::-> Trying \"%s\"  %d", fname, mSL_errC); mSL_log(SysLogBox, #gfxu););
 
     (mSL_errC === 0) ? (
-        fhd = GM_file_open(fname, 0);
+        fhd = GM_file_open(fname, FFlagsmSL);
         ((fhd >= 0)) ? (
             (FlagsTbVals[Flgs_Inits] & 2) ? (
                 sprintf(#gfxu, "::-> Using \"%s\"", #tmpFname); mSL_log(SysLogBox, #gfxu);
@@ -18719,40 +19240,6 @@ logTask ? (
 );
 
 
-
-//===== Clips Checking =====
-/*
-cnt = 40; // max(1, 0|(samplesblock/320));
-ClCheckView ? (
-    while ((cnt > 0) && (cBk4 <= clInBank)) (
-        xNum = (xNum + UClipPrime) % clInBank; cBk4 += 1; zNum = xnum + (slBankset * clBSSize + slGroupNum) * clInBank;
-        (ClCheckForce || ((gmem[clClInfos+zNum] === 0) && (gmem[clInfStart+zNum] === 0))) ? (
-            checkClip(zNum, ClCheckForce); cnt -= 1;
-        );
-    );
-    (cBk4 >= clInBank) ? (
-        0 ? (
-            sprintf(#s, "++Done CheckView [%d/%d]", slBankset, slGroupNum);
-            mSL_log(SysLogBox, #s);
-        );
-        ClCheckView = cBk4 = 0;
-    );
-);
-ClCheckFlag ? (
-    (ClCheckCnt >= clTSize) ? (
-        ClCheckCnt = ClCheckFlag = 0;
-        ClCheckForce = 0;
-        UClipPrime = gmem[somePrimes + (gmem[primeCurrent] = (gmem[primeCurrent]+1)%primeCount)];
-    ) : (
-        while ((cnt > 0) && (ClCheckCnt <= clTSize)) (
-            ClCheckNum = (ClCheckNum + UClipPrime) % clTSize; ClCheckCnt += 1;
-            (ClCheckForce || ((gmem[clClInfos+ClCheckNum] === 0) && (gmem[clInfStart+ClCheckNum] === 0))) ? (
-                checkClip(ClCheckNum, ClCheckForce); cnt -= 1;
-            );
-        );
-    );
-);
-*/
 
 
 // build a "keyboard command" from mouse click and modifiers
@@ -20057,15 +20544,19 @@ local(uix_jneed, uix_jmini, h1, h2, v, w, r, jmc, zzmi)
                 ui_show("G Volume", gmem[commonGlobalVolume], "%.4f");
 
 
-                ui_show("Gfx Refresh", ui_GFXReason, "%d");
+                //ui_show("Gfx Refresh", ui_GFXReason, "%d");
                 ui_show("Gfx Count", ui_GFXCount, "%d");
 
                 ui_show("Mem unused", SharedHighMemorySize, "%d w");
-                ui_show("Init 2", tInit2, "%d s");
+                //ui_show("Init 2", tInit2, "%d s");
 
-                ui_show("Last Action", last_op, "%d");
-                ui_show("Gfx doN", ui_XGdNCnt, "%d");
-                ui_show("Gfx Int", ui_XGIntCnt, "%d");
+                // ui_show("Last Action", last_op, "%d");
+                sprintf(#s, "%.5f s (%d)",  (dCnt ? dDur/dCnt : 0), dCnt); ui_show("File Check", #s);
+                sprintf(#s, "%.5f s (%d)",  (fCnt ? fDur/fCnt : 0), fCnt); ui_show("File fCheck", #s);
+                ui_show("Loop check", lDur, "%.5f s");
+                ui_show("Loop Res", lSum, "%.12f");
+                // ui_show("Gfx doN", ui_XGdNCnt, "%d");
+                // ui_show("Gfx Int", ui_XGIntCnt, "%d");
                 /*
                 ui_show(0);
                 ui_show("MIDI -4", zm4, "%d");
@@ -20630,8 +21121,7 @@ local(str, str2, uix_jneed, uix_jmini, key, jmc, val, zz, zzch, zzent, zzmcl, zz
 );
 
 
-function
-show_Clips_Selection()
+function show_Clips_Selection()
 local(iw, ix, iy, iz, str, uv, uw, ux, zz, zzmi, m, mcc, r, cc, sr, ds, dm, curB, emin, emax, cnt, rerun,
       nli, lx, cx, nc, jmc, ent, ezer, epos, eneg, elcnt, ehcnt, h1, h2, h3, j4, xcell, uix_jneed)
 (
@@ -20717,7 +21207,7 @@ local(iw, ix, iy, iz, str, uv, uw, ux, zz, zzmi, m, mcc, r, cc, sr, ds, dm, curB
                             // Start smooth rechecking the clips
                             ClCheckCnt = 0;
                             ClCheckFlag = 1;
-                            (jmc & 0x10) ? ClCheckForce = 1; // hard reset
+                            (jmc & 0x10) ? ClCheckForce = 1; // force hard reset
                         ) : (
                             slGroupNum = padbanks[ui_jpad_last]-1;
                         );
@@ -20932,7 +21422,7 @@ local(iw, ix, iy, iz, str, uv, uw, ux, zz, zzmi, m, mcc, r, cc, sr, ds, dm, curB
                                     );
                                 );
                             ) :
-                            (zzch === 'down') ? (
+                            ((zzch === 'down') || (zzch === '%')) ? (
                                 showClNbrs = (showClNbrs - 1 + showStates) % showStates ; // shift down
                             ) :
                             (zzch === 'up') ? (
@@ -21384,7 +21874,7 @@ local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h
                             padUCells[pid] &= -1 ~ ui_jpad_ct_selec;
                         ) :
                         (st === uSSError) ? (
-                            padUclrs[pid] = Color_Light_Reddish_Brown ;
+                            padUclrs[pid] = Color_Dark_Reddish_Brown_A ;
                         ) :
                         (st === uSError) ? (
                             padUclrs[pid] = Color_Light_Reddish_Brown ;
@@ -22585,7 +23075,7 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
                                 #D_ClipSetConf = #Def_ClipSetConf;
                                 #D_InSens_Name = #Def_InSens_Name;
                                 FlagsTbVals[Flgs_ConfLd] |= flag_ld_PlMd | flag_ld_SpMd | flag_ld_Bnks | flag_ld_HPC
-                                        | flag_ld_Clips | flag_ld_ClSets | flag_ld_Sensrs | flag_ld_Profile;
+                                        | flag_ld_Clips | flag_ld_ClSets | flag_ld_Sensrs | flag_chk_clips | flag_ld_Profile;
                                 0 ? (
                                     sprintf(#gfxu, "::reset: %04x %04x", FlagsTbVals[Flgs_ConfLd] , FlagsTbVals[Flgs_TblUpd]);
                                     mSL_log(SysLogBox, #gfxu);
@@ -22600,6 +23090,7 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
                                 flagClVRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_Clips;
                                 flagClSetload = FlagsTbVals[Flgs_TblUpd] & flag_ld_ClSets;
                                 flagSnsrRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_Sensrs;
+                                flagClipsCheck = FlagsTbVals[Flgs_TblUpd] & flag_chk_clips;
                                 flagGM_mSL_ini = FlagsTbVals[Flgs_TblUpd] & flag_ld_Profile;
                                 // Recheck all clips
                                 ig = 0;
@@ -22609,7 +23100,7 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
                                 );
                                 0 ? (
                                     sprintf(#gfxu, "::refresh: %04x", flagPMRload | flagSPRload| flagBKRload| flagHPCRload
-                                        | flagClVRload | flagSnsrRload| flagClSetload | flagGM_mSL_ini) ;
+                                        | flagClVRload | flagSnsrRload| flagClSetload | flagClipsCheck | flagGM_mSL_ini) ;
                                     mSL_log(SysLogBox, #gfxu);
                                 );
                                 ClCheckFlag = 1; rerun = 1;
@@ -22808,7 +23299,7 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
                         updScriptfiles = 1;
                     );
                     0 ? (
-                        sprintf(#s, "** Dropped in files settings ** %d %d %d %d %d -> %d", nli, nco, lx, cx, nc, updScriptfiles);
+                        sprintf(#s, "** Dropped in files settings ** %d %d %d %d %d -> %d [%s]", nli, nco, lx, cx, nc, updScriptfiles, #efs);
                         mSL_log(SysLogBox, #s);
                     );
                     doneDroppedFile();
@@ -22825,7 +23316,7 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
                     (zz & ui_jpad_ev_lmc) ? (  // left mouse clic
                         //sprintf(#s, "   ++ Click %d : \"%s\"", zzmcl, namScriptfiles[zzmcl]); mSL_log(SysLogBox, #s);
                         (jmc & cmdCap) ? (
-                            strcpy(namScriptfiles[zzmcl], "");
+                            strcpy(namScriptfiles[zzmcl], ""); strcpy(shortScriptfiles[zzmcl], "");
                         ) :
                         (jmc & altCap) ? (
                             (strlen(namScriptfiles[zzmcl]) != 0) ? (
@@ -22833,7 +23324,17 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
                             );
                         ) : (
                             (strlen(namScriptfiles[zzmcl]) != 0) ? (
-                                doMslCompile(namScriptfiles[zzmcl]);
+                                strcpy(#sname, namScriptfiles[zzmcl]);
+                                // Is this a relative name to the "script" directory?
+                                ((match("./*", #sname)) || (match(".\\*", #sname))) ? (
+                                    //
+                                    sprintf(#s, "Script relative name: %s", #sname); mSL_log(SysLogBox, #s);
+                                    strcpy_from(#ws, #sname, 2);
+                                    strcpy(#sname, #D_GM_Project_Path_SCR);
+                                    strcat(#sname, #ws);
+                                    sprintf(#s, "Script full name: %s", #sname); mSL_log(SysLogBox, #s);
+                                );
+                                doMslCompile(#sname);
                             );
                         );
                     );
@@ -27416,10 +27917,10 @@ must_do_gfx() ? (
 ui_end_do_gfx();
 
 
-xCnt = 4; //
+xCnt = min(40, xCnt += 4 * parV(p_FODlay));
 ClCheckView ? (
     while ((xCnt > 0) && (cBk4 <= clInBank)) (
-        xNum = (xNum + UClipPrime) % clInBank; cBk4 += 1; zNum = xnum + (slBankset * clBSSize + slGroupNum) * clInBank;
+        xNum = (xNum + UClipPrime) % clInBank; cBk4 += 1; zNum = xNum + (slBankset * clBSSize + slGroupNum) * clInBank;
         (((gmem[clClInfos+zNum] === 0) && (gmem[clInfStart+zNum] === 0))) ? (
             checkClip(zNum, ClCheckForce); xCnt -= 1;
         );
@@ -27440,7 +27941,7 @@ ClCheckFlag ? (
     ) : (
         while ((xCnt > 0) && (ClCheckCnt <= clTSize)) (
             ClCheckNum = (ClCheckNum + UClipPrime) % clTSize; ClCheckCnt += 1;
-            (ClCheckForce || ((gmem[clClInfos+ClCheckNum] === 0) && (gmem[clInfStart+ClCheckNum] === 0))) ? (
+            (((gmem[clClInfos+ClCheckNum] === 0) && (gmem[clInfStart+ClCheckNum] === 0))) ? (
                 checkClip(ClCheckNum, ClCheckForce); xCnt -= 1;
             );
         );

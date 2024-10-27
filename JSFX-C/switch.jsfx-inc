@@ -1,0 +1,684 @@
+
+    (xop<16)?((xop<8)?((xop<4)?((xop<2)?((xop<1)?(
+
+
+        //++++0++++//
+        0;
+        //++++0++++//
+
+
+    ):(
+
+
+        //++++1++++//
+        // Play one of the exec pad / auto play
+        // replaces "doPlayCmd"
+        KSource = ActPar1 = SchedPar1[SchX]; // unmodified source
+        cmdCurrPar = SchedPar2[SchX]; // 2nd parameter
+        (SchedPar3[SchX] != Undef) ? ( GvPlayCl0 = SchedPar3[SchX]; );
+        (SchedPar4[SchX] != Undef) ? ( GvPlayPart = SchedPar4[SchX]; );
+        KpFlags = ActPar1 & MskdoKeepHgFlgs;
+        Kmnd = ActPar1 & MskdoKeepKmnd;
+        // First, rebuild partial entry 0
+        memset(BKTab, 0, BKEsize);
+        BKTab[idx_Grp] = GvPlayGrp;
+        BKTab[idx_Bnk] = GvPlayBnk;
+        BKTab[idx_Clps] = GvPlayCl1;
+        BKTab[idx_Clps+1] = GvPlayCl2;
+        BKTab[idx_PlM] = GvPlayPM;
+        BKTab[idx_SpM] = GvPlaySM;
+        BKTab[idx_PWeight] = 1;
+        Kptyp = Krtc = 0;
+
+        (FlagsTbVals[Flgs_Pdbg] & 1) ? (
+            b = BKTab;
+            sprintf(#s2, "**P[%X]  %d %d %d %d --- %d %d %d %d --- %d %d %d %d",
+                ActPar1, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11]);
+            mSL_log(SysLogBox, #s2);
+        );
+
+        // Is there a "pad to play" ?
+        ((Kmnd >= cmdPadBase) && (Kmnd < (cmdPadBase + padStTotSiz))) ? (
+            Kmnd -= cmdPadBase;
+            // KpFlags are the high bits from the command
+            Krtc = 0;
+            KbtpPlayed = Kmnd;
+            Kpart = padStPVals[Kmnd]; // base Partial
+            Kselect = pACinP; // play any clip from partial as default
+            (cmdCurrPar != Undef) ? KpFlags |= cmdCurrPar;
+            // (Kvu5 != padStDispNone) ? (
+            Kvuu = (Kvu0 = padStPVals[Kmnd] % BKEcnt) * BKEsize; // Kvu0 : n° partiel
+            Kvu4 = BKTab[Kvuu + idx_Clps]; // first clip of range
+            // which mode are we using ?
+            Kvu5 = padStFlags[Kmnd] & padStFlDspM;
+            (Kvu5 === padStDispPar) ? (
+                // we want to play a specific partial
+                Kselect = pACinP; // the clip we want to play
+            ) :
+            (Kvu5 === padStDispGrp) ? (
+                Kselect = pACinG; // any clip from the group of the partiel
+            ) :
+            (Kvu5 === padStDispGBk) ? (
+                Kselect = pACinB; // any clip from bank and group of the partiel
+            ) :
+            (Kvu5 === padStDispRng) ? (
+                Kselect = padStClipsL[Kmnd]; // the 1st clip of the range we want to play
+                KpFlags |= abs(padStClipsH[Kmnd] - padStClipsL[Kmnd]); // the range
+            ) :
+            (Kvu5 === padStDispClip) ? (
+                // we want to play a specific clip
+                Kselect = padStClipsL[Kmnd]; // the clip we want to play
+                Kptyp = GvPlayTypClip;
+            ) :
+            (Kvu5 === padStDispAct) ? (
+                Kselect = Kpart; // we have an action to perform
+                Kpart = -1; // nothing to play
+                //
+                m = padStClipsL[Kmnd]; p = q = r = 0;
+                // temporary, accept various commands...
+                ((m >= 1) && (m <= 7)) ? (
+                    // change global volume
+                    (m === 1) ? (q = -120; ) :
+                    (m === 2) ? (q = paramValues[p_Vol_MinVal]; ) :
+                    (m === 3) ? (q = paramValues[p_Vol_MaxVal]; ) :
+                    (m === 4) ? (q = -3; ) :
+                    (m === 5) ? (q = 0; ) :
+                    (m === 6) ? (q = 3; ) :
+                    (m === 7) ? (q = 6; ) ;
+                    // gmem[gVolBias] = 0.0000002; // use a very very slow volume change
+                    // gmem[commonGlobalVolume] = 10 ^ (q/20); // convert as a number
+                    parSet(p_Vol_Global, q);
+                    // parSet(p_VolGlobBias, 9);
+                );
+                (p != 0) ? (
+                    SchedAddTask(p, q, r, s, t, 0, 0);
+                );
+            ) :
+            (Kvu5 === padStDispSpec) ? (
+                // we want to have a specific MIDI action to send
+                Kselect = padStClipsL[Kmnd]; // the clip we want to play
+                Kptyp = GvPlayTypClip;
+            ) : (
+                Kpart = -1; // nothing to play
+            );
+            (Kpart >= 0) ? (
+                padStErrors[Kmnd] = Krtc = doPlayClip(Kpart, Kselect, KpFlags, Kptyp); // keep err. return
+            );
+            // );
+            // return code from playing ?
+            (Krtc != 0) ? (
+                KbtpLast = Kmnd;
+                padStFlags[Kmnd] = padStFlags[Kmnd] | padStFlErrbit;
+                StdnumLastM = lastTime; StdnumUnchkd = 16;
+            ) : (
+                padStFlags[Kmnd] = padStFlags[Kmnd] & padStFlMsk7;
+            );
+            // StdnumLastM = lastTime; StdnumUnchkd = 16;
+            ui_GFXdoNow |= 2;
+            ui_GFXReason = 12;
+        ) :
+
+        // A play command in a specific mode ?
+        ((Kmnd >= cmdClMdBase) && (Kmnd < (cmdClMdBase + 16))) ? (
+            Kmnd -= cmdClMdBase;
+            // play from a specific setting
+            Kselect = pACinP;
+            Kpart = 0;
+            // select command according to current mode
+            (Kmnd === GvPlayTypGrPlay) ? (
+                // play a player from the "group"
+                Kselect = pACinG;
+                // Kpart = 0;
+            ) :
+            (Kmnd === GvPlayTypGrLoop) ? (
+                // play a looper from the "group"
+                Kselect = pACinG;
+                // Kpart = 0;
+            ) :
+            (Kmnd === GvPlayTypGroup) ? (
+                // play "group"
+                Kselect = pACinG;
+                // Kpart = 0;
+            ) :
+            (Kmnd === GvPlayTypBank) ? (
+                // play "bank"
+                Kselect = pACinB;
+                // Kpart = 0;
+            ) :
+            (Kmnd === GvPlayTypPartial) ? (
+                // play this "partial"
+                Kselect = pACinP;
+                Kpart = GvPlayPart;
+            ) :
+            (Kmnd === GvPlayTypClip) ? (
+                // play "clip"
+                Kselect = GvPlayCl0;
+                Kpart = GvPlayPart;
+                Kptyp = GvPlayTypClip;
+            ) :
+            (Kmnd === GvPlayTypRange) ? (
+                // play "Range"
+                Kselect = pACinSwP;
+                Kpart = GvPlayPart;
+            ) :
+            (Kmnd === GvPlayTypAnyClip) ? (
+                // play "Any clip"
+                Kselect = pACinWwP;
+                Kpart = GvPlayPart;
+            ) :
+            (Kmnd === GvPlayTypAnyBank) ? (
+                // play "Any clip from a partial"
+                Kselect = pACinRP;
+            ) :
+            (Kmnd === GvPlayClipClicked) ? (
+                // play "clip"
+                Kselect = GvPlayCl3;
+                Kpart = GvPlayPart;
+            ) : (
+                // This is an error
+                GvErr = 0500;
+            ) ;
+            // AAAA_doPlaycnt += 1;
+            (cmdCurrPar != Undef) ? KpFlags |= cmdCurrPar;
+            (FlagsTbVals[Flgs_Pdbg] & 2) ? (
+                sprintf(#s2, "**Q[%X]  Kpa:%d  Kse:%d  KpF:%X  Kty:%d",
+                            Kmnd, Kpart, Kselect, KpFlags, Kptyp);
+                mSL_log(SysLogBox, #s2);
+            );
+            Krtc = doPlayClip(Kpart, Kselect, KpFlags, Kptyp);
+            // (Krtc != 0) ? AAAA_Krtccnt += 1;
+        );
+
+        // Otherwise, ignore the command
+        Kmnd = -1;
+
+        //++++1++++//
+
+
+    );):((xop<3)?(
+
+
+        //++++2++++//
+        // Random Change global volume
+        m = (paramValues[p_Vol_MaxVal] + paramValues[p_Vol_MinVal]) / 2;
+        p = (10 + paramValues[p_Vol_VariVal])/90;
+        u = (paramValues[p_Vol_MaxVal] - paramValues[p_Vol_MinVal]) / 2;
+    AAAAAAAA_p = p;
+        (frand() > 0.5) ? (
+            x = frand(); m += x * x * p * 1.5 * u;
+        ) : (
+            m -= frand() * p * 1.1 * u;
+        );
+    AAAAAAAA_m = m;
+        m = max(paramValues[p_Vol_MinVal], min(paramValues[p_Vol_MaxVal], m));
+        // gmem[commonGlobalVolume] = 10 ^ (m/20); // convert as a number
+        // gmem[gVolBias] = 0.0000002; // use a very very slow volume change
+        parSet(p_Vol_Global, m);
+        // parSet(p_VolGlobBias, 9);
+       //++++2++++//
+
+
+    ):(
+
+
+        //++++3++++//
+        // OP 3 : Set a parameter
+        parSet(SchedPar1[SchX], SchedPar2[SchX]);
+        //++++3++++//
+
+
+    ););):((xop<6)?((xop<5)?(
+
+
+        //++++4++++//
+        // Switch to next group - or more
+        m = 0|(1 + (paramValues[p_Grp_VariVal] / 8));
+        GvPlayGrp = padAcVals[3] = updGrBkNumber('gr', GvPlayGrp + m, 0);
+        //++++4++++//
+
+
+    ):(
+
+
+        //++++5++++//
+        // OP 5 : Modify Some/ALL players status
+        // p1 === 0 : do nothing
+        // p1 === 1 : lock all & set flags to p2
+        // p1 === 2 : unlock all & reset flags
+        // p1 === 3 : toggle lock p2/p3
+        // p1 === 4 : unlock p2/p3
+        // p1 === 5 : solo p2/p3
+        // p1 === 6 : mute/unmute p2/p3
+        // p1 === 7 : stop p2/p3
+        // p1 === 8 : unlock p2/p3
+        xopKmd = (ActPar1 = SchedPar1[SchX]) & 0xff; // actual op code
+        Actpar2 = SchedPar2[SchX];
+        Actpar3 = SchedPar3[SchX];
+        Actpar4 = SchedPar4[SchX];
+        xopFlgs = ActPar1 & 0xffff00; // addtl. flags
+        xopFlgs & ActFlg1 ? parSet(p_GvAutoMd, 0); // paramValues[p_GvAutoMd] = 0;
+        msk = uid = pid = 0;
+        AAAAAAAA_Task5_1 = ActPar1;
+        loop (uCnt,
+            Un = UGAddr + UCBSize * uid;
+            pid = gmem[Un+cbPadUnitIdt]; // the ID of the pad
+            (((ty = gmem[Un+cbType]) === uPlayer)
+            && ((st = gmem[Un+cbStat]) === uSBusy)
+            && (((pm = gmem[Un+RCB_cbCKmd]) === KmdPlay) || (pm === KmdLoop))) ? ( // L=>C
+                (xopKmd === 1) ? ( // lock and set all to p2
+                    gmem[Un+RCB_ClipLoop] = LockSet = Actpar2;
+                    padUCells[pid] |= ui_jpad_ct_selec;
+                    msk = i_dB;
+                ) :
+                (xopKmd === 2) ? ( // unlock all
+                    gmem[Un+RCB_ClipLoop] = LockSet = 0;
+                    padUCells[pid] &= -1 ~ ui_jpad_ct_selec;
+                    msk = i_dB;
+                ) :
+                ((xopKmd === 3) && ((gmem[Un+cbPlIdt] === Actpar2) || (gmem[Un+cbUnitIdt] === Actpar3))) ? (
+                    // toggle lock p2/p3
+                    (gmem[Un+RCB_ClipLoop] & 1) ? (
+                        gmem[Un+RCB_ClipLoop] = 0;
+                        padUCells[pid] &= -1 ~ ui_jpad_ct_selec;
+                    ) : (
+                        gmem[Un+RCB_ClipLoop] |= 1;
+                        padUCells[pid] |= ui_jpad_ct_selec;
+                    );
+                    msk = i_dB;
+                ) :
+                ((xopKmd === 4) && ((gmem[Un+cbPlIdt] === Actpar2) || (gmem[Un+cbUnitIdt] === Actpar3))) ? (
+                    // unlock p2/p3
+                    gmem[Un+RCB_ClipLoop] = 0;
+                    padUCells[pid] &= -1 ~ ui_jpad_ct_selec;
+                    msk = i_dB;
+                ) :
+                (xopKmd === 5) ? (
+                    // solo p2/p3
+                    padUCells[pid] |= ui_jpad_ct_selec;
+                    gmem[Un+RCB_ClipLoop] =
+                        ((gmem[Un+cbPlIdt] === Actpar2) || (gmem[Un+cbUnitIdt] === Actpar3)) ? 1 : 3;
+                    msk = i_dB;
+                ) :
+                ((xopKmd === 6) && ((gmem[Un+cbPlIdt] === Actpar2) || (gmem[Un+cbUnitIdt] === Actpar3))) ? (
+                    // toggle mute p2/p3
+                    AAAAAAAA_pid = pid;
+                    gmem[Un+RCB_ClipLoop] = (gmem[Un+RCB_ClipLoop] & 2) ? 1 : 3;
+                    padUCells[pid] |= ui_jpad_ct_selec;
+                    msk = i_dB;
+                    // padUCells[0] |= ui_jpad_ct_selec;
+                ) :
+                ((xopKmd === 7) && ((gmem[Un+cbPlIdt] === Actpar2) || (gmem[Un+cbUnitIdt] === Actpar3))) ? (
+                    padUCells[pid] &= -1 ~ ui_jpad_ct_selec;
+                    gmem[Un + RCB_Kmd] = KmdQStop; // send stop command
+                ) :
+                (xopKmd === 8) ? (
+                    ((gmem[Un+cbPlIdt] === Actpar2) || (gmem[Un+cbUnitIdt] === Actpar3) ||
+                    ((Actpar2 === -1) && (Actpar3 === -1))) ? (
+                        // Set play volume to Actpar4
+                        gmem[Un+RCB_StdVol] = Actpar4;
+                        msk = i_dB;
+                    );
+                ) :
+                (xopKmd === 9) ? (
+                    ((gmem[Un+cbPlIdt] === Actpar2) || (gmem[Un+cbUnitIdt] === Actpar3) ||
+                    ((Actpar2 === -1) && (Actpar3 === -1))) ? (
+                        // Set play volume bias to Actpar4
+                        parSet(p_VolGlobBias, Actpar4);
+                        gmem[Un+RCB_VolBias] =  gmem[gVolBias];
+                        msk = i_dB;
+                    );
+                ) :
+                ((xopKmd === 10) && ((gmem[Un+cbPlIdt] === Actpar2) || (gmem[Un+cbUnitIdt] === Actpar3))) ? (
+                    // lock p2/p3
+                    gmem[Un+RCB_ClipLoop] |= 1;
+                    padUCells[pid] |= ui_jpad_ct_selec;
+                    msk = i_dB;
+                );
+                gmem[Un+RCB_State_Changed]  |= 0 | msk;
+            );
+            uid += 1;
+        );
+        //++++5++++//
+
+
+    );):((xop<7)?(
+
+
+        //++++6++++//
+        // random play one clip of current group
+        doPlayCmd(cmdClMdBase + GvPlayTypGroup);
+        //++++6++++//
+
+
+    ):(
+
+
+        //++++7++++//
+        // everybody play reverse !
+        parSet(p_GvAutoMd, 0); // paramValues[p_GvAutoMd] = 0;
+        doReader(-1, KmdSpF1, 1);
+        //++++7++++//
+
+
+    );););):((xop<12)?((xop<10)?((xop<9)?(
+
+
+        //++++8++++//
+        // Stop play
+        parSet(p_GvAutoMd, 0); // paramValues[p_GvAutoMd] = 0;
+        // clearCmd();
+        doReader(-1, KmdQStop); BPLSTClear();
+        //++++8++++//
+
+
+    ):(
+
+
+        //++++9++++//
+        // Random change max generators
+        m = paramValues[p_Gen_MaxCnt] / 2.5;
+        p = (10 + paramValues[p_Gen_VariVal])/90;
+        //AAAAAAAA_p = p;
+        (frand() > 0.4) ? (
+            x = frand(); m += x * x * p * 2.0 * m;
+        ) : (
+            m -= frand() * p * 1.2 * m;
+        );
+        //AAAAAAAA_m = m;
+        parSet(p_maxGenerators, max(paramValues[p_Gen_MinCnt], min(paramValues[p_Gen_MaxCnt], paramValues[p_Gen_MinCnt]+m)));
+        //++++9++++//
+
+
+    );):((xop<11)?(
+
+
+        //++++10++++//
+        //====== mSL EXECUTION ======
+        // mSL_errX=10;
+        mSL_dispatch_entry = SchX;
+        atomic_get(mSL_Lock) ? (
+            // We are doing some exclusive operation. mSL Threads are not allowed to execute
+            SchedInsertTail(SchedLockdPts, SchX, SchETypeThrd); // insert the thread in locked pts
+            SchX = -1;
+        ) : (
+            tstrt = time_precise() + timeD;
+            mSL_active_Thread = SchedThrdPt[SchX]; // the thread
+            ((SchedStatus[mSL_dispatch_entry] & SchmSLThrUsed) != SchmSLThrUsed) ? (
+                (mSL_errX === 0) ? mSL_errX = 3381; // thread not noted active ?
+            );
+            mSL_load_thread(mSL_active_Thread);
+            mSL_max_TOS = mSL_active_Thread[mSL_THR_basePhStack];
+
+            (mSL_errX != 0) ? (
+                thread_error(mSL_active_Thread, mSL_errX, SchX);
+            ) : (
+                mm_xec_mm[mm_xec_ptr] -=  mSL_ICount;
+                mm_cyc_mm[mm_cyc_ptr] -=  mSL_ICount;
+                // Curr_Block_Alloc
+                AAAAAAAA_mSL_rpeat = mSL_rpeat = max(4096, 0|(mSL_insts_per_s * min(TLeft, Curr_Block_Alloc * 0.15))) ; // A large number
+                // XV ? mSL_evaluate() : mSL_evaluate0();
+                mSL_evaluate();
+                AAAAAAAA_mSL_evaluate_count += 1;
+                mSL_High_Stack = max(mSL_High_Stack, mSL_max_TOS - mSL_active_Thread[mSL_THR_basePhStack]);
+                //sprintf(#uuu, "End of evaluation - CR: %d - XC: %d", mSL_CodeStop, AAAAAAAA_mSL_evaluate_count);
+                //mSL_log(SysLogBox, #uuu);
+                mSL_save_thread(mSL_active_Thread);
+                ((mSL_CodeStop === 0) || (mSL_CodeStop === mSL_RC_Yield)) ? (
+                    // reintroduce the thread in the queue
+                    SchedInsertTail(SchedActivPts, SchX, SchETypeThrd);
+                    SchX = -1;
+                ) :
+                (mSL_CodeStop === mSL_RC_Wait) ? (
+                    (mSL_WaitDuration > 0) ? (
+                        // introduce the entry in the wait queue
+                        Schedule(SchedRelative, mSL_WaitDuration, 0, SchX, 0, 0, 0);
+                    ) : (
+                        // reintroduce the thread in the queue
+                        SchedInsertTail(SchedActivPts, SchX, SchETypeThrd);
+                    );
+                    SchX = -1;
+                ) :
+                (mSL_CodeStop === mSL_RC_Stop) ? (
+                    // finished, free the thread
+                    freeSchedThread(SchX);
+                    // SchedStatus[SchX] &= SchThrNotUsed;
+                    // SchedInsertTail(SchedInactPts, SchX, SchETypeThrd);
+                    mSL_dispatch_entry = SchX = -1;
+                    flagShowMemory = 1;
+                ) :
+                (mSL_CodeStop === mSL_RC_WEvent) ? (
+                    // introduce the entry in the wait queue
+                    SchedInsertTail(SchedEvntPts, SchX, SchETypeThrd);
+                    (FlagsTbVals[Flgs_Thrds] & 2) ? ( // trace flags
+                        sprintf(#s, "Insert in Evnt : ent: %d thrd: %d siz: %d ", SchX, mSL_active_Thread, SchedListSize(SchedEvntPts));
+                        mSL_log(SysLogBox, #s);
+                    );
+                    AAAAA__Schx = Schx;
+                    AAAAA__SchxNum = SchedEntryN[Schx];
+                    SchX = -1;
+                ) :
+                (mSL_CodeStop === mSL_RC_WAITGC) ? (
+                    // introduce in the wait for GC list
+                    SchedInsertTail(SchedLockdPts, SchX, SchETypeThrd);
+                    SchX = -1;
+                ) :
+                (
+                    //AAAAAAAA_Errx = mSL_errX;
+                    thread_error(mSL_active_Thread, mSL_errX, mSL_CodeStop);
+                    // SchedStatus[SchX] &= SchThrNotUsed;
+                    // SchedInsertTail(SchedInactPts, SchX, SchETypeThrd);
+                    // sprintf(#uuu, "End of evaluation [%d]  CR: %d  Err: %d", SchX, mSL_CodeStop, mSL_errX);
+                    (mSL_wbl != 0) ? (
+                        sprintf(#uuu, "Block damaged @ %d", mSL_wbl);mSL_log(SysLogBox, #uuu);
+                    );
+                    mSL_error_analysis(mSL_active_Thread);
+                    SchedFree(SchX);
+                    SchX = -1;
+                    flagShowMemory = 1;
+                    mSL_errC = 0; mSL_errX = 1717; // "error previously detected"
+                    mSL_errX = 0; // let other threads progress
+                );
+                mm_xec_mm[mm_xec_ptr] += mSL_ICount;
+                mm_cyc_mm[mm_cyc_ptr] += mSL_ICount;
+            );
+            mm_dur_mm[mm_cyc_ptr] += time_precise() + timeD - tstrt;
+        );
+        mSL_active_Thread = -1;
+
+        //++++10++++//
+
+
+    ):(
+
+
+        //++++11++++//
+        // random play one clip of current group
+        doPlayCmd(cmdClMdBase + GvPlayTypGroup);
+        //++++11++++//
+
+
+    ););):((xop<14)?((xop<13)?(
+
+
+        //++++12++++//
+        // play a recorded item :
+        doPlayRItem(SchedPar1[SchX], SchedPar2[SchX]); //
+        //++++12++++//
+
+
+    ):(
+
+
+        //++++13++++///
+        // play a frozen sound/sequence
+        pp = SchedPar1[SchX]; // the 88 w block
+        sprintf(#u, "playing a FSND !  -> %d   [%d %d %d %d %d]",  pp,  pp[4],  pp[5],  pp[6],  pp[7],  pp[8]); mSL_log(SysLogBox, #u);
+        pl = pp + lppEPsnd; // list of sounds
+        itm = pp[lppECurItem]; // number of sound to play
+        scnt = pp[lppEElct]; // number of sounds
+        /*
+        // Play first item / selected item
+        doPlayRItem(pp[lppEPsnd+itm], 0); // send the itm FSND reference
+        //  Play a random sound in the list
+        doPlayRItem(pl[irand(pp[lppEElct])], 0); // send a random reference in the list
+        */
+        // Play items in round robin mode
+        doPlayRItem(pp[lppEPsnd+2*itm], 0); // send the itm FSND reference
+        pp[lppECurItem] = (itm + 1) % scnt;
+        //++++13++++//
+
+
+    );):((xop<15)?(
+
+
+        //++++14++++//
+        Err=14;
+        //++++14++++//
+
+
+    ):(
+
+
+        //++++15++++//
+        Err=15;
+        //++++15++++//
+
+
+    ););););):((xop<24)?((xop<20)?((xop<18)?((xop<17)?(
+
+
+        //++++16++++//
+        Err=16;
+        //++++16++++//
+
+
+    ):(
+
+
+        //++++17++++//
+        Err=17;
+        //++++17++++//
+
+
+    );):((xop<19)?(
+
+
+        //++++18++++//
+        Err=18;
+        //++++18++++//
+
+
+    ):(
+
+
+        //++++19++++//
+        Err=19;
+        //++++19++++//
+
+
+    ););):((xop<22)?((xop<21)?(
+
+
+        //++++20++++//
+        Err=20;
+        //++++20++++//
+
+
+    ):(
+
+
+        //++++21++++//
+        Err=21;
+        //++++21++++//
+
+
+    );):((xop<23)?(
+
+
+        //++++22++++//
+        Err=22;
+        //++++22++++//
+
+
+    ):(
+
+
+        //++++23++++//
+        Err=23;
+        //++++23++++//
+
+
+    );););):((xop<28)?((xop<26)?((xop<25)?(
+
+
+        //++++24++++//
+        Err=24;
+        //++++24++++//
+
+
+    ):(
+
+
+        //++++25++++//
+        Err=25;
+        //++++25++++//
+
+
+    );):((xop<27)?(
+
+
+        //++++26++++//
+        Err=26;
+        //++++26++++//
+
+
+    ):(
+
+
+        //++++27++++//
+        Err=27;
+        //++++27++++//
+
+
+    ););):((xop<30)?((xop<29)?(
+
+
+        //++++28++++//
+        Err=28;
+        //++++28++++//
+
+
+    ):(
+
+
+        //++++29++++//
+        Err=29;
+        //++++29++++//
+
+
+    );):((xop<31)?(
+
+
+        //++++30++++//
+        Err=30;
+        //++++30++++//
+
+
+    ):((xop<32)?(
+
+
+        //++++31++++//
+        Err=31;
+        //++++31++++//
+
+
+    ):(
+
+
+        //++++32++++//
+        Err=32;
+        //++++32++++//
+
+
+    ););););););
+
