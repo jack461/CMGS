@@ -1,9 +1,8 @@
 /*
     The GAME MASTER main procedures
     (c)Jean-Jacques Girardot
-    2018-2024
+    2018-2025
 */
-
 
 
 @init
@@ -11,10 +10,13 @@
 
 //    What do you see here ? =>      ⌘ ⌥ ⇧
 // GetProjectPath(#pp); // This would be so nice !
-GameMasterVersion = ui_version(1,7,8);
-#CreationDate = "October 6, 2024";
+GameMasterVersion = ui_version(1,7,9);
+#CreationDate = "October 26, 2025";
 the_host = mSL_KW_GameMaster;
 MACHINE_Type = 'Undf'; F_SEP = '?'; #DIR_SEP = "?";
+p_FODlay_MAC = 8;
+p_FODlay_PC = 0.1;
+p_FODlay_Undf = 0.1;
 
 // Evaluate an approximation of time_precise vs time
 tSUnix = time(); tPLoc = time_precise(); timeD = tSUnix - tPLoc;
@@ -53,27 +55,27 @@ altCap = 0x10 ; // on Mac : "alt"
 GMI('Game', 'Mast', 'er--'); // init memory
 
 
-//AGMW000 = AGMW010 = AGMW020 = AGMW030 = AGMW040 = AGMW050 = AGMW060 = AGMW070 = AGMW080 = AGMW090 = -1;
-//AGMW100 = AGMW110 = AGMW120 = AGMW130 = AGMW140 = AGMW150 = AGMW160 = AGMW170 = AGMW180 = AGMW190 = -1;
-//AGMW200 = AGMW210 = AGMW220 = AGMW230 = AGMW240 = AGMW250 = AGMW260 = AGMW270 = AGMW280 = AGMW290 = -1;
-//AGMW300 = AGMW310 = AGMW320 = AGMW330 = AGMW340 = AGMW350 = AGMW360 = AGMW370 = AGMW380 = AGMW390 = -1;
-//AGMW400 = AGMW410 = AGMW420 = AGMW430 = AGMW440 = AGMW450 = AGMW460 = AGMW470 = AGMW480 = AGMW490 = -1;
-//AGMW500 = AGMW510 = AGMW520 = AGMW530 = AGMW540 = AGMW550 = AGMW560 = AGMW570 = AGMW580 = AGMW590 = -1;
+AGMW000 = AGMW010 = AGMW020 = AGMW030 = AGMW040 = AGMW050 = AGMW060 = AGMW070 = AGMW080 = AGMW090 = -1;
+AGMW100 = AGMW110 = AGMW120 = AGMW130 = AGMW140 = AGMW150 = AGMW160 = AGMW170 = AGMW180 = AGMW190 = -1;
+AGMW200 = AGMW210 = AGMW220 = AGMW230 = AGMW240 = AGMW250 = AGMW260 = AGMW270 = AGMW280 = AGMW290 = -1;
+AGMW300 = AGMW310 = AGMW320 = AGMW330 = AGMW340 = AGMW350 = AGMW360 = AGMW370 = AGMW380 = AGMW390 = -1;
+AGMW400 = AGMW410 = AGMW420 = AGMW430 = AGMW440 = AGMW450 = AGMW460 = AGMW470 = AGMW480 = AGMW490 = -1;
+AGMW500 = AGMW510 = AGMW520 = AGMW530 = AGMW540 = AGMW550 = AGMW560 = AGMW570 = AGMW580 = AGMW590 = -1;
 
 // About string use
-string_cst_first = 10000;
+string_cst_first =  10000;
+string_cst_last  =  90000;
+string_var_first =  90000;
 string_tmp_first = 190000;
-string_var_first = 90000;
-string_cst_last = 90000;
-string_tmp_last = 290000;
-string_var_last = 190000;
+string_var_last  = 190000;
+string_tmp_last  = 290000;
 
 
 
 XV = 1;
 
 gmem[versionGMaster] = GameMasterVersion;
-presetVersionCurrent = ui_version(1,4,5);
+presetVersionCurrent = ui_version(1,4,8);
 presetVersionLoaded = 0;
 presetVersionMask = 0xffff00;
 presetLoadError = 0;
@@ -344,6 +346,7 @@ mSL_Str_TInit(#wstrFirst, #wstrLast); // allocate strings for temporary strings
 //AGMW040 = GMW();
 mSL_Str_PInit(#xstrFirst, #xstrLast); // allocate strings for permanent strings
 mSL_Str_GCPRinit(2000); // GC protected remanent strings
+mSL_Str_MkStructs(); // Build string management structures
 //AGMW050 = GMW();
 //====== GLOBALS ======
 init_idents();
@@ -358,11 +361,15 @@ function guess_machine_type()
         (strlen(#D_GM_Project_Path) != 0) ? (
             (str_getchar(#D_GM_Project_Path, 0, 'cu') === '/') ? (
                 MACHINE_Type = 'Mac'; F_SEP = '/'; #DIR_SEP = "/";
+                lastTgfx = tSUnix; // can start exploring clips
+                parSet(p_FODlay, p_FODlay_MAC);
             ) :
             (str_getchar(#D_GM_Project_Path, 1, 'cu') === ':') ? (
                 MACHINE_Type = 'PC'; F_SEP = '\\'; #DIR_SEP = "\\";
+                parSet(p_FODlay, p_FODlay_PC);
             ) : (
                 MACHINE_Type = 'Undf'; F_SEP = '?'; #DIR_SEP = "?";
+                parSet(p_FODlay, p_FODlay_Undf);
             );
         );
     );
@@ -415,7 +422,8 @@ idx += 64; // should we need more ?
 // 48 used on the strings provided
 (idx >= K_savedStringsCnt) ? err_sys_ini = 9927; // preset string array overflow
 //====== work area for "ui-lib-JJ.jsfx-inc" ======
-//AGMW060 = GMW();
+//
+AGMW060 = GMW();
 ui_lib_start = mSL_StM_BlockStart('ulib');
 //AGMW070 = GMW();
 // Graphic set-up
@@ -438,7 +446,8 @@ ui_MaxSize1Pane = 16 * ui_MinSize1Pane; // max size for 1 pane
 ui_BestSize1Pane = 0|(16 * ui_MinSize1Pane); // best size for 1 pane
 ui_MinSubColSize = 0|(ui_MinSize1Pane/2.5);
 ui_lib_JJ_GUI_init(studPrefDispSize);
-//AGMW110 = GMW();
+//
+AGMW110 = GMW();
 
 
 
@@ -748,6 +757,7 @@ SensorsCfVersion = 0; // version/identification of the sensors configuration fil
 
 
 lastTime = 0; // last "known" Unix time
+lastTgfx = 0;
 lastTick = lastGTick = 0;
 lastErrSignal = 0;
 lastDraw = 0;
@@ -1421,6 +1431,7 @@ local (tmppath, fhd)
                 );
             );
             (fhd >= 0) ? file_close(fhd);
+            parSet(p_FODlay, p_FODlay_MAC);
             updatePaths();
         );
     ) :
@@ -1462,6 +1473,7 @@ local (tmppath, fhd)
                 );
             );
             (fhd >= 0) ? file_close(fhd);
+            parSet(p_FODlay, p_FODlay_PC);
             updatePaths();
         );
     );
@@ -1648,13 +1660,14 @@ local (cpath, i, j, state, clNum, serr)
             );
         );
         // Start updating clipset
-        (parV(p_FODlay) <= 0) ? (
+        (parV(p_FODlay) <= 10) ? (
             (MACHINE_Type === 'Mac') ? (
-                parSet(p_FODlay, 1.00);
+                parSet(p_FODlay, p_FODlay_MAC);
             ) : (
-                parSet(p_FODlay, 0.01);
+                parSet(p_FODlay, p_FODlay_PC);
             );
         );
+        lastTgfx = tUnix + 2;
     );
     (mSL_C_fH >= 0) ? (file_close(mSL_C_fH); mSL_C_fH = -1;);
     ClCheckAct = 1;
@@ -2022,10 +2035,10 @@ Pr7_SensorSize = 23;
 Pr7_SensorNum = 24;
 Pr7_FStrAliasesNum = 25;
 Pr7_FStrAliasesCnt = 26;
-Pr7_MACH_Type = 27;
+Pr7_MACHINE_Type = 27;
 Pr7_Partial0 = 32; // size: BKEsize = 12 values
 
-BKEsize = 12; // size of a bank entry
+// BKEsize = 12; // size of a bank entry
 Pr7_StudConf = Pr7_Partial0 + BKEsize;  // up to 8 panes
 Pr7_StudRat = Pr7_StudConf + 8;  // size : 8 * 4
 Pr7_Free = Pr7_StudRat + 8 * 4;
@@ -2727,8 +2740,6 @@ paramDynBstMax = make_array(32); // "appropriate" maximum values for parameters
 #parId = "-";
 
 // Hash table for parameters coded names
-//paramHashIds = make_array(paramHSiz);
-//paramHashNbs = make_array(paramHSiz);
 paramHashTbl = mSL_makeHT(paramHSiz, paramHStep);
 paramHStep = paramHashTbl[-1]; // in case the func updated the step
 
@@ -2821,6 +2832,112 @@ idx += 1; // Menu item count
 bplSLMenu = make_jmenu(
             ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "Moves", idx, bplMenuNames);
+
+
+// =====================
+// Clips Selection Right Click Menu
+
+clipSelNames = make_array(20);
+idx = -1;
+clipSelNames[idx += 1] = "Select";
+csrcSelect = idx+1; // actual menu nums are NOT name indices !
+clipSelNames[idx += 1] = "Play";
+csrcPlay = idx+1;
+clipSelNames[idx += 1] = "Solo play";
+csrcSPlay = idx+1;
+clipSelNames[idx += 1] = "Play and lock";
+csrcLPlay = idx+1;
+clipSelNames[idx += 1] = "Solo play and lock";
+csrcSLPlay = idx+1;
+clipSelNames[idx += 1] = "Toggle display";
+csrcTDisp = idx+1;
+clipSelNames[idx += 1] = "Reset entry";
+csrcREnts = idx+1;
+clipSelNames[idx += 1] = "Reset entries sequence";
+csrcREntSeq = idx+1;
+clipSelNames[idx += 1] = "Toggle on/off entry";
+csrcTEnts = idx+1;
+clipSelNames[idx += 1] = "Toggle on/off entries sequence";
+csrcTEntSeq = idx+1;
+clipSelNames[idx += 1] = "Remove alias";
+csrcRemAlias = idx+1;
+clipSelNames[idx += 1] = "Remove aliases sequence";
+csrcRemAliasSeq = idx+1;
+clipSelNames[idx += 1] = "Check entry";
+csrcChkEntry = idx+1;
+clipSelNames[idx += 1] = "Check entries sequence";
+csrcChkEntSeq = idx+1;
+clipSelNames[idx += 1] = "Background recheck all clips";
+csrcBgRecheck = idx+1;
+
+idx += 1; // Menu item count
+
+clipSelRCMenu = make_jmenu(
+    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+    "ClipSels", idx, clipSelNames);
+
+
+// =====================
+// Sound Units Right Click Menu
+
+sunSelNames = make_array(32);
+idx = -1;
+sunSelNames[idx += 1] = "Lock all, stop autoplay";
+sunAllPckStA = idx+1;
+sunSelNames[idx += 1] = "Unlock all, start autoplay";
+sunAllUnlckAS = idx+1;
+sunSelNames[idx += 1] = "Lock";
+sunPLock = idx+1; // actual menu nums are NOT name indices !
+sunSelNames[idx += 1] = "Unlock";
+sunUPLock = idx+1;
+sunSelNames[idx += 1] = "Solo";
+sunSolo = idx+1;
+sunSelNames[idx += 1] = "Stop";
+sunStop = idx+1;
+sunSelNames[idx += 1] = "Restart";
+sunRestart = idx+1;
+sunSelNames[idx += 1] = "Dyn. Edit";
+sunEdit = idx+1;
+sunSelNames[idx += 1] = "Toggle mute";
+sunMute = idx+1;
+sunSelNames[idx += 1] = "Toggle autoplay";
+sunTgAuto = idx+1;
+sunSelNames[idx += 1] = "Lock all";
+sunAllLck = idx+1;
+sunSelNames[idx += 1] = "Unlock all";
+sunAllUnlck = idx+1;
+sunSelNames[idx += 1] = "Mute all";
+sunAllMute = idx+1;
+sunSelNames[idx += 1] = "Unmute all";
+sunAllUnmute = idx+1;
+sunSelNames[idx += 1] = "Player/Track show";
+sunShPlTr = idx+1;
+sunSelNames[idx += 1] = "Clip/Unit show";
+sunShClUn = idx+1;
+//
+sunSelNames[idx += 1] = ">Volume set...";
+sunSetVol = idx + 1;
+sunSelNames[idx += 1] = "Full";
+sunSelNames[idx += 1] = "Half";
+sunSelNames[idx += 1] = "Reduced";
+sunSelNames[idx += 1] = "Fast volume transition";
+sunSelNames[idx += 1] = "Standard volume transition";
+sunSelNames[idx += 1] = "<Slow volume transition";
+sunSetVolLast = idx;
+//
+sunSelNames[idx += 1] = ">Show unit in...";
+sunGenDisp = idx + 1;
+sunSelNames[idx += 1] = "Displayer A";
+sunSelNames[idx += 1] = "Displayer B";
+sunSelNames[idx += 1] = "Displayer C";
+sunSelNames[idx += 1] = "<Displayer D";
+sunGenDispLast = idx;
+
+idx += 1; // Menu item count
+
+sunRCMenu = make_jmenu(
+    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+    "Sounds Units", idx, sunSelNames);
 
 /*
     Displaying a parameter in a box
@@ -3127,8 +3244,7 @@ dcbUXRefsSiz = 64;
 blockUsrCode = make_array(dcbUXRefsSiz);
 blockUsrDesc = make_array(dcbUXRefsSiz);
 
-function
-checkUsrMods()
+function checkUsrMods()
 local (blu, i, k)
 (
     dcbUModsCnt = i = 0;
@@ -3140,8 +3256,7 @@ local (blu, i, k)
     );
 );
 
-function
-deleteUsrMods()
+function deleteUsrMods()
 local (blu, i, k)
 (
     memset(blockUsrNames, 0, dcbUModsSiz);
@@ -3153,8 +3268,7 @@ local (blu, i, k)
     memset(blockUsrDesc, 0, dcbUXRefsSiz);
 );
 
-function
-mkModuleMenu()
+function mkModuleMenu()
 local (i, tmp, bln, blu)
 (
 
@@ -6441,6 +6555,7 @@ local(Xkmd, z, v1, v2, v3, part, bladd, klc, khc, newpart, primeX, k, p, pc, ic,
             // send play mode parameters to the unit
 
             // Choose a Clip
+            0 ? (sprintf(#s, "   clip Range [%d | %d]", klc, khc); mSL_log(SysLogBox, #s););
             (klc === -1) ? (
                 // select a clip in a set
                 clcck = clipFromSet(khc); GvErrP2 = ClSet_ErrRe; GvErrP3 = khc;
@@ -6503,8 +6618,8 @@ local(Xkmd, z, v1, v2, v3, part, bladd, klc, khc, newpart, primeX, k, p, pc, ic,
                     clcck = clOffset;  // unique clip in the set
                     clRandCB2 = 1;
                 );
-                0 ? (sprintf(#s, "   clip From Range [%d %d => %d]", klc, khc, clcck); mSL_log(SysLogBox, #s););
             );
+            1 ? (sprintf(#s, "   clip From Range [%d | %d => %d]", klc, khc, clcck); mSL_log(SysLogBox, #s););
 
             // clcck is our clip number, or, alas, -1 if none...
             gmem[GPlUnit+RCB_ClipNb] = clcck; // save it for info
@@ -8522,8 +8637,8 @@ PlayLogSetUp();
 
 PlRecCurrent = PlLogCurrent = PlLogMain;
 // Sizes of Allocated arrays for the Compiler and the Evaluator
-C_compSize = 32 * 1024; // size : 64 kW [kilo words, not kilo watts]
-C_progSize = 32 * 1024; // size  for the evaluator
+C_compSize = 64 * 1024; // size : 64 kW [kilo words, not kilo watts]
+C_progSize = 64 * 1024; // size  for the evaluator
 ui_jmake_arraymax = 0x7FFFFFF; // "no" limit in the size of an array...
 
 // Then, initialize all structures of the compiler.
@@ -8543,6 +8658,7 @@ mm_limit_b[0] = 'END_'; mm_limit_b[1] = 'MEMR';
 //AGMW165 = GMW();;
 
 // Build the memory
+mSL_errX = mSL_errC = 0;
 mSL_current_memory = mSL_new_memory = 0; // make sure it is clear
 AAAAC_5 = mSL_make_memory(C_memrArea, C_memrSize);
 
@@ -8553,17 +8669,34 @@ mm_highmem = mSL_new_memory + mSL_new_memory[mSL_MM_HighAd];
 mm_show_ttf = mm_sizmem = mSL_new_memory[mSL_MM_MemSiz];//
 //AGMW166 = GMW();
 
-// Try to provide an independent main symbol table for the compiler - "var" declarations
+
+mm_limit_f = make_array(2);
+mm_limit_f[0] = 'STRT'; mm_limit_f[1] = 'COMP';
+
+void_pointer = make_array(2);
+void_pointer[0] = 0;
+void_pointer[1] = 0;
+
+// Provide an independent main symbol table for the compiler - "var" declarations
 aprime = 3313;
 size = 4 * (aprime + 1);
 mem = make_array(size + 4);
 A_mSL_GCTab = mSL_buildGVTab(mem, size, aprime);
 
-// Try to provide an independent local symbol table for the compiler - "loc" declarations
+
+// Provide an independent local symbol table for the compiler - "loc" declarations
 aprime = 191;
 size = 4 * (aprime + 1);
 mem = make_array(size + 4);
 A_mSL_LCTab = mSL_buildLCTab(mem, size, aprime);
+
+
+
+// Provide a common external symbol table for the compiler - "ext" declarations
+A_mSL_EXTab = mSL_buildEXTab(47);
+// Provide a common external symbol table for the compiler - "ptr" declarations
+A_mSL_PTTab = mSL_buildPTTab(47);
+
 // Build the compiler
 AAAAC_6 = mSL_make_compiler(C_compArea, C_compSize);
 // Then, the interpreter
@@ -8572,6 +8705,9 @@ mSL_new_thread = 0;
 
 // define our new extensions
 mSL_define_extensions();
+
+
+
 // share some values,
 // mSL_define_global("extarray", tab); // define an array
 // mSL_define_pointer("extpoint", tab+2); // and a pointer
@@ -8585,15 +8721,22 @@ mSL_define_global("SYSFlgs", FlagsTbVals); // last MIDI command
 mm_limit_g = make_array(2);
 mm_limit_g[0] = 'END_'; mm_limit_g[1] = 'COMP';
 
+
+
+
+
 mm_highblocks = make_array(2); // no block with memory references beyond that
+mm_highblocks[0] = 'High'; mm_highblocks[1] = '_Mem';
 
 
 
 
+
+// The event operations
+<? include("GM-Libs/mSL_Events.jsfx-inc"); ?>
 
 // The threads operations
 <? include("GM-Libs/mSL_Threads.jsfx-inc"); ?>
-
 
 // The Garbage Collector
 <? include("GM-Libs/mSL_Garbage_Collector.jsfx-inc"); ?>
@@ -8954,9 +9097,9 @@ function
 Set_Table(tbl)
 local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback, rd_err, pt, zpt, totsize, tout, pttr,
     Cl_n, Cl_dB, ii, s1, s2, s3, s4, s5, ty, n, ps, cp, cnt, kct, vmin, vmax, pos, stnext, kmax, cvl, LWA, LWAsiz,
-    xp1, xp2, AddT)
+    xp1, xp2, AddT, flgneg)
 (
-    xp1 = xp2 = cvl = ptr = 0;
+    xp1 = xp2 = cvl = ptr = flgneg = 0;
     LWA = 0; LWAsiz = 32000; // a large work area
     itc = tbl[-1]; // item count
     xmct = 2 * itc; // max loop count
@@ -8969,6 +9112,9 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
     while ((ptr < itc) && (rd_err === 0) && (xmct > 0)) (
         xmct -= 1;
 	    cwd = tbl[lptr = ptr]; // current word
+        (cwd === mSL_cstComma) ? (
+            ptr +=1; cwd = tbl[lptr = ptr]; // skip ","
+        );
         (flgs & 4) ? (
             // print the status
             sprintf(#s, "State %d - %d/%d - Input: %s", st, ptr, itc, mSL_edit_value(#u, cwd));
@@ -10600,11 +10746,19 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
 
             //—-44-+=//
             // Expect one decimal value in dB
-            ((cwd >= -40) && (cwd <= 24)) ? (
-                Cl_dB = cwd;  st = 45;
-                ptr +=1;
-            ) : (
-                STBerr = 0044;
+            (cwd === mSL_cstMinus) ? (
+                flgneg = 1; ptr +=1;
+            ) :
+            (
+                (flgneg) ? (cwd = - cwd;) ;
+                ((cwd >= -40) && (cwd <= 24)) ? (
+                    flgneg = 0;
+                    Cl_dB = cwd;  st = 45;
+                    ptr +=1;
+                ) :
+                (
+                    STBerr = 0044;
+                );
             );
             //—-44-+=//
 
@@ -10676,12 +10830,19 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
             //==================================================================
 
             //—-42-+=// st = 42
-            ((cwd == (0|cwd)) && (cwd >= vmin) && (cwd <= vmax)) ? (
-                AddT[pos] = cwd;
-                st = stback; ptr +=1;
+            (cwd === mSL_cstMinus) ? (
+                flgneg = 1; ptr +=1;
             ) :
             (
-                STBerr = 0042;
+                (flgneg) ? (cwd = - cwd;) ;
+                ((cwd == (0|cwd)) && (cwd >= vmin) && (cwd <= vmax)) ? (
+                    AddT[pos] = cwd;
+                    flgneg = 0;
+                    st = stback; ptr +=1;
+                ) :
+                (
+                    STBerr = 0042;
+                );
             );
             //—-42-+=//
 
@@ -10774,26 +10935,40 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
         ):(
 
             //—-40-+=// st = 40
-            ((cwd == (0|cwd)) && (cwd >= vmin) && (cwd <= vmax) && (kmax > 0)) ? (
-                AddT[pos] = cwd;
-                kmax -= 1; pos += 1;
-                st = 40; ptr +=1;
+            (cwd === mSL_cstMinus) ? (
+                flgneg = 1; ptr +=1;
             ) :
             (
-                st = 41;
+                (flgneg) ? (cwd = - cwd;) ;
+                ((cwd == (0|cwd)) && (cwd >= vmin) && (cwd <= vmax) && (kmax > 0)) ? (
+                    AddT[pos] = cwd;
+                    kmax -= 1; pos += 1;
+                    flgneg = 0;
+                    st = 40; ptr +=1;
+                ) :
+                (
+                    st = 41;
+                );
             );
             //—-40-+=//
 
         );););):((st&0x4)?((st&0x2)?((st&0x1)?(
 
             //—-39-+=// st = 39
-            ((cwd == (0|cwd)) && (cwd >= vmin) && (cwd <= vmax)) ? (
-                AddT[pos+1] = AddT[pos] = cwd;
-                kmax -= 1; pos += 1;
-                st = 40; ptr +=1;
+            (cwd === mSL_cstMinus) ? (
+                flgneg = 1; ptr +=1;
             ) :
             (
-                STBerr = 0039;
+                (flgneg) ? (cwd = - cwd;) ;
+                ((cwd == (0|cwd)) && (cwd >= vmin) && (cwd <= vmax)) ? (
+                    AddT[pos+1] = AddT[pos] = cwd;
+                    kmax -= 1; pos += 1;
+                    flgneg = 0;
+                    st = 40; ptr +=1;
+                ) :
+                (
+                    STBerr = 0039;
+                );
             );
             //—-39-+=//
 
@@ -10913,12 +11088,19 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
 
             //—-33-+=// st = 33
             // Get second of 2 integer values
-            ((cwd == (0|cwd)) && (cwd >= 0) && (cwd < vmax) && (kmax > 0)) ? (
-                AddT[pos] = cwd; pos += 1;
-                ptr +=1; kmax -= 1;
-            ) : (
-                // probably finished with that
-                st = stback; // keep the input, go back to
+            (cwd === mSL_cstMinus) ? (
+                flgneg = 1; ptr +=1;
+            ) :
+            (
+                (flgneg) ? (cwd = - cwd;) ;
+                ((cwd == (0|cwd)) && (cwd >= 0) && (cwd < vmax) && (kmax > 0)) ? (
+                    AddT[pos] = cwd; pos += 1;
+                    flgneg = 0;
+                    ptr +=1; kmax -= 1;
+                ) : (
+                    // probably finished with that
+                    st = stback; // keep the input, go back to
+                );
             );
             //—-33-+=//
 
@@ -10926,11 +11108,18 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
 
             //—-32-+=//
             // Get first of 2 integer values
-            ((cwd == (0|cwd)) && (cwd >= 0) && (cwd < vmax)) ? (
-                AddT[pos] = cwd; pos += 1;
-                ptr +=1; st = 33;
-            ) : (
-                STBerr = 0032;
+            (cwd === mSL_cstMinus) ? (
+                flgneg = 1; ptr +=1;
+            ) :
+            (
+                (flgneg) ? (cwd = - cwd;) ;
+                ((cwd == (0|cwd)) && (cwd >= 0) && (cwd < vmax)) ? (
+                    AddT[pos] = cwd; pos += 1;
+                    flgneg = 0;
+                    ptr +=1; st = 33;
+                ) : (
+                    STBerr = 0032;
+                );
             );
             //—-32-+=//
 
@@ -10938,11 +11127,18 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
 
             //—-31-+=//
             // Expect one single integer value
-            ((cwd == (0|cwd)) && (cwd >= 0) && (cwd < vmax)) ? (
-                AddT[pos] = cwd;
-                ptr +=1; st = stback;
-            ) : (
-                STBerr = 0031;
+            (cwd === mSL_cstMinus) ? (
+                flgneg = 1; ptr +=1;
+            ) :
+            (
+                (flgneg) ? (cwd = - cwd;) ;
+                ((cwd == (0|cwd)) && (cwd >= 0) && (cwd < vmax)) ? (
+                    AddT[pos] = cwd;
+                    flgneg = 0;
+                    ptr +=1; st = stback;
+                ) : (
+                    STBerr = 0031;
+                );
             );
             //—-31-+=//
 
@@ -10952,7 +11148,7 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
             // All Space Mode internal defs.
             stback = 30; // return there
             (cwd === mSL_KW_HPSet) ? (
-                ptr +=1; st = 32; // get one to for values
+                ptr +=1; st = 32; // get one to four values
                 pos = idx_Sm_HPSet1; // in this position
                 vmax = HPPSize; kmax = 4;
             ) :
@@ -11130,12 +11326,18 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
                 HPConfCheck(); // Count and check HP and configurations
                 st = 1; ptr +=1; // Return to step 1
             ) :
-            ((cwd == (0|cwd)) && (((cwd > 0) && (cwd < HPPSize)) || ((cwd < 0) && (cwd > - HPPSize)))) ? (
-                // can be a conf number of a conf set number
-                pt1st = ptr; cnt = 0; cvl = cwd; cid = abs(cwd); st = 25; ptr +=1;
+            (cwd === mSL_cstMinus) ? (
+                flgneg = 1; ptr +=1;
             ) :
             (
-                STBerr = 0024;
+                (flgneg) ? (cwd = - cwd;) ;
+                ((cwd == (0|cwd)) && (((cwd > 0) && (cwd < HPPSize)) || ((cwd < 0) && (cwd > - HPPSize)))) ? (
+                    // can be a conf number or a conf set number
+                    pt1st = ptr; flgneg = cnt = 0; cvl = cwd; cid = abs(cwd); st = 25; ptr +=1;
+                ) :
+                (
+                    STBerr = 0024;
+                );
             );
             //—-24-+=//
 
@@ -11144,12 +11346,19 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
 
             //—-23-+=//
             // Expect other integer values
-            ((cwd == (0|cwd)) && (cwd >= vmin) && (cwd <= vmax) && (kmax > 0)) ? (
-                AddT[pos] = cwd;
-                ptr +=1; pos += 1;
-                kmax -= 1;
-            ) : (
-                st = stback; // else, get back
+            (cwd === mSL_cstMinus) ? (
+                flgneg = 1; ptr +=1;
+            ) :
+            (
+                (flgneg) ? (cwd = - cwd;) ;
+                ((cwd == (0|cwd)) && (cwd >= vmin) && (cwd <= vmax) && (kmax > 0)) ? (
+                    AddT[pos] = cwd;
+                    ptr +=1; pos += 1;
+                    kmax -= 1;
+                    flgneg = 0;
+                ) : (
+                    st = stback; // else, get back
+                );
             );
             //—-23-+=//
 
@@ -11157,12 +11366,19 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
 
             //—-22-+=// st = 22
             // Expect one first integer value
-            ((cwd == (0|cwd)) && (cwd >= vmin) && (cwd <= vmax) && (kmax > 0)) ? (
-                AddT[pos] = cwd;  st = 23; // next state
-                ptr +=1; pos += 1;
-                kmax -= 1;
-            ) : (
-                STBerr = 0022;
+            (cwd === mSL_cstMinus) ? (
+                flgneg = 1; ptr +=1;
+            ) :
+            (
+                (flgneg) ? (cwd = - cwd;) ;
+                ((cwd == (0|cwd)) && (cwd >= vmin) && (cwd <= vmax) && (kmax > 0)) ? (
+                    AddT[pos] = cwd;  st = 23; // next state
+                    ptr +=1; pos += 1;
+                    kmax -= 1;
+                    flgneg = 0;
+                ) : (
+                    STBerr = 0022;
+                );
             );
             //—-22-+=//
 
@@ -11170,12 +11386,19 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
 
             //—-21-+=//
             // Expect other decimal values
-            ((cwd >= vmin) && (cwd <= vmax) && (kmax > 0)) ? (
-                AddT[pos] = cwd;
-                ptr +=1; pos += 1;
-                kmax -= 1;
-            ) : (
-                st = stback; // else, get back
+            (cwd === mSL_cstMinus) ? (
+                flgneg = 1; ptr +=1;
+            ) :
+            (
+                (flgneg) ? (cwd = - cwd;) ;
+                ((cwd >= vmin) && (cwd <= vmax) && (kmax > 0)) ? (
+                    AddT[pos] = cwd;
+                    ptr +=1; pos += 1;
+                    kmax -= 1;
+                    flgneg = 0;
+                ) : (
+                    st = stback; // else, get back
+                );
             );
             //—-21-+=//
 
@@ -11183,12 +11406,20 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
 
             //—-20-+=// st = 20
             // Expect one first decimal value
-            ((cwd >= vmin) && (cwd <= vmax) && (kmax > 0)) ? (
-                AddT[pos] = cwd;  st = 21;
-                ptr +=1; pos += 1;
-                kmax -= 1;
-            ) : (
-                STBerr = 0020;
+            (cwd === mSL_cstMinus) ? (
+                flgneg = 1; ptr +=1;
+            ) :
+            (
+                (flgneg) ? (cwd = - cwd;) ;
+                ((cwd >= vmin) && (cwd <= vmax) && (kmax > 0)) ? (
+                    AddT[pos] = cwd;  st = 21;
+                    ptr +=1; pos += 1;
+                    kmax -= 1;
+                    flgneg = 0;
+                ) :
+                (
+                    STBerr = 0020;
+                );
             );
             //—-20-+=//
 
@@ -11196,11 +11427,18 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
 
             //—-19-+=//  st = 19
             // Expect one single decimal value
-            ((cwd >= vmin) && (cwd <= vmax)) ? (
-                AddT[pos] = cwd;
-                ptr +=1; st = stback;
-            ) : (
-                STBerr = 0019;
+            (cwd === mSL_cstMinus) ? (
+                flgneg = 1; ptr +=1;
+            ) :
+            (
+                (flgneg) ? (cwd = - cwd;) ;
+                ((cwd >= vmin) && (cwd <= vmax)) ? (
+                    AddT[pos] = cwd;
+                    flgneg = 0;
+                    ptr +=1; st = stback;
+                ) : (
+                    STBerr = 0019;
+                );
             );
             //—-19-+=//
 
@@ -11208,11 +11446,18 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
 
             //—-18-+=//
             // Expect one single integer value
-            ((cwd == (0|cwd)) && (cwd >= 0) && (cwd <= vmax)) ? (
-                AddT[pos] = cwd;
-                ptr +=1; st = stback;
-            ) : (
-                STBerr = 0018;
+            (cwd === mSL_cstMinus) ? (
+                flgneg = 1; ptr +=1;
+            ) :
+            (
+                (flgneg) ? (cwd = - cwd;) ;
+                ((cwd == (0|cwd)) && (cwd >= 0) && (cwd <= vmax)) ? (
+                    AddT[pos] = cwd;
+                    flgneg = 0;
+                    ptr +=1; st = stback;
+                ) : (
+                    STBerr = 0018;
+                );
             );
             //—-18-+=//
 
@@ -11463,12 +11708,19 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
                     // Parse it...
                 );
             ) :
-            (cwd >= -1000) ? (
-                // consider it as a command/parameter
-                // this includes keywords, macro names, etc.
-                kct += 1; ptr +=1;
-            ) : (
-                STBerr = 0012;
+            (cwd === mSL_cstMinus) ? (
+                flgneg = 1; ptr +=1;
+            ) :
+            (
+                (flgneg) ? (cwd = - cwd;) ;
+                (cwd >= -1000) ? (
+                    // consider it as a command/parameter
+                    // this includes keywords, macro names, etc.
+                    kct += 1; ptr +=1;
+                    flgneg = 0;
+                ) : (
+                    STBerr = 0012;
+                );
             );
             //—-12-+=//
 
@@ -11730,10 +11982,6 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
     rd_err;
 
 );
-
-
-
-<? include("GM-Libs/mSL_Events.jsfx-inc"); ?>
 
 
 
@@ -13989,6 +14237,7 @@ local (res, kw, id, ent, k, p1, p2, p3)
 /*
     Threads management = single operation on thread
 */
+/*
 function
 mSL_thread_ops(argc, argv)
 local (res, k, kw, ent)
@@ -14104,7 +14353,7 @@ local (res, k, kw, ent)
     );
     res;
 );// mSL_thread_ops
-
+*/
 
 /*
     Play operations = single operation for playing in mSL
@@ -14382,7 +14631,7 @@ local (pfid, ref, addr, res, flg, kod, size, s, ip, k, k2, pt, kid, pid)
 );//mSL_get
 
 /*
-    Set the value of field ; return previous one
+    Set the value of a field ; return previous one
 */
 function
 mSL_set(argc, argv)
@@ -15460,6 +15709,8 @@ function after_load_actions()
         strcpy(#D_clNameFormat, #D_clDirectory);
         strcat(#D_clNameFormat, #DIR_SEP);
         strcat(#D_clNameFormat, #D_clEdFormat);
+        sprintf(#s, "Path: %s   Machine: %s", #D_GM_Project_Path, ((MACHINE_Type === 'Mac' ? "Mac" : "PC")));
+        mSL_log(SysLogBox, #s);
     );
     // +++ Temporary flags setting while debugging
     FlagsTbVals[Flgs_Inits] = 3;
@@ -15473,10 +15724,23 @@ function after_load_actions()
     //sprintf(#dbg_trace2, "Flags:  0x%X  0x%X  0x%X  0x%X", FlagsTbVals[Flgs_Play], FlagsTbVals[Flgs_Plyers],
     //                      FlagsTbVals[Flgs_ConfLd],FlagsTbVals[Flgs_TblUpd] );
     //  OpenClipList(); // reconstitute clips
+
+    (MACHINE_Type === 'Mac') ? (
+        parSet(p_FODlay, p_FODlay_MAC);
+        lastTgfx = tUnix;
+    ) : (
+        parSet(p_FODlay, p_FODlay_PC);
+        lastTgfx = tUnix + 60;
+    );
+    ClCheckFlag = ClCheckView = ClCheckAct = 1;
 );
 
 //sprintf(#dbg_trace0, "Memory1: %d  %s  %s  %s", blockMemory1, MM1, blockDispNames[blockMemory1], memoryBox1[5]);
 //sprintf(#dbg_trace1, "Memory2: %d  %s  %s  %s", blockMemory2, MM2, blockDispNames[blockMemory2], memoryBox2[5]);
+
+
+parSet(p_FODlay, p_FODlay_Undf);
+lastTgfx = tSUnix + 180; // wait for 3' before checking clips
 
 GMW2("Init MAIN");
 
@@ -16854,7 +17118,7 @@ timeFlag2 ? (
             ) : (
                 clearClipsCharacteristics();
                 mSL_log(SysLogBox, "Clips Modifiers reinitialized");
-                flagRunClipsCheck = 30;
+                flagRunClipsCheck = 60;
             );
         ) :
 
@@ -17014,7 +17278,7 @@ timeFlag2 ? (
 
         (flagClipsCheck != 0) && (flagDoLoadScripts != 0) ? (
             flagClipsCheck = 0;
-            flagRunClipsCheck = 34;
+            flagRunClipsCheck = 60;
         ) :
 
         (
@@ -18216,7 +18480,6 @@ loadMode ? (
 
     doLoad = 1;
     // First, load the block
-    // file_mem(0, serialBlock, serialSize);
     file_mem(0, serialBlock, serialHead);
     // Then update values from preset
 
@@ -18264,6 +18527,7 @@ loadMode ? (
         UplayControl = serialBlock[Pr7_UplayControl];
         padSensShowSiz = serialBlock[Pr7_SensorSize]; setSensorSize(padSensShowSiz);
         MIDI_Sens_mode = serialBlock[Pr7_SensorNum];
+        MACHINE_Type = serialBlock[Pr7_MACHINE_Type];
         // load partial zero
         memcpy(BKTab, serialBlock+Pr7_Partial0, BKEsize); // currently 12 values
         0 ? (
@@ -18429,6 +18693,7 @@ loadMode ? (
     serialBlock[Pr7_UplayControl] = UplayControl;
     serialBlock[Pr7_SensorSize] = padSensShowSiz;
     serialBlock[Pr7_SensorNum] = MIDI_Sens_mode;
+    serialBlock[Pr7_MACHINE_Type] = MACHINE_Type;
     // save partial zero
     memcpy(serialBlock+Pr7_Partial0, BKTab, BKEsize);
     // Save strings
@@ -19014,7 +19279,16 @@ while (efi) (
 );
 
 flagRunClipsCheck ? (
-    ((flagRunClipsCheck -= 1) <= 0) ? OpenClipList();
+    ((flagRunClipsCheck -= 1) <= 0) ? (
+        OpenClipList();
+        (parV(p_FODlay) <= 10) ? (
+            (MACHINE_Type === 'Mac') ? (
+                parSet(p_FODlay, p_FODlay_MAC);
+            ) : (
+                parSet(p_FODlay, p_FODlay_PC);
+            );
+        );
+    );
 );
 
 // Read & Print a text file
@@ -21527,7 +21801,136 @@ local(iw, ix, iy, iz, str, uv, uw, ux, zz, zzmi, m, mcc, r, cc, sr, ds, dm, curB
                         ) :
                         //============================ Right click
                         (m === 0x02) ? (  // click droit : select
-                            cellAlt = xcell; //
+                            xx = control_jmenu(clipSelRCMenu);
+                            (xx === csrcSelect) ? (
+                                cellAlt = xcell; //
+                            ) :
+                            (xx === csrcPlay) ? (
+                                GvPlayCl3 = xcell;
+                                Kbtp = cmdClMdBase | GvPlayClipClicked | FLdoForcePlay;
+                            ) :
+                            (xx === csrcSPlay) ? (
+                                // Stop others, play
+                                parSet(p_GvAutoMd, 0); // Auto Play off
+                                doActivePlayer(-1, KmdQStop, 0); // stop all players
+                                GvPlayCl3 = xcell; // select this clip
+                                Kbtp = cmdClMdBase | GvPlayClipClicked | FLdoForcePlay;
+                            ) :
+                            (xx === csrcLPlay) ? (
+                                // Lock and play
+                                GvPlayCl3 = xcell;
+                                Kbtp = cmdClMdBase | GvPlayClipClicked | FLdoForcePlay | FLdoForceLock;
+                            ) :
+                            (xx === csrcSLPlay) ? (
+                                // Stop others, play and lock
+                                parSet(p_GvAutoMd, 0); // Auto Play off
+                                doActivePlayer(-1, KmdQStop, 0); // stop all players
+                                GvPlayCl3 = xcell;
+                                Kbtp = cmdClMdBase | GvPlayClipClicked | FLdoForcePlay | FLdoForceLock;
+                            ) :
+                            (xx === csrcTDisp) ? (
+                                //  toggle display mode
+                                showClNbrs = (showClNbrs + 1) % showStates ;
+                            ) :
+                            (xx === csrcREnts) ? (
+                                //  reset this entry
+                                gmem[clInfStart+xcell] = 0;
+                                gmem[clClInfos+xcell] = 0;
+                                gmem[clClDurations+xcell] = 0;
+                            ) :
+                            (xx === csrcRemAlias) ? (
+                                //  remove the alias and clear the entry
+                                gmem[clClAlias+xcell] = 0;
+                                gmem[clInfStart+xcell] = 0;
+                                gmem[clClInfos+xcell] = 0;
+                                gmem[clClDurations+xcell] = 0;
+                            ) :
+                            (xx === csrcTEnts) ? (
+                                //  validate/unvalidate the entry
+                                (gmem[clInfStart+xcell] < -10000) ? (
+                                    gmem[clInfStart+xcell] += 20000;
+                                ) : (
+                                    gmem[clInfStart+xcell] -= 20000;
+                                );
+                            ) :
+                            (xx === csrcREntSeq) ? (
+                                // reset the aliases between here and previously selected one
+                                ((cellAlt >= 0) && (cellAlt < clTSize)) ? (
+                                    ix = max(0, min(clTSize-1, min(cellAlt, xcell)));
+                                    iy = max(0, min(clTSize-1, max(cellAlt, xcell)));
+                                    loop (iy-ix+1,
+                                        gmem[clClAlias+ix] = 0;
+                                        gmem[clInfStart+ix] = 0;
+                                        gmem[clClInfos+ix] = 0;
+                                        gmem[clClDurations+ix] = 0;
+                                        ix += 1;
+                                    );
+                                );
+                            ) :
+                            (xx === csrcRemAliasSeq) ? (
+                                // reset all enties between here and previously selected one
+                                ((cellAlt >= 0) && (cellAlt < clTSize)) ? (
+                                    ix = max(0, min(clTSize-1, min(cellAlt, xcell)));
+                                    iy = max(0, min(clTSize-1, max(cellAlt, xcell)));
+                                    loop (iy-ix+1,
+                                        gmem[clInfStart+ix] = 0;
+                                        gmem[clClInfos+ix] = 0;
+                                        gmem[clClDurations+ix] = 0;
+                                        ix += 1;
+                                    );
+                                );
+                            ) :
+                            (xx === csrcTEntSeq) ? (
+                                ((cellAlt >= 0) && (cellAlt < clTSize)) ? (
+                                    iw = gmem[clInfStart+cellAlt] >= -10000;
+                                    ix = max(0, min(clTSize-1, min(cellAlt, xcell)));
+                                    iy = max(0, min(clTSize-1, max(cellAlt, xcell)));
+                                    loop (iy-ix+1,
+                                        iw ? ((gmem[clInfStart+ix] >= -10000) ? gmem[clInfStart+ix] -= 20000)
+                                        : ((gmem[clInfStart+ix] < -10000) ? gmem[clInfStart+ix] += 20000);
+                                        ix += 1;
+                                    );
+                                );
+                            ) :
+                            (xx === csrcChkEntry) ? (
+                                // Reexplore this clip
+                                gmem[clClAlias+xcell] = 0;
+                                gmem[clInfStart+xcell] = 0;
+                                gmem[clClInfos+xcell] = 0;
+                                gmem[clClVolumes+xcell] = clVolumeBias;
+                                gmem[clClDurations+xcell] = 0;
+                                checkClip(xcell, 0);
+                            ) :
+                            (xx === csrcChkEntSeq) ? (
+                                // Reexplore this set
+                                ((cellAlt >= 0) && (cellAlt < clTSize)) ? (
+                                    ix = max(0, min(clTSize-1, min(cellAlt, xcell)));
+                                    iy = max(0, min(clTSize-1, max(cellAlt, xcell)));
+                                    loop (iy-ix+1,
+                                        gmem[clClAlias+ix] = 0;
+                                        gmem[clInfStart+ix] = 0;
+                                        gmem[clClInfos+ix] = 0;
+                                        gmem[clClVolumes+ix] = clVolumeBias;
+                                        gmem[clClDurations+ix] = 0;
+                                        checkClip(ix, 0);
+                                        ix += 1;
+                                    );
+                                );
+                            ) :
+                            (xx === csrcBgRecheck) ? (
+                                // hard rechecking the clips
+                                ix =0; loop (clTSize,
+                                    gmem[clInfStart+ix] = 0;
+                                    gmem[clClInfos+ix] = 0;
+                                    gmem[clClDurations+ix] = 0;
+                                    ix += 1;
+                                );
+                                cellAlt = -1;
+                                ClCheckCnt = 0;
+                                ClCheckForce = 1;
+                                ClCheckFlag = 1;
+                            );
+                            cellAlt = xcell; // note the position
                         ) :
                         ((m === 0x6)) ? ( // clic droit  + Cmd
                             ((cellAlt >= 0) && (cellAlt < clTSize)) ? (
@@ -21929,10 +22332,11 @@ local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h
                     cid = padunits[ui_jpad_entkey] - 1;  // char entered with mouse over this cell
                     Un = padUNAddr[uid]; // valid in all cases
                     st = gmem[Un+cbStat];
+                    rd = gmem[Un+cbPlIdt];
 
                     (zz & ui_jpad_ev_key) ? (
                         ((Un >= UGAddr) && (Un < UGAddrLast)) ? (
-                            AAAAAAAA_rd = rd = gmem[Un+cbPlIdt];
+                            AAAAAAAA_rd = rd;
                             AAAAAAAA_uzzch = zzch = padunits[ui_jpad_lkey];
                             (zzch === 'm') ? (
                                 SchedAddTask(5, 6, rd, -1, 0, 0, 0); // mute/unmute current
@@ -22036,7 +22440,6 @@ local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h
                     (zz & ui_jpad_ev_lmc) ? (
                         AAAAAAAA_zzmd = zzmd;
                         ((Un >= UGAddr) && (Un < UGAddrLast)) ? (
-                            rd = gmem[Un+cbPlIdt];
                             (zzmd === 0x28) ? ( // CTRL + Shift + left
                                 // UnLock all
                                 SchedAddTask(5, 2, -1, -1, 0, 0, 0);
@@ -22064,7 +22467,128 @@ local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h
 
                     (zz & ui_jpad_ev_rmc) ? ( // right mouse clic
                         ((Un >= UGAddr) && (Un < UGAddrLast)) ? (
-                            rd = gmem[Un+cbPlIdt];
+                            (zzmd === 0x00) ? ( // right
+                                xx = control_jmenu(sunRCMenu);
+                                ((xx >= sunGenDisp) && (xx <= sunGenDispLast)) ? (
+                                    // Show unit in...
+                                    cn = xx - sunGenDisp;
+                                    SchedAddTask(5, 5|ActFlg1, rd, -1, 0, 0, 0); // solo current
+                                    //padUCells[0] |= ui_jpad_ct_selec;
+                                    gDispPlay = rd; // gmem[Un+cbPlIdt];
+                                    select_unit(Un); // and select this a "current unit"
+                                    (cn === 0) ? (
+                                        BplayerA[2] = rd; //  display in gen A, edit
+                                        BplayerA[0] = BplEdit;
+                                    ) :
+                                    (cn === 1) ? (
+                                        BplayerB[2] = rd; //  display in gen B, edit
+                                        BplayerB[0] = BplEdit;
+                                    ) :
+                                    (cn === 2) ? (
+                                        BplayerC[2] = rd; //  display in gen C, edit
+                                        BplayerC[0] = BplEdit;
+                                    ) :
+                                    (cn === 3) ? (
+                                        BplayerD[2] = rd; //  display in gen D, edit
+                                        BplayerD[0] = BplEdit;
+                                    );
+                                ) :
+                                ((xx >= sunSetVol) && (xx <= sunSetVolLast)) ? (
+                                    cn = xx - sunSetVol;
+                                    (cn === 0) ? (
+                                        SchedAddTask(5, 8, -1, -1, 1, 0, 0); // full volume play
+                                    ) :
+                                    (cn === 1) ? (
+                                        SchedAddTask(5, 8, -1, -1, 0.40, 0, 0); // Standard volume play
+                                    ) :
+                                    (cn === 2) ? (
+                                        SchedAddTask(5, 8, -1, -1, 0.15, 0, 0); // reduced volume play
+                                    ) :
+                                    (cn === 3) ? (
+                                        SchedAddTask(5, 9, -1, -1, 0.5, 0, 0); // fast volume transition,
+                                    ) :
+                                    (cn === 4) ? (
+                                        SchedAddTask(5, 9, -1, -1, 5, 0, 0); // normal volume transition,
+                                    ) :
+                                    (cn === 5) ? (
+                                        SchedAddTask(5, 9, -1, -1, 16, 0, 0); // slow volume transition,
+                                    );
+                                ) :
+                                (xx === sunPLock) ? (
+                                    (st & uSWorking) ? (
+                                        // Lock entry
+                                        SchedAddTask(5, 10, rd, -1, 0, 0, 0);
+                                        gDispPlay = rd;
+                                    );
+                                    // In both cases, select unit
+                                    select_unit(Un);
+                                ) :
+                                (xx === sunUPLock) ? (
+                                    SchedAddTask(5, 3, rd, -1, 0, 0, 0);
+                                    gDispPlay = rd;
+                                ) :
+                                (xx === sunSolo) ? (
+                                    SchedAddTask(5, 5|ActFlg1, rd, -1, 0, 0, 0); // solo current
+                                    //padUCells[0] |= ui_jpad_ct_selec;
+                                    gDispPlay = rd; // gmem[Un+cbPlIdt];
+                                    select_unit(Un); // and select this a "current unit"
+                                ) :
+                                (xx === sunStop) ? (
+                                    SchedAddTask(5, 7, rd, -1, 0, 0, 0); // kill player task
+                                ) :
+                                (xx === sunEdit) ? (
+                                    gmem[Un+RCB_State_Changed] |= i_M_Rst;
+                                    gDispPlay = rd;
+                                    gmem[Un+RCB_Cl_Flgs] = 1;
+                                    padUCells[uid] |= ui_jpad_ct_selec;
+                                    select_unit(Un); // and select this a "current unit"
+                                ) :
+                                (xx === sunRestart) ? (
+                                    !(st & uSWorking) ? (
+                                        // restartplaying
+                                        gmem[Un+RCB_State_Changed] |= i_M_Rst;
+                                        gDispPlay = rd;
+                                        // also Lock entry
+                                        gmem[Un+RCB_Cl_Flgs] = 1;
+                                        padUCells[uid] |= ui_jpad_ct_selec;
+                                        select_unit(Un);
+                                    );
+                                ) :
+                                (xx === sunMute) ? (
+                                    SchedAddTask(5, 6, rd, -1, 0, 0, 0); // mute/unmute current
+                                    gDispPlay = rd;
+                                ) :
+                                (xx === sunTgAuto) ? (
+                                    parSet(p_GvAutoMd, ! paramValues[p_GvAutoMd]); //  Toggle autoplay
+                                ) :
+                                (xx === sunAllUnlck) ? (
+                                    SchedAddTask(5, 2, -1, -1, 0, 0, 0); // unLock all
+                                ) :
+                                (xx === sunAllUnlckAS) ? (
+                                    SchedAddTask(5, 2, -1, -1, 0, 0, 0); // unLock all
+                                    parSet(p_GvAutoMd, 1); // and restart auto play
+                                ) :
+                                (xx === sunAllMute) ? (
+                                    SchedAddTask(5, 1|ActFlg1, 3, -1, 0, 0, 0); // Lock & mute all
+                                ) :
+                                (xx === sunAllUnmute) ? (
+                                    SchedAddTask(5, 1, 1, -1, 0, 0, 0); // Lock & unmute all
+                                ) :
+                                (xx === sunShPlTr) ? (
+                                    lmode = ! lmode ; // toggle player # / track #
+                                ) :
+                                (xx === sunShClUn) ? (
+                                    lqmode = ! qmode ; // toggle show clip # track #
+                                ) :
+                                (xx === sunAllLck) ? (
+                                    SchedAddTask(5, 11|ActFlg1, -1, -1, 0, 0, 0); // Lock all
+                                ) :
+                                (xx === sunAllPckStA) ? (
+                                    SchedAddTask(5, 11|ActFlg1, -1, -1, 0, 0, 0); // Lock all
+                                    setPModePause(); // stop replay
+                                    setPlayMark(clESize-1, psKPlaying, recOptMarkReplay ? psKReplaying : 0, 0); // keep the entry in last position
+                                );
+                            ):
                             (zzmd === 0x20) ? ( // CTRL + right
                                 (st & uSWorking) ? (
                                     // stop the player
@@ -22078,7 +22602,8 @@ local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h
                                     padUCells[uid] |= ui_jpad_ct_selec;
                                     select_unit(Un);
                                 );
-                            ) :
+                            );
+                            /*
                             (zzmd === 0x00) ? ( // right
                                 (st & uSWorking) ? (
                                     // mute/unmute entry
@@ -22091,6 +22616,8 @@ local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h
                                 );
                                 select_unit(Un);
                             );
+                            */
+                           ui_GFXdoNow |= 1;
                         );
                     );
 
@@ -23345,8 +23872,7 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
 
 
 
-function
-show_PlayLog()
+function show_PlayLog()
 local (h1, h2, h3, h3min, uix_jneed, uix_jmini, da, dl, elc, flPl, ig, ij, is, it, jmc, pq, xx, r, td, u,
     k, kit, val, inc, ivs, nv, alt, zz, zzch, zzent, zzmcl, zzmmd, zzmi, axion)
 (
@@ -24389,7 +24915,12 @@ local (h1, h2, h3, uix_jneed, uix_jmini, ig, jmc, zz, zzmi)
     );
 );
 
-
+function mSL_Dbg_Memory_Updt(membox)
+(
+    (membox[14] & 0x100) ? (
+        membox[9] = membox[8] = membox[7] = 0;
+    );
+);
 
 <? include("GM-Libs/mSL_Dbg_Memory.jsfx-inc"); ?>
 
@@ -27898,38 +28429,40 @@ must_do_gfx() ? (
 
 ui_end_do_gfx();
 
-
-xCnt = min(40, xCnt += 4 * parV(p_FODlay));
-(ClCheckView && ClCheckAct) ? (
-    while ((xCnt > 0) && (cBk4 <= clInBank)) (
-        xNum = (xNum + UClipPrime) % clInBank; cBk4 += 1; zNum = xNum + (slBankset * clBSSize + slGroupNum) * clInBank;
-        (((gmem[clClInfos+zNum] === 0) && (gmem[clInfStart+zNum] === 0))) ? (
-            checkClip(zNum, ClCheckForce); xCnt -= 1;
-        );
-    );
-    (cBk4 >= clInBank) ? (
-        0 ? (
-            sprintf(#s, "++Done CheckView [%d/%d]", slBankset, slGroupNum);
-            mSL_log(SysLogBox, #s);
-        );
-        ClCheckView = cBk4 = 0;
-    );
-);
-(ClCheckFlag && ClCheckAct) ? (
-    (ClCheckCnt >= clTSize) ? (
-        ClCheckFlag = 0;
-        ClCheckForce = 0;
-        UClipPrime = gmem[somePrimes + (gmem[primeCurrent] = (gmem[primeCurrent]+1)%primeCount)];
-    ) : (
-        while ((xCnt > 0) && (ClCheckCnt <= clTSize)) (
-            ClCheckNum = (ClCheckNum + UClipPrime) % clTSize; ClCheckCnt += 1;
-            (((gmem[clClInfos+ClCheckNum] === 0) && (gmem[clInfStart+ClCheckNum] === 0))) ? (
-                checkClip(ClCheckNum, ClCheckForce); xCnt -= 1;
+(ClCheckAct && (tUnix > lastTgfx)) ? (
+    xCnt = min(40, xCnt += 5 * parV(p_FODlay));
+    (ClCheckView) ? (
+        while ((xCnt > 0) && (cBk4 <= clInBank)) (
+            xNum = (xNum + UClipPrime) % clInBank; cBk4 += 1; zNum = xNum + (slBankset * clBSSize + slGroupNum) * clInBank;
+            (((gmem[clClInfos+zNum] === 0) && (gmem[clInfStart+zNum] === 0))) ? (
+                checkClip(zNum, ClCheckForce); xCnt -= 1;
             );
         );
+        (cBk4 >= clInBank) ? (
+            0 ? (
+                sprintf(#s, "++Done CheckView [%d/%d]", slBankset, slGroupNum);
+                mSL_log(SysLogBox, #s);
+            );
+            ClCheckView = cBk4 = 0;
+        );
+    ) :
+    (ClCheckFlag) ? (
+        (ClCheckCnt >= clTSize) ? (
+            ClCheckFlag = 0;
+            ClCheckForce = 0;
+            UClipPrime = gmem[somePrimes + (gmem[primeCurrent] = (gmem[primeCurrent]+1)%primeCount)];
+        ) : (
+            while ((xCnt > 0) && (ClCheckCnt <= clTSize)) (
+                ClCheckNum = (ClCheckNum + UClipPrime) % clTSize; ClCheckCnt += 1;
+                (((gmem[clClInfos+ClCheckNum] === 0) && (gmem[clInfStart+ClCheckNum] === 0))) ? (
+                    checkClip(ClCheckNum, ClCheckForce); xCnt -= 1;
+                );
+            );
+        );
+    ) : (
+        lastTgfx = tUnix + 60;
     );
 );
-
 
 string_cst_last = "very last string constant used";
 string_tmp_last = #;

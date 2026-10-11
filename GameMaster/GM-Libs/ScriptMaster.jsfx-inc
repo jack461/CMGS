@@ -48,60 +48,6 @@ mSL_run_max = 0;
 mSL_insts_per_s = 32000000; // Mac Studio Pro
 #efs = "";
 
-/*
-// Initialize some words in low main memory
-function
-GMI()
-local(mmm, ii)
-(
-    fmemmax = __memtop(); // total memory available
-    fmemmax_4 = fmemmax - 4; //
-    mmm = 0;
-    ii =0; loop (16, mmm[ii] = fmemmax; ii += 1;);
-    mmm[0] = 'MAIN';
-    mmm[1] = fmemmax_4;
-    mmm[2] = GM_Word0 = 'Scri';
-    mmm[3] = GM_Word1 = 'ptMa';
-    mmm[4] = GM_Word2 = 'ster';
-    mmm[fmemmax - 2] = fmemmax_4; mmm[fmemmax - 1] =  'MAIN'~ mSL_CC_Chksum;
-    mmm[6] = mmm[fmemmax - 2];
-    mmm[7] = mmm[fmemmax - 1];
-);
-// Check that words in low main memory have not been modified
-function GMW()
-(
-    0[0] === 'MAIN'  &&  0[1] === fmemmax_4  &&  0[2] === GM_Word0  &&  0[3] === GM_Word1
-            &&  0[4] === GM_Word2  &&  0[5] === fmemmax  &&  0[6] === fmemmax_4  &&  0[7] === ('MAIN'~ mSL_CC_Chksum)
-            &&  0[fmemmax - 2] === 0[6]  &&  0[fmemmax - 1] === 0[7]
-);
-GMI();
-
-function GMW0(msg)
-(
-    mSL_edit_value(#AA0, 0[0]); mSL_edit_value(#AA1, 0[1]);
-    mSL_edit_value(#AA2, 0[2]); mSL_edit_value(#AA3, 0[3]); mSL_edit_value(#AA4, 0[4]);
-    mSL_edit_value(#AA5, 0[5]); mSL_edit_value(#AA6, 0[6]); mSL_edit_value(#AA7, 0[7]);
-    sprintf(#s2, "[%s]  %s %s %s %s %s %s %s %s", msg, #AA0, #AA1, #AA2, #AA3, #AA4, #AA5, #AA6, #AA7);
-    mSL_log(SysLogBox, #s2);
-);
-
-GMIfsig = 0;
-function GMW2(msg)
-(
-// Check first words of memory, to detect eventual bugs
-((!GMW()) && (XDcount > 0)) ? (
-    /*
-    sprintf(#s2, "[%s] Game Master Damaged! %s %s %s %s %s %s %s %s", msg, mSL_edit_value(#Z0, 0[0]), mSL_edit_value(#Z1, 0[1]),
-                mSL_edit_value(#Z2, 0[2]), mSL_edit_value(#Z3, 0[3]), mSL_edit_value(#Z4, 0[4]), mSL_edit_value(#Z5, 0[5]),
-                mSL_edit_value(#Z6, 0[6]), mSL_edit_value(#Z7, 0[7]));
-    mSL_log(SysLogBox, #s2);
-    * /
-    GMW0(msg);
-    XDcount -= 1;
-    XDcount > 0 ? GMI();
-);
-);
-*/
 
 GMI('Scri', 'ptMa', 'ster'); // init memory
 
@@ -197,8 +143,9 @@ local (item)
 
 function mSL_define_extensions()
 (
-    mSL_define_opcode("GM_Log", 133); // define 254 as "GM_Log"
-    mSL_define_opcode("prod", 134); // define 255 as "prod"
+    mSL_define_opcode("GM_Log", 133); // define "GM_Log"
+    mSL_define_opcode("print", 133); // define print as a synonyp for "GM_Log"
+    mSL_define_opcode("prod", 134); // define "prod"
     mSL_define_opcode("GM_Addr", 135); // etc.
 );
 
@@ -367,6 +314,7 @@ current_Memory_Mode = mSL_MMd_Static; // starting now, allow use of "make_array"
 mSL_Str_Init(#strFirst, #strLast); // allocate strings for strings allocator
 mSL_Str_TInit(#wstrFirst, #wstrLast); // allocate strings for temporary strings
 mSL_Str_PInit(#xstrFirst, #xstrLast); // allocate strings for permanent strings
+mSL_Str_MkStructs(); // Build string management structures
 //====== GLOBALS ======
 init_idents();
 mSL_Init_Keywords();
@@ -509,8 +457,6 @@ mm_bl_mini = 0;
 
 
 // Hash table for parameters coded names
-//paramHashIds = make_array(paramHSiz);
-//paramHashNbs = make_array(paramHSiz);
 paramHashTbl = mSL_makeHT(paramHSiz, paramHStep);
 paramHStep = paramHashTbl[-1]; // in case the func updated the step
 
@@ -691,9 +637,11 @@ function doMslCompile(fname)
 );
 
 
+// The event operations
+<? include("GM-Libs/mSL_Events.jsfx-inc"); ?>
+
 // The threads operations
 <? include("GM-Libs/mSL_Threads.jsfx-inc"); ?>
-
 
 // The Garbage Collector
 <? include("GM-Libs/mSL_Garbage_Collector.jsfx-inc"); ?>
@@ -796,19 +744,17 @@ ModWav3 = make_array(ModWSizB);
 Simple_temp = make_array(10);
 
 
-
-
-mm_lowblocks = make_array(2); // creates a gap of 2 zeroes.
 mSL_GC_Protected = make_array(1123, mSL_KODE_protect);
 
 // Create the scheduler structure
 SchedSetup();
-0 ? (sprintf(#uuu, "    ---> SchedSetup :   %d tasks", SchedListSize(SchedFreePts));mSL_log(SysLogBox, #uuu););
+//0 ?
+(sprintf(#uuu, "SchedSetup :   %d tasks", SchedListSize(SchedFreePts));mSL_log(SysLogBox, #uuu););
 
 
 // Sizes of Allocated arrays for the Compiler and the Evaluator
-C_compSize = 32 * 1024; // size : 64 kW [kilo words, not kilo watts]
-C_progSize = 32 * 1024; // size  for the evaluator
+C_compSize = 64 * 1024; // size : 64 kW [kilo words, not kilo watts]
+C_progSize = 64 * 1024; // size  for the evaluator
 ui_jmake_arraymax = 0x7FFFFFF; // "no" limit in the size of an array...
 
 // Then, initialize all structures of the compiler.
@@ -820,7 +766,7 @@ mm_limit_a[0] = 'STRT'; mm_limit_a[1] = 'MEMR';
 
 
 // Memory size :
-C_memrSize = 8 * 1024 * 1024; // size : X x 1MW
+C_memrSize = 16 * 1024 * 1024; // size : X x 1MW
 C_memrArea = make_array(C_memrSize); // THE MEMORY !
 
 mm_limit_b = make_array(2);
@@ -837,17 +783,33 @@ mm_highmem = mSL_new_memory + mSL_new_memory[mSL_MM_HighAd];
 mm_show_ttf = mm_sizmem = mSL_new_memory[mSL_MM_MemSiz];//
 //AGMW166 = GMW();
 
-// Try to provide an independent main symbol table for the compiler - "var" declarations
+
+mm_limit_f = make_array(2);
+mm_limit_f[0] = 'STRT'; mm_limit_f[1] = 'COMP';
+
+void_pointer = make_array(2);
+void_pointer[0] = 0;
+void_pointer[1] = 0;
+
+// Provide an independent main symbol table for the compiler - "var" declarations
 aprime = 3313;
 size = 4 * (aprime + 1);
 mem = make_array(size + 4);
 A_mSL_GCTab = mSL_buildGVTab(mem, size, aprime);
+
 
 // Try to provide an independent local symbol table for the compiler - "loc" declarations
 aprime = 191;
 size = 4 * (aprime + 1);
 mem = make_array(size + 4);
 A_mSL_LCTab = mSL_buildLCTab(mem, size, aprime);
+
+
+// Provide a common external symbol table for the compiler - "ext" declarations
+A_mSL_EXTab = mSL_buildEXTab(47);
+// Provide a common external symbol table for the compiler - "ptr" declarations
+A_mSL_PTTab = mSL_buildPTTab(47);
+
 // Build the compiler
 AAAAC_6 = mSL_make_compiler(C_compArea, C_compSize);
 // Then, the interpreter
@@ -859,6 +821,11 @@ mSL_define_extensions();
 
 mm_limit_g = make_array(2);
 mm_limit_g[0] = 'END_'; mm_limit_g[1] = 'COMP';
+
+
+
+
+
 
 mm_highblocks = make_array(2); // no block with memory references beyond that
 
@@ -1209,8 +1176,6 @@ local (pfid, ref, value, force, addr, res, flg, kod, size, s, ip, k, k2, pt, kid
 <? include("GM-Libs/mSL_DeAsm.jsfx-inc"); ?>
 
 
-<? include("GM-Libs/mSL_Events.jsfx-inc"); ?>
-
 
 
 // Read & Compile a mSL script file
@@ -1310,8 +1275,6 @@ local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars)
     ent;
 );
 
-mSL_loc_tim = max(mSL_loc_tim - 1, 0);
-
 
 
 function
@@ -1410,6 +1373,7 @@ local (res, kw, ent, k, p1, p2, p3)
 /*
     Threads management = single operation on thread
 */
+/*
 function
 mSL_thread_ops(argc, argv)
 local (res, k, kw, ent)
@@ -1523,7 +1487,7 @@ local (res, k, kw, ent)
     );
     res;
 );
-
+*/
 
 // Insert here the mSL interpreter
 <? include("GM-Libs/mSL_Evaluator.jsfx-inc"); ?>
@@ -1539,74 +1503,7 @@ M_avail = UTmem - UBuffer - 256; // up to 64 * 2 * 2 zero-valued samples
 current_Memory_Mode = mSL_MMd_Dynamic;  // change allocation mode
 
 
-// Update a big number passed as parameter
-// with "key" being the "command"
-function updtBNumber(num, key, alt)
-local (cq, cx, flu, flk, kuz, zplm)
-(
-    zplm = num;
-    flu = 0; kuz = 1; cq = 1; flk = key > 0;
-    key < 0 ? key = -key;
-    ((key >= '0') && (key <= '9')) ? (
-        num = num * 10 + key - '0';
-    ) :
-    ((key === '%')||(key === 'z')) ? (
-        num = 0;
-    ) :
-    ((key === '+')||(key === '=')) ? (
-        num = num + 8;
-    ) :
-    ((key === ':')||(key === '/')) ? (
-        num = num - 8;
-    ) :
-    ((key === ';')||(key === '.')) ? (
-        num = num + 1;
-    ) :
-    ((key === ',')||(key === '?')) ? (
-        num = num - 1; cq = -1; flu = 1;
-    ) :
-    ((key === '$')) ? (
-        num = alt;
-    ) :
-    ((key === 0)||(key === 1)) ? (
-        flu = 1; // just "normalize" the value
-        cq = (key === 0) ? 1 : -1;
-    ) :
-    (ui_jmouse_cap === 0) ? (
-        ((key === 'n')||(key === 'p')||(key === 'b')||(key === 'rght')||(key === 'left')) ? (
-            cq = ((key === 'n')||(key === 'rght')) ? 1 : -1;
-            num = num + cq;
-        ) :
-        ((key === 'down')) ? (
-            num = num + 32;
-        ) :
-        ((key === 'up')) ? (
-            num = max(0, num - 32);
-        ) :
-        ((key === 'pgdn')) ? (
-            num = num + 256;
-        ) :
-        ((key === 'pgup')) ? (
-            num = max(0, num - 256);
-        ) :
-        ((key === 'home')) ? (
-            num = 0;
-        ) :
-        (
-            kuz = 0; // key has not been used
-        );
-    ) : (
-        kuz = 0; // key has not been used
-    );
 
-
-
-    num;
-);
-
-
-// Mock-up function
-function keepBlockInfos(b) ( 0; );
 gui_show_syslog = gui_show_memory = 1;
 SysLogBox[5] = 6;
 SysLogBox[6] = 0;
@@ -1616,6 +1513,7 @@ mSL_log(SysLogBox, "*** Script Master initialized ***");
 GMW2("Init MAIN");
 
 
+// #dbg_trace0 = "Text printed ! ";
 
 
 
@@ -1657,9 +1555,11 @@ tUnix = time();
 */
 
 // every second or so...
-(second != gmem[timeSecOfDay]) ? (
+// (second != gmem[timeSecOfDay]) ? (
+(second != tUnix) ? (
     // EVERY SECOND
-    second = gmem[timeSecOfDay];
+    // second = gmem[timeSecOfDay];
+    second = tUnix;
 
     (mSL_run_test && (mSL_run_ct <= 0)) ? (
         mSL_run_ct = 2;
@@ -1916,6 +1816,14 @@ tfact = srate * 4;
 
 
 
+
+
+
+
+
+
+
+
 @gfx
 
 
@@ -1957,11 +1865,22 @@ gfxStrtT = time_precise() + timeD;
     );
 );
 
+function keepBlockInfos(b) ( 0; );
+
+
 efi = 1; idx = efs = 0;
 while (efi) (
   (efi = gfx_getdropfile(idx, #s)) ? (
     efs = mSL_Str_Tmp();
     strcpy(efs, #s);
+
+    (match ("*.mSL", efs)) ? (
+        //sprintf(#s, "*  Compile: %s  (%d)  *", efs, strlen(#efs)); mSL_log(SysLogBox, #s);
+        doMslCompile(efs); // add to compile list
+    ) : (
+        sprintf(#s, "::unknown file type : \"%s\"", efs);
+        mSL_log(SysLogBox, #s);
+    );
     /*
     mSL_log(SysLogBox, #s);
     strcpy(#s1s, #s);
@@ -1973,7 +1892,6 @@ while (efi) (
     sprintf(#s4s, "%d", strlen(#s3s));
     mSL_log(SysLogBox, #s4s);
     mSL_log(SysLogBox, efs);
-    */
     dropped_x = mouse_x; dropped_y = mouse_y;
     //
     (FlagsTbVals[Flgs_Traces] & 2) ? (
@@ -1988,8 +1906,10 @@ while (efi) (
         mSL_log(SysLogBox, efs);
     );
     // mSL_log(SysLogBox, efs);
+    */
     ui_GFXdoNow |= 1; // Make sure we react as soon as possible
     // Is this an mSL script ?
+    /*
     (match ("*mSL", efs) || match ("*txt", efs)) ? (
         ((mouse_cap & 8) || (dropped_y < 32)) ? (
             sprintf(#s, "*  Compile: %s  (%d)  *", efs, strlen(efs)); mSL_log(SysLogBox, #s);
@@ -2004,12 +1924,12 @@ while (efi) (
         dpa = 1; // an audio file is available
         //mSL_log(SysLogBox, "Matching sound file");
     );
+    */
     idx += 1;
-
-  ) : (
-    (efs != 0) ? gfx_getdropfile(-1);
   );
 );
+
+(idx != 0) ? gfx_getdropfile(-1);
 
 
 function do_GenericKeyRead()
@@ -2613,11 +2533,6 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
         ui_pop();
     );
 );
-
-
-
-<? include("GM-Libs/mSL_Dbg_Memory.jsfx-inc"); ?>
-
 
 (gfxMn !== lastMn) ? (
     gfxMn = lastMn;

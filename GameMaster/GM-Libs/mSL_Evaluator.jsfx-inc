@@ -7,13 +7,34 @@
 //    J.J. Girardot - 3/2023
 //---------------------------------------------
 
+@init
+
+
 mfcmax = 320; // max # of "costful" operations in a cycle.
 
-//    Evaluation of an mSL expression - 2023 version
+/*
+    Evaluation of an mSL expression - 2023 version
 
+The "context" consists of following global variables :
+
+mSL_active_Thread  the active thread itself
+mSL_baseAddStack   pointer to the preceding context
+mSL_baseLocals     pointer to the local variables values
+mSL_baseTOS        return stack pointer
+mSL_baseCode       pointer to the start of function code
+mSL_CodePtr        current execution pointer
+mSL_baseAVars      address of the global variables table
+mSL_baseOVars      address of the semi-local variables
+mSL_basePVars      address of the pointer variables
+
+Also uses the following global variables :
+
+A_mSL_EXTab        address of the external variables table
+
+*/
 function
 mSL_evaluate()
-local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
+local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
 (
     // (mSL_current_evaluator === 0) ? (mSL_set_evaluator(mSL_new_evaluator););
     rpeat = mSL_rpeat;
@@ -23,7 +44,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
     //// Inner equivalent loop
     while ((rpeat > 0) && (mSL_errX === 0)) (
         rpeat -= 1;
-        Xop = (XopPar = mSL_NxtOp) & 0xff;
+        xop = (XopPar = mSL_NxtOp) & 0xff;
         mSL_PCode = mSL_CodePtr;
         mSL_CodePtr += 1;
         mSL_NxtOp = mSL_baseCode[mSL_CodePtr];
@@ -36,7 +57,8 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
 
                 //===0===//
                 // illegal instruction "0"
-                mSL_errX=1901;
+                // sprintf(#sfc, "Inst. 0 at %d   b.code:%d codeptr:%d", mSL_PCode, mSL_baseCode, mSL_CodePtr); mSL_log(SysLogBox, #sfc);
+                mSL_errX=1901; // Illegal instruction "0"
                 mSL_CodePtr = mSL_PCode; // lock on current address
                 mSL_NxtOp = mSL_baseCode[mSL_CodePtr];
                 mSL_CodeStop = mSL_RC_IllInst; // illegal inst "stop" flag
@@ -48,6 +70,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
 
                 //===1===//
                 // exit —
+                // sprintf(#sfc, "Inst. 1 at %d   b.code:%d codeptr:%d", mSL_PCode, mSL_baseCode, mSL_CodePtr); mSL_log(SysLogBox, #sfc);
                 mSL_ExitValue = mSL_TOS[0]; // exit value
                 mSL_ICount -= rpeat; // deduce rest of count
                 rpeat = 0;
@@ -97,6 +120,10 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 );
                 mSL_TOS[0] = m; // transmit the return value
                 mSL_NxtOp = mSL_baseCode[mSL_CodePtr];
+                // (mSL_NxtOp === 0) ? (
+                //    sprintf(#sfc, "Ret. NxtOp:%d   baseCode:%d  CodePtr:%d  TOS:%d", mSL_NxtOp, mSL_baseCode, mSL_CodePtr, mSL_TOS);
+                //    mSL_log(SysLogBox, #sfc);
+                // );
                 //===2===//
 
 
@@ -125,7 +152,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 (m < 0) ? (
                     gmem[-m] = mSL_TOS[0];
                 ) : (
-                    mSL_errX = 1627;
+                    mSL_errX = 1627; // set on 0
                 );
                 //===4===//
 
@@ -145,7 +172,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 (m < 0) ? (
                     gmem[-m] = mSL_TOS[0];
                 ) : (
-                    mSL_errX = 1628;
+                    mSL_errX = 1628;  // set & pop on 0
                 );
                 mSL_TOS -= 1;
                 //===5===//
@@ -158,6 +185,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Load the value of a local variable
                 mSL_TOS += 1;
                 mSL_TOS[0] = mSL_baseLocals[(0|(XopPar / mSL_X_OpShDiv))];
+                // sprintf(#dbg_trace10, "6: ld.Value  %d + %d => %f", mSL_baseLocals, (0|(XopPar / mSL_X_OpShDiv)), mSL_TOS[0]);
                 //===6===//
 
 
@@ -168,6 +196,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Load the address of a local variable
                 mSL_TOS += 1;
                 mSL_TOS[0] = (0|(XopPar / mSL_X_OpShDiv)) + mSL_baseLocals;
+                // sprintf(#dbg_trace11, "7: ld.Addr  %d + %d", mSL_baseLocals, (0|(XopPar / mSL_X_OpShDiv)));
                 //===7===//
 
 
@@ -178,6 +207,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Load the value of a global variable
                 mSL_TOS += 1;
                 mSL_TOS[0] = mSL_baseAVars[(0|(XopPar / mSL_X_OpShDiv))];
+                // sprintf(#dbg_trace10, "8: ld.Value  %d + %d => %f", mSL_baseAVars, (0|(XopPar / mSL_X_OpShDiv)), mSL_TOS[0]);
                 //===8===//
 
 
@@ -188,6 +218,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Load the address of a global variable
                 mSL_TOS += 1;
                 mSL_TOS[0] = (0|(XopPar / mSL_X_OpShDiv)) + mSL_baseAVars;
+                // sprintf(#dbg_trace11, "9: ld.Addr  %d + %d", mSL_baseAVars, (0|(XopPar / mSL_X_OpShDiv)));
                 //===9===//
 
 
@@ -198,6 +229,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Load the value of a semi-global variable
                 mSL_TOS += 1;
                 mSL_TOS[0] = mSL_baseOVars[(0|(XopPar / mSL_X_OpShDiv))];
+                // sprintf(#dbg_trace10, "10: ld.Value  %d + %d => %f", mSL_baseOVars, (0|(XopPar / mSL_X_OpShDiv)), mSL_TOS[0]);
                 //===10===//
 
 
@@ -208,6 +240,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Load the address of a semi-global variable
                 mSL_TOS += 1;
                 mSL_TOS[0] = (0|(XopPar / mSL_X_OpShDiv)) + mSL_baseOVars;
+                // sprintf(#dbg_trace11, "11: ld.Addr  %d + %d", mSL_baseOVars, (0|(XopPar / mSL_X_OpShDiv)));
                 //===11===//
 
 
@@ -217,7 +250,8 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===12===//
                 // Load the value of a pointer variable
                 mSL_TOS += 1;
-                mSL_TOS[0] = 0[mSL_basePVars[(0|(XopPar / mSL_X_OpShDiv))]];
+                mSL_TOS[0] = 0[A_mSL_PTTab[(0|(XopPar / mSL_X_OpShDiv))]];
+                // sprintf(#dbg_trace10, "12: ld.Value  %d + %d => %f", A_mSL_PTTab, (0|(XopPar / mSL_X_OpShDiv)), mSL_TOS[0]);
                 //===12===//
 
 
@@ -227,7 +261,8 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===13===//
                 // Load the address of a pointer variable
                 mSL_TOS += 1;
-                mSL_TOS[0] = mSL_basePVars[(0|(XopPar / mSL_X_OpShDiv))];
+                mSL_TOS[0] = A_mSL_PTTab[(0|(XopPar / mSL_X_OpShDiv))];
+                // sprintf(#dbg_trace11, "13: ld.Addr  %d + %d", A_mSL_PTTab, (0|(XopPar / mSL_X_OpShDiv)));
                 //===13===//
 
 
@@ -313,6 +348,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
 
                 //===20===//
                 //=====FUNCTION CALL=====
+                // TOS is [-n-1: arg 1; -n: arg 2; ... -2: arg n; -1: arg count ; 0: func ]
                 // The TOS is supposed to be a func
                 (mSL_baseHighStack[0] === mSL_End_Mark) ? ( // checks near the end of the stack
                     // AAAA_funAddr =
@@ -325,7 +361,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                     par = mSL_TOS[0]; // arg count
                     ((fn[-2] === mSL_CC_KeyCKod) && (fn[fn[-1]+1] === mSL_CC_KeyKEnd)) ? (
                         ((par != fn[mSL_CC_ParCnt]) && ((fn[mSL_CC_Flags] & 1) === 0)) ? (
-                            mSL_errX=1621;
+                            mSL_errX=1621; // incorrect arg. count
                         ) : (
                             (mSL_NxtOp === mSL_K_return) ? (
                                 // Doing a tail rec optimisation.
@@ -333,15 +369,20 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                                 memcpy(mSL_wa2, mSL_baseAddStack, mSL_STK_DSiz); // save previous state
                                 // install new TOS operands
                                 s = par+1;
-                                memcpy(mSL_wSt1, mSL_TOS - par, s); // save parameters in a lage area...
+                                memcpy(mSL_wSt1, mSL_TOS - par, s); // save parameters in a large area...
                                 memcpy(mSL_baseTOS, mSL_wSt1, s); // copy parameters at the base stack
                                 mSL_TOS = mSL_baseTOS + par; // add the number of parameters
                                 (fn[mSL_CC_Flags] & 1) ? (
                                     // This is a variadic func
                                     mSL_baseLocals = mSL_baseTOS - 1 + par;
                                     // set the "second" parameter
+                                    // mSL_baseLocals[2] = mSL_baseTOS;
                                     mSL_baseLocals[2] = mSL_baseTOS;
                                     mSL_TOS += 2; // add the two actual parameters of the func
+                                    1 ? (
+                                    sprintf(#sfc, "VFun. TR: %d @ %d/%d => %d @ %d", par, mSL_TOS - par,mSL_baseTOS, mSL_baseLocals[1], mSL_baseLocals[2]);
+                                    mSL_log(SysLogBox, #sfc);
+                                    );
                                 ) : (
                                     mSL_baseLocals = mSL_baseTOS - 1;
                                 );
@@ -352,9 +393,13 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                                 s = bl = mSL_TOS - par; // points to first argument
                                 (fn[mSL_CC_Flags] & 1) ? (
                                     // This is a variadic func
-                                    bl += par; // 1st param is the arg count
+                                    bl = mSL_TOS; // 1st param is the arg count
                                     bl[1] = s; // 2nd param is the arg list
                                     mSL_TOS = bl+2; // new TOS value
+                                    0 ? (
+                                    sprintf(#sfc, "VFun   %d @ %d => %d @ %d // %d", par, s, bl[0], bl[1], bl);
+                                    mSL_log(SysLogBox, #sfc);
+                                    );
                                 );
                                 mSL_TOS += fn[mSL_CC_LocCnt];
                                 // Create the "new" baseStack
@@ -395,7 +440,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                             mSL_baseCode = fn + fn[mSL_CC_dpCode]; // @ code
                             mSL_CodePtr = 0;
                             mSL_NxtOp = mSL_baseCode[0];
-                            // Has the func its own global/own/pointers tables ?
+                            // Has the func we are calling its own global/own/pointers tables ?
                             (fn[mSL_CC_GlbTab] != 0) ? mSL_baseAVars = fn[mSL_CC_GlbTab];
                             while (mSL_baseAVars[mSL_baseAVars[-1]-2] === mSL_Fwrd_Link) (
                                 mSL_baseAVars = fn[mSL_CC_GlbTab] = mSL_baseAVars[mSL_baseAVars[-1]-1];
@@ -404,7 +449,37 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                                 mSL_log(SysLogBox, #sfc);
                                 );
                             );
-                            (fn[mSL_CC_OwnTab] != 0) ? mSL_baseOVars = fn[mSL_CC_OwnTab];
+                            (fn[mSL_CC_OwnTab] != 0) ? (
+                                mSL_baseOVars = fn[mSL_CC_OwnTab];
+                                p = mSL_active_Thread[mSL_THR_LDict];
+                                q = 2 * mSL_baseOVars % (p[-1]/2); // get the entry.
+                                (p[q] != mSL_baseOVars) ? (
+                                    // search the entry in the table
+                                    r = 0;
+                                    while (r === 0) (
+                                        (p[q] === mSL_baseOVars) ? (
+                                            r = q + 1;
+                                        ) :
+                                        (p[q] === 0) ? (
+                                            // duplicate the semi-local symbol table and keep it
+                                            r = q + 1;
+                                            p[q] = mSL_baseOVars;
+                                            p[r] = mSL_bl_Dup(mSL_baseOVars);
+                                            //sprintf(#dbg_trace6, "Duplicating mSL_baseOVars.");
+                                        ) :
+                                        (
+                                            // try a new location
+                                            q = (q + 7*2) % p[-1];
+                                        );
+                                    );
+                                    (r === 0) ? (
+                                        mSL_errX=1677; // unable to create semi-local thread table
+                                    );
+                                ) : (
+                                    r = q + 1;
+                                );
+                                mSL_baseOVars = p[r];
+                            );
                             while (mSL_baseOVars[mSL_baseOVars[-1]-2] === mSL_Fwrd_Link) (
                                 mSL_baseOVars = fn[mSL_CC_OwnTab] = mSL_baseOVars[mSL_baseOVars[-1]-1];
                                 0 ? (
@@ -463,6 +538,10 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                     (
                         AAAAA_0620M = fn;
                         mSL_errX=1620;
+                        1 ? (
+                        sprintf(#sfc, "Error %d for %d", mSL_errX, fn);
+                        mSL_log(SysLogBox, #sfc);
+                        );
                     );
                 ) : (
                     mSL_errX=1619; // stack overflow
@@ -502,7 +581,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
 
 
                 //===24===//
-                // Multi-adic "sum" — to be redefined later
+                // Multi-adic "sum"
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
                 mSL_TOS[0] = mSL_prim_Sum(m, mSL_TOS);
@@ -903,7 +982,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // edn(string, value)  — edit "best" a number inside a string
                 m = mSL_TOS[0];
                 mSL_TOS -= 1;
-                mSL_TOS[0] = mSL_edit_value(mSL_TOS[0], m)
+                mSL_TOS[0] = mSL_edit_value(mSL_TOS[0], m, 0);
                 //===62===//
 
 
@@ -911,15 +990,21 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
 
 
                 //===63===//
-                mSL_errX=63;
+                // Load the value of a semi-global variable
+                mSL_TOS += 1;
+                mSL_TOS[0] = A_mSL_EXTab[(0|(XopPar / mSL_X_OpShDiv))];
+                // sprintf(#dbg_trace10, "63: ld.Value  %d + %d => %f", A_mSL_EXTab, (0|(XopPar / mSL_X_OpShDiv)), mSL_TOS[0]);
                 //===63===//
 
 
-            ););););););):((xop<100)?((xop<82)?((xop<73)?((xop<68)?((xop<66)?((xop<65)?(
+            ););););););):((xop<106)?((xop<85)?((xop<74)?((xop<69)?((xop<66)?((xop<65)?(
 
 
                 //===64===//
-                mSL_errX=64;
+                // Load the address of a semi-global variable
+                mSL_TOS += 1;
+                mSL_TOS[0] = (0|(XopPar / mSL_X_OpShDiv)) + A_mSL_EXTab;
+                // sprintf(#dbg_trace10, "64: ld.Addr  %d + %d", A_mSL_EXTab, (0|(XopPar / mSL_X_OpShDiv)));
                 //===64===//
 
 
@@ -939,7 +1024,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===66===//
 
 
-            ):(
+            ):((xop<68)?(
 
 
                 //===67===//
@@ -947,7 +1032,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===67===//
 
 
-            ););):((xop<70)?((xop<69)?(
+            ):(
 
 
                 //===68===//
@@ -955,7 +1040,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===68===//
 
 
-            ):(
+            );););):((xop<71)?((xop<70)?(
 
 
                 //===69===//
@@ -963,7 +1048,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===69===//
 
 
-            );):((xop<71)?(
+            ):(
 
 
                 //===70===//
@@ -971,7 +1056,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===70===//
 
 
-            ):((xop<72)?(
+            );):((xop<72)?(
 
 
                 //===71===//
@@ -980,7 +1065,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===71===//
 
 
-            ):(
+            ):((xop<73)?(
 
 
                 //===72===//
@@ -989,7 +1074,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===72===//
 
 
-            ););););):((xop<77)?((xop<75)?((xop<74)?(
+            ):(
 
 
                 //===73===//
@@ -998,7 +1083,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===73===//
 
 
-            ):(
+            ););););):((xop<79)?((xop<76)?((xop<75)?(
 
 
                 //===74===//
@@ -1007,7 +1092,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===74===//
 
 
-            );):((xop<76)?(
+            ):(
 
 
                 //===75===//
@@ -1015,7 +1100,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===75===//
 
 
-            ):(
+            );):((xop<77)?(
 
 
                 //===76===//
@@ -1023,7 +1108,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===76===//
 
 
-            ););):((xop<79)?((xop<78)?(
+            ):((xop<78)?(
 
 
                 //===77===//
@@ -1039,7 +1124,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===78===//
 
 
-            );):((xop<80)?(
+            );););):((xop<82)?((xop<80)?(
 
 
                 //===79===//
@@ -1063,7 +1148,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===81===//
 
 
-            );););););):((xop<91)?((xop<86)?((xop<84)?((xop<83)?(
+            ););):((xop<83)?(
 
 
                 //===82===//
@@ -1071,7 +1156,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===82===//
 
 
-            ):(
+            ):((xop<84)?(
 
 
                 //===83===//
@@ -1079,7 +1164,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===83===//
 
 
-            );):((xop<85)?(
+            ):(
 
 
                 //===84===//
@@ -1087,7 +1172,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===84===//
 
 
-            ):(
+            );););););):((xop<95)?((xop<90)?((xop<87)?((xop<86)?(
 
 
                 //===85===//
@@ -1095,7 +1180,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===85===//
 
 
-            ););):((xop<88)?((xop<87)?(
+            ):(
 
 
                 //===86===//
@@ -1104,7 +1189,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===86===//
 
 
-            ):(
+            );):((xop<88)?(
 
 
                 //===87===//
@@ -1113,16 +1198,16 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===87===//
 
 
-            );):((xop<89)?(
+            ):((xop<89)?(
 
 
                 //===88===//
                 mSL_TOS += 1;
                 mSL_TOS[0] = srate;
-                //===88===/
+                //===88===//
 
 
-            ):((xop<90)?(
+            ):(
 
 
                 //===89===//
@@ -1131,7 +1216,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===89===//
 
 
-            ):(
+            );););):((xop<92)?((xop<91)?(
 
 
                 //===90===//
@@ -1140,7 +1225,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===90===//
 
 
-            ););););):((xop<95)?((xop<93)?((xop<92)?(
+            ):(
 
 
                 //===91===//
@@ -1149,7 +1234,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===91===//
 
 
-            ):(
+            );):((xop<93)?(
 
 
                 //===92===//
@@ -1158,7 +1243,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===92===//
 
 
-            );):((xop<94)?(
+            ):((xop<94)?(
 
 
                 //===93===//
@@ -1177,7 +1262,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===94===//
 
 
-            ););):((xop<97)?((xop<96)?(
+            ););););):((xop<100)?((xop<97)?((xop<96)?(
 
 
                 //===95===//
@@ -1209,7 +1294,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
             ):((xop<99)?(
 
 
-                 //===98===//
+                //===98===//
                 // is fun(x)
                 m = mSL_TOS[0];
                 mSL_TOS[0] =
@@ -1295,23 +1380,23 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===99===//
 
 
-            ););););););):((xop<118)?((xop<109)?((xop<104)?((xop<102)?((xop<101)?(
+            );););):((xop<103)?((xop<101)?(
 
 
                 //===100===//
                 // malloc(size, type) or malloc(size)
                 m = mSL_TOS[0];
                 (m === 1) ? (
-                    mSL_TOS -= 1;
-                    r = mSL_Dyn_Alloc(mSL_TOS[0], 'data', mSL_StM_FlClear);
+                    mSL_TOS -= 1; s = mSL_TOS[0];
+                    r = mSL_Dyn_Alloc(s, 'data', mSL_StM_FlClear);
                 ) :
                 (m === 2) ? (
-                    mSL_TOS -= 2;
-                    r = mSL_Dyn_Alloc(mSL_TOS[0], mSL_TOS[1], mSL_StM_FlClear);
+                    mSL_TOS -= 2; s = mSL_TOS[0];
+                    r = mSL_Dyn_Alloc(s, mSL_TOS[1], mSL_StM_FlClear);
                 ) :
                 (m === 3) ? (
-                    mSL_TOS -= 3;
-                    r = mSL_Dyn_Alloc(mSL_TOS[0], mSL_TOS[1], mSL_TOS[2]);
+                    mSL_TOS -= 3; s = mSL_TOS[0];
+                    r = mSL_Dyn_Alloc(s, mSL_TOS[1], mSL_TOS[2]);
                 ) :
                 (
                     mSL_errX=1100; // incorrect malloc arity
@@ -1325,28 +1410,37 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                             rpeat = 0;
                         );
                 ) :
-                ((mSL_errX === 1032) || ((mSL_errX === 1033)) ? (
-                    (mSL_Dyn_Tr & 2) ? ( sprintf(#sfc, "[[Error %04d - Starting a GC]]", mSL_errX); mSL_log(SysLogBox, #sfc); );
-                        mSL_errX = 0; // ignore the error once
-                        // we need a GC !
-                        mSL_TOS += m; // restore stack.
-                        // build a restart op as "malloc_retry"
-                        mSL_NxtOp = 115; // malloc retry code
-                        mSL_CodePtr = mSL_PCode; // be ready to continue
-                        // stop thread temporary (as in a yield)
-                        mSL_ICount -= rpeat; // deduce rest of count
-                        rpeat = 0;
-                        mSL_CodeStop = mSL_RC_WAITGC; // set "yield" flag
-                        // run a GC
-                        gc_run_phaz = 1;
-                        atomic_add(mSL_Lock,1);
-                        atomic_add(mSL_loc_tim,2);
+                ((mSL_errX === 1032) || (mSL_errX === 1033)) ? (
+                    (mSL_Dyn_Tr & 2) ? (
+                        sprintf(#sfc, "[[Error %04d - Starting a GC]]", mSL_errX); mSL_log(SysLogBox, #sfc);
                     );
+                    mSL_errX = 0; // ignore the error once
+                    // we need a GC !
+                    mSL_TOS += m; // restore stack.
+                    // build a restart op as "malloc_retry"
+                    mSL_NxtOp = 115; // malloc retry code
+                    mSL_CodePtr = mSL_PCode; // be ready to continue
+                    // stop thread temporary (as in a yield)
+                    mSL_ICount -= rpeat; // deduce rest of count
+                    rpeat = 0;
+                    mSL_CodeStop = mSL_RC_WAITGC; // set "yield" flag
+                    // run a GC
+                    gc_run_phaz = 1;
+                    atomic_add(mSL_Lock,1);
+                    atomic_add(mSL_loc_tim,2);
+
+                    q = -1;
+                    p = mSL_active_Thread[mSL_THR_SchedEnt];
+                    ((p >= SchedFirstEnt) && (p <= SchedLastEnt)) ? (
+                        q = p[SchedPid]; // return the process ID
+                    );
+
+                    0 ? (sprintf(#sfc, "/%d/: malloc [%d] failed, trying a gc.", q, s); mSL_log(SysLogBox, #sfc););
                 );
                 //===100===//
 
 
-            ):(
+            ):((xop<102)?(
 
 
                 //===101===//
@@ -1361,7 +1455,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===101===//
 
 
-            );):((xop<103)?(
+            ):(
 
 
                 //===102===//
@@ -1371,7 +1465,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===102===//
 
 
-            ):(
+            ););):((xop<104)?(
 
 
                 //===103===//
@@ -1380,7 +1474,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===103===//
 
 
-            ););):((xop<106)?((xop<105)?(
+            ):((xop<105)?(
 
 
                 //===104===//
@@ -1402,7 +1496,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===105===//
 
 
-            );):((xop<107)?(
+            ););););););):((xop<127)?((xop<116)?((xop<111)?((xop<108)?((xop<107)?(
 
 
                 //===106===//
@@ -1411,7 +1505,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===106===//
 
 
-            ):((xop<108)?(
+            ):(
 
 
                 //===107===//
@@ -1420,7 +1514,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===107===//
 
 
-            ):(
+            );):((xop<109)?(
 
 
                 //===108===//
@@ -1429,7 +1523,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===108===//
 
 
-            ););););):((xop<113)?((xop<111)?((xop<110)?(
+            ):((xop<110)?(
 
 
                 //===109===//
@@ -1447,7 +1541,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===110===//
 
 
-            );):((xop<112)?(
+            );););):((xop<113)?((xop<112)?(
 
 
                 //===111===//
@@ -1462,10 +1556,10 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===112===//
                 mSL_TOS -= 2;
                 mSL_TOS[0] = str_getchar(mSL_TOS[0], mSL_TOS[1], mSL_TOS[2]);
-                //===112===//
+                //===112===///
 
 
-            ););):((xop<115)?((xop<114)?(
+            );):((xop<114)?(
 
 
                 //===113===//
@@ -1474,11 +1568,11 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===113===//
 
 
-            ):(
+            ):((xop<115)?(
 
 
                 //===114===//
-                // sprintf(str, fmt, x, x, x, x, x...
+                // sprintf(str, fmt, x, x, x, x, x... )
                 m = mSL_TOS[0]; // arg count
                 (m >= 1) ? (
                     k = mSL_TOS[- m]; // the string
@@ -1573,6 +1667,20 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                                 mSL_TOS[12], mSL_TOS[13], mSL_TOS[14], mSL_TOS[15], mSL_TOS[16], mSL_TOS[17],
                                 mSL_TOS[18]);
                 ) :
+                (m === 20) ? (
+                    mSL_TOS -= 20;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5],
+                                mSL_TOS[6], mSL_TOS[7], mSL_TOS[8], mSL_TOS[9], mSL_TOS[10], mSL_TOS[11],
+                                mSL_TOS[12], mSL_TOS[13], mSL_TOS[14], mSL_TOS[15], mSL_TOS[16], mSL_TOS[17],
+                                mSL_TOS[18], mSL_TOS[19]);
+                ) :
+                (m === 21) ? (
+                    mSL_TOS -= 21;
+                    mSL_TOS[0] = sprintf(k, mSL_TOS[1], mSL_TOS[2], mSL_TOS[3], mSL_TOS[4], mSL_TOS[5],
+                                mSL_TOS[6], mSL_TOS[7], mSL_TOS[8], mSL_TOS[9], mSL_TOS[10], mSL_TOS[11],
+                                mSL_TOS[12], mSL_TOS[13], mSL_TOS[14], mSL_TOS[15], mSL_TOS[16], mSL_TOS[17],
+                                mSL_TOS[18], mSL_TOS[19], mSL_TOS[20]);
+                ) :
                 (
                     sprintf(#sfc, "***** sprintf. PC %d", m);
                     mSL_log(SysLogBox, #sfc);
@@ -1581,7 +1689,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===114===//
 
 
-            );):((xop<116)?(
+            ):(
 
 
                 //===115===//
@@ -1591,20 +1699,25 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 r = 0;
                 (m === 1) ? (
                     mSL_TOS -= 1;
-                    // r = mSL_malloc(mSL_TOS[0], 'data');
                     r = mSL_Dyn_Alloc(mSL_TOS[0], 'data', mSL_StM_FlClear);
                 ) :
                 (m === 2) ? (
                     mSL_TOS -= 2;
-                    // r = mSL_malloc(mSL_TOS[0], mSL_TOS[1]);
                     r = mSL_Dyn_Alloc(mSL_TOS[0], mSL_TOS[1], mSL_StM_FlClear);
                 );
                 mSL_TOS[0] = r;
-                // mSL_log(SysLogBox, "    —- malloc retried");
+
+                q = -1;
+                p = mSL_active_Thread[mSL_THR_SchedEnt];
+                ((p >= SchedFirstEnt) && (p <= SchedLastEnt)) ? (
+                    q = p[SchedPid]; // return the process ID
+                );
+
+                0 ? (sprintf(#sfc, "/%d/: malloc retried. => %d [%d] / err=%d", q, r, r[-1], mSL_errX); mSL_log(SysLogBox, #sfc););
                 //===115===//
 
 
-            ):((xop<117)?(
+            ););););):((xop<121)?((xop<118)?((xop<117)?(
 
 
                 //===116===//
@@ -1639,7 +1752,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===117===//
 
 
-            );););););):((xop<127)?((xop<122)?((xop<120)?((xop<119)?(
+            );):((xop<119)?(
 
 
                 //===118===//
@@ -1657,7 +1770,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===118===//
 
 
-            ):(
+            ):((xop<120)?(
 
 
                 //===119===//
@@ -1665,7 +1778,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===119===//
 
 
-            );):((xop<121)?(
+            ):(
 
 
                 //===120===//
@@ -1675,7 +1788,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===120===//
 
 
-            ):(
+            );););):((xop<124)?((xop<122)?(
 
 
                 //===121===//
@@ -1686,7 +1799,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===121===//
 
 
-            ););):((xop<124)?((xop<123)?(
+            ):((xop<123)?(
 
 
                 //===122===//
@@ -1716,7 +1829,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===123===//
 
 
-            );):((xop<125)?(
+            ););):((xop<125)?(
 
 
                 //===124===//
@@ -1760,7 +1873,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===126===//
 
 
-            ););););):((xop<132)?((xop<129)?((xop<128)?(
+            );););););):((xop<138)?((xop<132)?((xop<129)?((xop<128)?(
 
 
                 //===127===//
@@ -1853,7 +1966,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===131===//
 
 
-            );););):((xop<134)?((xop<133)?(
+            );););):((xop<135)?((xop<133)?(
 
 
                 //===132===//
@@ -1869,47 +1982,247 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===132===//
 
 
-            ):(
+            ):((xop<134)?(
 
 
                 //===133===//
                 // Multi-adic "mSL_133" — to be redefined later
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                mSL_TOS[0] = mSL_133(m, mSL_TOS);
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_133(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_133(m, mSL_TOS);
+                );
                 //===133===//
 
 
-            );):((xop<135)?(
+            ):(
 
 
                 //===134===//
                 // Multi-adic "mSL_134" — to be redefined later
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                mSL_TOS[0] = mSL_134(m, mSL_TOS);
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_134(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_134(m, mSL_TOS);
+                );
                 //===134===/
 
 
-            ):((xop<136)?(
+            ););):((xop<136)?(
 
 
                 //===135===//
                 // Multi-adic "mSL_135" — to be redefined later
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                mSL_TOS[0] = mSL_135(m, mSL_TOS);
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_135(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_135(m, mSL_TOS);
+                );
                 //===135===//
+
+
+            ):((xop<137)?(
+
+
+                //===136===//
+                // Multi-adic "mSL_136" — to be redefined later
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_136(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_136(m, mSL_TOS);
+                );
+                //===136===//
 
 
             ):(
 
 
-                //===136===//
-                sprintf(#s, "Z136. Xop = %d XopPar = %d", Xop, XopPar);
+                //===137===//
+                // Multi-adic "mSL_137" — to be redefined later
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_137(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_137(m, mSL_TOS);
+                );
+                //===137===//
+
+
+            ););););):((xop<143)?((xop<140)?((xop<139)?(
+
+
+                //===138===//
+                // Multi-adic "mSL_138" — to be redefined later
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_138(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_138(m, mSL_TOS);
+                );
+                //===138===//
+
+
+            ):(
+
+
+                //===139===//
+                // Multi-adic "mSL_139" — to be redefined later
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_139(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_139(m, mSL_TOS);
+                );
+                //===139===//
+
+
+            );):((xop<141)?(
+
+
+                //===140===//
+                // Multi-adic "mSL_140" — to be redefined later
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_140(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_140(m, mSL_TOS);
+                );
+                //===140===//
+
+
+            ):((xop<142)?(
+
+
+                //===141===//
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_141(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_141(m, mSL_TOS);
+                );
+                //===141===//
+
+
+            ):(
+
+
+                //===142===//
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_142(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_142(m, mSL_TOS);
+                );
+                //===142===//
+
+
+            );););):((xop<146)?((xop<144)?(
+
+
+                //===143===//
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_143(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_143(m, mSL_TOS);
+                );
+                //===143===//
+
+
+            ):((xop<145)?(
+
+
+                //===144===//
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_144(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_144(m, mSL_TOS);
+                );
+                //===144===//
+
+
+            ):(
+
+
+                //===145===//
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_145(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_145(m, mSL_TOS);
+                );
+                //===145===//
+
+
+            ););):((xop<147)?(
+
+
+                //===146===//
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_146(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_146(m, mSL_TOS);
+                );
+                //===146===//
+
+
+            ):((xop<148)?(
+
+
+                //===147===//
+                m = mSL_TOS[0];
+                mSL_TOS -= m;
+                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                    // parameter is a data, pass it to the func
+                    mSL_TOS[0] = mSL_147(p[-1], p);
+                ) : (
+                    mSL_TOS[0] = mSL_147(m, mSL_TOS);
+                );
+                //===147===//
+
+
+            ):(
+
+
+                //===148===//
+                sprintf(#s, "Z148. xop = %d XopPar = %d", xop, XopPar);
                 mSL_log(SysLogBox, #s);
-                mSL_errX=136;
-                //===136===//
+                mSL_errX=148;
+                //===148===//
 
 
             ););););););););
@@ -1919,14 +2232,19 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
 
         );
 
+        (mSL_errX != 0) ? (
+            sprintf(#sfc, "Err %d/ Inst. %d at %d   b.code:%d codeptr:%d", mSL_errX, xop, mSL_PCode, mSL_baseCode, mSL_CodePtr);
+            mSL_log(SysLogBox, #sfc);
+        );
+
         mSL_max_TOS = max(mSL_max_TOS, mSL_TOS);
         // xxtrace(mSL_PCode, mSL_TOS - mSL_current_stack);
 
 
-        1 ? (
+        ((rpeat & 0x3FF) === 0x3FF) ? (
             (!GMW()) ? (
                 mSL_errX = 1666; // damaged 0 address
-                mSL_log(SysLogBox, "Locations 0-7 modified !");
+                mSL_log(SysLogBox, "Err. 1666  Locations 0-7 modified !");
                 GMW0("X-1666");
             );
         );
@@ -1950,7 +2268,7 @@ local (rpeat, Xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
         flagShowMemory = 1;
     );
 
-    // );
+
     (mfc > 0) ? flagShowMemory = 1;
     mSL_ICount -= rpeat;
     mSL_result = mSL_TOS[0];

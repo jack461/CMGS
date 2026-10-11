@@ -1,13 +1,16 @@
 /*
    Game Master ---
 */
+
+
+
 @init
 
 //    A micro Script Language for JSFX plug-ins
 //
 //    Part1 : the compiler
 //        mSL_Comp_lib.jsfx-inc
-//    J.J. Girardot - 7/2020
+//    J.J. Girardot - 7/2020 - 11/2025
 //
 //
 //    Note that "mSL_Utilities.jsfx-inc" must be
@@ -18,16 +21,18 @@
 
 //==== Globals Adjustment parameters
 //  for the compiler
-mSL_minCpSize = 24576; // min. memory size required for compilation
+mSL_minCpSize = 32768; // min. memory size required for compilation
 mSL_intCSiz = 4096; // min. chained unit size
 // mSL_StrsSize = 0; // size of an array of string references
 mSL_GCSiz = 571; // sym. tab size (* 4) -- modified later
 mSL_LCSiz = 131; // local table size
+mSL_EXSiz = 197; // external table size
+mSL_PTSiz = 47; // external table size
 mSL_CstsSize = 64; // an array of symbolic constants definition
-mSL_CMaxStrSiz = 8192;
+mSL_CMaxStrSiz = 16384;
 
 // for the evaluator
-mSL_minXcSize = 16384; // min. memory size required for execution
+mSL_minXcSize = 65532; // min. memory size required for execution
 mSL_rpeat = 256 * 4096; // Inner exec loop repet. count
 mSL_baseAVSPc = 0.010; // proportion for the global variables table "var"
 mSL_baseAVSMin = 256;
@@ -38,12 +43,13 @@ mSL_baseOVSMax = 256;
 mSL_basePVSPc = 0.003; // proportion for the semi-external variables table "ext"
 mSL_basePVSMin = 64;
 mSL_basePVSMax = 128;
-mSL_baseStkPc = 0.040; // proportion for the stack
-mSL_baseStkMin = 512;
-mSL_baseStkMax = 3072;
+mSL_baseStkPc = 0.010; // proportion for the stack
+mSL_baseStkMin = 128; // 512
+mSL_baseStkMax = 256; // 3072; // mean use : around 60
 mSL_baseMemPc = 0.001; // Static. alloc. memory
 mSL_baseMemMin = 4; // actually, not used
 mSL_baseMemMax = 4;
+mSL_baseLDic = 11*2;
 
 
 mSL_CMarkSiz = 32;
@@ -51,6 +57,7 @@ mSL_CGlobSiz = 2048; // max number of external definition FROM the plug-in
 mSL_F2CSize = 256; // max number of defined functions in a code segment
 mSL_CpStSiz = 256; // size of the Compiler Stack (for temp. subexpressions)
 mSL_Flat_Siz = 32; // flattening a tree
+mSL_StrgsSiz = 1024; // keep all constant strings
 
 // Code area - make sure the 3 next values are consistant based on mSL_Code_IShift...
 mSL_Code_IShift = 12; // code pages with 4096 word
@@ -102,10 +109,7 @@ mSL_ExitValue = 0; // the exit value of the code
 #mSL_cline = ""; // current line
 #mSL_wS1 = ""; // decoding an identifier
 #mSL_wS2 = ""; // or a string
-#mSL_wS3 = "";
-#mSL_wS4 = ""; #mSL_wS5 = ""; #mSL_wS6 = ""; #mSL_wS7 = "";
-#mSL_wS8 = ""; #mSL_wS9 = ""; #mSL_wSA = ""; #mSL_wSB = "";
-#mSL_wSC = ""; #mSL_wSD = ""; #mSL_wSE = ""; #mSL_wSF = "";
+#mSL_wS3 = ""; // unused
 #directory = ""; // import directory
 
 
@@ -122,6 +126,8 @@ mSL_tyValuasPtr =  0x00200000;  // the value of the cell is a pointer
 mSL_tyPrimFun   =  0x00100000;  // primitive or predefined operation
 //                 0x0000FC00;  // The priority level, on 6 bits
 //                 0x000003FF;  // The opcode on 10 bits
+mSL_tyMMask = 0x7F000000;
+// mSL_CharConst = 0x20200700;
 mSL_prtyShift = 10;  // shift const. for the priority value
 mSL_prtyMask = 0x3F; // mask after shift
 mSL_opKodMask = 0x3FF; // the op-code mask
@@ -139,6 +145,8 @@ mSL_tyString = 8 | mSL_tyOperand;
 mSL_tySubExp = 10 | mSL_tyOperand | mSL_tyValuasPtr;
 mSL_tyParExp = 12 | mSL_tyOperand | mSL_tyValuasPtr; // parenthesed exp.
 mSL_tyBrkExp = 13 | mSL_tyOperand | mSL_tyValuasPtr; // bracketed (?) exp.
+mSL_tyChar = 14 | mSL_tyOperand; // a single "char"
+mSL_tyArray = 15 | mSL_tyOperand; // a compile time array
 // Special operators
 mSL_prFCall = '()' ; // printable code for a function call
 mSL_tyFCall = mSL_prFCall | mSL_tyOP;
@@ -254,8 +262,8 @@ mSL_K_pmemcpy = 59;
 mSL_K_pstrtmp = 60;
 mSL_K_pthread = 61;
 mSL_K_pedn = 62;
-// free : 63;
-// free : 64;
+mSL_K_ldXVar = 63;
+mSL_K_ldXAddr = 64;
 mSL_K_pSin = 65;
 mSL_K_pCos = 66;
 mSL_K_pTan = 67;
@@ -363,6 +371,7 @@ mSL_tyMgmem2 = 'G[]' | mSL_tyOP ;
 mSL_ckwVar = 0; // provided later
 mSL_ckwLoc = 0; // provided later
 mSL_ckwPtr = 0; // provided later
+mSL_ckwExt = 0; // provided later
 // mSL_ckwShr = 0; // provided later
 mSL_ckwFunction = 0; // provided later
 mSL_ckwLocal = 0; // provided later
@@ -418,6 +427,8 @@ mSL_baseOVars = 0; // The base address for own variables    ==ARRAY==
 mSL_baseOVSize = 0; // the size of the OVars
 mSL_basePVars = 0; // The base address for Pointers variables    ==ARRAY==
 mSL_basePVSize = 0; // the size of the PVars
+mSL_baseXTVars = 0; // The base address for Extern variables    ==ARRAY==
+mSL_baseXTSize = 0; // the size of the XTVars
 mSL_current_stack = 0; // the array for the stack    ==ARRAY==
 //mSL_baseASSize = 0; // the size of the AStack
 mSL_baseStack = 0; // the current base Stack
@@ -454,6 +465,8 @@ mSL_KODE_locals =  'locs';
 mSL_KODE_pointers = 'ptrs';
 // Stack
 mSL_KODE_stack = 'stak';
+// Strings constants
+mSL_KODE_Strings = 'strg';
 // GC-Protect
 mSL_KODE_protect = 'prot';
 // Main tree structure
@@ -477,7 +490,7 @@ mSL_RC_WEvent = 7; // wait/want an event
 mSL_CC_KeyCKod = 'ccod';
 mSL_CC_KeyKEnd = (mSL_CC_Chksum ~ mSL_CC_KeyCKod);
 mSL_CC_Key = mSL_BLOCK_Key; // 1st entry is a unique "key" -- mSL_CC_KeyCKod
-mSL_CC_Size = idx = mSL_BLOCK_Size; // 2nd entry is size
+mSL_CC_Size = idx = mSL_BLOCK_Size; // 2nd entry is size (-1)
 mSL_CC_Flags_Idt = (idx += 1); // various infos
 mSL_CC_Flags = (idx += 1); // various infos
 mSL_CC_dpCode_Idt = (idx += 1); // position (relative) of the code
@@ -498,6 +511,10 @@ mSL_CC_OwnTab_Idt = (idx += 1); // local symbol table
 mSL_CC_OwnTab = (idx += 1); // local symbol table
 mSL_CC_PtrTab_Idt = (idx += 1); // pointers symbol table
 mSL_CC_PtrTab = (idx += 1); // pointers symbol table
+mSL_CC_ExtTab_Idt = (idx += 1); // pointers symbol table
+mSL_CC_ExtTab = (idx += 1); // pointers symbol table
+mSL_CC_Strngs_Idt = (idx += 1); // strings symbol table
+mSL_CC_Strngs = (idx += 1); // strings symbol table
 mSL_CC_last = (idx += 1); // lock
 mSL_CC_1stId = (idx += 1); // first ident. position
 // Last word is a unique "key" -- mSL_CC_KeyKEnd
@@ -506,6 +523,7 @@ mSL_CC_1stId = (idx += 1); // first ident. position
 // Thread Structure
 // Thread
 mSL_THR_KeyStrt = 'thrd' ;
+mSL_THR_KeyLDic = 'ldic' ;
 mSL_THR_KeyEnd = mSL_THR_KeyStrt ~ mSL_CC_Chksum ;
 mSL_THR_Key = idx = -2; // 1st entry is a unique "key" -- mSL_THR_KeyStrt
 mSL_THR_Size = (idx += 1); // 2nd entry is size
@@ -554,12 +572,14 @@ mSL_THR_errX_Idt = (idx += 1); // Error code (if any)
 mSL_THR_errX = (idx += 1); // Error code (if any)
 mSL_THR_PCode_Idt = (idx += 1); // Error location
 mSL_THR_PCode = (idx += 1); // Error location
-mSL_THR_ICount_Idt = (idx += 1); // count location
-mSL_THR_ICount = (idx += 1); // count location
+mSL_THR_ICount_Idt = (idx += 1); // instruction count location
+mSL_THR_ICount = (idx += 1); // instruction count location
 mSL_THR_MxStk_Idt = (idx += 1); // high stack location
 mSL_THR_MxStk = (idx += 1); // high stack location
 mSL_THR_Evnt_Idt = (idx += 1); // event location
 mSL_THR_Evnt = (idx += 1); // event location
+mSL_THR_LDict_Idt = (idx += 1); // local dictionnary
+mSL_THR_LDict = (idx += 1); // local dictionnary
 // ----
 mSL_THR_TotSize = (idx += 1); // Total Size - about 50
 mSL_THR_Z = 60; // > mSL_THR_TotSize
@@ -575,6 +595,8 @@ mSL_EV_loc = (idx += 1);
 mSL_EV_locAddr = (idx += 1);
 mSL_EV_ext = (idx += 1);
 mSL_EV_extAddr = (idx += 1);
+mSL_EV_ptr = (idx += 1);
+mSL_EV_ptrAddr = (idx += 1);
 mSL_EV_strs = (idx += 1);
 mSL_EV_strsAddr = (idx += 1);
 mSL_EV_mem = (idx += 1);
@@ -604,6 +626,8 @@ mSL_CGlobCnt = 0; // count of globals
 mSL_CplStack = 0; // The compiler stack 1 ==ARRAY==
 mSL_pCStack = 0;
 mSL_Flat_List = 0; // a work area
+mSL_StringSet = 0; // All the constant strings
+mSL_pCStrSet = 0;  // pointer for cst. strings
 
 mSL_CG_MainGen = 0; // main bloc of generated code
 mSL_pCCode = 0; //
@@ -640,16 +664,22 @@ mSL_GCTabSize = 0;
 mSL_GlbFlg = 0;  // "var" type
 mSL_gvar = 0; // allocator for glob. var #
 mSL_OwnFlg = 0x10000;  // "Local/Own" type
-mSL_ovar = mSL_OwnFlg; // allocator for "own" var. #
+mSL_ovar = mSL_OwnFlg-1; // allocator for "own" var. #
 mSL_PtrFlg = 0x20000;  // "Pointer/Indirect" type
-mSL_pvar = mSL_PtrFlg; // allocator for "special" var. #
-mSL_FlgMask = 0xf0000;
+mSL_pvar = mSL_PtrFlg-1; // allocator for "special" var. #
+mSL_ExtFlg = 0x40000;  // "External/Shared" type
+mSL_xvar = mSL_ExtFlg-1; // allocator for "external" var. #
+mSL_FlgMask = 0xff0000;
 mSL_NumMask = 0xffff;
 // The compiler internal local table
 mSL_LCTab = 0; //  ==ARRAY==
 mSL_LCTyp = 0; //   ==ARRAY==
 mSL_LCCod = 0; //  ==ARRAY==
 mSL_LCTabSize = 0;
+// The common externals table
+mSL_EXTab = 0; //  ==ARRAY==
+// The common pointer table
+mSL_PTTab = 0; //  ==ARRAY==
 mSL_lvar = 0; // allocator for loc. var #
 
 mSL_C_chPos = 0;
@@ -880,7 +910,7 @@ function mSL_buildGVTab(mem, size, aprime)
 (
     (size === (4 * (aprime + 1))) ? (
         mSL_GCSiz = aprime;
-        mSL_GCTabSize = 4 * (mSL_GCSiz + 1);
+        mSL_GCTabSize = size;
         mSL_GCTab = mem + 1;
         mSL_GCCod = mSL_GCTab + mSL_GCSiz + 1;
         mSL_GCTyp = mSL_GCCod + mSL_GCSiz + 1;
@@ -907,6 +937,104 @@ function mSL_buildLCTab(mem, size, aprime)
         mSL_LCTab ;
     ) : (
         mSL_LCTab = 0;
+    );
+);
+
+
+function mSL_buildEXTab(aprime)
+(
+    mSL_EXSiz = aprime;
+    mSL_EXTab = mSL_StM_Alloc(2 * aprime, 'xtab', mSL_StM_FlClear);
+);
+
+
+
+function mSL_buildPTTab(aprime)
+(
+    mSL_PTSiz = aprime;
+    mSL_PTTab = mSL_StM_Alloc(2 * aprime, 'ptab', mSL_StM_FlClear);
+);
+
+
+
+
+// This looks for a identifier in the external symbol table
+// It returns the correct entry or (alas) -1 when table is full
+// entries are sequences of name / values or 0 / 0
+function mSL_searchXId(name) local (pt, ent, cnt)
+(
+    ent = -1; cnt = mSL_EXSiz;
+    pt = name % mSL_EXSiz; // first guess and probable hit
+    while ((mSL_EXTab[2 * pt] != name) && (cnt > 0)) (
+        (mSL_EXTab[2 * pt] === 0) ? (
+            // Entry is empty - name doesn't exist
+            cnt = 0;
+        ) : (
+            pt = (pt + 13) % mSL_EXSiz;
+        );
+        cnt -= 1;
+    );
+    (mSL_EXTab[2 * pt] === name) ? ent = 2 * pt + 1;
+    ent;
+);
+
+
+
+// This looks for a identifier in the external symbol table
+// It returns the correct entry or (alas) -1 when table is full
+// entries are sequences of name / values or 0 / 0
+function mSL_findXId(name) local (pt, ent, cnt)
+(
+    ent = -1; cnt = mSL_EXSiz;
+    pt = name % mSL_EXSiz; // first guess and probable hit
+    while ((mSL_EXTab[2 * pt] != name) && (cnt > 0)) (
+        (mSL_EXTab[2 * pt] === 0) ? (
+            mSL_EXTab[2 * pt] = name;
+            mSL_EXTab[2 * pt + 1] = void_pointer;
+        ) : (
+            pt = (pt + 13) % mSL_EXSiz; cnt -= 1;
+        );
+    );
+    (mSL_EXTab[2 * pt] === name) ? ent = 2 * pt + 1;
+    ent;
+);
+
+
+
+// This looks for a identifier in the pointer symbol table
+// It returns the correct entry or (alas) -1 when table is full
+// entries are sequences of name / values or 0 / 0
+function mSL_findPId(name) local (pt, ent, cnt)
+(
+    ent = -1; cnt = mSL_PTSiz;
+    pt = name % mSL_PTSiz; // first guess and probable hit
+    while ((mSL_PTTab[2 * pt] != name) && (cnt > 0)) (
+        (mSL_PTTab[2 * pt] === 0) ? (
+            mSL_PTTab[2 * pt] = name;
+            mSL_PTTab[2 * pt + 1] = void_pointer;
+        ) : (
+            pt = (pt + 13) % mSL_PTSiz; cnt -= 1;
+        );
+    );
+    (mSL_PTTab[2 * pt] === name) ? ent = 2 * pt + 1;
+    ent;
+);
+
+
+function mSL_defExternal(name, value)
+local (ent)
+(
+    ((ent = mSL_findXId(name)) >= 0) ? (
+        mSL_EXTab[ent] = value;
+    );
+);
+
+
+function mSL_defPointer(name, value)
+local (ent)
+(
+    ((ent = mSL_findPId(name)) >= 0) ? (
+        mSL_PTTab[ent] = value;
     );
 );
 
@@ -977,6 +1105,7 @@ function mSL_checkGId(name) local (pt, ent, cnt)
 //            0 : a global variable
 //            0x10000 : a semi-local var
 //            0x20000 : a pointer var
+//            0x40000 : an external var
 //            n : a spectial gizmo
 //        type = typically, mSL_tyIdent, or mSL_tyKeywrd, or mSL_tyPrimFun, etc.
 //        value = the value to associate to the object
@@ -991,12 +1120,22 @@ function mSL_enterGCode(name, code, type, value) local (pt)
                     mSL_GCCod[pt] = (mSL_gvar += 2);
                 ) :
                 (code === mSL_OwnFlg) ? (
-                    mSL_GCCod[pt] = (mSL_ovar += 2);
+                    mSL_GCCod[pt] = mSL_OwnFlg | (mSL_ovar += 2);
                 ) :
                 (code === mSL_PtrFlg) ? (
-                    mSL_GCCod[pt] = (mSL_pvar += 2);
+                    // enter the name in "pointer" symbol table
+                    ((xpt = mSL_findPId(name)) >= 0) ? (
+                        mSL_GCCod[pt] = mSL_PtrFlg | xpt;
+                    );
+                ) :
+                (code === mSL_ExtFlg) ? (
+                    // enter the name in "external" symbol table
+                    ((xpt = mSL_findXId(name)) >= 0) ? (
+                        mSL_GCCod[pt] = mSL_ExtFlg | xpt;
+                    );
                 ) :
                 (
+                    // Any other flag conbination...
                     mSL_GCCod[pt] = (mSL_gvar += 2);
                 );
             ) : (
@@ -1026,7 +1165,6 @@ function mSL_findLId(name) local (pt, ent, cnt)
     (mSL_LCTab[pt] === name) ? ent = pt;
     ent;
 );
-
 
 // Just look for the identifier, but don't enter it
 function mSL_checkLId(name) local (pt, ent, cnt)
@@ -1064,16 +1202,15 @@ function mSL_enterLCode(name, code, type) local (pt)
 
 
 // Clean all execution symbol tables
-function mSL_clean_vtabs(glbs, ownv, extv)
+function mSL_clean_vtabs(glbs, ownv)
 (
     memset(glbs, 0, glbs[-1]);
     memset(ownv, 0, ownv[-1]);
-    memset(extv, 0, extv[-1]);
 );
 
 
 // Update the values in the runtime variables area from the compiler main symbol table
-function mSL_retrieveGlobals(glbs, ownv, extv)
+function mSL_retrieveGlobals(glbs, ownv)
 local (ip, v, ent)
 (
     ip = 0;
@@ -1085,11 +1222,7 @@ local (ip, v, ent)
                 ownv[ent] = mSL_GCVal[ip];
                 ownv[ent-1] = mSL_GCTab[ip];
             ) :
-            (v === mSL_PtrFlg) ? (
-                extv[ent] = mSL_GCVal[ip];
-                extv[ent-1] = mSL_GCTab[ip];
-            ) :
-            (
+            (v === 0) ? (
                 glbs[ent] = mSL_GCVal[ip];
                 glbs[ent-1] = mSL_GCTab[ip];
             )
@@ -1309,10 +1442,11 @@ local(pt)
     memset(mSL_GCTab-1, 0, mSL_GCTabSize);
     mSL_gvar = -1;  // allocator for glob. var #
     mSL_ovar = mSL_OwnFlg-1; // allocator for "own" var. #
-    mSL_pvar = mSL_PtrFlg-1; // allocator for "special" var. #
+    // we keep mSL_xvar as it is
     mSL_enterGCode((mSL_ckwVar = mSL_KW_var), 1, mSL_tyKeywrd, 0);
     mSL_enterGCode((mSL_ckwLoc = mSL_KW_loc), 2, mSL_tyKeywrd, 0);
     mSL_enterGCode((mSL_ckwPtr = mSL_KW_ptr), 3, mSL_tyKeywrd, 0);
+    mSL_enterGCode((mSL_ckwExt = mSL_KW_ext), 4, mSL_tyKeywrd, 0);
     mSL_enterGCode((mSL_ckwFunction = mSL_KW_function), 5, mSL_tyKeywrd, 0);
     mSL_enterGCode((mSL_ckwLocal = mSL_KW_local), 6, mSL_tyKeywrd, 0);
     mSL_enterGCode((mSL_ckwWhile = mSL_KW_while), 7, mSL_tyKeywrd, 0);
@@ -1420,7 +1554,7 @@ local (ent, ip, pp, num)
         (mSL_TreeMainStruc === 0) ? (
             mSL_TreeMainStruc = mSL_Dyn_Alloc(mSL_TreePgMax + 2, mSL_KODE_tree, mSL_StM_FlClear);
             (mSL_TreeMainStruc === 0) ? (
-                mSL_errC = 1273;
+                mSL_errC = 1273; // can't allocate structure for compiling
                 mSL_malloc_failed |= 1;
             ) : (
                 mSL_GC_BProtect(mSL_TreeMainStruc, mSL_GC_Protected);
@@ -1438,7 +1572,7 @@ local (ent, ip, pp, num)
             // allocate a new page
             pp = mSL_Dyn_Alloc(mSL_TreeBlPSize * mSL_TreeCellUSize, mSL_KODE_trbl, mSL_StM_FlClear);
             (pp === 0) ? (
-                mSL_errC = 1274;
+                mSL_errC = 1274; // can't allocate structure for compiling
                 mSL_malloc_failed |= 1;
             ) : (
                 mSL_TreeMainStruc[ip] = pp;
@@ -1464,10 +1598,10 @@ local (ent, ip, pp, num)
 
 function mSL_chainEnt(lft, rgt)
 (
-    (lft >= 0) ? (
+    (lft > 0) ? (
         mSL_rptr[lft] = rgt;
     );
-    (rgt >= 0) ? (
+    (rgt > 0) ? (
         mSL_lptr[rgt] = lft;
     );
 
@@ -1691,9 +1825,16 @@ function mSL_flatten_tree(tr)
 local (p, hd, tl, ty, ent, rpeat, restart, bz, ll, rl, tyl, tyr, lx, rx, v)
 (
     ty = mSL_tyun[tr];
-    (mSL_CP_Flags & 16) ? (
-        sprintf(#sfc, "Flatten:    %d    %d    %s", tr, mSL_valu[tr],  mSL_type_Name(ty));
+    // (mSL_CP_Flags & 16) ?
+    (
+        sprintf(#sfc, "Flatten:    %d / %d,%d   %d    %s", tr, mSL_upos[tr]>>16, mSL_upos[tr]&0xFFFF,
+                    mSL_valu[tr],  mSL_type_Name(ty));
         mSL_log(SysLogBox, #sfc);
+        ((mSL_lptr[tr] <= 0) || (mSL_rptr[tr] <= 0)) ? (
+            sprintf(#sfc, "Err. 1675  Incorrect tree [%d  <- %d -> %d]", mSL_lptr[tr], tr, mSL_rptr[tr]);
+            mSL_log(SysLogBox, #sfc);
+            mSL_errC =  1675; // Incorrect internal structure
+        );
     );
     (ty === mSL_tySubExp) ? (
         // The object is a sub-exp
@@ -1715,10 +1856,10 @@ local (p, hd, tl, ty, ent, rpeat, restart, bz, ll, rl, tyl, tyr, lx, rx, v)
             mSL_flgs[ent] = mSL_flgs[tr];
             mSL_lptr[ent] = hd;
             mSL_rptr[ent] = tl;
-            mSL_lptr[hd] = -1;
+            mSL_lptr[hd] = mSL_nullPtr;
             mSL_rptr[hd] = ent;
             mSL_lptr[tl] = ent;
-            mSL_rptr[tl] = -1;
+            mSL_rptr[tl] = mSL_nullPtr;
         );
         // we have now :  hd --> subexp --> tl
         // process lightly
@@ -1731,7 +1872,7 @@ local (p, hd, tl, ty, ent, rpeat, restart, bz, ll, rl, tyl, tyr, lx, rx, v)
                     sprintf(#sfc, "Fl:    %d    %d    %s", p, mSL_valu[p],  mSL_type_Name(ty));
                     mSL_log(SysLogBox, #sfc);
                 );
-                ((ty === mSL_tyNum) || (ty === mSL_tyIdent)) ? (
+                ((ty === mSL_tyNum) || (ty === mSL_tyIdent) || (ty === mSL_tyChar)) ? (
                     // OK - skip to next
                     p = mSL_rptr[p];
                 ) :
@@ -1740,7 +1881,7 @@ local (p, hd, tl, ty, ent, rpeat, restart, bz, ll, rl, tyl, tyr, lx, rx, v)
                     p = mSL_rptr[p];
                 ) :
                 ((ty === mSL_tyMNeg) || (ty === mSL_tyDMinus) || (ty === mSL_tyDadd) || (ty === mSL_tyDOr) || (ty === mSL_tyDAnd) || (ty === mSL_tyDDiv)) ? (
-                    // OK
+                    // OK - there is a tiny operator associated with this symbol
                     p = mSL_rptr[p];
                 ) :
                 (ty === mSL_tySubExp) ? (
@@ -1749,10 +1890,10 @@ local (p, hd, tl, ty, ent, rpeat, restart, bz, ll, rl, tyl, tyr, lx, rx, v)
                     bz = p; // our base
                     ll = mSL_lptr[bz];
                     rl = mSL_rptr[bz];
-                    xp = mSL_valu[bz];
+                    xp = mSL_valu[bz]; // points to the sub. exp
                     lx = mSL_lptr[xp];
                     rx = mSL_rptr[xp];
-                    (lx < 0) ? (
+                    (lx <= 0) ? (
                         // no left operand - link the operator
                         mSL_rptr[ll] = xp;
                         mSL_lptr[xp] = ll;
@@ -1761,8 +1902,14 @@ local (p, hd, tl, ty, ent, rpeat, restart, bz, ll, rl, tyl, tyr, lx, rx, v)
                         mSL_lptr[lx] = ll;
                     );
                     // link the right operand
-                    mSL_rptr[rx] = rl;
-                    mSL_lptr[rl] = rx;
+                    (rx <= 0) ? (
+                        sprintf(#sfc, "Internal error 3422 @%d", bz);
+                        mSL_log(SysLogBox, #sfc);
+                        mSL_errC = 3422; // Incorrect internal structure
+                    ) : (
+                        mSL_rptr[rx] = rl;
+                        mSL_lptr[rl] = rx;
+                    );
                     // Restart analysis
                     rpeat = 1;
                     restart = ll; // from the left
@@ -1770,21 +1917,45 @@ local (p, hd, tl, ty, ent, rpeat, restart, bz, ll, rl, tyl, tyr, lx, rx, v)
                     // mSL_freeChEnt(p);
                     p = -1; // end & restart
                 ) :
+                ((ty & mSL_tyMMask) === mSL_tyOP) ? (
+                    // change to a mSL_tyChar, skip to next
+                    sprintf(#sfc, "Changing    @%d: %08X/%d,%d %s > %s to num.",
+                                p, ty, mSL_upos[p]>>16, mSL_upos[p]&0xFFFF,
+                                mSL_type_Name(ty), mSL_edit_value(#sfd, mSL_valu[p]));
+                    mSL_log(SysLogBox, #sfc);
+                    mSL_tyun[p] = mSL_tyChar;
+                    mSL_valu[p] += mSL_CharConst ;
+                    p = mSL_rptr[p];
+                ) :
                 (
                     // error for now...
-                    (mSL_CP_Flags & 16) ? (
-                        mSL_log(SysLogBox, "Unknown type");
+                    // (mSL_CP_Flags & 16) ?
+                    (
+                        sprintf(#sfc, "Unknown type 3415 @%d: %08X/%d,%d %s > %s",
+                                        p, ty, mSL_upos[p]>>16, mSL_upos[p]&0xFFFF,
+                                        mSL_type_Name(ty), mSL_edit_value(#sfd, mSL_valu[p]));
+                        mSL_log(SysLogBox, #sfc);
                     );
-                    mSL_errC = 3415;
+                    mSL_errC = 3415; // Unknown type
                 );
             );
         );
+
+
+        (!GMW()) ? (
+                mSL_errX = 1668; // damaged 0 address
+                mSL_log(SysLogBox, "Err. 1668  Locations 0-7 modified !");
+                GMW0("X-1668");
+        );
+
         (mSL_errC === 0) ? (
             // Rescan and replace the "-" "numbers"
             p = hd;
             while ((p >= 0) && (mSL_errC === 0))  (
+                prvp = p;
                 ty = mSL_tyun[p];
-                ((ty === mSL_tyNum) || (ty === mSL_tyIdent)) ? (
+                prvty = ty;
+                ((ty === mSL_tyNum) || (ty === mSL_tyIdent) || (ty === mSL_tyChar)) ? (
                     // OK - skip to next
                     p = mSL_rptr[p];
                 ) :
@@ -1808,7 +1979,7 @@ local (p, hd, tl, ty, ent, rpeat, restart, bz, ll, rl, tyl, tyr, lx, rx, v)
                         (mSL_CP_Flags & 16) ? (
                             mSL_log(SysLogBox, "Unmanaged '-' operand");
                         );
-                        mSL_errC = 3416;
+                        mSL_errC = 3416; // Unmanaged '-' operand
                     );
                 ) :
                 ((ty === mSL_tyDadd) || (ty === mSL_tyDOr) || (ty === mSL_tyDAnd) || (ty === mSL_tyDDiv)) ? (
@@ -1855,19 +2026,39 @@ local (p, hd, tl, ty, ent, rpeat, restart, bz, ll, rl, tyl, tyr, lx, rx, v)
                     (
                         // error for now...
                         (mSL_CP_Flags & 16) ? (
-                            mSL_log(SysLogBox, "Unmanaged 'x'  operand");
+                            mSL_log(SysLogBox, "Unmanaged 'x' operand");
                         );
-                        mSL_errC = 3416;
+                        mSL_errC = 3416; // "Unmanaged 'x' operand"
                     );
 
                 ) :
                 (
                     // error for now...
-                    (mSL_CP_Flags & 16) ? (
-                        mSL_log(SysLogBox, "Unknown type");
+                    // (mSL_CP_Flags & 16) ?
+                    (
+                        sprintf(#sfc, "Unknown type 3417 @%d: %08X/%d,%d %s > %s",
+                                                    prvp, prvty, mSL_upos[prvp]>>16, mSL_upos[prvp]&0xFFFF,
+                                                    mSL_type_Name(ty), mSL_edit_value(#sfd, mSL_valu[prvp]));
+                        mSL_log(SysLogBox, #sfc);
                     );
-                    mSL_errC = 3417;
+                    mSL_errC = 3417; // Unknown type
                 );
+
+
+                (!GMW()) ? (
+                        mSL_errX = 1670; // damaged 0 address
+                        mSL_log(SysLogBox, "Err. 1670  Locations 0-7 modified !");
+                                sprintf(#sfc, "around @%d: %08X/%d,%d %s > %s",
+                                                            p, ty, mSL_upos[p]>>16, mSL_upos[p]&0xFFFF,
+                                                            mSL_type_Name(ty), mSL_edit_value(#sfd, mSL_valu[p]));
+                                mSL_log(SysLogBox, #sfc);
+                        GMW0("X-1670");
+                );
+
+
+
+
+
             );
         );
         (mSL_errC === 0) ? (
@@ -1880,8 +2071,18 @@ local (p, hd, tl, ty, ent, rpeat, restart, bz, ll, rl, tyl, tyr, lx, rx, v)
             mSL_rptr[p] = rl;
             // we can free "tr"
             // mSL_freeChEnt(tr);
+            sprintf(#sfc, "Update: ll=%d lr=%d p=%d", ll, rl, p);
+            mSL_log(SysLogBox, #sfc);
         );
     );
+
+
+    (!GMW()) ? (
+            mSL_errX = 1669; // damaged 0 address
+            mSL_log(SysLogBox, "Err. 1669  Locations 0-7 modified !");
+            GMW0("X-1669");
+    );
+
 );
 
 
@@ -2073,7 +2274,7 @@ local (flgRpeat, s, nxs, ty, prev, next, newc, pprev, nnext)
                             ptr = newc; // all is done
                         ) : (
                             // probably an error
-                            mSL_errC = 2221; //
+                            mSL_errC = 2221; // Internal chaining error
                         );
                         (nnext > 0) ? (
                             // rechain to the next cell
@@ -2126,7 +2327,7 @@ local (flgRpeat, s, eptr, ty, nxs, prev, next, newc, pprev, nnext, pty, ppty)
                                     mSL_tyun[mSL_valu[prev]] = mSL_tyBrkIndA;
                                 ) :
                                 (ppty != mSL_tyMgmem) ? (
-                                    mSL_errC = 2202;
+                                    mSL_errC = 2202; // Incorrect operand
                                     mSL_errPos = mSL_upos[s];
                                 );
                             ) :
@@ -2155,7 +2356,7 @@ local (flgRpeat, s, eptr, ty, nxs, prev, next, newc, pprev, nnext, pty, ppty)
                             ptr = newc; // all is done
                         ) : (
                             // probably an error
-                            mSL_errC = 2222; //
+                            mSL_errC = 2222; // Internal rechain error
                         );
                         (nnext > 0) ? (
                             // rechain to the next cell
@@ -2222,7 +2423,7 @@ local (s, ty, nxs, prev, next, newc, nnext)
                     ptr = newc; // all is done
                 ) : (
                     // probably an error
-                    mSL_errC = 2223; //
+                    mSL_errC = 2223; // Internal rechain error
                 );
                 (nnext > 0) ? (
                     // rechain to the next cell
@@ -2308,7 +2509,7 @@ local (res, p, state, ty, va, vb, elc, prv, nxt, erf)
         (p > 0) ? (
             ty = mSL_tyun[p];
             va = mSL_valu[p];
-            mSL_edit_value(#va, va)
+            mSL_edit_value(#va, va);
         ) : (
             state = 0; // ends as error
             AA_checkCList = 10; //TRACE
@@ -2438,21 +2639,25 @@ local (res, p, state, ty, va, vb, elc, prv, nxt, erf)
 
 
 
-// Next syntactic unit
-function
-mSL_lex()
-local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
+
+
+// Next syntactic unit - 2025-10-25
+function mSL_lex()
+local (state, lex, cod, ch, fac, dec, expn, exps, i, s, w, addr)
 (
     state = 1; // init state
     lex = 0;
     cod = 1;
     dec = 1;
-    #sid = "";
-    while (state > 0) (
+    #sid = ""; #bio = ""; #bic = ""; #str = "";
+    while ((state > 0) && (mSL_errC === 0)) (
         (mSL_C_chcurr === 0) ? (mSL_C_chcurr = mSL_getchar(dec));
         ch = mSL_C_chcurr;
 
-        (state === 1) ? (
+        (state<8)?((state<4)?((state<2)?(
+
+
+            //===1===//
             // initial state
             dec = 1;
             mSL_posChar = mSL_C_chPos; // keep initial position
@@ -2522,47 +2727,56 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
             (ch === '$') ? (  // $constant
                 state = 2; dec = cod = s = 0; lex = mSL_tyNum; mSL_C_chcurr = 0; fac = 2;
             ) :
+            // Simple cases : a single operator/separator
+            ((ch === ')') || (ch === '(') || (ch === '[') || (ch === ']')) ? (
+                lex = ch | mSL_tySep;
+                cod = ch; state = 0; mSL_C_chcurr = 0;
+            ) :
+            ((ch === '^')) ? (
+                lex = mSL_K_fPow | mSL_tyOP| mSL_prty3;
+                cod = ch; state = 0; mSL_C_chcurr = 0;
+            ) :
+            ((ch === '~')) ? (
+                lex = mSL_K_fXOr | mSL_tyOP| mSL_prty9;
+                cod = ch; state = 0; mSL_C_chcurr = 0;
+            ) :
+            ((ch === '?') || (ch === ':')) ? (
+                lex = ch | mSL_tyOP| mSL_prty13;
+                cod = ch; state = 0; mSL_C_chcurr = 0;
+            ) :
+            ((ch === ',')) ? (
+                lex = ch | mSL_tyOP| mSL_prty15;
+                cod = ch; state = 0; mSL_C_chcurr = 0;
+            ) :
+            ((ch === ';')) ? (
+                lex = mSL_tySemiCol;
+                cod = ch; state = 0; mSL_C_chcurr = 0;
+            ) :
+            (ch === '{') ? (  // String opening
+                state = 31; #bio = ""; #bic = "";
+                dec = cod = s = 0; lex = mSL_tyString; mSL_C_chcurr = 0; fac = 2;
+            ) :
             (
-                // Simple case : a single operator/separator
-                ((ch === ')') || (ch === '(') || (ch === '[') || (ch === ']')) ? (
-                    lex = ch | mSL_tySep;
-                ) :
-                ((ch === '^')) ? (
-                    lex = mSL_K_fPow | mSL_tyOP| mSL_prty3;
-                ) :
-                ((ch === '~')) ? (
-                    lex = mSL_K_fXOr | mSL_tyOP| mSL_prty9;
-                ) :
-                ((ch === '?') || (ch === ':')) ? (
-                    lex = ch | mSL_tyOP| mSL_prty13;
-                ) :
-                ((ch === ',')) ? (
-                    lex = ch | mSL_tyOP| mSL_prty15;
-                ) :
-                ((ch === ';')) ? (
-                    lex = mSL_tySemiCol;
-                ) :
-                (
-                    // default ?
-                    lex = ch | mSL_tyOP;
-                ) ;
-                cod = ch;
-                state = 0; // done
-                mSL_C_chcurr = 0;
+                // default ?
+                lex = ch | mSL_tyOP;
+                cod = ch; state = 0; mSL_C_chcurr = 0;
             );
-        ) :
+            //===1===//
 
-        (state === 2) ? (
+
+        ):((state<3)?(
+
+
+            //===2===//
             // coding an identifier - we already have the first char
             // Gather all chars in the string "#sid"
             (((ch >= '0') && (ch <= '9')) || ((ch >= 'A') && (ch <= 'Z')) || ((ch >= 'a') && (ch <= 'z')) || (ch === '_') ) ? (
                 // Enter the char in the string
                 str_setchar(#sid, s, ch, 'cu'); s += 1; mSL_C_chcurr = 0;
             ) : (
-                // The char doesn't belong to the identifier
+                // The new char doesn't belong to the identifier
                 (s > 128) ? (
-                    // Identifier too long
-                    mSL_errC = 2301;
+                    mSL_errC = 2301; // Identifier too long
                     state = lex = 0; // error
                 ) : (
                     cod = mSL_symbol(#sid);
@@ -2600,9 +2814,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                     state = 0; // done
                 );
             );
-        ) :
+            //===2===//
 
-        (state === 3) ? (
+
+        ):(
+
+
+            //===3===//
             // decoding a number
             ((ch >= '0') && (ch <= '9')) ? (
                 cod = cod * 10 + ch - '0'; mSL_C_chcurr = 0;
@@ -2618,9 +2836,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 // done decoding
                 state = 0;
             );
-        ) :
+            //===3===//
 
-        (state === 4) ? (
+
+        ););):((state<6)?((state<5)?(
+
+
+            //===4===//
             // gone decimal
             ((ch >= '0') && (ch <= '9')) ? (
                 fac = fac * 0.1; cod = cod + fac * (ch - '0'); mSL_C_chcurr = 0;
@@ -2632,9 +2854,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 // done decoding
                 state = 0;
             );
-        ) :
+            //===4===//
 
-        (state === 5) ? (
+
+        ):(
+
+
+            //===5===//
             // found a "<" - is there something else behind ?
             (ch === '<') ? (
                 // got a "<<"
@@ -2653,9 +2879,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 cod = '<';
                 state = 0; // & keep char
             );
-        ) :
+            //===5===//
 
-        (state === 6) ? (
+
+        );):((state<7)?(
+
+
+            //===6===//
             // found a '>'
             (ch === '>') ? (
                 // we got a ">>"
@@ -2674,9 +2904,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 cod = '>';
                 state = 0; // & keep char
             );
-        ) :
+            //===6===//
 
-        (state === 7) ? (
+
+        ):(
+
+
+            //===7===//
             // found a '='
             (ch === '=') ? (
                 // we got a "==" -- check for another "="
@@ -2687,9 +2921,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 cod = '=';
                 state = 0; // & keep char
             );
-        ) :
+            //===7===//
 
-        (state === 8) ? (
+
+        );););):((state<24)?((state<16)?((state<12)?((state<10)?((state<9)?(
+
+
+            //===8===//
             // found a '!'
             (ch === '=') ? (
                 // we got a "!=" -- check for another "="
@@ -2700,9 +2938,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 cod = '!';
                 state = 0; // & keep char
             );
-        ) :
+            //===8===//
 
-        (state === 9) ? (
+
+        ):(
+
+
+            //===9===//
             // found a '&'
             (ch === '&') ? (
                 // we got a "&&"
@@ -2721,9 +2963,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 cod = '&';
                 state = 0; // & keep char
             );
-        ) :
+            //===9===//
 
-        (state === 10) ? (
+
+        );):((state<11)?(
+
+
+            //===10===//
             // found a '|'
             (ch === '|') ? (
                 // we got a "||"
@@ -2742,9 +2988,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 cod = '|';
                 state = 0; // & keep char
             );
-        ) :
+            //===10===//
 
-        (state === 11) ? (
+
+        ):(
+
+
+            //===11===//
             // found a "/" -- is this a comment ?
             (ch === '/') ? (
                 state = 12; mSL_C_chcurr = 0;
@@ -2763,26 +3013,38 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 cod = '/';
                 state = 0; // & keep char
             );
-        ) :
+            //===11===//
 
-        (state === 12) ? (
+
+        ););):((state<14)?((state<13)?(
+
+
+            //===12===//
             // "end of line" comment
             ((ch === 10) || (ch === 13) || (ch === -1)) ? (
                 // end of comment -- look for a new unit
                 state = 1;
             );
             mSL_C_chcurr = 0; // stay in state - delete char
-        ) :
+            //===12===//
 
-        (state === 13) ? (
+
+        ):(
+
+
+            //===13===//
             // inside a / * comment
             (ch === '*') ? (
                 state = 14;
             );
             mSL_C_chcurr = 0; // stay in state - delete char
-        ) :
+            //===13===//
 
-        (state === 14) ? (
+
+        );):((state<15)?(
+
+
+            //===14===//
             // found a "*" inside a / * comment
             (ch === '/') ? (
                 state = 1; // we are out !
@@ -2791,9 +3053,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 state = 13; // return to the comment
             );
             mSL_C_chcurr = 0; // del. char
-        ) :
+            //===14===//
 
-        (state === 15) ? (
+
+        ):(
+
+
+            //===15===//
             // found a '*'
             (ch === '=') ? (
                 // we got a "*="
@@ -2806,9 +3072,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 cod = '*';
                 state = 0; // & keep char
             );
-        ) :
+            //===15===//
 
-        (state === 16) ? (
+
+        );););):((state<20)?((state<18)?((state<17)?(
+
+
+            //===16===//
             // found a '+'
             (ch === '=') ? (
                 // we got a "+="
@@ -2821,9 +3091,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 cod = '+';
                 state = 0; // & keep char
             );
-        ) :
+            //===16===//
 
-        (state === 17) ? (
+
+        ):(
+
+
+            //===17===//
             // found a '-'
             (ch === '=') ? (
                 // we got a "-="
@@ -2836,9 +3110,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 cod = '-';
                 state = 0; // & keep char
             );
-        ) :
+            //===17===//
 
-        (state === 18) ? (
+
+        );):((state<19)?(
+
+
+            //===18===//
             // found a '%'
             (ch === '=') ? (
                 // we got a "%="
@@ -2851,20 +3129,32 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 cod = '%';
                 state = 0; // & keep char
             );
-        ) :
+            //===18===//
 
-        (state === 19) ? (
+
+        ):(
+
+
+            //===19===//
             // found a "'"
             (ch === 0x27) ? (
                 // closing quote
                 state = 0;
+            ) :
+            (ch < 0) ? (
+                // end of file is an error here
+                mSL_errC = 2209; // unexpected "eof"
             ) : (
                 cod = cod * 256 + ch;
             );
             mSL_C_chcurr = 0;
-        ) :
+            //===19===//
 
-        (state === 20) ? (
+
+        ););):((state<22)?((state<21)?(
+
+
+            //===20===//
             // found a "0" - is there a "x" or "b" behind ?
             ((ch === 'x') || (ch === 'X')) ? (
                 // starting an hexadecimal
@@ -2888,9 +3178,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 // done decoding
                 state = 0;
             );
-        ) :
+            //===20===//
 
-        (state === 21) ? (
+
+        ):(
+
+
+            //===21===//
             ((ch >= '0') && (ch <= '9')) ? (
                 cod = (cod * 16) + ch - '0'; mSL_C_chcurr = 0;
             ) :
@@ -2903,18 +3197,26 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 // done decoding
                 state = 0;
             );
-        ) :
+            //===21===//
 
-        (state === 22) ? (
+
+        );):((state<23)?(
+
+
+            //===22===//
             ((ch >= '0') && (ch <= '1')) ? (
                 cod = (cod * 2) + ch - '0'; mSL_C_chcurr = 0;
             ) : (
                 // done decoding
                 state = 0;
             );
-        ) :
+            //===22===//
 
-        (state === 23) ? (
+
+        ):(
+
+
+            //===23===//
             // Inside a string (coded as UTF8)
             ((ch === 0x22) || (ch === 0xA) || (ch === 0xD)) ? (
                 // These close the string
@@ -2922,7 +3224,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 cod = mSL_mk_string(-1, mSL_wSt1); // returns an actual JSFX string reference
                 AA_StrRef = cod;
                 // done decoding
+                // Enter the string in the strgs area
+                mSL_StringSet[mSL_pCStrSet] = cod; mSL_pCStrSet += 1;
                 state = 0; mSL_C_chcurr = 0;
+            ) :
+            (ch < 0) ? (
+                // end of file is an error here
+                mSL_errC = 2210; // unexpected "eof"
             ) :
             (ch === 0x5C) ? (
                 // The back-slash escapes something
@@ -2932,9 +3240,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 (i < mSL_CMaxStrSiz) ? (mSL_wSt1[i] = ch; i += 1; );
                 mSL_C_chcurr = 0;
             );
-        ) :
+            //===23===//
 
-        (state === 24) ? (
+
+        ););););):((state<32)?((state<28)?((state<26)?((state<25)?(
+
+
+            //===24===//
             // a backslash is found in the string
             (ch === 'n') ? ch = 0xA :
             (ch === 'r') ? ch = 0xD :
@@ -2943,9 +3255,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
             // enter ch in the string
             (i < mSL_CMaxStrSiz) ? (mSL_wSt1[i] = ch; i += 1; );
             state = 23; mSL_C_chcurr = 0;
-        ) :
+            //===24===//
 
-        (state === 25) ? (
+
+        ):(
+
+
+            //===25===//
             // Found an "==" ; is this an "===" ?
             (ch === '=') ? (
                 // we got a "==="
@@ -2958,9 +3274,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 cod = '==';
                 state = 0; // & keep char
             );
-        ) :
+            //===25===//
 
-        (state === 26) ? (
+
+        );):((state<27)?(
+
+
+            //===26===//
             // Found an "!=" ; is this an "!==" ?
             (ch === '=') ? (
                 // we got a "!=="
@@ -2973,9 +3293,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 cod = '!=';
                 state = 0; // & keep char
             );
-        ) :
+            //===26===//
 
-        (state === 27) ? (
+
+        ):(
+
+
+            //===27===//
             // found an "e/E" after a number - look for exponent
             (ch === '-') ? (
                 mSL_C_chcurr = 0; exps = -1;
@@ -2984,9 +3308,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 mSL_C_chcurr = 0;
             );
             state = 28;
-        ) :
+            //===27===//
 
-        (state === 28) ? (
+
+        ););):((state<30)?((state<29)?(
+
+
+            //===28===//
             // expect an integer dec. number
             ((ch >= '0') && (ch <= '9')) ? (
                 expn = ch - '0'; state = 29; mSL_C_chcurr = 0;
@@ -2994,9 +3322,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 // no number is following the "e"
                 state = 99;
             );
-        ) :
+            //===28===//
 
-        (state === 29) ? (
+
+        ):(
+
+
+            //===29===//
             // expect an integer dec. number
             ((ch >= '0') && (ch <= '9')) ? (
                 expn = expn * 10 + ch - '0'; mSL_C_chcurr = 0;
@@ -3015,9 +3347,13 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
                 );
                 state = 0; // done decoding
             );
-        ) :
+            //===29===//
 
-        (state === 30) ? (
+
+        );):((state<31)?(
+
+
+            //===30===//
             (ch === 96) ? (  // backquote
                 // allow 2 [or more] consecutive backquotes, for syntactic reasons
                 mSL_C_chcurr = 0; // suppress it, stay in 30
@@ -3031,20 +3367,160 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, addr)
             ) : (
                 state = 2;
             );
-        ) :
+            //===30===//
 
 
-        (
+        ):(
+
+
+            //===31===//
+            // found "{" -- expect an identifier and a "{"
+            (((ch >= '0') && (ch <= '9')) || ((ch >= 'A') && (ch <= 'Z')) || ((ch >= 'a') && (ch <= 'z')) || (ch === '_') ) ? (
+                // Enter the char in the string
+                str_setchar(#bio, s, ch, 'cu'); s += 1; mSL_C_chcurr = 0; // stay in state
+            ) :
+            (ch === '{') ? (
+                // we have {ident{ - string opening is correct - we keep #bio
+                #str = ""; w = 0; state = 32; mSL_C_chcurr = 0;
+                lex = mSL_tyString;
+            ) :
+            (ch < 0) ? (
+                // end of file is an error here
+                mSL_errC = 2203; // unexpected "eof"
+            ) : (
+                // an other char is an error
+                mSL_errC = 2204; // unexpected char
+            );
+            //===31===//
+
+
+        );););):((state<36)?((state<34)?((state<33)?(
+
+
+            //===32===//
+            // Accumulate chars in the string
+            (ch === '}') ? (
+                // Is this the closing bracket ? Expect an identifier
+                #bic = ""; s = 0;
+                state = 33; mSL_C_chcurr = 0;
+            ) :
+            (ch < 0) ? (
+                // end of file is an error here
+                mSL_errC = 2205; // unexpected "eof"
+            ) : (
+                str_setchar(#str, w, ch, 'cu'); w += 1; mSL_C_chcurr = 0; // stay in state
+            );
+            //===32===//
+
+
+        ):(
+
+
+            //===33===//
+            // Found a "}" what have we next ?
+            (ch === '}') ? (
+                // found a second "}". Do we match the initial identifier ?
+                (strcmp(#bio, #bic)) ? (
+                    // both identifiers are different, keep the contents
+                    str_setchar(#str, w, '}', 'cu'); w += 1; // enter the first bracket
+                    (strlen(#bic) !== 0) ? (strcat(#str, #bic); w += strlen(#bic););
+                    #bic = ""; s = 0; mSL_C_chcurr = 0; // stay in state
+                ) : (
+                    // both identifiers are equal - close the string
+                    AA_StrRef = cod = mSL_Str_Alloc(#str);
+                    // Enter the string in the strgs area
+                    mSL_StringSet[mSL_pCStrSet] = cod; mSL_pCStrSet += 1;
+                    state = 0; mSL_C_chcurr = 0;
+                );
+            ) :
+            (((ch >= '0') && (ch <= '9')) || ((ch >= 'A') && (ch <= 'Z')) || ((ch >= 'a') && (ch <= 'z')) || (ch === '_') ) ? (
+                // Enter the char in the string
+                str_setchar(#bic, s, ch, 'cu'); s += 1; mSL_C_chcurr = 0; // stay in state
+            ) :
+            (ch < 0) ? (
+                // end of file is an error here
+                mSL_errC = 2208; // unexpected "eof"
+            ) :
+            (
+                // The char doesn't match what is expected. save and expect
+                str_setchar(#str, w, '}', 'cu'); w += 1; // enter the first bracket
+                (strlen(#bic) !== 0) ? (strcat(#str, #bic); w += strlen(#bic););
+                #bic = ""; s = 0;
+                state = 32; // change state, keep the char
+            );
+            //===33===//
+
+
+        );):((state<35)?(
+
+
+            //===34===//
+            state = 134;
+            //===34===//
+
+
+        ):(
+
+
+            //===35===//
+            state = 135;
+            //===35===//
+
+
+        ););):((state<38)?((state<37)?(
+
+
+            //===36===//
+            state = 136;
+            //===36===//
+
+
+        ):(
+
+
+            //===37===//
+            state = 137;
+            //===37===//
+
+
+        );):((state<39)?(
+
+
+            //===38===//
+            state = 138;
+            //===38===//
+
+
+        ):((state<40)?(
+
+
+            //===39===//
+            state = 139;
+            //===39===//
+
+
+        ):(
+
+
+            //===40===//
             // Unclassified /state
             cod = state;
             state = 0;
             lex = 0; // error
-            mSL_errC = 2302;
-        );
+            mSL_errC = 2302; // Unclassified analysis state
+            //===40===//
+
+
+        );););););););
     );
     mSL_lcod = cod;
     lex;
 );
+
+
+
+
+
 
 
 
@@ -3075,7 +3551,8 @@ function mSL_make_compiler(mem, size)
     mSL_C_fH = -1;
     size = 0|size;
     (size < mSL_minCpSize) ? (
-        mSL_errC = 1001; mSL_errPos = 0;
+        mSL_errC = 1001; // Memory too small for compiling
+        mSL_errPos = 0;
     );
 
     (mSL_errC === 0) ? (
@@ -3102,6 +3579,10 @@ function mSL_make_compiler(mem, size)
         mSL_Flat_List = mSL_a_cpmem;
         mSL_a_cpmem += mSL_Flat_Siz;
 
+        // A temporary area for keeping strings
+        mSL_StringSet = mSL_a_cpmem;
+        mSL_a_cpmem += mSL_StrgsSiz;
+
        // Do we already have an array of constants ?
         ((mSL_current_constants != 0) && (mSL_current_constants[-2] === mSL_KODE_constants)) ? (
             // we will use this array
@@ -3121,7 +3602,7 @@ function mSL_make_compiler(mem, size)
         mSL_fileNames = mSL_a_cpmem; mSL_a_cpmem += 16; // an array of 16 imbricated file names
         mSL_wa1 = mSL_a_cpmem; mSL_a_cpmem += 16; // 16 words work area
         mSL_wa2 = mSL_a_cpmem; mSL_a_cpmem += 16; // 16 words work area
-        mSL_wSt1 = mSL_a_cpmem; mSL_a_cpmem += mSL_CMaxStrSiz + 4; // string work area
+        mSL_wSt1 = mSL_a_cpmem; mSL_a_cpmem += mSL_CMaxStrSiz + 4; // string/values large work area
         mSL_CplStack = mSL_a_cpmem; mSL_a_cpmem += mSL_CpStSiz; // array for the compiler's stack
         mSL_CMarkA = mSL_a_cpmem; mSL_a_cpmem += mSL_CMarkSiz; // mark locations in the Kod
         mSL_F2CList = mSL_a_cpmem; mSL_a_cpmem += mSL_F2CSize; // list of functions to compile
@@ -3160,7 +3641,9 @@ function mSL_make_compiler(mem, size)
         // The chain-list data structure -- one "cell" is 5 words
         // We will use about 98% of the rest of the memory for the cells
         u = 0|(0.98 * (mSL_maxCpAddr - mSL_a_cpmem + mSL_memCpStart) / 5 - 1); // avail
-        (u < mSL_intCSiz) ? (mSL_errC = 1003) ;
+        (u < mSL_intCSiz) ? (
+            mSL_errC = 1003; // Memory too small for local table
+        ) ;
         mSL_intCSiz = u; // use this anyway
 
         mSL_lastStatic = mSL_a_cpmem;
@@ -3173,6 +3656,7 @@ function mSL_make_compiler(mem, size)
     );
 
     mSL_checkCLimits();
+
     mSL_current_compiler === 0 ?
         mSL_current_compiler = mSL_new_compiler;
     mSL_new_compiler;
@@ -3265,10 +3749,12 @@ local (flg, ty, PBExp, lex, ty, xp, xty, r, x, y, z, opt, prev, xprev, xnext, id
                         // mSL_errC = 2334; mSL_errPos = mSL_upos[PBExp];
                     ) : (
                         // we have an error : ident expected before an indexation
-                        mSL_errC = 2333; mSL_errPos = mSL_upos[PBExp];
+                        mSL_errC = 2333; // ident expected in an indexation
+                        mSL_errPos = mSL_upos[PBExp];
                     );
                 ) : (
-                    mSL_errC = 2332; mSL_errPos = mSL_upos[PBExp]; // syntax error in bracket
+                    mSL_errC = 2332;  // syntax error in bracket
+                    mSL_errPos = mSL_upos[PBExp];
                 );
             ) :
 
@@ -3284,7 +3770,7 @@ local (flg, ty, PBExp, lex, ty, xp, xty, r, x, y, z, opt, prev, xprev, xnext, id
                 // AAAAA_T_xty = xty; AAAAA_T_x = x; AAAAA_T_z = z;
                 r = mSL_checkCList(xp, z); // get the length of the list
                 AAA_lastXP = xp; AAA_lastXPlg = r; AAA_lastXPty = mSL_tyun[xp]; AAA_lastXPval = mSL_valu[xp];
-                // mSL_errC = 22222; r = 333; xty = 0;
+                // mSL_errC = 2222; r = 333; xty = 0;
                 ((xty === mSL_tyIdent) || (xty === mSL_tyKeywrd) || (xty === mSL_tyPrimF) ||
                     ((xty === mSL_tySubExp) && ((x = mSL_valu[idt]) > 0) && (mSL_tyun[x] === mSL_tyFSpcF)
                         && ((xty = mSL_tyFSpcF))))? (
@@ -3319,7 +3805,8 @@ local (flg, ty, PBExp, lex, ty, xp, xty, r, x, y, z, opt, prev, xprev, xnext, id
                                 ) : (
                                     // error
                                     AAAAA_r = r; AAAAA_z = z;
-                                    mSL_errC = 2331; mSL_errPos = mSL_upos[PBExp];
+                                    mSL_errC = 2331; // Syntax error inside a parenthesed expression
+                                    mSL_errPos = mSL_upos[PBExp];
                                 );
                             );
                         ) : (
@@ -3580,6 +4067,10 @@ local (ptr, nxp, flg, ty, valu, upos, q, qty, argc, ent, prev, pty, next, nnext,
                         ((v & mSL_FlgMask) === mSL_PtrFlg) ? (
                             mSL_addCode1(mSL_K_ldPVar + ((v & 0xffff) * mSL_X_OpShDiv));
                         ) :
+                        ((v & mSL_FlgMask) === mSL_ExtFlg) ? (
+                            mSL_addCode1(mSL_K_ldXVar + ((v & 0xffff) * mSL_X_OpShDiv));
+                            // sprintf(#dbg_trace6, "Gen ext load : %d [%d]", mSL_K_ldXVar, v);
+                        ) :
                         (
                             mSL_errC = 3416; // undeclared identifier
                         );
@@ -3593,7 +4084,7 @@ local (ptr, nxp, flg, ty, valu, upos, q, qty, argc, ent, prev, pty, next, nnext,
 
                 // An address
                 (ty === mSL_tyIdAddr) ? (
-                    // generate a "push ident"
+                    // generate a "push ident address"
                     (((ent = mSL_checkLId(valu)) >= 0) && ((v = mSL_LCCod[ent]) > 0)) ? (
                         mSL_addCode1(mSL_K_ldLAddr + (v * mSL_X_OpShDiv));
                     ) :
@@ -3607,8 +4098,12 @@ local (ptr, nxp, flg, ty, valu, upos, q, qty, argc, ent, prev, pty, next, nnext,
                         ((v & mSL_FlgMask) === mSL_PtrFlg) ? (
                             mSL_addCode1(mSL_K_ldPAddr + ((v & 0xffff) * mSL_X_OpShDiv));
                         ) :
+                        ((v & mSL_FlgMask) === mSL_ExtFlg) ? (
+                            mSL_addCode1(mSL_K_ldXAddr + ((v & 0xffff) * mSL_X_OpShDiv));
+                            // sprintf(#dbg_trace5, "Gen ext addr : %d [%d]", mSL_K_ldXAddr, v);
+                        ) :
                         (
-                            mSL_errC = 3417; // undeclared identifier
+                            mSL_errC = 3420; // undeclared identifier
                         );
                     ) :
                     (
@@ -3748,34 +4243,56 @@ local (ptr, nxp, flg, ty, valu, upos, q, qty, argc, ent, prev, pty, next, nnext,
                                     r = next; c = 0;
                                     while ((r > 0) && (mSL_errC === 0))  (
                                         rty = mSL_tyun[r]; c += 1;
-                                        ((rty != mSL_tyNum) && (rty != mSL_tyIdent) && (rty != mSL_tyString)) ? (
-                                            (mSL_CP_Flags & 16) ? (
-                                                sprintf(#sfc, "Obj Found 3414 %d  %s", r, mSL_type_Name(rty));
-                                                mSL_log(SysLogBox, #sfc);
-                                            );
+                                        ((rty === mSL_tyNum) || (rty === mSL_tyIdent) || (rty === mSL_tyArray) ||
+                                                (rty === mSL_tyString) || (rty === mSL_tyChar)) ? (
+                                            r = mSL_rptr[r];
+                                        ) :
+                                        // (mSL_CP_Flags & 16) ?
+                                        (
+                                            sprintf(#sfc, "Obj Found 3414 @%d: %08X/%d,%d %s > %s",
+                                                    r, rty, mSL_upos[r]>>16, mSL_upos[r]&0xFFFF,
+                                                    mSL_type_Name(rty), mSL_edit_value(#sfd, mSL_valu[r]));
+                                            mSL_log(SysLogBox, #sfc);
                                             bk = mSL_lptr[r];
                                             (rty === mSL_tySubExp) ? (
                                                 // The object is a subexpression
                                                 // Try to evaluate it
+                                                sprintf(#sfc, "Try to flatten %d  [%d  <-> %d]", r, mSL_lptr[r], mSL_rptr[r]);
+                                                mSL_log(SysLogBox, #sfc);
                                                 mSL_flatten_tree(r);
+                                                (mSL_errC === 0) ? (
+                                                    // relink...
+                                                    c -= 2;
+                                                    r = bk;
+                                                    // (mSL_CP_Flags & 16) ?
+                                                    (
+                                                        sprintf(#sfc, "Relink at  %d   %s", r, mSL_type_Name(mSL_tyun[r]));
+                                                        mSL_log(SysLogBox, #sfc);
+                                                    );
+                                                );
+                                            ) :
+                                            ((rty & mSL_tyMMask) === mSL_tyOP) ? (
+                                                // change to a mSL_tyChar
+                                                sprintf(#msg, "Changing    @%d: %08X/%d,%d %s > %s to num.",
+                                                            r, rty, mSL_upos[r]>>16, mSL_upos[r]&0xFFFF,
+                                                            mSL_type_Name(rty),
+                                                            mSL_edit_value(#sfc, mSL_valu [r]));
+                                                mSL_log(SysLogBox, #msg);
+                                                mSL_tyun[r] = mSL_tyChar;
+                                                mSL_valu[r] += mSL_CharConst ;
+                                                r = mSL_rptr[r];
                                             ) : (
                                                 AAAAA_data_err = rty;
                                                 mSL_errC = 3414; mSL_errPos = mSL_upos[r]; r = -1;
                                             );
-                                            (mSL_errC === 0) ? (
-                                                // relink...
-                                                c -= 2;
-                                                r = bk;
-                                                (mSL_CP_Flags & 16) ? (
-                                                    sprintf(#sfc, "Relink at  %d   %s", r, mSL_type_Name(mSL_tyun[r]));
-                                                    mSL_log(SysLogBox, #sfc);
-                                                );
-                                            ) ;
-                                        ) : (
-                                            r = mSL_rptr[r];
                                         );
                                     );
-                                    // we need to create a memory block with these values
+                                    (!GMW()) ? (
+                                        mSL_errX = 1667; // damaged 0 address
+                                        mSL_log(SysLogBox, "Err. 1667  Locations 0-7 modified !");
+                                        GMW0("X-1667");
+                                    );
+                                   // we need to create a memory block with these values
                                     r = next;
                                     // s = mSL_malloc(c, mSL_MT_Data);
                                     s = mSL_Dyn_Alloc(c, mSL_MT_Data, mSL_StM_FlClear);
@@ -4168,11 +4685,15 @@ local (id, li, ex, wa, idx, ip, c, w, lc, s)
         wa[mSL_CC_GlbTab_Idt] = mSL_KW_ccglbtbl;
         wa[mSL_CC_OwnTab_Idt] = mSL_KW_ccowntbl;
         wa[mSL_CC_PtrTab_Idt] = mSL_KW_ccptrtbl;
+        wa[mSL_CC_ExtTab_Idt] = mSL_KW_ccexttbl;
+        wa[mSL_CC_Strngs_Idt] = mSL_KW_ccstrngs;
         wa[mSL_CC_last] = mSL_End_Mark;
         wa[mSL_CC_Flags] = 0;
         wa[mSL_CC_GlbTab] = 0;
         wa[mSL_CC_OwnTab] = 0;
         wa[mSL_CC_PtrTab] = 0;
+        wa[mSL_CC_ExtTab] = 0;
+        wa[mSL_CC_Strngs] = 0;
         wa[mSL_CC_Name] = mSL_valu[id]; // name of the function
         w = mSL_valu[li]; // points to the arg. count/list
         c = mSL_valu[w];
@@ -4239,11 +4760,15 @@ local (wa, ip, idx)
     wa[mSL_CC_GlbTab_Idt] = mSL_KW_ccglbtbl;
     wa[mSL_CC_OwnTab_Idt] = mSL_KW_ccowntbl;
     wa[mSL_CC_PtrTab_Idt] = mSL_KW_ccptrtbl;
+    wa[mSL_CC_ExtTab_Idt] = mSL_KW_ccexttbl;
+    wa[mSL_CC_Strngs_Idt] = mSL_KW_ccstrngs;
     wa[mSL_CC_last] = mSL_End_Mark;
     wa[mSL_CC_Flags] = 0;
     wa[mSL_CC_GlbTab] = 0;
     wa[mSL_CC_OwnTab] = 0;
     wa[mSL_CC_PtrTab] = 0;
+    wa[mSL_CC_ExtTab] = 0;
+    wa[mSL_CC_Strngs] = 0;
     wa[mSL_CC_Name] = 0; // no code ident
     wa[mSL_CC_ParCnt] = 0; // no parameters
     wa[mSL_CC_LocCnt] = 0; // no locals
@@ -4363,9 +4888,10 @@ local (p, q, state, ty, v, vty, i, leftanchor, left, ex1, ex2, ex3, ps, fd, id, 
             // do we have a keyword/special construct ?
             // leftanchor = mSL_lptr[p];
             (ty === mSL_tyKeywrd) ? (
-                ((v === mSL_ckwVar) || (v === mSL_ckwLoc) || (v === mSL_ckwPtr)) ? (
+                ((v === mSL_ckwVar) || (v === mSL_ckwLoc) || (v === mSL_ckwPtr) || (v === mSL_ckwExt)) ? (
                     (v === mSL_ckwLoc) ? (vty = mSL_OwnFlg;) :
                     (v === mSL_ckwPtr) ? (vty = mSL_PtrFlg;) :
+                    (v === mSL_ckwExt) ? (vty = mSL_ExtFlg;) :
                     (vty = 0;);
                     q = p; p = mSL_rptr[p]; mSL_freeChEnt(q);
                     // chain to the anchor
@@ -4380,12 +4906,14 @@ local (p, q, state, ty, v, vty, i, leftanchor, left, ex1, ex2, ex3, ps, fd, id, 
                     //AA_03 = p; AA_03c = mSL_tyun[p];
                     state = 7;
                 ) : (
-                    mSL_errC = 2228; mSL_errPos = mSL_upos[p];
+                    mSL_errC = 2228;
+                    mSL_errPos = mSL_upos[p];
                 );
             ) :
             (ty === mSL_tyTAIL) ? (
                 (mSL_rptr[p] > 0) ? (
-                    mSL_errC = 2229; mSL_errPos = mSL_upos[p];
+                    mSL_errC = 2229;
+                    mSL_errPos = mSL_upos[p];
                 );
                 p = -1;
             ) : (
@@ -4408,7 +4936,7 @@ local (p, q, state, ty, v, vty, i, leftanchor, left, ex1, ex2, ex3, ps, fd, id, 
             );
         ) :
 
-        // "var" / "loc" construct
+        // "var" / "loc" / "ptr" / "ext" constructs
         (state === 4) ? (
             (ty === mSL_tySemiCol) ? (
                 state = 2; p = mSL_rptr[p];
@@ -4661,6 +5189,7 @@ local (p, q, state, ty, v, vty, i, leftanchor, left, ex1, ex2, ex3, ps, fd, id, 
         ) :
 
 
+
         (
             mSL_errC = 2220; mSL_errPos = mSL_upos[p];
         )
@@ -4722,7 +5251,10 @@ local (s, r, u)
         mSL_new_evaluator[mSL_EV_loc] = mSL_KW_locals;
         mSL_new_evaluator[mSL_EV_locAddr] = mSL_baseOVars;
 
-        mSL_new_evaluator[mSL_EV_ext] = mSL_KW_pointers;
+        mSL_new_evaluator[mSL_EV_ptr] = mSL_KW_pointers;
+        mSL_new_evaluator[mSL_EV_ptrAddr] = mSL_basePVars;
+
+        mSL_new_evaluator[mSL_EV_ext] = mSL_KW_external;
         mSL_new_evaluator[mSL_EV_extAddr] = mSL_basePVars;
 
 
@@ -4845,7 +5377,7 @@ local (flg, lex, endgen, fptr, fp, fn, fent, sz, loc_baseAVars, loc_baseOVars, l
             // update globals from external exec.
             mSL_updateGlobals(mSL_baseAVars, mSL_GlbFlg);
             mSL_updateGlobals(mSL_baseOVars, mSL_OwnFlg);
-            mSL_updateGlobals(mSL_basePVars, mSL_PtrFlg);
+            mSL_basePVars = 0;
         ) : (
             mSL_baseAVars = 0;
             mSL_baseOVars = 0;
@@ -4864,6 +5396,7 @@ local (flg, lex, endgen, fptr, fp, fn, fent, sz, loc_baseAVars, loc_baseOVars, l
     mSL_checkCLimits();
 
     (mSL_errC === 0) ? (
+        mSL_pCStrSet = 0;
         //AA_tr = 2;
         mSL_C_fH = fHandle;
         ((mSL_C_fH < 0) && (fname > 0)) ? (
@@ -4909,6 +5442,116 @@ local (flg, lex, endgen, fptr, fp, fn, fent, sz, loc_baseAVars, loc_baseOVars, l
     );
     //AA_lpUnit = 0;
     mSL_F2CPt = 0;
+
+
+
+    (mSL_errC === 0) ? (
+        // Special check for "data" constructs
+        // we are exploring a chained list of lexical units
+        dtstr = p = mSL_start; plev = 0; pcnt = 0;
+        while ((p >= 0) && (mSL_errC === 0))  (
+            /*
+            */
+            // Is "p" the "data" keyword ?
+            ty = mSL_tyun[p];
+            ((plev > 0) && (ty === mSL_tyRPar)) ? (
+                plev -= 1;
+                (plev === 0) ? (
+                    /*
+                    sprintf (#sfc, "++data end @%d : %d,%d   [%d]", p, mSL_upos[p]>>16, mSL_upos[p]&0xFFFF, pcnt);
+                    mSL_log(SysLogBox, #sfc);
+                    */
+                    dtend = p; // This is where the data block ends, at close parent
+                    // create an array to keep all the items (pcnt)
+                    s = mSL_Dyn_Alloc(pcnt, mSL_MT_Data, mSL_StM_FlClear);
+                    (s === 0) ? (
+                        mSL_errC = 1276;
+                        mSL_malloc_failed |= 1;
+                    ) : (
+                        // Protect the block
+                        mSL_GC_BProtect(s, mSL_GC_Protected);
+                        // do another pass to get all the items
+                        i = 0; p = dt1st;
+                        loop(pcnt,
+                            ty = (t = mSL_tyun[p]) & mSL_tyMMask; v = mSL_valu[p];
+                            (((ty === mSL_tyOP) || (ty === mSL_tySep)) && (v > 32) && (v < 0x7FFFFF)) ? (
+                                v += mSL_CharConst; // as a "printable char"
+                            );
+                            s[i] = v; i += 1; p = mSL_rptr[p];
+                        );
+                        // Create as a constant
+                        mSL_tyun[dtstr] = mSL_tyNum;
+                        mSL_valu[dtstr] = s; // keep the address
+                        // Relink everything
+                        q = mSL_rptr[dtend];
+                        mSL_rptr[dtstr] = q;
+                        mSL_lptr[q] = dtstr;
+                        p = q; // restart here
+                        // sprintf (#sfc, "++data block: %d", s); mSL_log(SysLogBox, #sfc);
+                    );
+                );
+            );
+            (plev > 0) ? (
+                /*
+                sprintf (#sfc, "++data @%d : %d,%d    %08X    =%s=", p, mSL_upos[p]>>16, mSL_upos[p]&0xFFFF,
+                        mSL_tyun[p],  mSL_edit_value(#sfd, mSL_valu[p]));
+                mSL_log(SysLogBox, #sfc);
+                */
+                (ty === mSL_tyLPar) ? (plev += 1;);
+                pcnt += 1; // item count
+                // Inside "data"
+                ((ty === mSL_tyDMinus)) ? (
+                    // minus found, is next item a number ?
+                    q = mSL_rptr[p];
+                    (mSL_tyun[q] === mSL_tyNum) ? (
+                        s = mSL_lptr[p]; // before "-"
+                        r = mSL_rptr[q]; // after <number>
+                        /*
+                        sprintf (#sfc, "++number found @%d after a minus sign @%d", q, p);
+                        mSL_log(SysLogBox, #sfc);
+                        sprintf (#sfc, "++1 s:%d s>:%d p:%d p>:%d p:<%d q:%d q<:%d q>r:%d",
+                            s, mSL_rptr[s], p, mSL_rptr[p], mSL_lptr[p], q, mSL_lptr[q], r);
+                        mSL_log(SysLogBox, #sfc);
+                        */
+                        // Use the minus slot (p) for the number previously in (q)
+                        mSL_valu[p] = - mSL_valu[q]; // negate it
+                        mSL_tyun[p] = mSL_tyun[q];
+                        // mSL_upos[p] is correct
+                        mSL_flgs[p] = mSL_flgs[q];
+                        mSL_rptr[p] = r;
+                        mSL_lptr[r] = p;
+                        /*
+                        sprintf (#sfc, "++2 s:%d s>:%d p:%d p>:%d p:<%d q:%d q<:%d q>r:%d",
+                            s, mSL_rptr[s], p, mSL_rptr[p], mSL_lptr[p], q, mSL_lptr[q], r);
+                        mSL_log(SysLogBox, #sfc);
+                        */
+                        ty = mSL_tyun[p];
+                    );
+                );
+                //  sprintf(#sfc, "++in data: p:%d ty=%d  val=%d", p, ty, mSL_valu[p]);  mSL_log(SysLogBox, #sfc);
+            );
+            ((ty === mSL_tyKeywrd) && (mSL_valu[p] === mSL_ckwData)) ? (
+                // found the keyword "data"
+                //  sprintf (#sfc, "++data kwd @%d : %d,%d", p, mSL_upos[p]>>16, mSL_upos[p]&0xFFFF); mSL_log(SysLogBox, #sfc);
+                // is "data" followed by an open parent ?
+                q = mSL_rptr[p]; // "p" is "data"
+                (mSL_tyun[q] === mSL_tyLPar) ? (
+                    // "q" is "("
+                    (plev === 0) ? (
+                        dtstr = p; // This is where the data block start, at "data ";
+                        plev += 1; pcnt = 0;
+                        dt1st = mSL_rptr[q]; // first item to keep
+                        p = q; // will skip the parenth.
+                    );
+                    // sprintf (#sfc, "++data(%d -> %d -> %d ... )", dtstr, q, dt1st); mSL_log(SysLogBox, #sfc);
+                );
+            );
+            // skip to next unit
+            p = mSL_rptr[p];
+        );
+    );
+
+
 
 
     (mSL_errC === 0) ? (
@@ -4966,18 +5609,29 @@ local (flg, lex, endgen, fptr, fp, fn, fent, sz, loc_baseAVars, loc_baseOVars, l
         //loc_baseOVars = mSL_malloc(sz+8, mSL_KODE_locals);
         loc_baseOVars = mSL_Dyn_Alloc(sz+8, mSL_KODE_locals, mSL_StM_FlClear);
         mSL_GC_BProtect(loc_baseOVars, mSL_GC_Protected);
+        /*
         sz = (mSL_pvar+1) & mSL_NumMask;
         // loc_basePVars = ((sz === 0) && (mSL_EmptyPVars != 0)) ? mSL_EmptyPVars : mSL_malloc(sz+8, mSL_KODE_pointers);
         //loc_basePVars = mSL_malloc(sz+8, mSL_KODE_pointers);
         loc_basePVars = mSL_Dyn_Alloc(sz+8, mSL_KODE_pointers, mSL_StM_FlClear);
         mSL_GC_BProtect(loc_basePVars, mSL_GC_Protected);
-        ((loc_baseAVars === 0) || (loc_baseOVars === 0) || (loc_basePVars === 0)) ? (
+        */
+        // ((loc_baseAVars === 0) || (loc_baseOVars === 0) || (loc_basePVars === 0)) ? (
+        ((loc_baseAVars === 0) || (loc_baseOVars === 0)) ? (
             mSL_errC = 1275;
         );
+        // keep the strings
+        (mSL_pCStrSet >= mSL_StrgsSiz) ? (
+            mSL_errC = 1279; // static constants limit
+        );
+        sz = mSL_pCStrSet;
+        loc_cstStrings = mSL_Dyn_Alloc(sz, mSL_KODE_Strings, mSL_StM_FlClear);
+        mSL_GC_BProtect(loc_cstStrings, mSL_GC_Protected);
+        memcpy(loc_cstStrings, mSL_StringSet, mSL_pCStrSet);
 
         (mSL_errC === 0) ? (
-            mSL_clean_vtabs(loc_baseAVars, loc_baseOVars, loc_basePVars);
-            mSL_retrieveGlobals(loc_baseAVars, loc_baseOVars, loc_basePVars);
+            mSL_clean_vtabs(loc_baseAVars, loc_baseOVars);
+            mSL_retrieveGlobals(loc_baseAVars, loc_baseOVars);
 
             (cpflgs & 2) ? (
                 // Are these identical to our original tables ?
@@ -4999,6 +5653,7 @@ local (flg, lex, endgen, fptr, fp, fn, fent, sz, loc_baseAVars, loc_baseOVars, l
                 ) : (
                     mSL_fwdChain(mSL_baseOVars, loc_baseOVars); // forward chain
                 );
+                /*
                 mSL_same_entries(mSL_basePVars, loc_basePVars)  ? (
                     loc_basePVars = mSL_basePVars;
                     (mSL_CP_Flags & 8) ? (
@@ -5008,19 +5663,22 @@ local (flg, lex, endgen, fptr, fp, fn, fent, sz, loc_baseAVars, loc_baseOVars, l
                 ) : (
                     mSL_fwdChain(mSL_basePVars, loc_basePVars); // forward chain
                 );
+                */
             );
 
             // Let's populate the various structures: main code and functions
             mSL_main_cod[mSL_CC_GlbTab] = loc_baseAVars;
             mSL_main_cod[mSL_CC_OwnTab] = loc_baseOVars;
-            mSL_main_cod[mSL_CC_PtrTab] = loc_basePVars;
+            // mSL_main_cod[mSL_CC_PtrTab] = loc_basePVars;
+            mSL_main_cod[mSL_CC_Strngs] = loc_cstStrings;
 
             fptr = 0;
             while (mSL_F2CPt > fptr) (
                 mSL_fun = mSL_F2CCode[fptr];
                 mSL_fun[mSL_CC_GlbTab] = loc_baseAVars;
                 mSL_fun[mSL_CC_OwnTab] = loc_baseOVars;
-                mSL_fun[mSL_CC_PtrTab] = loc_basePVars;
+                // mSL_fun[mSL_CC_PtrTab] = loc_basePVars;
+                mSL_fun[mSL_CC_Strngs] = loc_cstStrings;
                 fptr += 1;
             );
         );
@@ -5047,19 +5705,21 @@ local (flg, lex, endgen, fptr, fp, fn, fent, sz, loc_baseAVars, loc_baseOVars, l
 //    Use a mSL allocated bloc
 
 function mSL_make_thread()
-local (s, bl, stak)
+local (bl, stak, ldic)
 (
-    mSL_new_thread = 0;
-    //bl = mSL_malloc(mSL_THR_Z, mSL_THR_KeyStrt); // create thread
+    mSL_new_thread = bl = stak = ldic = 0;
     bl = mSL_Dyn_Alloc(mSL_THR_Z, mSL_THR_KeyStrt, mSL_StM_FlClear); // create thread
-    //stak = mSL_malloc(mSL_baseStkMax, mSL_KODE_stack); // create stack
     stak = mSL_Dyn_Alloc(mSL_baseStkMax, mSL_KODE_stack, mSL_StM_FlClear); // create stack
-    ((bl === 0) || (stak === 0)) ? (
+    ldic = mSL_Dyn_Alloc(mSL_baseLDic, mSL_THR_KeyLDic, mSL_StM_FlClear); // create local dictionnary
+    ((bl === 0) || (stak === 0) || (ldic === 0)) ? (
         // allocation failed
+        sprintf(#dbg_trace6, "make_thread failed : %d[%d], %d[%d], %d[%d]", bl, mSL_THR_Z, stak, mSL_baseStkMaxstak, ldic, mSL_baseLDic);
         bl ? mSL_Dyn_Free(bl);
         stak ? mSL_Dyn_Free(stak);
+        ldic ? mSL_Dyn_Free(ldic);
         mSL_errX = 1016; mSL_errPos = 0; // no space
         mSL_malloc_failed |= 1;
+        bl = stak = ldic = 0;
     ) : (
         // internal clear
         // memset(bl, 0, s); // all reset - done in malloc
@@ -5088,8 +5748,11 @@ local (s, bl, stak)
         bl[mSL_THR_ICount_Idt] = 'icnt'; // Instruction count
         bl[mSL_THR_MxStk_Idt] = 'stmx'; // Stack max size
         bl[mSL_THR_Evnt_Idt] = 'evnt'; // event location
+        bl[mSL_THR_LDict_Idt] = 'ldic'; // local dictionnary
         // Enter stack address
         bl[mSL_THR_basePhStack] = stak;
+        // Enter the local dictionnary address
+        bl[mSL_THR_LDict] = ldic;
         mSL_new_thread = bl;
     );
     (mSL_current_thread === 0) ? (
@@ -5108,6 +5771,7 @@ local (stk)
 (
     (thrd[-2] === mSL_THR_KeyStrt) ? ( // half verification
         stk = thrd[mSL_THR_basePhStack];
+        ldic = bl[mSL_THR_LDict];
         thrd[mSL_THR_State] = 0;
         thrd[mSL_THR_UTId] = 0;
         // mSL_THR_SchedEnt -- updated outside
@@ -5131,6 +5795,7 @@ local (stk)
         thrd[mSL_THR_Evnt] = 0;
         mSL_bl_clear(stk); // keep the stack, but clear it
         thrd[mSL_THR_StackSize] = stk[-1]; // by definition
+        mSL_bl_clear(ldic); // keep the dictionnary, but clear it
     );
 );
 
@@ -5240,10 +5905,10 @@ function mSL_load_thread(thrd)
 
 
 
-//   Populate a thread structure after a compilation
+//   Populate a mSL thread structure after a compilation
 
 function mSL_init_thread(ent)
-local (w, xcode, bcode, thrd, stk, ssiz)
+local (w, xcode, bcode, thrd, stk, ldic, lccnt, prcnt, ssiz, lsiz, p, r, bl)
 (
     (mSL_errX === 0) ? (
         ((ent < SchedFirstEnt) || (ent > SchedLastEnt)) ? (
@@ -5257,6 +5922,9 @@ local (w, xcode, bcode, thrd, stk, ssiz)
         );
     );
     (mSL_errX === 0) ? (
+        lccnt = xcode[mSL_CC_LocCnt]; // number of 'local' variables
+        prcnt = xcode[mSL_CC_ParCnt]; // number of parameters
+        // sprintf(#sfc, "*  fct: %d   arg cnt.:%d   loc. cnt.:%d", xcode, prcnt, lccnt); mSL_log(SysLogBox, #sfc);
         thrd = SchedThrdPt[ent];
         ((thrd === 0) || (thrd[-2] != mSL_THR_KeyStrt)) ? (
             mSL_errX = 2414; // incorrect thread
@@ -5270,33 +5938,56 @@ local (w, xcode, bcode, thrd, stk, ssiz)
         );
     );
     (mSL_errX === 0) ? (
+        ldic = thrd[mSL_THR_LDict];
+        ((ldic === 0) || (ldic[-2] != mSL_THR_KeyLDic) || ((lsiz=ldic[-1]) < 20)) ? (
+            mSL_errX = 2419; // no defined local dictionnary
+        );
+    );
+    (mSL_errX === 0) ? (
         // Start populating the thread AREA
         // thrd[mSL_THR_SchedEnt] = ent; // the scheduler entry
         // The always available global variables
-        (thrd[mSL_THR_baseAVars] === 0) ? (
+        //(thrd[mSL_THR_baseAVars] === 0) ? (
             (w = xcode[mSL_CC_GlbTab]) ? (
                 thrd[mSL_THR_baseAVars] = w;
             ) : (
                 mSL_errX = 2418; // no defined global table
             );
-        );
+        //);
     );
     (mSL_errX === 0) ? (
-        (thrd[mSL_THR_baseOVars] === 0) ? (
+        //(thrd[mSL_THR_baseOVars] === 0) ? (
             (w = xcode[mSL_CC_OwnTab]) ? (
-                thrd[mSL_THR_baseOVars] = w;
+                // Create a copy of the local variables tab
+                r = 0; p = 2 * (w / (lsiz%2));
+                while (r === 0) (
+                    (ldic[p] === w) ? (
+                        r = p + 1;
+                    ) :
+                    (ldic[p] === 0) ? (
+                        r = p + 1;
+                        ldic[p] = w;
+                        ldic[r] = mSL_bl_Dup(w);
+                        // sprintf(#dbg_trace6, "Th:Duplicating mSL_baseOVars.");
+                    ) :
+                    (
+                        p = (p + 7*2) % ldic[-1];
+                    );
+                );
+                (r === 0) ? (
+                    mSL_errX=1423; // unable to update semi-local thread table
+                );
+                thrd[mSL_THR_baseOVars] = ldic[r];
             ) : (
                 mSL_errX = 2420; // no defined own table
             );
-        );
+        //);
     );
     (mSL_errX === 0) ? (
-        (thrd[mSL_THR_basePVars] === 0) ? (
-            (w = xcode[mSL_CC_PtrTab]) ? (
-                thrd[mSL_THR_basePVars] = w;
-            ) : (
-                mSL_errX = 2419; // no defined pointer table
-            );
+        // check the number of parameters
+        (((xcode[mSL_CC_Flags] & 1) === 0) && (prcnt != SchedPar2[ent])) ? (
+            mSL_errX = 2421; // wrong parameter count
+            // sprintf(#sfc, "fct arg cnt.:%d  fct par cnt.:%d", prcnt, SchedPar2[ent], stkb); mSL_log(SysLogBox, #sfc);
         );
     );
     (mSL_errX === 0) ? (
@@ -5315,28 +6006,49 @@ local (w, xcode, bcode, thrd, stk, ssiz)
         // thrd[mSL_THR_basePhStack] = stk; // keep the provided stak
         memset(stk,0,ssiz); // reset stack to zeroes
         stk[0] = mSL_K_stop; // Put a "stop lock" instruction
-        // Add some stack end markers
+        // Add some "stack end" markers
         // Help check stack overflow conditions
         stk[ssiz-65] = stk[ssiz-33] = stk[ssiz-1] = mSL_End_Mark;
         thrd[mSL_THR_baseHighStack] = stk + ssiz - 65;
         thrd[mSL_THR_baseAddStack] = stkb = stk + 1; // initial base stack
         // The "context"
+        bl = stkb; // begin of locals
+        // Some parameters to add ?
+        p = SchedPar3[ent]; w = SchedPar2[ent];
+        (w > 0) ? (
+            // Copy the values of parameters in the stack
+            r = 0; loop (w, stkb[r] = p[r]; r += 1;);
+            // sprintf(#sfc, "copy %d values from %d to %d", w, p, stkb); mSL_log(SysLogBox, #sfc);
+            stkb += w;
+        );
+        (xcode[mSL_CC_Flags] & 1) ? (
+            // Function with a variable count of parameter
+            stkb[0] = w; // arg count
+            stkb[1] = bl; // arg values
+            bl = stkb; // new begin of locals
+            stkb += 2;
+            // sprintf(#sfc, "push c=%d, v=%d, tos=%d", bl[0], bl[1], stkb); mSL_log(SysLogBox, #sfc);
+        );
+        stkb += lccnt; // add local count
         stkb[0] = stkb; // loop on last stack [[mSL_baseAddStack]]
-        stkb[1] =       // [[mSL_baseLocals]]
+        stkb[1] = thrd[mSL_THR_baseLocals] = bl-1;     // [[mSL_baseLocals]]
         stkb[2] =       // [[mSL_baseTOS]]
-                    thrd[mSL_THR_baseTOS] = thrd[mSL_THR_baseLocals] = thrd[mSL_THR_TOS] = stkb + mSL_STK_DSiz - 1;
-        stkb[3] = stk;  // [[mSL_baseCode]] - a code with the single instruction "0" ==> error
+                    thrd[mSL_THR_baseTOS] = thrd[mSL_THR_TOS] = stkb + mSL_STK_DSiz - 1;
+        stkb[3] = stk;  // [[mSL_baseCode]] - a code with the single instruction "1" ==> stop
         stkb[4] = 0;    // [[mSL_CodePtr]]
         stkb[5] = thrd[mSL_THR_baseAVars];  // [[mSL_baseAVars]]
         stkb[6] = thrd[mSL_THR_baseOVars];  // [[mSL_baseOVars]]
         stkb[7] = thrd[mSL_THR_basePVars];  // [[mSL_basePVars]]
         // Set the needed values
         thrd[mSL_THR_NxtOp] = w = bcode[0];
+        thrd[mSL_THR_baseAddStack] = stkb;
         mSL_CodeStop = 0;
         (w === 0) ? (
             mSL_errX = 2416;
         );
     );
+    // sprintf(#sfc, "stk:%d stkb:%d err:%d loc:%d par:%d val:%d tos:%d", stk, stkb, mSL_errX, lccnt, prcnt, SchedPar2[ent], stkb); mSL_log(SysLogBox, #sfc);
+    // sprintf(#sfc, "ent: %d fct:%d Code:%d Nx.op:%d/%x op:%d/%x", ent, xcode, bcode, w, w, w & 0xff, w & 0xff); mSL_log(SysLogBox, #sfc);
     ent;
 );
 
@@ -5403,7 +6115,7 @@ local (anum, a, b, c, d)
             );
         ) :
         ((num > mSL_Sym_Low) && (num < mSL_Sym_High)) ? (
-            mSL_id2Str(num);
+            mSL_id2Str(num, #mSL_wS1);
             strcpy(#mSL_wS2, "`");
             strcat(#mSL_wS2, #mSL_wS1);
         ) :
@@ -5452,10 +6164,6 @@ function mSL_define_global(name, value)
     mSL_defGlobal(name, mSL_GlbFlg, mSL_tyIdent, value);
 );
 
-function mSL_define_pointer(name, value)
-(
-    mSL_defGlobal(name, mSL_PtrFlg, mSL_tyIdent, value);
-);
 
 // Some run-time operations for user extensions (128)
 // They can be redefined in mSL_Extend.jsfx-inc to provide more useful operations...

@@ -1,0 +1,924 @@
+
+@init
+
+// Some constants
+xml_docstart = - 138462423 / 256;   //  -540868.83984375
+xml_eltstart = - 138462327 / 256;   //  -540868.46484375
+xml_attrend  = - 138462291 / 256;   //  -540868.32421875
+xml_eltend   = - 138462121 / 256;   //  -540867.66015625
+xml_docend   = - 138462079 / 256;   //  -540867.49609375
+xml_prologs  = - 138461353 / 256;   //  -540864.66015625
+xml_prologe  = - 138460417 / 256;   //  -540861.00390625
+
+// XML Decoding
+rejectChPt = 0;
+// reject a char
+function rejectCh(c)
+(
+    rejectedChars[rejectChPt] = c;
+    rejectChPt += 1;
+);
+
+
+// Get a char from the current file "fHndl"
+function getCh()
+local (x)
+(
+    (rejectChPt > 0) ? (
+        rejectChPt -= 1;
+        chcurr = rejectedChars[rejectChPt];
+    ) : (
+        x = 1;
+        while (x && (chAvail === 0)) (
+            // read a new line
+            ((fHndl >= 0) && file_avail(fHndl)) ? (
+                chAvail = file_string(fHndl, #FLline);
+                x = strlen(#FLline);
+                FnumLine += 1;
+                FchPos = 0;
+            ) : (
+                (fHndl >= 0) ? (file_close(fHndl); fHndl = -1;);
+                chAvail = -1;
+            );
+        );
+        (chAvail > 0) ? (
+            chcurr = str_getchar(#FLline, FchPos, 'cu');
+            FchPos += 1; chAvail -= 1;
+        ) : (
+            chcurr = chAvail = -1;
+        );
+    );
+    chcurr;
+);
+
+
+// Code a string as a floating point number
+function codeid(str)
+local (res, l, i)
+(
+    res = l = strlen(str); i=0;
+    while (l > 0) (
+        res = res * 4;
+        res += str_getchar(str, i, 'cu');
+        i += 1; l -= 1;
+    );
+    res;
+);
+
+#sid = "";
+#str = "";
+xml_lt = codeid("lt");
+xml_gt = codeid("gt");
+xml_amp = codeid("amp");
+xml_apos = codeid("apos");
+xml_quote = codeid("quote");
+xml_Type = 0;
+xml_Value = 0;
+xml_Err = 0;
+xml_Tree = 0;
+xml_sep = 0;
+
+function xmlEntity(k)
+(
+    (k === xml_lt) ? '<' :
+    (k === xml_gt) ? '>' :
+    (k === xml_amp) ? '&' :
+    (k === xml_apos) ? '\'' :
+    (k === xml_quote) ? '"' :
+    '?';
+);
+
+// Gen an xml item from the current file "fHndl"
+function xmlItem()
+local (state, ch, s, k, l)
+(
+    state = 1;
+    ch = 0;
+
+    while (state > 0) (
+        (ch === 0) ? (
+            ch = getCh();
+        );
+
+        (state === 1) ? (
+            (ch === '&') ? (
+                state = 2; ch = 0; #sid = "";
+            ) :
+            (ch === '<') ? (
+                state = 3; ch = 0;
+            ) :
+            (ch === '>') ? (
+                xml_Type = 'sepr'; xml_Value = ">"; ch = 0; state = 0;
+            ) :
+            (ch === '/') ? (
+                state = 7; ch = 0;
+            ) :
+            (ch === '-') ? (
+                state = 8; ch = 0;
+            ) :
+            (ch === '?') ? (
+                state = 11; ch = 0;
+            ) :
+            (ch === '\'') ? (
+                state = 12; xml_sep = ch; ch = 0;
+            ) :
+            (ch === '"') ? (
+                state = 12; xml_sep = ch; ch = 0;
+            ) :
+            (((ch >= 'A') && (ch <= 'Z')) || ((ch >= 'a') && (ch <= 'z')) || (ch === '_')) ? (
+                state = 4; s = 0; #sid = "";
+            ) :
+            (ch === -1) ? (
+                xml_Type = 'feof'; xml_Value = -1; ch = 0; state = 0;
+            ) : (
+                // Any other char
+                xml_Value = ch;
+                xml_Type = 'char';
+                ch = 0;
+                state = 0;
+            );
+        ) :
+
+
+        (state === 2) ? (
+            // get an identifier after an '&'
+            (((ch >= '0') && (ch <= '9')) || ((ch >= 'A') && (ch <= 'Z')) || ((ch >= 'a') && (ch <= 'z')) || (ch === '_') ) ? (
+                str_setchar(#sid, s, ch, 'cu'); s += 1; ch = 0;
+            ) :
+            (ch === ';') ? (
+                // closing the entity suppress the ';'
+                // convert it immediately to a char
+                k = codeid(#sid);
+                xml_Value = xmlEntity(k);
+                xml_Type = 'char';
+                ch = 0;
+                state = 0;
+            ) : (
+                xml_Err = 4; // incorrect & construct
+                xml_Type = 'xmlr'; xml_Value = state;
+                state = 0;
+            );
+        ) :
+
+
+        (state === 3) ? (
+            // found '<'
+            (ch === '?') ? (
+                xml_Type = 'sepr'; xml_Value = "<\?"; ch = 0; state = 0;
+            ) :
+            (ch === '/') ? (
+                xml_Type = 'sepr'; xml_Value = "</"; ch = 0; state = 0;
+            ) :
+            (ch === '!') ? (
+                state = 5; ch = 0;
+            ) : (
+                xml_Type = 'sepr'; xml_Value = "<"; state = 0;
+            );
+        ) :
+
+
+        (state === 4) ? (
+            // get an identifier -- accept only ascii chars
+            (((ch >= '0') && (ch <= '9')) || ((ch >= 'A') && (ch <= 'Z')) || ((ch >= 'a') && (ch <= 'z'))
+                || (ch === '_') || (ch === '-') || (ch === '.')) ? (
+                str_setchar(#sid, s, ch, 'cu'); s += 1; ch = 0;
+            ) :
+            (
+                // closing the identifier
+                xml_Value = #sid;
+                xml_Type = 'idnt';
+                state = 0;
+            );
+        ) :
+
+
+        (state === 5) ? (
+            // found '<!'
+            (ch === '-') ? (
+                ch = 0; state = 6;
+            ) : (
+                xml_Type = 'sepr'; xml_Value = "<!"; state = 0;
+            );
+        ) :
+
+
+        (state === 6) ? (
+            // found '<!-'
+            (ch === '-') ? (
+                // It is the '<!--'
+                xml_Type = 'sepr'; xml_Value = "<!--"; state = 0; ch = 0;
+            ) : (
+                // reject the last two
+                rejectCh(ch); ch = '-';
+                xml_Type = 'sepr'; xml_Value = "<"; state = 0;
+            );
+        ) :
+
+
+        (state === 7) ? (
+            // found '/'
+            (ch === '>') ? (
+                // It is the '/>'
+                xml_Type = 'sepr'; xml_Value = "/>"; state = 0; ch = 0;
+            ) : (
+                // reject the last
+                xml_Type = 'char'; xml_Value = '/'; state = 0;
+            );
+        ) :
+
+
+        (state === 8) ? (
+            // found '-'
+            (ch === '-') ? (
+                state = 9; ch = 0;
+            ) : (
+                // reject the last
+                xml_Type = 'char'; xml_Value = '-'; state = 0;
+            );
+        ) :
+
+
+        (state === 9) ? (
+            // found '--'
+            (ch === '>') ? (
+                xml_Type = 'sepr'; xml_Value = "-->"; state = 0; ch = 0;
+            ) : (
+                // reject the last
+                rejectCh(ch);ch = '-';
+                xml_Type = 'char'; xml_Value = '-'; state = 0;
+            );
+         ) :
+
+
+        (state === 11) ? (
+            // found '?'
+            (ch === '>') ? (
+                xml_Type = 'sepr'; xml_Value = "?\>"; state = 0; ch = 0;
+            ) : (
+                // do not use the last
+                xml_Type = 'char'; xml_Value = '?'; state = 0;
+            );
+        ) :
+
+
+        (state === 12) ? (
+            // Found a " or a '
+            #str = ""; l = 0;
+            state = 13;
+        ) :
+
+
+        (state === 13) ? (
+            // Inside a string
+            (ch === xml_sep) ? (
+                // string ending
+                xml_Type = 'strg'; xml_Value = #str; ch = 0; state = 0;
+            ) :
+            ((ch === '"') || (ch === '\'')) ? (
+                str_setchar(#str, l, ch, 'cu'); l += 1; ch = 0;
+            ) :
+            (ch === "&") ? (
+                // entity allowed inside a string
+                state = 14; ch = 0; s = 0; #sid = "";
+            ) : (
+                ((ch >= 0) && (ch < ' ')) ? (ch = ' ');
+                str_setchar(#str, l, ch, 'cu'); l += 1; ch = 0;
+            );
+        ) :
+
+
+        (state === 14) ? (
+            // get an identifier after an '&'
+            (((ch >= '0') && (ch <= '9')) || ((ch >= 'A') && (ch <= 'Z')) || ((ch >= 'a') && (ch <= 'z')) || (ch === '_') ) ? (
+                str_setchar(#sid, s, ch, 'cu'); s += 1; ch = 0;
+            ) :
+            (ch === ';') ? (
+                // closing the entity, suppress the ';'
+                // convert it immediately to a char
+                k = codeid(#sid);
+                ch = xmlEntity(k); // a char
+                str_setchar(#str, l, ch, 'cu'); l += 1; ch = 0;
+                state = 13;
+            ) : (
+                xml_Err = 5; // incorrect "&" construct
+                xml_Type = 'xmlr'; xml_Value = state;
+                state = 0;
+            );
+        ) :
+
+
+        (
+            xml_Err = 3; // unknown state
+            xml_Type = 'xmlr'; xml_Value = state;
+            state = 0;
+        );
+    );
+
+    (ch !== 0) ? rejectCh(ch);
+
+    xml_Type;
+
+);
+
+
+/*
+function xmlparse()
+local(un)
+(
+    un = xmlItem();
+    while (un > 0) (
+        (xml_Type === 'char') ? (
+            ch = xml_Value;
+            ((ch >= 0) && (ch < ' ')) ? (ch = ' ');
+            sprintf(#xml, "xml char '%c'", ch);
+        ) :
+        (xml_Type === 'idnt') ? (
+            sprintf(#xml, "xml ident \"%s\"", xml_Value);
+        ) :
+        (xml_Type === 'sepr') ? (
+            sprintf(#xml, "xml sepr \"%s\"", xml_Value);
+        ) :
+        (xml_Type === 'xmlr') ? (
+            sprintf(#xml, "xml err val=%d", xml_Value);
+        ) :
+        (xml_Type === 'strg') ? (
+            sprintf(#xml, "xml string \"%s\"", xml_Value);
+        ) : (
+            sprintf(#xml, "xml ty=%d val=%d", xml_Type, xml_Value);
+        );
+        mSL_log(SysLogBox, #xml);
+        un = xmlItem();
+        (xml_Type === 'feof') ? (
+            sprintf(#xml, "xml feof val=%d", xml_Value);
+            mSL_log(SysLogBox, #xml);
+            un = -1;
+        );
+    );
+);
+*/
+
+// Introduce an item in the constructed tree
+function xmlenteritem(itm)
+local (newTsiz, newTr)
+(
+    (Tptr > Tsize-16) ? (
+        // Increase the size of the tree
+        newTsiz = Tsize + (Tsize >> 1); // add 50 %
+        newTr = mSL_Dyn_Alloc(newTsiz, 'xmlt', mSL_StM_FlClear);
+        xml_Err = mSL_errX;
+        (xml_Err === 0) ? (
+            memcpy(newTr, xml_Tree, Tsize);
+            mSL_Dyn_Free(xml_Tree);
+            xml_Tree = newTr;
+            Tsize = newTsiz;
+        );
+    );
+    (xml_Err === 0) ? (
+        xml_Tree[Tptr] = itm;
+        Tptr += 1;
+    );
+    Tptr;
+);
+
+function xmlparse()
+local(state, un, textstr, level, newTr, w)
+(
+    1 ? (
+        mSL_log(SysLogBox, "Starting XML Parse");
+    );
+    state = 1;
+    textstr = 0;
+    rejectChPt = 0;
+    chAvail = 0;
+    strcpy(#tmp, "?"); // for single chars
+    xml_Err = mSL_errX;
+    (xml_Err === 0) ? (
+        textstr = 0;
+        level = 0;
+        (xml_Tree !== 0) ? (
+            mSL_Dyn_Free(xml_Tree); xml_Tree = 0; // Free previous tree
+            xml_Err = mSL_errX;
+        );
+        (xml_Err === 0) ? (
+            // Allocate a new tree
+            Tsize = 4092;
+            Tptr = 0;
+            xml_Tree = mSL_Dyn_Alloc(Tsize, 'xmlt', mSL_StM_FlClear);
+            xml_Err = mSL_errX;
+        );
+    );
+
+    (xml_Err === 0) ? (
+        // Initialize the tree
+        sizepos = xmlenteritem(xml_docstart); // mark the start of the document
+        rootpos = xmlenteritem(0);   // will be the size of the document
+        xmlenteritem(0);             // will be the position of the root
+
+        xmlstack[0] = "!Document!";
+        xmlstack[1] = 0;
+        Sptr = 2;
+    );
+
+
+    un = 0;
+    while ((un >= 0) && (state > 0) && (xml_Err === 0)) (
+        (un === 0) ? (
+            un = xmlItem();
+            1 ? (
+                (xml_Type === 'char') ? (
+                    ch = xml_Value;
+                    ((ch >= 0) && (ch < ' ')) ? (ch = ' ');
+                    sprintf(#xml, "xml 'char' '%c'", ch);
+                ) :
+                (xml_Type === 'idnt') ? (
+                    sprintf(#xml, "xml 'idnt' \"%s\"", xml_Value);
+                ) :
+                (xml_Type === 'sepr') ? (
+                    sprintf(#xml, "xml 'sepr' \"%s\"", xml_Value);
+                ) :
+                (xml_Type === 'sepr') ? (
+                    sprintf(#xml, "xml 'sepr' val=%d", xml_Value);
+                ) :
+                (xml_Type === 'strg') ? (
+                    sprintf(#xml, "xml 'strg' \"%s\"", xml_Value);
+                ) :
+                (xml_Type === 'feof') ? (
+                    sprintf(#xml, "xml 'feof' val=%d", xml_Value);
+                ) : (
+                    sprintf(#xml, "xml ty=%d val=%d", xml_Type, xml_Value);
+                );
+                mSL_log(SysLogBox, #xml);
+            );
+        );
+
+        (state === 1) ? (
+            (xml_Type === 'sepr') ? (
+                // Is there a text we need to save ?
+                (textstr !== 0) ? (
+                    xmlenteritem('text');
+                    xmlenteritem(textstr);
+                    textstr = 0;
+                );
+                (xml_Value === "<") ? (
+                    // start an element
+                    elsize = xmlenteritem(xml_eltstart);
+                    elname = xmlenteritem(elsize); // will be the size of the entry
+                    xmlenteritem(0); // will be the name of the element
+                    xmlstack[Sptr] = "Element";
+                    xmlstack[Sptr+1] = elsize;
+                    Sptr += 2;
+                    // Is this the root ?
+                    (xml_Tree[rootpos] === 0) ? (
+                        xml_Tree[rootpos] = elsize - 1;
+                    );
+                    state = 2; un = 0;
+                ) :
+                (xml_Value === "<\?") ? (
+                    // start a prolog
+                    elsize = xmlenteritem(xml_prologs);
+                    elname = xmlenteritem(elsize); // will be the size of the entry
+                    xmlenteritem(0); // will be the name of the element
+                    xmlstack[Sptr] = "Prolog";
+                    xmlstack[Sptr+1] = elsize;
+                    Sptr += 2;
+                    state = 6; un = 0;
+                ) :
+                (xml_Value === "</") ? (
+                    // Closing an element
+                    state = 10; un = 0;
+                ) :
+                (xml_Value === "<!--") ? (
+                    // start a comment
+                    fcomment = 1;
+                    while (fcomment) (
+                        un = xmlItem();
+                        (xml_Type === 'feof') ? (
+                            xml_Err = 5; // eof in comment
+                            fcomment = 0;
+                        ) :
+                        ((xml_Type === 'sepr') && (xml_Value === "-->")) ? (
+                            fcomment = 0;
+                            un = 0;
+                        );
+                    );
+                ) :
+                (
+                    // no other 'sepr' expected in this state
+                    xml_Err = 8; // syntax error
+                );
+            ) :
+            (xml_Type === 'feof') ? (
+                // Is there a text we need to save ?
+                (textstr !== 0) ? (
+                    xmlenteritem('text');
+                    xmlenteritem(textstr);
+                    textstr = 0;
+                );
+                state = 0;
+            ) :
+            (xml_Type === 'xmlr') ? (
+                // error found
+                state = 0;
+            ) :
+            (
+                // something out of the element
+                (textstr === 0) ? (
+                    textstr = mSL_Str_Alloc(0);
+                );
+                (xml_Type === 'char') ? (
+                    str_setchar(#tmp, 0, xml_Value, 'cu');
+                    strcat(textstr, #tmp);
+                ) :
+                (xml_Type === 'idnt') ? (
+                    strcat(textstr, xml_Value);
+                ) :
+                (xml_Type === 'strg') ? (
+                    str_setchar(#tmp, 0, xml_sep, 'cu');
+                    strcat(textstr, #tmp);
+                    strcat(textstr, xml_Value);
+                    strcat(textstr, #tmp);
+                ) :
+                (
+                    xml_Err = 10; // syntax error
+                );
+                un = 0;
+            );
+        ) :
+
+
+        (state === 2) ? (
+            // start an element
+            (xml_Type === 'char') ? (
+                ((xml_Value >= 0) && (xml_Value <= ' ')) ? (
+                    // can remove the unwanted spaces
+                    un = 0;
+                ) : (
+                    xml_Err = 11; // syntax error
+                );
+            ) :
+            (xml_Type === 'idnt') ? (
+                // This is the name of the element.
+                // Update the entry
+                xml_Tree[elname] = v = mSL_Str_Alloc(xml_Value);
+                xmlstack[Sptr-2] = v; // keep the name in the xml stack
+                state = 3;
+                un = 0;
+            ) :
+            (
+                xml_Err = 12; // syntax error
+            );
+        ) :
+
+
+        (state === 3) ? (
+            // Inside an element
+            (xml_Type === 'char') ? (
+                ((xml_Value >= 0) && (xml_Value <= ' ')) ? (
+                    // can remove the unwanted spaces
+                    un = 0;
+                ) : (
+                    xml_Err = 13; // syntax error
+                );
+            ) :
+            (xml_Type === 'sepr') ? (
+                // accept ">" or "/>"
+                (xml_Value === ">") ? (
+                    // Closing the element head
+                    // Put the "xml_attrend" marker
+                    xmlenteritem(xml_attrend);
+                    state = 1; un = 0; // return to state 1
+                ) :
+                (xml_Value === "/>") ? (
+                    // Closing the element
+                    // Put the "xml_attrend" marker
+                    xmlenteritem(xml_attrend);
+                    k = xmlenteritem(xml_eltend);
+                    // Update the size of the element
+                    Sptr -= 2;
+                    elsize = xmlstack[Sptr+1]; // position of the size
+                    xml_Tree[elsize] = k - xml_Tree[elsize];
+                    state = 1; un = 0; // return to state 1
+                ) :
+                (xml_Value === "?\>") ? (
+                    // Closing the element
+                    // Put the "xml_attrend" marker
+                    xmlenteritem(xml_attrend);
+                    k = xmlenteritem(xml_prologe);
+                    // Update the size of the element
+                    Sptr -= 2;
+                    elsize = xmlstack[Sptr+1]; // position of the size
+                    xml_Tree[elsize] = k - xml_Tree[elsize];
+                    state = 1; un = 0; // return to state 1
+                ) : (
+                    // no other 'sepr' allowed here
+                    xml_Err = 14; // syntax error
+                );
+            ) :
+            (xml_Type === 'idnt') ? (
+                // name of an attribute - Enter it
+                xmlenteritem(mSL_Str_Alloc(xml_Value));
+                state = 4; un = 0;
+            ) : (
+                // no other object allowed here
+                xml_Err = 15; // syntax error
+            );
+        ) :
+
+
+        (state === 4) ? (
+            // expect a '='
+            (xml_Type === 'char') ? (
+                (xml_Value === '=') ? (
+                    state = 5; un = 0;
+                ) :
+                ((xml_Value >= 0) && (xml_Value <= ' ')) ? (
+                    // can remove the unwanted spaces
+                    un = 0;
+                ) : (
+                    xml_Err = 16; // syntax error
+                );
+            ) : (
+                // no other object allowed here
+                xml_Err = 17; // syntax error
+            );
+        ) :
+
+
+        (state === 5) ? (
+            // expect a string
+            (xml_Type === 'strg') ? (
+                // keep it as the value of the attribute
+                xmlenteritem(mSL_Str_Alloc(xml_Value));
+                state = 3; un = 0;
+            ) :
+            (xml_Type === 'char') ? (
+                ((xml_Value >= 0) && (xml_Value <= ' ')) ? (
+                    // can remove the unwanted spaces
+                    un = 0;
+                ) : (
+                    xml_Err = 18; // syntax error
+                );
+            ) : (
+                // no other object allowed here
+                xml_Err = 19; // syntax error
+            );
+        ) :
+
+
+        (state === 6) ? (
+            // start a prolog
+            // Expect an identifier
+            (xml_Type === 'char') ? (
+                ((xml_Value >= 0) && (xml_Value <= ' ')) ? (
+                    // can remove the unwanted spaces
+                    un = 0;
+                ) : (
+                    xml_Err = 20; // syntax error
+                );
+            ) :
+            (xml_Type === 'idnt') ? (
+                // This is the name of the element.
+                // Update the entry
+                xml_Tree[elname] = mSL_Str_Alloc(xml_Value);
+                state = 7;
+                un = 0;
+            ) :
+            (
+                xml_Err = 21; // syntax error
+            );
+        ) :
+
+
+        (state === 7) ? (
+            // Inside a prolog
+            (xml_Type === 'char') ? (
+                ((xml_Value >= 0) && (xml_Value <= ' ')) ? (
+                    // can remove the unwanted spaces
+                    un = 0;
+                ) : (
+                    xml_Err = 22; // syntax error
+                );
+            ) :
+            (xml_Type === 'sepr') ? (
+                (xml_Value === "?\>") ? (
+                    // Closing the element
+                    // Put the "xml_attrend" marker
+                    xmlenteritem(xml_attrend);
+                    k = xmlenteritem(xml_eltend);
+                    // Update the size of the element
+                    Sptr -= 2;
+                    elsize = xmlstack[Sptr+1]; // position of the size
+                    xml_Tree[elsize] = k - xml_Tree[elsize];
+                    state = 1; un = 0; // return to state 1
+                ) : (
+                    // no other 'sepr' allowed here
+                    xml_Err = 14; // syntax error
+                );
+            ) :
+            (xml_Type === 'idnt') ? (
+                // name of an attribute - Enter it
+                xmlenteritem(mSL_Str_Alloc(xml_Value));
+                state = 8; un = 0;
+            ) : (
+                // no other object allowed here
+                xml_Err = 23; // syntax error
+            );
+        ) :
+
+
+        (state === 8) ? (
+            // expect a '='
+            (xml_Type === 'char') ? (
+                (xml_Value === '=') ? (
+                    state = 9; un = 0;
+                ) :
+                ((xml_Value >= 0) && (xml_Value <= ' ')) ? (
+                    // can remove the unwanted spaces
+                    un = 0;
+                ) : (
+                    xml_Err = 24; // syntax error
+                );
+            ) : (
+                // no other object allowed here
+                xml_Err = 25; // syntax error
+            );
+        ) :
+
+
+        (state === 9) ? (
+            // expect a string
+            (xml_Type === 'strg') ? (
+                // keep it as the value of the attribute
+                xmlenteritem(mSL_Str_Alloc(xml_Value));
+                state = 3; un = 0;
+            ) :
+            (xml_Type === 'char') ? (
+                ((xml_Value >= 0) && (xml_Value <= ' ')) ? (
+                    // can remove the unwanted spaces
+                    un = 0;
+                ) : (
+                    xml_Err = 26; // syntax error
+                );
+            ) : (
+                // no other object allowed here
+                xml_Err = 27; // syntax error
+            );
+        ) :
+
+
+        (state === 10) ? (
+            // Found a "</" - Expect an identifier
+            (xml_Type === 'idnt') ? (
+                k = xmlenteritem(xml_eltend);
+                // Does it match the current ident
+                Sptr -= 2;
+                elsize = xmlstack[Sptr+1]; // position of the size
+                xml_Tree[elsize] = k - xml_Tree[elsize];
+                (strcmp(xml_Value, xmlstack[Sptr])) ? (
+                    xml_Err = 28; // syntax error : non matching elements identifiers
+                );
+                state = 11; un = 0;
+            ) :
+            (xml_Type === 'char') ? (
+                ((xml_Value >= 0) && (xml_Value <= ' ')) ? (
+                    // can remove the unwanted spaces
+                    un = 0;
+                ) : (
+                    xml_Err = 29; // syntax error
+                );
+            ) : (
+                xml_Err = 30; // syntax error
+            );
+        ) :
+
+
+        (state === 11) ? (
+            // expect a ">"
+            (xml_Type === 'sepr') ? (
+                (xml_Value === ">") ? (
+                    // Closing the element
+                    state = 1; un = 0; // return to state 1
+                ) : (
+                    // no other 'sepr' allowed here
+                    xml_Err = 31; // syntax error
+                );
+            ) :
+            (xml_Type === 'char') ? (
+                ((xml_Value >= 0) && (xml_Value <= ' ')) ? (
+                    // can remove the unwanted spaces
+                    un = 0;
+                ) : (
+                    xml_Err = 32; // syntax error
+                );
+            ) : (
+                xml_Err = 33; // syntax error
+            );
+        ) :
+
+
+        (
+            xml_Err = 33; // syntax error
+        );
+    );
+
+
+    // End of analysis. Some dangling text ?
+    (xml_Err === 0) ? (
+        (textstr != 0) ? (
+            xmlenteritem('text');
+            xmlenteritem(textstr);
+            textstr = 0;
+        );
+
+        // Close the structure & Update the size
+        xml_Tree[1] = Tptr;
+        xmlenteritem(xml_docend);
+
+        // Reduce the final size of the tree
+        (Tptr < xml_Tree[-1]) ? (
+            // get a new array
+            newTr = mSL_Dyn_Alloc(Tptr, 'xmlt', 0);
+            memcpy(newTr, xml_Tree, Tptr); // copy the contents
+            mSL_Dyn_Free(xml_Tree);
+            xml_Tree = newTr;
+        );
+    );
+
+    1 ? (
+        sprintf(#s4, "Ending XML Parse  err= %d  tree=%d size=%d", xml_Err, xml_Tree, Tptr);
+        mSL_log(SysLogBox, #s4);
+    );
+    (xml_Err === 0) ? (
+        // Keep the value in the "ext" table
+        w = mSL_searchXId(mSL_KW_XML_tree);
+        (w > 0) ? (
+            val = A_mSL_EXTab[w];
+            (val != 0) ? mSL_Dyn_Free(val);
+            A_mSL_EXTab[w] = xml_Tree;
+            xml_Tree = 0;
+        );
+    );
+    xml_Err;
+
+);
+
+
+
+
+
+
+
+function xmlshowtree(tree)
+local(i, k)
+(
+    mSL_edit_value(#s5, tree[-2], 0);
+    mSL_edit_value(#s6, tree[-1], 0);
+    sprintf(#s4, "tree  %d   %s   %s   %f   %d    %d   ", tree, #s5, #s6, tree[0], tree[1], tree[2]);
+    mSL_log(SysLogBox, #s4);
+    ((tree[0] === xml_docstart) && (tree[1] > 0) && (tree[-1] > tree[1])) ? (
+        i = 0; loop ( tree[1],
+            k = tree[i];
+            (k === xml_docstart) ? (
+                sprintf(#s4, "%5d: - Doc Start -", i);
+                mSL_log(SysLogBox, #s4);
+            ) :
+            (k === xml_eltstart) ? (
+                sprintf(#s4, "%5d: - Element Start -", i);
+                mSL_log(SysLogBox, #s4);
+            ) :
+             (k === xml_prologs) ? (
+                sprintf(#s4, "%5d: - Prolog Start -", i);
+                mSL_log(SysLogBox, #s4);
+            ) :
+            (k === xml_attrend) ? (
+                sprintf(#s4, "%5d: - Attributes end -", i);
+                mSL_log(SysLogBox, #s4);
+            ) :
+            (k === xml_eltend) ? (
+                sprintf(#s4, "%5d: - Element End -", i);
+                mSL_log(SysLogBox, #s4);
+            ) :
+            (k === xml_prologe) ? (
+                sprintf(#s4, "%5d: - Prolog End -", i);
+                mSL_log(SysLogBox, #s4);
+            ) :
+            (k === xml_docend) ? (
+                sprintf(#s4, "%5d: - Doc End -", i);
+                mSL_log(SysLogBox, #s4);
+            ) : (
+                mSL_edit_value(#s3, tree[i], 0);
+                sprintf(#s4, "%5d: (%d) %s", i, strlen(#s3), #s3);
+                mSL_log(SysLogBox, #s4);
+            );
+            i += 1;
+        );
+    ) : (
+        sprintf(#s4, "Not an XML tree  %d   %f   %d    %d   ", tree, tree[0], tree[1], tree[2]);
+                mSL_log(SysLogBox, #s4);
+    );
+);
+
+
+
+
+

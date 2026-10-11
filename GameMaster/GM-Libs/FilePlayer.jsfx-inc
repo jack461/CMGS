@@ -448,7 +448,8 @@ current_Memory_Mode = mSL_MMd_Static; // starting now, allow use of "make_array"
 mSL_Str_Init(#strFirst, #strLast); // allocate strings for strings allocator
 mSL_Str_TInit(#wstrFirst, #wstrLast); // allocate strings for temporary strings
 mSL_Str_PInit(#xstrFirst, #xstrLast); // allocate strings for permanent strings
-
+mSL_Str_MkStructs(); // Build string management structures
+//====== GLOBALS ======
 init_idents();
 mSL_Init_Keywords();
 mSL_Init_long_Keywords();
@@ -761,16 +762,14 @@ sactLimX = sactLim + D2;
 sactActs = make_array(sactLimX);
 sactNeutre = -3.5;
 sactACnt = 0;
-function
-sactClear()
+function sactClear()
 (
     memset(sactActs, sactNeutre, sactLimX);
 );
 sactClear();
 
 // Add an action with its parameter in the action list
-function
-sactAdd(act, par)
+function sactAdd(act, par)
 local (pt, re, x1, x2)
 (
     act = max(0, act);
@@ -924,8 +923,6 @@ mm_bl_mini = 0;
 
 
 // Hash table for parameters coded names
-//paramHashIds = make_array(paramHSiz);
-//paramHashNbs = make_array(paramHSiz);
 paramHashTbl = mSL_makeHT(paramHSiz, paramHStep);
 paramHStep = paramHashTbl[-1]; // in case the func updated the step
 
@@ -1301,6 +1298,9 @@ function doMslCompile(fname)
 );
 
 
+
+// The event operations
+<? include("GM-Libs/mSL_Events.jsfx-inc"); ?>
 
 
 // The threads operations
@@ -1706,8 +1706,8 @@ SchedSetup();
 === COMPILER ===
 */
 // Sizes of Allocated arrays for the Compiler and the Evaluator
-C_compSize = 32 * 1024; // size : 64 kW [kilo words, not kilo watts]
-C_progSize = 32 * 1024; // size  for the evaluator
+C_compSize = 64 * 1024; // size : 64 kW [kilo words, not kilo watts]
+C_progSize = 64 * 1024; // size  for the evaluator
 ui_jmake_arraymax = 0x7FFFFFF; // "no" limit in the size of an array...
 
 // Then, initialize all structures of the compiler.
@@ -1736,17 +1736,36 @@ mm_highmem = mSL_new_memory + mSL_new_memory[mSL_MM_HighAd];
 mm_show_ttf = mm_sizmem = mSL_new_memory[mSL_MM_MemSiz];//
 //AGMW166 = GMW();
 
+
+
+
+mm_limit_f = make_array(2);
+mm_limit_f[0] = 'STRT'; mm_limit_f[1] = 'COMP';
+
+void_pointer = make_array(2);
+void_pointer[0] = 0;
+void_pointer[1] = 0;
+
 // Provide an independent main symbol table for the compiler - "var" declarations
 aprime = 3313;
 size = 4 * (aprime + 1);
 mem = make_array(size + 4);
 A_mSL_GCTab = mSL_buildGVTab(mem, size, aprime);
 
+
 // Provide an independent local symbol table for the compiler - "loc" declarations
 aprime = 191;
 size = 4 * (aprime + 1);
 mem = make_array(size + 4);
 A_mSL_LCTab = mSL_buildLCTab(mem, size, aprime);
+
+
+// Provide a common external symbol table for the compiler - "ext" declarations
+A_mSL_EXTab = mSL_buildEXTab(47);
+// Provide a common external symbol table for the compiler - "ptr" declarations
+A_mSL_PTTab = mSL_buildPTTab(47);
+
+
 // Build the compiler
 AAAAC_6 = mSL_make_compiler(C_compArea, C_compSize);
 // Then, the interpreter
@@ -2738,9 +2757,6 @@ local (pfid, ref, value, force, addr, res, flg, kod, size, s, ip, k, k2, pt, kid
 
 
 
-<? include("GM-Libs/mSL_Events.jsfx-inc"); ?>
-
-
 // Read & Compile a mSL script file
 function
 mSL_load_file_inGFX(fname)
@@ -2931,7 +2947,8 @@ local (res, kw, ent, k, p1, p2, p3)
 
 /*
     Threads management = single operation on thread
-*/
+
+
 function
 mSL_thread_ops(argc, argv)
 local (res, k, kw, ent)
@@ -3045,7 +3062,7 @@ local (res, k, kw, ent)
     );
     res;
 );
-
+*/
 
 // Insert here the mSL interpreter
 <? include("GM-Libs/mSL_Evaluator.jsfx-inc"); ?>
@@ -7429,6 +7446,12 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
 );
 
 
+function mSL_Dbg_Memory_Updt(membox)
+(
+    (membox[14] & 0x100) ? (
+        membox[9] = membox[8] = membox[7] = 0;
+    );
+);
 
 <? include("GM-Libs/mSL_Dbg_Memory.jsfx-inc"); ?>
 

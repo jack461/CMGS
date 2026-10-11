@@ -1,4 +1,8 @@
 //====== THREADS MANAGEMENT ======//
+
+
+@init
+
 mSL_active_Thread = 0;
 mSL_active_SchedEnt = 0;
 mSL_dispatch_entry = 0;
@@ -48,38 +52,39 @@ local (ent, thrd, k, w)
     thrd = ent = 0; // default result
     (SchedListEmpty(SchedInactPts)) ? (
         // No free thread available
-        0 ? (
+        //
+        0 ?
+        (
             sprintf(#s2, "SCHED1A   ");
             mSL_log(SysLogBox, #s2);
         );
         (SchedListNonEmpty(SchedFreePts)) ? (
             // try to create one
             thrd = mSL_make_thread();
-            0 ? (
+            //
+            0 ?
+            (
                 sprintf(#s2, "SCHED1B  %d ", thrd);
                 mSL_log(SysLogBox, #s2);
             );
             (thrd > 0) ? (
                 ent = SchedDetachHead(SchedFreePts);
-
-                0 ? (
+                //
+                0 ?
+                (
                     b = SchedFreePts;
                     sprintf(#s2, "SCHED2  %d ", ent);
                     mSL_log(SysLogBox, #s2);
                 );
-                //thrd[mSL_THR_SchedEnt] = ent; // refer the thread to this ent
-                //SchedStatus[ent] = SchThreadmSL; // This will be an mSL thread
-                //SchedPar1[ent] = 0; // will be the code
-                //SchedPar3[ent] = 0;
-                //SchedPar4[ent] = 0; // unused
-                //SchedThrdPt[ent] = thrd; // address for the thread area
             );
         );
     ) : (
         ent = SchedDetachHead(SchedInactPts);
 
         thrd = SchedThrdPt[ent]; // It already has a thread allocated
-        0 ? (
+        //
+        0 ?
+        (
             b = SchedFreePts;
             sprintf(#s2, "SCHED3  %d ", ent);
             mSL_log(SysLogBox, #s2);
@@ -129,8 +134,9 @@ local (ent, thrd, k, w)
     ent;
 );
 
+
 function freeSchedThread(ent)
-local (k, mthrd, mstak)
+local (k, mthrd, mstak, mdic)
 (
     (FlagsTbVals[Flgs_Thrds] & 1) ? ( // trace flags
         sprintf(#sfc, "   **freeSchedThread    %d", ent);
@@ -144,11 +150,12 @@ local (k, mthrd, mstak)
         );
 
         ((mthrd = ent[SchedThrdPt]) != 0) ? (
-            // mstak = 0;
             mSL_Mbl_check(mthrd) ? (
                 // a block in dyn. memory
                 mstak = mthrd[mSL_THR_basePhStack]; // could have a stack
                 mSL_Mbl_check(mstak) ? mSL_Dyn_Recycle(mstak) : (mstak = 0;);
+                mdic = mthrd[mSL_THR_LDict]; // could have a local dictionnary
+                mSL_Mbl_check(mdic) ? mSL_Dyn_Recycle(mdic) : (mdic = 0;);
                 mSL_Dyn_Recycle(mthrd);
                 //sprintf(#sfc, "   **SchedFree  recycling  %d %d from ent %d", mstak, mthrd, num);
                 //mSL_log(SysLogBox, #sfc);
@@ -173,7 +180,7 @@ local (k, mthrd, mstak)
 */
 function
 SchedFree(ent)
-local(msg, num, mthrd, mstak)
+local(msg, num, mthrd, mstak, mdic)
 (
     (ent > 0) ? (
         ((ent >= SchedFirstEnt) && (ent <= SchedLastEnt) && ((num = (ent - SchedFirstEnt)/SchedEntSiz) >= 0)
@@ -198,18 +205,15 @@ local(msg, num, mthrd, mstak)
                     msg_recycle(msg, 2);
                 );
                 ((mthrd = ent[SchedThrdPt]) != 0) ? (
-                    mstak = 0;
-                    0 ? (
-                        sprintf(#sfc, "   **SchedFree  recycling  %d %d from ent %d", mstak, mthrd, num);
-                        mSL_log(SysLogBox, #sfc);
-                    );
                     mSL_Mbl_check(mthrd) ? (
                         // a block in dyn. memory
                         mstak = mthrd[mSL_THR_basePhStack]; // could have a stack
                         mSL_Mbl_check(mstak) ? mSL_Dyn_Recycle(mstak);
+                        mdic = mthrd[mSL_THR_LDict]; // could have a local dictionnary
+                        mSL_Mbl_check(mdic) ? mSL_Dyn_Recycle(mdic);
                         mSL_Dyn_Recycle(mthrd);
                         0 ? (
-                            sprintf(#sfc, "   **SchedFree  recycling  %d %d from ent %d", mstak, mthrd, num);
+                            sprintf(#sfc, "   **SchedFree  recycling  %d %d %d from ent %d", mstak, mdic, mthrd, num);
                             mSL_log(SysLogBox, #sfc);
                         );
                     );
@@ -263,3 +267,166 @@ local (in, ent)
         in += 1;
     );
 );
+
+
+
+
+function
+mSL_run_fct(fct, cnt, vals)
+local(res, ent)
+(
+    ent = 0;
+    // fct must be a function
+    (mSL_bl_check(fct) && (fct[mSL_CC_Key] === mSL_CC_KeyCKod)) ? (
+        ent = getNewThread();
+        ((ent > 0) && (mSL_errX === 0)) ? (
+            SchedPar1[ent] = fct; // the code to execute
+            SchedPar2[ent] = cnt; // count of parameters
+            SchedPar3[ent] = vals; // list of parameters
+            SchedPar4[ent] = 0; // use std locals
+            SchedCode[ent] = KRun_mSL_Thread; // ready to start
+            mSL_init_thread(ent);
+            (mSL_errX === 0) ? (
+                SchedStatus[ent] |= SchThrUsed;  // now in use
+                SchedInsertTail(SchedActivPts, ent, SchETypeThrd); // enter in active ptrs
+            ) : (
+                SchedFree(ent); // free the ent
+                ent = 0;
+            );
+        );
+    );
+    ent;
+);
+
+
+
+
+/*
+    Threads management = single operation on thread
+*/
+function
+mSL_thread_ops(argc, argv)
+local (res, k, kw, c, ent, p1, p2, p3)
+(
+    res = -1;
+    (argc > 0) ? (
+        kw = argv[0];
+        //sprintf(#ms, "** kw ** => %g  %s", kw, mSL_edit_value(#mt, kw));
+        //mSL_log(SysLogBox, #ms);
+        // we expect a keyword
+        (kw === mSL_KW_new) ? (
+            // expect : `new, func, params...
+            k = argv[1];
+            //sprintf(#ms, "** new ** => %d/%d", k, mSL_bl_check(k));
+            //mSL_log(SysLogBox, #ms);
+            ((argc > 1) && mSL_bl_check(k) && (k[mSL_CC_Key] === mSL_CC_KeyCKod)) ? (
+                // Do we have the appropriate arg. count ?
+                c = argc - 2; // args. count
+                (((k[mSL_CC_Flags] & 1) === 0) && (c != k[mSL_CC_ParCnt])) ? (
+                    res = - (mSL_errX = 2411); // invalid args count
+                ) : (
+                    // this is a correct func - load it in a new thread
+                    ent = getNewThread();
+                    //sprintf(#ms, "** ent ** => %d/%d", ent, KRun_mSL_Thread);
+                    // mSL_log(SysLogBox, #ms);
+                    ent ? (
+                        SchedPar1[ent] = k; // keep the code to execute
+                        SchedPar2[ent] = c; // parameter count
+                        SchedPar3[ent] = argv + 2;
+                        SchedPar4[ent] = 0; // use std locals
+                        SchedCode[ent] = KRun_mSL_Thread; // ready to start
+                        mSL_init_thread(ent);
+                        (mSL_errX === 0) ? (
+                            SchedInsertTail(SchedSuspPts, ent, SchETypeThrd);
+                            res = ent[SchedPid]; // return the process ID
+                        ) : (
+                            res = - mSL_errX;
+                            SchedFree(ent); // free the ent
+                            ent = 0;
+                        );
+                    ) : (
+                        res = - (mSL_errX = 2408); // can't get a thread
+                    );
+                );
+            ) : (
+                res = - (mSL_errX = 2415); // function expected
+            );
+        ) :
+        (kw === mSL_KW_run) ? (
+            // k = argv[1]; // the thread id contains the entry number
+            // ent = SchedFirstEnt + (k & SchedNMask) * SchedEntSiz; // points to "a" thread
+            ((argc > 1) && (k = argv[1])
+                && (ent = SchedFirstEnt + (k & SchedNMask) * SchedEntSiz)
+                && (k === ent[SchedPid])
+            ) ? (
+                // this is a correct reference
+                // ent is supposed to be in SchedSuspPts !
+                SchedUnchainEnt(SchedSuspPts, ent, SchETypeThrd);
+                SchedStatus[ent] |= SchThrUsed;  // now in use
+                // introduce in the active list
+                SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
+                (FlagsTbVals[Flgs_Thrds] & 4) ? ( // trace flags
+                    sprintf(#ms, "** RUN ** [%g:%g] => %d/%d", ent, SchedThrdPt[ent], (floor(k/SchedNEmax)), (k & SchedNMask));
+                    mSL_log(SysLogBox, #ms);
+                );
+                res = k; // done
+            );
+        ) :
+        (kw === mSL_KW_idt) ? (
+            ent = mSL_active_Thread[mSL_THR_SchedEnt];
+            ((ent >= SchedFirstEnt) && (ent <= SchedLastEnt)) ? (
+                res = ent[SchedPid]; // return the process ID
+            );
+        ) :
+        (kw === mSL_KW_name) ? (
+            ent = mSL_active_Thread[mSL_THR_SchedEnt];
+            ((ent >= SchedFirstEnt) && (ent <= SchedLastEnt)) ? (
+                res = ent[SchedThrName]; // return the process name
+                (argc > 1) ? (
+                    // use 2nd word as name
+                    ent[SchedThrName] = argv[1];
+                    (FlagsTbVals[Flgs_Thrds] & 4) ? (
+                        sprintf(#ms, "  --> Name : %s", mSL_edit_value(0, ent[SchedThrName]));
+                        mSL_log(SysLogBox, #ms);
+                    );
+                );
+            );
+        ) :
+        (kw === mSL_KW_status) ? (
+            k = argv[1]; // should be in SchedSuspPts !
+            res = 0; // undefined
+            ent = SchedFirstEnt + (k & SchedNMask) * SchedEntSiz; // points to "a" thread
+            ((k === ent[SchedPid]) && (argc > 1)) ? (
+                res = SchedStatus[ent]; // done
+            );
+        ) :
+        (kw === mSL_KW_find) ? (
+            p1 = p2 = p3 = 0;
+            (argc === 2) ? (
+                p1 = argv[1]; p2 = 0; p3 = 2;
+            ) :
+            (argc === 3) ? (
+                p1 = argv[1]; p2 = argv[2]; p3 = 2;
+            ) :
+            (argc >= 3) ? (
+                p1 = argv[1]; p2 = argv[2]; p3 = argv[2];
+            );
+            res = event_check_recipient(p1, p2, p3);
+        ) :
+        (kw === mSL_KW_count) ? (
+            (argc === 2) ? (
+                kw = argv[1]; ent = SchedFirstEnt; res = 0;
+                loop (SchedNEmax,
+                    (SchedThrName[ent] === kw) && (SchedStatus[ent] != 0) ? res += 1;
+                    ent += SchedEntSiz;
+                );
+            );
+        ) :
+        (
+            res = -4007;
+        );
+    );
+    res;
+);// mSL_thread_ops
+
+

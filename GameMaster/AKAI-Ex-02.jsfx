@@ -1,0 +1,178 @@
+desc: APCmini 2 Slider management
+
+
+// J.J. Girardot
+/*
+    Utilisation de l'AKAI APCmini mk2
+
+    Exemple 2 : afficher les valeurs des sliders avec les touches du pad
+
+    Placer le plug-in sur une piste
+    Cliquer le bouton "Record"
+    Choisir "input MIDI Akai APCmini mk2 Control"
+    Placer la piste (bouton record clic droit) en "Monitor input" et "Record : disable (input monitoring only)"
+    Dans ROUTE :
+        Supprimer les envois de la piste au master (Master send channels)
+        Ajouter "MIDI hardware output : Akai APCmini mk2 Control"
+
+*/
+
+
+in_pin:none
+out_pin:none
+
+options:gfx_idle
+options:no_meter
+
+@init
+ext_midi_bus = 1;
+
+// MIDI objects
+
+memaddr = 0; // pour allouer "statiquement" de la mémoire
+
+memaddr += 16; // laisser libre les 16 premier mots
+
+midirsize = 65538; // une très grande zone de mémoire
+midirbuf = memaddr; memaddr += midirsize;
+
+// Un tableau pour les valeurs des 8 sliders
+pslvals = memaddr; memaddr += 8; // ce seront les 8 valeurs des sliders
+
+// 16 couleurs de touches du pad
+pclr = memaddr; memaddr += 16;
+plum = memaddr; memaddr += 16;
+
+// Pour se simplifier la vie, on définit une fonction qui insère 8 valeurs consécutives
+function fill(tab, v0, v1, v2, v3, v4, v5, v6, v7)
+(
+    tab[0] = v0; tab[1] = v1; tab[2] = v2; tab[3] = v3;
+    tab[4] = v4; tab[5] = v5; tab[6] = v6; tab[7] = v7;
+);
+
+// On essaye de créer 16 "dégradés" de rouge à partir des couleurs disponibles
+// Chaque valeur de couleur de "pclr" est appairée avec une intensité dans "plum"
+fill(pclr,     0,   6,   6,   6,   6, 106, 106, 106);
+fill(pclr+8,  72,  72,  60,  60,  60,  84,  84,  84);
+
+fill(plum,     0,   0,   1,   2,   3,   2,   3,   4);
+fill(plum+8,   3,   4,   3,   4,   5,   4,   5,   6);
+
+recvlen = 0;
+offset = 0;
+
+NoteOn = 0x90;
+NoteOff = 0x80;
+Controler = 0xB0;
+
+// Description de l'AKAI APCmini
+nbtch = 64; // nombre de touches
+touche1 = 0; // numéro première touche
+AK_bus = 0; // on écrit sur ce bus
+touche_Off = 0;  // pour éteindre
+touche_On = 54;  // une couleur (indigo)
+NoteOnAk = 0x96; // canal 7 pour accès aux leds des touches en mode fixe
+
+
+// infos reçues
+M_kmd = 0;
+M_p1 = 0;
+M_p2 = 0;
+M_bus = 0;
+
+
+function eteindre()
+local (i)
+(
+    midi_bus = AK_bus;
+    i = 0; loop (128, // toutes les touches, y compris boutons de contrôle
+        midisend(0, NoteOnAk, i, touche_Off);
+        i += 1;
+    );
+);
+
+function MIDI_init()
+(
+    // En premier, éteindre toutes les touches de l'AKAI
+    eteindre();
+);
+
+
+// Afficher les pads correspondant au slider num (0x30 à 0x37)
+function showsldr(num)
+local (val, ns, nc, nl, n1)
+(
+    midi_bus = AK_bus;
+    ns = num % 8; // résultat entre 0 et 7
+    val = pslvals[ns];
+    nl = ns; // led courante - la première du bas a le même numéro que le slider, modulo 8
+    nc = 0; // simple compteur
+    // combien de led "à fond" ?
+    n1 = floor(val / 16);
+    (n1 > 0) ? (
+        // On utilise l'intensité max. pour celles-ci
+        loop(n1,
+            midisend(0, NoteOn + plum[15], nl, pclr[15]);
+            nl += 8; nc += 1;
+        );
+    );
+    // Pour la led suivante, on calcule le numéro de sa teinte
+    (nc < 8) ? (
+        t = val - 16 * n1; // dans [0  15]
+        midisend(0, NoteOn + plum[t], nl, pclr[t]);
+        nl += 8; nc += 1;
+    );
+    // On "éteint" les dernières
+    while (nc < 8) (
+        // utilise l'intensité "minimale"
+        midisend(0, NoteOn + plum[0], nl, pclr[0]);
+        nl += 8; nc += 1;
+    );
+);
+
+
+// Le slider num (0x30 à 0x37) prend la nouvelle valeur "val"
+function setsldr(num, val)
+local (ns)
+(
+    ns = num % 8; // résultat entre 0 et 7
+    pslvals[ns] = val;
+    showsldr(ns);
+);
+
+function updall()
+local (n)
+(
+    n = 0; loop(8,
+        showsldr(n); n += 1;
+    );
+);
+
+MIDI_init();
+timel = timec = time();
+
+
+@block
+// Partie exécutée à chaque buffer reçu par le plug-in
+
+// Reçoit-on du MIDI ?
+while ((recvlen = midirecv_buf(offset, midirbuf, midirsize)) > 0) (
+    (recvlen == 3) ? (
+        M_kmd = midirbuf[0]; M_p1 = midirbuf[1]; M_p2 = midirbuf[2]; M_bus = midi_bus;
+        // On ne s'intéresse qu'aux potentiomètres 1 à 8
+        ((M_kmd & 0xF0) == Controler) ? (
+            ((M_p1 >= 0x30) && (M_p1 <= 0x37)) ? (
+                setsldr(M_p1, M_p2);
+            );
+        );
+    );
+);
+
+
+// On décide de tout afficher chaque 10 secondes...
+timec = time();
+(timec >= timel + 10) ? (
+    updall();
+    timel = timec;
+);
+

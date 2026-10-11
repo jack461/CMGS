@@ -1,5 +1,8 @@
+
+@init
+
 /*
-   A Static Memory allocation  -- V2 -- Jack641
+   A Static Memory allocation  -- V3 -- Jack641
 
    This library can be used to allocate memory blocks.
 
@@ -27,15 +30,29 @@
           mSL_StM_FlAlign = 2; // allocate inside a 64k boundary
           mSL_StM_FlCheck = 4; // check memory before allocation
           mSL_StM_FlSigErr= 8; // stop process in case of error found
+          mSL_StM_FlFill = 16; // fill new block with random garbage
 
    mSL_StM_Check(); // verify the memory
 
    mSL_StM_FreePt always points to the first non used memory address
 */
 
-@init
+
+mSL_CC_Chksum = 0x7FFFFFFF;
+mSL_MMd_Static = 1;
+mSL_MMd_Dynamic = 2;
+
+<? StM_globals = "mSL_StM_Start, mSL_StM_Low, mSL_StM_High, mSL_StM_Key_min, mSL_StM_Key_max,
+    mSL_CC_Chksum, mSL_StM_Zone, mSL_StM_Loc, mSL_StM_MaxRq, mSL_StM_FreePt,
+    mSL_StM_BlockType, mSL_StM_BlockSize, mSL_StM_Top, mSL_StM_Err, mSL_StM_ErrLoc,
+    mSL_StM_ErrAux, mSL_StM_GlobFlgs, mSL_StM_Dangling, mSL_StM_TMask, mSL_MMd_Static,
+    mSL_StM_FlClear, mSL_StM_FlAlign, mSL_StM_FlCheck, mSL_StM_FlSigErr, mSL_StM_FlFill, mSL_MMd_Dynamic
+    mSL_StM_BCount, mSL_StM_BTSize, mSL_StM_BSzMin, mSL_StM_BSzMax, current_Memory_Mode,
+    #dbg_desc";
+?>
 
 function mSL_StM_Init(start)
+<? printf("global(%s)", StM_globals); ?>
 (
     mSL_StM_Start = 0|max(0, start); // where to start from
     mSL_StM_Low =  0x7FDA04C1; // Low memory marker :  2144994497
@@ -45,7 +62,8 @@ function mSL_StM_Init(start)
     mSL_StM_Zone = 0x7FFFFF0000; // get the zone ID of a mem address
     mSL_StM_Loc = 0xFFFF; // location inside a zone
     mSL_StM_MaxRq = 0x7FFFFFFF; // max. request for an malloc
-    mSL_StM_FreePt = mSL_StM_Start + 1; // The allocation pointer
+    mSL_StM_Start[0]='StMr'; // Static memory marker
+    mSL_StM_FreePt = mSL_StM_Start + 2; // The allocation pointer
     mSL_StM_FreePt[-1] = mSL_StM_Low;
     mSL_StM_FreePt[0] = mSL_StM_High;
     mSL_StM_BlockType = -2;
@@ -58,21 +76,22 @@ function mSL_StM_Init(start)
     mSL_StM_FlFill = 16; // fill new block with random garbage
     mSL_StM_GlobFlgs = 0;  // global flags
     mSL_StM_Dangling = 0;
-
+    mSL_StM_BCount = 0;
+    mSL_StM_BTSize = 0;
+    mSL_StM_BSzMin = mSL_StM_MaxRq;
+    mSL_StM_BSzMax = -1;
     mSL_StM_Err = 0;
     mSL_StM_ErrLoc = 0;
-    current_Memory_Mode = mSL_MMd_Static = 1;
-    mSL_MMd_Dynamic = 2;
+    current_Memory_Mode = mSL_MMd_Static;
 );
-mSL_MMd_Static = 1;
-mSL_MMd_Dynamic = 2;
 
 function mSL_StM_Check(par)
-local (pt, t, s)
+<? printf("global(%s)", StM_globals); ?>
+local (pt, t, s, c)
 (
     (mSL_StM_Err === 0) ? (
         (par === 0) ? (
-            pt = mSL_StM_Start;
+            pt = mSL_StM_Start+1;
             (pt[0] != mSL_StM_Low) ? (
                 mSL_StM_Err = 0101; // low terminal missing
                 mSL_StM_ErrLoc = pt;
@@ -94,7 +113,7 @@ local (pt, t, s)
                     mSL_StM_ErrAux = s;
                 ) :
                 (s != pt[s+2]) ? (
-                    mSL_StM_Err = 0113.; // non matching length
+                    mSL_StM_Err = 0113; // non matching length
                     mSL_StM_ErrLoc = pt+2;
                     mSL_StM_ErrAux = s;
                 ) :
@@ -140,9 +159,11 @@ local (pt, t, s)
 );
 
 function mSL_StM_Alloc(size, type, flags)
+<? printf("global(%s)", StM_globals); ?>
 local (add, fill, s)
 (
     s = #;
+    mSL_StM_BCount += 1;
     add = mSL_StM_FreePt + 2;
     flags |= mSL_StM_GlobFlgs; // merge with global flags
     // Check there is no "bloc en cours"
@@ -187,6 +208,9 @@ local (add, fill, s)
             (flags & mSL_StM_FlClear) ? memset(add, 0, size) :
             (flags & mSL_StM_FlFill) ? memcpy(add, 8|rand(mSL_StM_FreePt), size);
         );
+        mSL_StM_BTSize += size;
+        mSL_StM_BSzMin > size ? mSL_StM_BSzMin = size;
+        mSL_StM_BSzMax < size ? mSL_StM_BSzMax = size;
     );
     add;
 );
@@ -196,6 +220,7 @@ local (add, fill, s)
 
 
 function mSL_StM_BlockStart(type)
+<? printf("global(%s)", StM_globals); ?>
 local (add, size)
 (
     add = 0;
@@ -220,6 +245,8 @@ local (add, size)
 
 
 function mSL_StM_BlockEnd(addr)
+<? printf("global(%s)", StM_globals); ?>
+global(#dbg_trace5)
 local (size, prev, res)
 (
     res = 0;
@@ -247,6 +274,7 @@ local (size, prev, res)
 
 
 function make_array(size)
+global(current_Memory_Mode,mSL_MMd_Static,mSL_StM_Err,mSL_StM_ErrLoc,mSL_StM_FlClear,mSL_StM_Alloc)
 (
     (current_Memory_Mode != mSL_MMd_Static) ? (
         mSL_StM_Err = 0109;
@@ -258,6 +286,7 @@ function make_array(size)
 
 
 function make_array(size, type)
+global(current_Memory_Mode,mSL_MMd_Static,mSL_StM_Err,mSL_StM_ErrLoc,mSL_StM_FlClear,mSL_StM_Alloc)
 (
     (current_Memory_Mode != mSL_MMd_Static) ? (
         mSL_StM_Err = 0109;
@@ -272,6 +301,7 @@ function make_array(size, type)
     Check that "bl" is a valid block, return true or false
 */
 function mSL_bl_check(bl)
+global(mSL_MKey_min,mSL_MKey_max,mSL_CC_Chksum)
 local (ty, s)
 (
     (bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min)
@@ -280,6 +310,7 @@ local (ty, s)
 );
 
 function mSL_bl_check(bl, type)
+global(mSL_MKey_min,mSL_MKey_max,mSL_CC_Chksum,Undef)
 local (ty, s)
 (
     (bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min)
@@ -293,6 +324,7 @@ local (ty, s)
     Clear a "valid" block
 */
 function mSL_bl_clear(bl)
+global(mSL_MKey_min,mSL_MKey_max,mSL_CC_Chksum,memset)
 local (ty, s)
 (
     ((bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min) && (ty <= mSL_MKey_max)
@@ -304,6 +336,7 @@ local (ty, s)
 );
 
 function mSL_bl_clear(bl,val)
+global(mSL_MKey_min,mSL_MKey_max,mSL_CC_Chksum,memset)
 local (ty, s)
 (
     ((bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min) && (ty <= mSL_MKey_max)

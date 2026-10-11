@@ -1,16 +1,70 @@
 
+<? no_init != 0 ? _suppress=1; ?>
+@init
+<? _suppress=0; ?>
 
+/*
+    membox description
+
+
+membox[0] = padDebug;               8 cells pad 1 line for header display
+membox[1] = padDebug1Labs;          addresses of labels
+membox[2] = padDebug1Colrs;         addresses of colors
+membox[3] = padDebug1Cells;         addresses of cells desc.
+membox[4] = padDebug1Vals;          addresses of values
+membox[5] = MM1;                    MM1 = blockDispNames[blockMemory] = "Memory";
+membox[6] =                         number X of structure displayed
+membox[7] =                         DebugTbAdds[X]; displayed address
+membox[8] =                         DebugTbAdds[X];
+membox[9] =                         DebugTbDecs[X]; subtracted from displayed address
+membox[10] =
+membox[11] =
+membox[12] = 96;                    max line count // debugDispl
+membox[13] =
+membox[14] =                        DebugTbTyps[X]; // display type & special values
+membox[15] =
+membox[16] =
+membox[17] = 96;                    max line count -> size of display content
+membox[18] = 19;                    line height    ->
+membox[19] = blockMemory;           # of blockMemory
+membox[20] = 1;
+
+    debug info tables
+
+DebugTbNames =   "Name";            name of the table to be displayed
+DebugTbAdds =
+DebugTbDecs =
+DebugTbTyps =
+Types:  0x100  : the address to display is computed in the memory displayer by "mSL_Dbg_Memory_Updt"
+        0x001  : show absolute : relative address
+        0x002  : data is in gmem
+        0x004  : show @ in hexadecimal
+        0x008  : show data in hexadecimal
+
+
+    pad values
+pad[0]      name of displayed structure
+pad[1]      @ displayed
+pad[2]      <->
+pad[3]      relative cell number [0 .. ]
+pad[4]      content of this cell
+pad[5]      [[display height]]
+pad[6]      relative cell number [0 .. ]
+pad[7]      content of this cell
+*/
 //====== Debugger ======
 function
 show_Memory(membox)
 local (h1, h2, uix_jneed, uix_jmini, svr, svz, pt, ptr, dec, nad, cnt, v, zm, ii, ms_x, ms_y, w1, w2, u_flg,
-    bl, s, ty, add, zz, zzch, zzmi, zzent, zzmcl, zzmmd, xx, act, jmc, u_ch, u_ms_x, u_ms_y)
+    a, bl, s, ty, add, zz, zzch, zzmi, zzent, zzmcl, zzmmd, xx, act, jmc, u_ch, u_ms_x, u_ms_y, knb)
 (
     act = 0;
+
     h1 = uix_jpadHeight(1); // height
     h2 = membox[18] * membox[17] + ui_jd_bboxs; //
     svr = ui_bx_min_w;
     svz = uix_req_w;
+    knb = 4; // display 4 values per line
     uix_jneed = h1 + h2 + ui_jd_ctgr;
     uix_jmini = h1 + membox[18] * 4 + ui_jd_bboxs + ui_jd_ctgr;
     (ui_height() >= uix_jmini) ? (
@@ -23,6 +77,7 @@ local (h1, h2, uix_jneed, uix_jmini, svr, svz, pt, ptr, dec, nad, cnt, v, zm, ii
             padDebugCells = membox[3];
             padDebugVals = membox[4];
             debugDispl = membox[12];
+            (ui_width() > 1250) ? knb = 8; // display 4 or 8 values per line
             zzmi = ui_hover();
             jmc = ui_jmouse_cap;
             keepBlockInfos(membox[19]);
@@ -91,6 +146,7 @@ local (h1, h2, uix_jneed, uix_jmini, svr, svz, pt, ptr, dec, nad, cnt, v, zm, ii
                         (zzmcl === 0) ? (
                             xx = control_jmenu(menu_Debug);
                             (xx > 0) ? (
+                                // Change displayed structure
                                 membox[6] = xx - 1;
                                 membox[7] = membox[8] = DebugTbAdds[membox[6]];
                                 membox[9] = DebugTbDecs[membox[6]];
@@ -111,27 +167,16 @@ local (h1, h2, uix_jneed, uix_jmini, svr, svz, pt, ptr, dec, nad, cnt, v, zm, ii
                 );
 
             ui_pop();
+
+
+            // Content display
             ui_split_top(h2);
                 ui_bx_min_w = 80;
                 uix_req_w = 80;
 
                 // special dynamic references
                 (membox[14] & 0x100) ? (
-                    (membox[7] === 0) ? (
-                        membox[9] = membox[8] = membox[7] = mSL_active_Thread - 2;
-                    ) :
-                    (membox[7] === 1) ? (
-                        membox[9] = membox[8] = membox[7] = mSL_TreeMainStruc - 2;
-                    ) :
-                    (membox[7] === 2) ? (
-                        membox[9] = membox[8] = membox[7] = mSL_CG_MainGen - 2;
-                    ) :
-                    (membox[7] === 3) ? (
-                        membox[9] = membox[8] = membox[7] = UAdd;
-                    ) :
-                    (membox[7] === 4) ? (
-                        membox[9] = membox[8] = membox[7] = mSL_new_memory;
-                    );
+                    mSL_Dbg_Memory_Updt(membox)
                 );
                 membox[14] &= 0xff;
 
@@ -140,18 +185,12 @@ local (h1, h2, uix_jneed, uix_jmini, svr, svz, pt, ptr, dec, nad, cnt, v, zm, ii
                 (u_zzmi = ui_hover()) ? (
                     ui_GFXdoNow |= 1;
                     ms_x = uix_mouse_x - ui_left(); ms_y = uix_mouse_y - ui_top();
-                    w1 = ui_width()/5; w2 = ui_height()/membox[18];ZZZUIH = ui_height();
+                    w1 = ui_width()/(knb + 1); w2 = ui_height()/membox[18];ZZZUIH = ui_height();
                     u_ms_x = min(4, 0|(ms_x/w1)); u_ms_y = 0|(ms_y / membox[18]); //min(membox[17]-1, 0|(ms_y/w2));
                     dbg_u_zmc = ui_jmouse_cap;
                     (u_ms_x !== 0) ? (
                         dbg_u_za = membox[15] = membox[7] + 4 * u_ms_y + u_ms_x - 1;
                         membox[16] = dbg_u_za[0];
-                    );
-                    u_ch = do_GenericKeyRead();
-                    (u_ch != 0) ? (
-                        sprintf(#gfx_uc, "Keyed: '%c' / %02X   [%d]", u_ch, u_ch, kcnt); kcnt+= 1;
-                        // mSL_log(SysLogBox, #gfxu);
-                        ui_key_next();
                     );
 
                     u_flg = (dbg_u_zmc != dbg_u_prev_zmc) && (dbg_u_zmc & 3);
@@ -161,150 +200,164 @@ local (h1, h2, uix_jneed, uix_jmini, svr, svz, pt, ptr, dec, nad, cnt, v, zm, ii
                         0;
                     );
 
-                    (u_ms_x === 0) ? (
-                        // first column : change address
-                        ((ui_jmouse_cap === 0) && (u_ch === 'up')) ? (
-                            membox[7] = membox[7] - 4;
-                        ) :
-                        ((ui_jmouse_cap === 0) && (u_ch === 'down')) ? (
-                            membox[7] = membox[7] + 4;
-                        ) :
-                        ((ui_jmouse_cap === 0) && (u_ch === 'left')) ? (
-                            membox[7] = membox[7] - 1;
-                        ) :
-                        ((ui_jmouse_cap === 0) && (u_ch === 'rght')) ? (
-                            membox[7] = membox[7] + 1;
-                        ) :
-                        ((ui_jmouse_cap === 8) && (u_ch === 'left')) ? (
-                            membox[7] = membox[7] - 4 * 32;
-                        ) :
-                        ((ui_jmouse_cap === 8) && (u_ch === 'rght')) ? (
-                            membox[7] = membox[7] + 4 * 32;
-                        ) :
-                        ((ui_jmouse_cap === 8) && (u_ch === 'up')) ? (
-                            membox[7] = membox[7] - 4 * 256;
-                        ) :
-                        ((ui_jmouse_cap === 8) && (u_ch === 'down')) ? (
-                            membox[7] = membox[7] + 4 * 256;
-                        ) :
-                        (u_ch === '=') ? (
-                            // set this location as relative zero
-                            membox[9] = membox[7] + 4 * u_ms_y;
-                        ) :
-                        (u_ch === ':') ? (
-                            membox[14] = membox[14] ~ 1;
-                        ) :
-                        (u_ch === 'x') ? (
-                            membox[14] = membox[14] ~ 4;
-                        ) :
-                        (u_ch === 'c') ? (
-                            memoryBoxAdd = membox[7] + 4 * u_ms_y;
-                        ) :
-                        (u_ch === 'm') ? (
-                            act = 1;
-                        ) :
-                        (u_ch === 'l') ? (
-                            act = 2;
-                        ) :
-                        (u_ch === 'j') ? (
-                            act = 3;
-                        ) :
-                        (u_ch === 'k') ? (
-                            act = 4;
-                        ) :
-                        (u_flg && (dbg_u_zmc & 1)) ? (
-                            membox[7] = membox[7] + 4 * u_ms_y;
-                        ) :
-                        (u_flg && (dbg_u_zmc & 2)) ? (
-                            membox[7] = membox[7] - 4 * u_ms_y;
+                    u_ch = do_GenericKeyRead();
+                    (u_ch != 0) ? (
+                        0 ? (
+                            sprintf(#gfxu, "Keyed: '%c' / %02X   [%d]", u_ch, u_ch, kcnt); kcnt+= 1;
+                            mSL_log(SysLogBox, #gfxu);
                         );
-                    ) : (
-                        // other columns : jump to location
-                        dbg_u_za = membox[15] = membox[7] + 4 * u_ms_y + u_ms_x - 1;
-                        membox[16] = dbg_u_za[0];
-                        ((ui_jmouse_cap === 0) && (u_ch === 'up')) ? (
-                            membox[7] = membox[7] - 4;
-                        ) :
-                        ((ui_jmouse_cap === 0) && (u_ch === 'down')) ? (
-                            membox[7] = membox[7] + 4;
-                        ) :
-                        ((ui_jmouse_cap === 0) && (u_ch === 'left')) ? (
-                            membox[7] = membox[7] - 1;
-                        ) :
-                        ((ui_jmouse_cap === 0) && (u_ch === 'rght')) ? (
-                            membox[7] = membox[7] + 1;
-                        ) :
-                        (u_ch === '=') ? (
-                            // set this location as relative zero
-                            membox[9] = membox[15];
-                        ) :
-                        (u_ch === ':') ? (
-                            membox[14] = membox[14] ~ 1;
-                        ) :
-                        (u_ch === 'x') ? (
-                            membox[14] = membox[14] ~ 8;
-                        ) :
-                        (u_ch === 'c') ? (
-                            memoryBoxAdd = membox[16];
-                        ) :
-                        (u_ch === 'g') ? (
-                            membox[16] = memoryBoxAdd;
-                            ((membox[16] >= 0) && (membox[16] < fmemmax) ) ? (
-                                debugDispl[membox[13]] = membox[7];
-                                membox[10] = membox[13] = (membox[13] + 1) % debugDSize;
-                                membox[7] = membox[8] = dbg_last_a = membox[16] - 4;
-                            );
-                        ) :
-                        (u_flg && (dbg_u_zmc === 1)) ? (  //  left clic
-                            // set this location as relative zero
-                            membox[9] = membox[15];
-                        ) :
-                        (u_flg && (dbg_u_zmc === 33)) ? (  // ctrl-left clic
-                            // jump to this location
-                            ((membox[16] >= 0) && (membox[16] < fmemmax) ) ? (
-                                debugDispl[membox[13]] = membox[7];
-                                membox[10] = membox[13] = (membox[13] + 1) % debugDSize;
-                                membox[7] = membox[8] = dbg_last_a = membox[16] - 4;
-                            );
-                        ) :
-                        (u_flg && (dbg_u_zmc === 37)) ? (  // cmd-ctrl-left-click
-                            // skip to start/end of block - click on key or ~key
-                            bl = membox[15];
-                            ((bl > 0) && ((s = bl[1]) >= 0) && (((ty = bl[0]) >= mSL_MKey_min) || (ty === mSL_MT_FreeSt))
-                                    && (ty <= mSL_MKey_max) && (s === bl[s+2])
-                                    && (bl[s+3] === (ty ~ mSL_CC_Chksum))) ? (
-                                // skip to after end of block
-                                debugDispl[membox[13]] = membox[7];
-                                membox[10] = membox[13] = (membox[13] + 1) % debugDSize;
-                                membox[7] = membox[8] = bl + s + 3 - 3;
+                        ui_key_next();
+
+
+
+                        (u_ms_x === 0) ? (
+                            // first column : change address
+                            ((ui_jmouse_cap === 0) && (u_ch === 'up')) ? (
+                                membox[7] = membox[7] - knb;
                             ) :
-                            ((bl > 2) && ((s = bl[-1]) > 0) && ((add = bl - s - 3) > 0) && (s === add[1])
-                                    && (((ty = add[0]) >= mSL_MKey_min) || (ty === mSL_MT_FreeSt)) && (ty <= mSL_MKey_max)
-                                    && (bl[0] === (ty ~ mSL_CC_Chksum))) ? (
-                                // skip to before start of block
-                                debugDispl[membox[13]] = membox[7];
-                                membox[10] = membox[13] = (membox[13] + 1) % debugDSize;
-                                membox[7] = membox[8] = add - 5;
+                            ((ui_jmouse_cap === 0) && (u_ch === 'down')) ? (
+                                membox[7] = membox[7] + knb;
+                            ) :
+                            ((ui_jmouse_cap === 0) && (u_ch === 'left')) ? (
+                                membox[7] = membox[7] - 1;
+                            ) :
+                            ((ui_jmouse_cap === 0) && (u_ch === 'rght')) ? (
+                                membox[7] = membox[7] + 1;
+                            ) :
+                            ((ui_jmouse_cap === 8) && (u_ch === 'left')) ? (
+                                membox[7] = membox[7] - knb * 32;
+                            ) :
+                            ((ui_jmouse_cap === 8) && (u_ch === 'rght')) ? (
+                                membox[7] = membox[7] + knb * 32;
+                            ) :
+                            ((ui_jmouse_cap === 8) && (u_ch === 'up')) ? (
+                                membox[7] = membox[7] - knb * 256;
+                            ) :
+                            ((ui_jmouse_cap === 8) && (u_ch === 'down')) ? (
+                                membox[7] = membox[7] + knb * 256;
+                            ) :
+                            (u_ch === '=') ? (
+                                // set this location as relative zero
+                                membox[9] = membox[7] + knb * u_ms_y;
+                            ) :
+                            (u_ch === ':') ? (
+                                membox[14] = membox[14] ~ 1;
+                            ) :
+                            (u_ch === 'x') ? (
+                                membox[14] = membox[14] ~ 4;
+                            ) :
+                            (u_ch === 'c') ? (
+                                memoryBoxAdd = membox[7] + knb * u_ms_y;
+                            ) :
+                            (u_ch === 'm') ? (
+                                act = 1;
+                            ) :
+                            (u_ch === 'l') ? (
+                                act = 2;
+                            ) :
+                            (u_ch === 'j') ? (
+                                act = 3;
+                            ) :
+                            (u_ch === 'k') ? (
+                                act = 4;
+                            ) :
+                            (u_flg && (dbg_u_zmc & 1)) ? (
+                                membox[7] = membox[7] + knb * u_ms_y;
+                            ) :
+                            (u_flg && (dbg_u_zmc & 2)) ? (
+                                membox[7] = membox[7] - knb * u_ms_y;
                             );
-                        ) :
-                        (u_flg && (dbg_u_zmc === 2)) ? ( // right clic
-                            // set this loc. as display start
-                            membox[7] = membox[15];
-                        ) :
-                        (u_flg && (dbg_u_zmc === 34)) ? ( // ctrl right clic
-                            // set this location content as logical zero
-                            membox[9] = membox[16];
-                        ) :
-                        (u_flg && (dbg_u_zmc === 38)) ? ( // cmd-ctrl-right-clic
-                            do_dump_block(membox[15]);
+                        ) : (
+                            // other columns : jump to location
+                            dbg_u_za = membox[15] = membox[7] + knb * u_ms_y + u_ms_x - 1;
+                            membox[16] = dbg_u_za[0];
+                            ((ui_jmouse_cap === 0) && (u_ch === 'up')) ? (
+                                membox[7] = membox[7] - knb;
+                            ) :
+                            ((ui_jmouse_cap === 0) && (u_ch === 'down')) ? (
+                                membox[7] = membox[7] + knb;
+                            ) :
+                            ((ui_jmouse_cap === 0) && (u_ch === 'left')) ? (
+                                membox[7] = membox[7] - 1;
+                            ) :
+                            ((ui_jmouse_cap === 0) && (u_ch === 'rght')) ? (
+                                membox[7] = membox[7] + 1;
+                            ) :
+                            (u_ch === '=') ? (
+                                // set this location as relative zero
+                                membox[9] = membox[15];
+                            ) :
+                            (u_ch === ':') ? (
+                                membox[14] = membox[14] ~ 1;
+                            ) :
+                            (u_ch === 'x') ? (
+                                membox[14] = membox[14] ~ 8;
+                            ) :
+                            (u_ch === 'c') ? (
+                                memoryBoxAdd = membox[16];
+                            ) :
+                            (u_ch === 'g') ? (
+                                membox[16] = memoryBoxAdd;
+                                ((membox[16] >= 0) && (membox[16] < fmemmax) ) ? (
+                                    debugDispl[membox[13]] = membox[7];
+                                    membox[10] = membox[13] = (membox[13] + 1) % debugDSize;
+                                    membox[7] = membox[8] = dbg_last_a = membox[16] - 4;
+                                );
+                            );
                         );
+
                     );
+
+                    (u_flg && (dbg_u_zmc === 1)) ? (  //  left clic
+                        // set this location as relative zero
+                        membox[9] = membox[15];
+                    ) :
+                    (u_flg && (dbg_u_zmc === 33)) ? (  // ctrl-left clic
+                        // jump to this location
+                        ((membox[16] >= 0) && (membox[16] < fmemmax) ) ? (
+                            debugDispl[membox[13]] = membox[7];
+                            membox[10] = membox[13] = (membox[13] + 1) % debugDSize;
+                            membox[7] = membox[8] = dbg_last_a = membox[16] - 4;
+                        );
+                    ) :
+                    (u_flg && (dbg_u_zmc === 37)) ? (  // cmd-ctrl-left-click
+                        // skip to start/end of block - click on key or ~key
+                        bl = membox[15];
+                        ((bl > 0) && ((s = bl[1]) >= 0) && (((ty = bl[0]) >= mSL_MKey_min) || (ty === mSL_MT_FreeSt))
+                                && (ty <= mSL_MKey_max) && (s === bl[s+2])
+                                && (bl[s+3] === (ty ~ mSL_CC_Chksum))) ? (
+                            // skip to after end of block
+                            debugDispl[membox[13]] = membox[7];
+                            membox[10] = membox[13] = (membox[13] + 1) % debugDSize;
+                            membox[7] = membox[8] = bl + s + 3 - 3;
+                        ) :
+                        ((bl > 2) && ((s = bl[-1]) > 0) && ((add = bl - s - 3) > 0) && (s === add[1])
+                                && (((ty = add[0]) >= mSL_MKey_min) || (ty === mSL_MT_FreeSt)) && (ty <= mSL_MKey_max)
+                                && (bl[0] === (ty ~ mSL_CC_Chksum))) ? (
+                            // skip to before start of block
+                            debugDispl[membox[13]] = membox[7];
+                            membox[10] = membox[13] = (membox[13] + 1) % debugDSize;
+                            membox[7] = membox[8] = add - 5;
+                        );
+                    ) :
+                    (u_flg && (dbg_u_zmc === 2)) ? ( // right clic
+                        // set this loc. as display start
+                        membox[7] = membox[15];
+                    ) :
+                    (u_flg && (dbg_u_zmc === 34)) ? ( // ctrl right clic
+                        // set this location content as logical zero
+                        membox[9] = membox[16];
+                    ) :
+                    (u_flg && (dbg_u_zmc === 38)) ? ( // cmd-ctrl-right-clic
+                        do_dump_block(membox[15]);
+                    );
+
                     dbg_u_prev_zmc = dbg_u_zmc;
                 );
 
                 // show memory
                 pt = membox[7];
-                ui_new_column(1/5);
+                ui_new_column(1/(knb+1));
                 ptr = pt; dbg_mem_alt = ptr[0];
 
                 debugDispl[membox[13]] = membox[7];
@@ -323,12 +376,12 @@ local (h1, h2, uix_jneed, uix_jmini, svr, svz, pt, ptr, dec, nad, cnt, v, zm, ii
                             sprintf(#MEM, "%d :", ptr);
                         );
                     );
-                    ptr += 4;
+                    ptr += knb;
                     ui_jd_tboxh = membox[18];
                     ui_show(#MEM);
                 );
 
-                loop (4,
+                loop (knb,
                     ptr = pt; pt += 1;
                     ui_new_column();
                     loop (membox[17],
@@ -338,12 +391,13 @@ local (h1, h2, uix_jneed, uix_jmini, svr, svz, pt, ptr, dec, nad, cnt, v, zm, ii
                             v = ptr[0];
                         );
 
-                        ptr += 4;
+                        ptr += knb;
                         (membox[14] & 8) ? (
-                            (v == floor(v)) ? (
+                            ((v === floor(v)) && (abs(v) < 4294967296))? (
                                 sprintf(#VAL, "%X", v);
                             ) : (
-                                sprintf(#VAL, "%17g", v);
+                                // sprintf(#VAL, "%17g", v);
+                                mSL_edit_value(#VAL, v);
                             );
                         ) : (
                             mSL_edit_value(#VAL, v);

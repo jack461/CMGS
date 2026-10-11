@@ -1,15 +1,12 @@
 /*
     A micro Script Language for JSFX plug-ins
 
-    Part0 : utilities
+    Part2 : utilities, 2
         mSL_Utilities.jsfx-inc
     J.J. Girardot - 7/2020
 */
 
-
 @init
-
-
 #D_GM_Project_Path = ""; // unknown for now
 #D_GM_Project_Name = ""; // unknown for now
 #D_GM_Project_Path_FX = ""; // unknown for now
@@ -103,7 +100,7 @@ local (s, ty, res)
             && (src >= mSL_current_memory[mSL_MM_LowAd])
             && (src < mSL_current_memory[mSL_MM_HighAd])) ? (
         res = mSL_Dyn_Alloc(s, ty, 0);
-        memcpy(res, src, s);
+        (res !=0) ? ( memcpy(res, src, s);) : (mSL_errX = 1796;);
     );
     res;
 );
@@ -257,10 +254,21 @@ local (siz, cnt, p)
 
 /*
 */
-function mSL_make_memory(mem, size) (mSL_Dyn_Init(mem, size)) ;
+function mSL_make_memory(mem, size) (mSL_Dyn_Init(mem, size, mSL_Dyn_First_Init)) ;
 function mSL_mfree(obj) ( mSL_Dyn_Free(obj) );
 function mSL_malloc(size, type) ( mSL_Dyn_Alloc(size, type, mSL_StM_FlClear) );
 
+
+function mSL_mfree_all(addr, size)
+local (i, m)
+(
+    i = 0; loop(size,
+        ((m = addr[i]) != 0) ? (
+             mSL_Dyn_Free(obj); addr[i] = 0;
+        );
+        i += 1;
+    );
+);
 
 // Copy from src to dst - respect blocks size, and access gmem
 function
@@ -359,6 +367,7 @@ local(mmm, ii)
     mmm[fmemmax - 1] =  'MAIN'~ mSL_CC_Chksum;
     mmm[6] = mmm[fmemmax - 2];
     mmm[7] = mmm[fmemmax - 1];
+    XDcount = 1;
     mmmDefLoc = 15; // where to write without consequences in memory
 );
 
@@ -368,7 +377,7 @@ GMI()
     GMI(GM_Word0, GM_Word1, GM_Word2);
 );
 
-// Check that words in low main memory have not been modified
+// Check that words in low/high main memory have not been modified
 function GMW()
 (
     0[0] === 'MAIN'  &&  0[1] === fmemmax_4  &&  0[2] === GM_Word0  &&  0[3] === GM_Word1
@@ -382,7 +391,7 @@ function GMW0(msg)
     mSL_edit_value(#AA2, 0[2]); mSL_edit_value(#AA3, 0[3]); mSL_edit_value(#AA4, 0[4]);
     mSL_edit_value(#AA5, 0[5]); mSL_edit_value(#AA6, 0[6]); mSL_edit_value(#AA7, 0[7]);
     mSL_edit_value(#AA8, 0[fmemmax - 2]); mSL_edit_value(#AA9, 0[fmemmax - 1]);
-    sprintf(#s2, "[%s]  %s %s %s %s %s %s %s %s .. %s %s", msg, #AA0, #AA1, #AA2, #AA3, #AA4, #AA5, #AA6, #AA7, #AA8, #AA9);
+    sprintf(#s2, "[%s]  %s %s %s %s %s %s %s %s .. %s %s", msg,#AA0,#AA1,#AA2,#AA3,#AA4,#AA5,#AA6,#AA7,#AA8,#AA9);
     mSL_log(SysLogBox, #s2);
 );
 
@@ -404,3 +413,113 @@ function GMW2(msg)
     );
 );
 
+
+
+
+// Exchange strings between JSFX effects
+/*
+   Convert an array of ASCII codes of characters (in gmem[expldwstr+i])
+   to a string in #sct, also returned by the function
+*/
+function getexpldstr(str,src)
+local (ux, vz, lm)
+(
+    (str == 0) ? str = #sct;
+    strcpy(str, "");
+    lm = 256;
+    (src == 0) ? (src = expldwstr; lm = explavail-1; gmem[src+lm] = 0;);
+    (gmem[src] == 'strx') ? (
+        src += 1;
+        ux = 0; vz = gmem[src];
+        while ((vz != 0) && (lm > 0)) (
+            str_setchar(str, -0.25, vz, 'uc');
+            lm -= 1; ux +=1; vz = gmem[src+ux];
+        );
+    );
+    str;
+);
+
+function setexpldstr(str, dst, siz)
+local (ux, lg)
+(
+    (dst == 0) ? (dst = expldwstr; siz = explavail;);
+    lg = min(siz - 1,strlen(str));
+    gmem[dst] = 'strx'; ux = 0; dst += 1;
+    loop (lg,
+        gmem[dst+ux] = str_getchar(str, ux, 'uc');
+        ux += 1;
+    );
+    gmem[dst+ux] = 0;
+);
+
+
+// Pack a string in a gmem array, 6 chard/word
+function
+mSL_g6packStr(dst, str, ptre, ptmx, flnl)
+local (pt, nk, pkg, fct, ch)
+(
+    pt = 0; nk = 6; pkg = 0; fct = 1;
+    while (((ch = str_getchar(str, pt, 'cu')) != 0) && (ptre < ptmx - 4))  (
+        //sprintf(#s, "       >>>  %c  %x  %d", ch, ch, ch); mSL_log(SysLogBox, #s);
+        (nk <= 0) ? (
+            (pkg != 0) ? (gmem[dst+ptre] = pkg; ptre += 1;) ;
+            nk = 6; pkg = 0; fct = 1;
+        );
+        pkg += ch * fct; nk -= 1; fct *= 256; pt += 1;
+    );
+    (pkg != 0) ? (gmem[dst+ptre] = pkg; ptre += 1;);
+    (flnl != 0) ? (
+        // 4: suppress trailing spaces
+        while ((flnl & 4) && (gmem[dst+ptre-1] === ' ')) (ptre -= 1;);
+        // 2: no more than 2 consecutive empty lines or single space line
+        ((flnl & 2) && (gmem[dst+ptre-1] === ' ') && (gmem[dst+ptre-2] === '\n')
+                    && (gmem[dst+ptre-3] === ' ') && (gmem[dst+ptre-4] === '\n')
+                    && (gmem[dst+ptre-5] === ' ') && (gmem[dst+ptre-6] === '\n')) ? (ptre -= 2;);
+        ((flnl & 2) && (gmem[dst+ptre-1] === '\n') && (gmem[dst+ptre-2] === '\n') && (gmem[dst+ptre-3] === '\n')) ? (ptre -= 1;);
+        // 1: add a line feed after the string
+        (flnl & 1) ? (gmem[dst+ptre] = '\n'; ptre += 1;);
+    );
+    gmem[dst+ptre] = 0;
+    ptre;
+);
+
+
+// Unpack a string from a gmem array, 6 chars/word
+function mSL_g6unpackArray(str, array, ptin)
+local (src, ch)
+(
+    (str === 0) ? str = #;
+    strcpy(str, "");
+    while ((src = gmem[array+ptin]) != 0) (
+        while (src != 0) (
+            ch = src - 256 * floor(src / 256);
+            str_setchar(str, -0.25, ch, 'cu');
+            src = floor(src/256);
+        );
+        ptin += 1;
+    );
+    str;
+);
+
+
+
+//======================================================>
+
+/*
+   Protected "gmem[add] = val" operation
+   signal if "add == 0"
+*/
+function gmset(add,val)
+(
+    (add == 0) ? (
+        gmset_lg = min(23, strlen(#section));
+        gmset_ix = 0;
+        loop (gmset_lg,
+            gmem[expldwstr+gmset_ix] = str_getchar(#section, gmset_ix, 'c');
+            gmset_ix += 1;
+        );
+        gmem[expldwstr+gmset_ix] = 0;
+        gmem[flagSubS] = SubSection;
+    );
+    gmem[add]=val;
+);

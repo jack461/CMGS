@@ -1,0 +1,1314 @@
+//
+// The APC Mini Include code
+//
+
+
+
+@init
+
+
+APCmini_inited = 0;
+CurrentPage = 0;
+
+// For the AKAI APCmini
+colorGreen = 1;
+colorGreen2 = 2;
+colorRed = 3;
+colorYellow = 5;
+colorBlack = 0;
+buttonOff = 0;
+buttonOn = 1;
+buttonCli = 2;
+unusedled = 0x7F; // an unused led
+NoteOn = 0x96; // 0x90;
+NoteOnK = 0x90;
+NoteOnB = 0x90;
+ctlV1 = 0x38;
+ctlV2 = 0x37;
+// flg0x59 = 0;
+
+Model = -1; // for APCmini, 1 for mk2
+// Btctl = 0x59; // for APCmini, 0x77 for mk2
+Firstpro = 0x40; // for APCmini, 0x64 for mk2
+shiftB = 0x62; // for APCmini, 0x7A for mk2
+PrvModel = -1;
+
+// ---------------------
+mtime = 0;
+selectedscene = 1;
+selectedgroup = 1;
+selecteditem = 1;
+
+reledA = unusedled; // Led for the current selected item in the pad [0x00 .. 0x0F]
+reledA2 = unusedled; // Led for the current selected item in the pad2 [0x00 .. 0x3F]
+reledB = unusedled; // Led for the current selected group [0x10 .. 0x1F]
+reledC = unusedled; // Led for the current item [0x20 .. 0x2F]
+reledD = unusedled; // Led of the current projector [0x40 .. 0x47]
+reledE = 0x3A;
+reledF = 0x3B;
+reledG = 0x3C;
+reledH = 0x38;
+reledJ = 0x39;
+reledK = 0x3F;
+reledL = 0x3E;
+reledM = 0x52; // for APCmini, 0x70 for mk2
+reledN = 0x53;
+reledO = 0x54;
+reledP = 0x55;
+reledR = 0x56;
+reledS = 0x57;
+reledT = 0x58;
+reledU = 0x59;
+reledX = 0x3E;
+reledY = 0x3D;
+
+
+
+reledAtime = 1;
+reledA2time = 1;
+reledBtime = 1;
+reledCtime = 1;
+reledDtime = 1;
+reledEtime = 1;
+reledFtime = 1;
+reledGtime = 1;
+reledKtime = 1;
+reledPtime = 1;
+reledQtime = 1;
+reledRtime = 1;
+
+oldopmod = 0;
+oldvadj = undefined;
+
+vols1 = vols2 = 0;
+
+
+colorAOn = colorGreen;
+colorAOff = colorYellow;
+
+colorBOn = colorYellow;
+colorBOff = colorGreen;
+
+colorCOn = colorGreen;
+colorCOff = colorYellow;
+
+showdelay = 5;
+delitime = 8; // wait some seconds after some interactions
+
+zzrefreshUI = 0;
+zzrefreshNxt = 0;
+refresh_01 = 1;
+refresh_02 = 2;
+refresh_03 = 4;
+refresh_04 = 8;
+refresh_05 = 0x10;
+refresh_06 = 0x20;
+refresh_07 = 0x40;
+refresh_08 = 0x80;
+refresh_09 = 0x100;
+refresh_10 = 0x200;
+refresh_11 = 0x400;
+refresh_12 = 0x800;
+refresh_13 = 0x1000;
+refresh_14 = 0x2000;
+refresh_15 = 0x4000;
+refresh_16 = 0x8000;
+refresh_17 = 0x10000;
+refresh_18 = 0x20000;
+refresh_19 = 0x40000;
+refresh_20 = 0x80000;
+refresh_all = 0xFFFFF;
+
+timen = utime = 0;
+zzucount = 0;
+zzubit = 0;
+
+zzupdnowUI = 0;
+zzupdone = 0;
+zzupdone2 = 0;
+zzupdleds = 0;
+zzupdrefreshUI =  0;
+sigcfchange = refresh_02 | refresh_03;
+
+
+projUI = currentpro; // Projector currently chosen on the AKAI
+
+// Using "midiwa"
+xalloc = midiwa; // Size is 65538
+MIDInotedate = xalloc;  xalloc += 128;// a 128 words area to keep dates of midi in notes
+dolistsiz = 32;
+dolistdate = xalloc; xalloc += dolistsiz;
+dolistflgs = xalloc; xalloc += dolistsiz;
+dolistacts = xalloc; xalloc += dolistsiz;
+PsetColors = xalloc; xalloc += 16; // A set of 16 Colors
+
+midiwafree = midiwasize + midiwa - xalloc;
+justafter = 0;
+theent = 0;
+
+
+// Select the AKAI APCmini model : 0 (mk1) or 1 (mk2)
+function setModel(mo)
+(
+    Model = mo;
+    (Model != PrvModel) ? (
+        PrvModel = Model;
+        (Model === 0) ? (
+            // APCmini mk1
+            NoteOn = 0x90;
+            Firstpro = 0x40;
+            // Btctl = 0x59;
+            reledM = 0x52; reledN = 0x53;
+            reledO = 0x54; reledP = 0x55;
+            reledR = 0x56; reledS = 0x57;
+            reledT = 0x58; reledU = 0x59;
+            NoteOnB = 0x90;
+            // We are limited to these 3 colors
+            colorGreen = 1; colorGreen2 = 2;
+            colorRed = 3; colorYellow = 5; colorBlack = 0; colorChange = 4;
+            colorAOn = colorGreen; colorAOff = colorYellow;
+            colorBOn = colorYellow; colorBOff = colorGreen;
+            colorCOn = colorGreen; colorCOff = colorYellow;
+            // Set the array of presets colors for APCmini mk1
+            PsetColors[0] = 1; PsetColors[1] = 1; PsetColors[2] = 1; PsetColors[3] = 1;
+            PsetColors[4] = 5; PsetColors[5] = 5; PsetColors[6] = 5; PsetColors[7] = 5;
+            PsetColors[8] = 3; PsetColors[9] = 3; PsetColors[10] = 3; PsetColors[11] = 3;
+            PsetColors[12] = 2; PsetColors[13] = 6; PsetColors[14] = 4; PsetColors[15] = 0;
+        ) : (
+            // APCmini mk2
+            NoteOn = 0x96;
+            Firstpro = 0x64;
+            // Btctl = 0x77;
+            reledM = 0x70; reledN = 0x71;
+            reledO = 0x72; reledP = 0x73;
+            reledR = 0x74; reledS = 0x75;
+            reledT = 0x76; reledU = 0x77;
+            NoteOnB = 0x9F; // blink
+            // More choices of colors
+            colorGreen = 54; colorGreen2 = 32;
+            colorRed = 60; colorYellow = 13; colorBlack = 0; colorChange = 70;
+            colorAOn = 32; colorAOff = 102;  // two shades
+            colorBOn = 13; colorBOff = 62; // two shades
+            colorCOn = 36; colorCOff = 45; // two shades
+            // Set the array of presets colors for APCmini mk2
+            PsetColors[0] = 54; PsetColors[1] = 20; PsetColors[2] = 42; PsetColors[3] = 56;
+            PsetColors[4] = 60; PsetColors[5] = 9; PsetColors[6] = 18; PsetColors[7] = 96;
+            PsetColors[8] = 113; PsetColors[9] = 69; PsetColors[10] = 127; PsetColors[11] = 74;
+            PsetColors[12] = 1; PsetColors[13] = 2; PsetColors[14] = 3; PsetColors[15] = 52;
+        );
+    );
+
+);
+
+
+// Debug functions -- unused
+function my_midisend(Chnl, Kmd, Led, Val, Where)
+(
+    midisend(Chnl, Kmd, Led, Val);
+    ((Led === 0x43) && (Val != 0)) ? (
+        zzLed43 += 1;
+        zzLed43V = Val;
+        zzLed43W = Where;
+    );
+);
+function my_midisend(Chnl, Kmd, Led, Val)
+(
+    my_midisend(Chnl, Kmd, Led, Val, 0)
+);
+
+
+
+// Events handling
+function willdo(qdate, qflags, qacts)
+local (i, ent)
+(
+    // fist, search an entry
+    i = 0; ent = -1; qdate += 0.001; // shift one millisecond
+    while ((i < dolistsiz) && (ent < 0)) (
+        (dolistdate[i] === 0) ? (
+            // entry is free
+            ent = i;
+            dolistdate[i] = qdate;
+            dolistflgs[i] = qflags;
+            dolistacts[i] = qacts;
+        );
+        i += 1;
+    );
+    // search for the min. "justafter"
+    justafter = min (justafter, qdate); // the one
+);
+
+function updateLeds()
+local (n, u, v, w, ppro, disp_1, disp_2, cnt, bit)
+(
+    disp_1 = disp_2 = 0;
+
+    zzupdnowUI |= zzrefreshUI; // what is received ?
+    zzupdleds += 1;
+    donow = 0; cnt = 30; bit = 1;
+    while ((donow === 0) && (cnt > 0)) (
+        (zzrefreshUI & bit) ? (
+            donow = bit;
+            zzrefreshUI &= 0x7FFFFFFF - bit;
+        );
+        cnt -= 1;
+        bit = bit * 2;
+    );
+    zzrefreshNxt |= zzrefreshUI;
+
+    (donow & refresh_20) ? (
+        midisend(0, NoteOnK, reledM, ((CurrentPage === 0) ? buttonOn : ((CurrentPage === 8) ? buttonCli : buttonOff)));
+        midisend(0, NoteOnK, reledN, ((CurrentPage === 1) ? buttonOn : ((CurrentPage === 9) ? buttonCli : buttonOff)));
+        midisend(0, NoteOnK, reledO, ((CurrentPage === 2) ? buttonOn : ((CurrentPage === 10) ? buttonCli : buttonOff)));
+        midisend(0, NoteOnK, reledP, ((CurrentPage === 3) ? buttonOn : ((CurrentPage === 11) ? buttonCli : buttonOff)));
+        midisend(0, NoteOnK, reledR, ((CurrentPage === 4) ? buttonOn : ((CurrentPage === 12) ? buttonCli : buttonOff)));
+        midisend(0, NoteOnK, reledS, ((CurrentPage === 5) ? buttonOn : ((CurrentPage === 13) ? buttonCli : buttonOff)));
+        midisend(0, NoteOnK, reledT, ((CurrentPage === 6) ? buttonOn : ((CurrentPage === 14) ? buttonCli : buttonOff)));
+        midisend(0, NoteOnK, reledU, ((CurrentPage === 7) ? buttonOn : ((CurrentPage === 15) ? buttonCli : buttonOff)));
+        donow = 0;
+    );
+
+    // "donow" is always a single bit
+    //   ******************************************************
+    (CurrentPage === 0) ? (
+        // Default case - show page 0
+        // Zone A
+        (MIDIshowtime >= timez) ? (
+            // Show an approximated slider value
+            n = 0;
+            loop (16,
+                midisend(0, NoteOn, n, colorBlack);
+                n += 1;
+            );
+            midisend(0, NoteOn, MIDIshowpos, MIDIshowflags & ctrlsync ? colorGreen : colorRed);
+            // flg0x59 = 1;
+        ) :  // This is an ELSE !
+        (donow & refresh_01) ? (
+            zzupdone |= refresh_01;
+            reledA = projUI[prx_cpadval];
+            n = 0; loop (16,
+                (n != reledA) ? midisend(0, NoteOn, n, colorAOff);
+                n += 1;
+            );
+            ((reledAtime != 0) && (reledAtime < timez) && (reledA != unusedled)) ? midisend(0, NoteOn, reledA, colorAOn);
+            // (flg0x59) ? (midisend(0, NoteOn, Btctl, 0); flg0x59 = 0; );
+            donow = 0;
+        );
+
+        // Zone B
+        (donow & refresh_02) ? (
+            zzupdone |= refresh_02;
+            // 16 Ready to display selected group
+            reledB = 16 + projUI[prx_svgroup] - 1;
+            n = 16; loop (16,
+                (n != reledB) ? midisend(0, NoteOn, n, colorBOff);
+                n += 1;
+            );
+            ((reledBtime != 0) && (reledBtime < timez) && (reledB != unusedled)) ? midisend(0, NoteOn, reledB, colorBOn);
+            donow = 0;
+        );
+
+        // Zone C
+        (donow & refresh_03) ? (
+            zzupdone |= refresh_03;
+            // 16 items in the group
+            reledC = 32 + projUI[prx_savitem] - 1;
+            n = 32; loop (16,
+                (n != reledC) ? midisend(0, NoteOn, n, colorCOff);
+                n += 1;
+            );
+            ((reledCtime != 0) && (reledCtime < timez) && (reledC != unusedled)) ? midisend(0, NoteOn, reledC, colorCOn);
+            donow = 0;
+        );
+
+
+        // Zone D
+        (donow & refresh_04) ? (
+            zzupdone |= refresh_04;
+            // "Restart" is green - On page 1
+            // What is the color of the halt button ?
+            (changeallowed) ? (
+                interpallowed ? (
+                    midisend(0, NoteOn, reledH, colorGreen);
+                ) : (
+                    midisend(0, NoteOn, reledH, colorGreen2);
+                )
+            ) : (
+                interpallowed ? (
+                    midisend(0, NoteOn, reledH, colorYellow);
+                ) : (
+                    midisend(0, NoteOn, reledH, colorRed);
+                );
+            );
+
+            (projUI[prx_savopmod] < 2) ? (
+                midisend(0, NoteOn, reledJ, colorGreen);
+            ) : (
+                midisend(0, NoteOn, reledJ, colorYellow);
+            );
+            donow = 0;
+        );
+
+        // Zone E
+        (donow & refresh_05) ? (
+            zzupdone |= refresh_05;
+            ((reledFtime != 0) && (reledFtime < timez)) ? midisend(0, NoteOn, reledF, colorGreen);
+            ((reledGtime != 0) && (reledGtime < timez)) ? midisend(0, NoteOn, reledG, colorGreen);
+            ((reledEtime != 0) && (reledEtime < timez)) ? midisend(0, NoteOn, reledE, hypermode ? colorYellow : colorGreen);
+            ((reledPtime != 0) && (reledPtime < timez)) ? midisend(0, NoteOn, reledX, statgraph ? colorGreen : colorBlack);
+            ((reledQtime != 0) && (reledQtime < timez)) ? midisend(0, NoteOn, reledY, statclock ? (stattimer ? colorYellow : colorGreen) : colorBlack);
+            donow = 0;
+        );
+
+
+        // Zone F
+        (donow & refresh_06) ? (
+            zzupdone |= refresh_06;
+            disp_1 |= 1;
+            disp_2 |= 1;
+            donow = 0;
+        );
+    ) :
+
+    //   ******************************************************
+    (CurrentPage === 8) ? (
+        // Default case - show page 8
+        // Zone A
+        (MIDIshowtime >= timez) ? (
+            // Show an approximated slider value
+            n = 0;
+            loop (16,
+                midisend(0, NoteOn, n, colorBlack);
+                n += 1;
+            );
+            midisend(0, NoteOn, MIDIshowpos, MIDIshowflags & ctrlsync ? colorGreen : colorRed);
+            // flg0x59 = 1;
+        ) :  // This is an ELSE !
+        (donow & refresh_01) ? (
+            zzupdone |= refresh_01;
+            reledA2 = projUI[prx_cpadval];
+            n = 0; loop (64,
+                (n != reledA2) ? midisend(0, NoteOn, n, colorAOff);
+                n += 1;
+            );
+            ((reledA2time != 0) && (reledA2time < timez) && (reledA2 != unusedled)) ? midisend(0, NoteOn, reledA2, colorAOn);
+            // (flg0x59) ? (midisend(0, NoteOn, Btctl, 0); flg0x59 = 0; );
+            donow = 0;
+        );
+        (donow & refresh_06) ? (
+            disp_1 |= 1; // Display Projector #
+            donow = 0;
+        );
+    ) :
+
+    //   ******************************************************
+    ((CurrentPage === 1) || (CurrentPage === 9)) ? (
+        // Display Presets Available
+        (donow & refresh_06) ? (
+            disp_1 |= 1; // Display Projector #
+            donow = 0;
+        );
+        (donow & refresh_01) ? (
+            n = (CurrentPage === 1) ? 0 : 64;
+            loop(64,
+                u = 0;
+                w = proprerefs[n];
+                (w != 0) ? (
+                    v = w[prx_pcolor+1] ;
+                    u = ((v >= 0) && (v <16)) ? v : 0;
+                );
+                midisend(0, NoteOn, n%64, ((w != 0) ? PsetColors[u] : colorBlack));
+                n += 1;
+            );
+            donow = 0;
+        );
+    ) :
+
+
+    //   ******************************************************
+    ((CurrentPage === 2) || (CurrentPage === 10)) ? (
+        // Display actions Available
+        (donow & refresh_06) ? (
+            disp_1 |= 1; // Display Projector #
+            donow = 0;
+        );
+        (donow & refresh_01) ? (
+            n = (CurrentPage === 2) ? 0 : 64;
+            loop(64,
+                u = 0;
+                w = actlist[n];
+                (w != 0) ? (
+                    u = w[0];
+                );
+                midisend(0, NoteOn, n%64, ((w != 0) ? PsetColors[u] : colorBlack));
+                n += 1;
+            );
+            donow = 0;
+        );
+    ) :
+
+
+    //   ******************************************************
+    ((CurrentPage === 3) || (CurrentPage === 11)) ? (
+        // Unused
+        (donow & refresh_06) ? (
+            disp_1 |= 1; // Display Projector #
+            donow = 0;
+        );
+        (donow & refresh_01) ? (
+            n = 0;
+            loop(64,
+                midisend(0, NoteOn, n, colorBlack);
+                n += 1;
+            );
+            donow = 0;
+        );
+    ) :
+
+
+
+    //   ******************************************************
+    ((CurrentPage === 4) || (CurrentPage === 12)) ? (
+        // Unused
+        (donow & refresh_06) ? (
+            disp_1 |= 1; // Display Projector #
+            donow = 0;
+        );
+        (donow & refresh_01) ? (
+            n = 0;
+            loop(64,
+                midisend(0, NoteOn, n, colorBlack);
+                n += 1;
+            );
+            donow = 0;
+        );
+    ) :
+
+
+
+    //   ******************************************************
+    ((CurrentPage === 5) || (CurrentPage === 13)) ? (
+        (donow & refresh_06) ? (
+            disp_1 |= 1; // Display Projector #
+            donow = 0;
+        );
+        (donow & refresh_01) ? (
+            n = 0;
+            loop(64,
+                midisend(0, NoteOn, n, colorBlack);
+                n += 1;
+            );
+            donow = 0;
+        );
+    );
+
+
+
+    //   ******************************************************
+    ((CurrentPage === 6) || (CurrentPage === 14)) ? (
+        (donow & refresh_06) ? (
+            disp_1 |= 1; // Display Projector #
+            donow = 0;
+        );
+        (donow & refresh_01) ? (
+            n = 0;
+            loop(64,
+                midisend(0, NoteOn, n, colorBlack);
+                n += 1;
+            );
+            donow = 0;
+        );
+    );
+
+
+
+    //   ******************************************************
+    ((CurrentPage === 7) || (CurrentPage === 15)) ? (
+        (donow & refresh_06) ? (
+            disp_1 |= 1; // Display Projector #
+            donow = 0;
+        );
+        (donow & refresh_01) ? (
+            n = 0;
+            loop(64,
+                midisend(0, NoteOn, n, colorBlack);
+                n += 1;
+            );
+            donow = 0;
+        );
+    );
+
+
+
+
+    (disp_1 & 1) ? (
+        // Display the 8 round/square buttons projectors status
+        n = 0; loop (projucnt, midisend(0, NoteOnK, Firstpro + n, buttonOff); n += 1;);
+        projUI = currentpro;
+        prjnum = slprjcur - 1;
+        reledD = Firstpro + prjnum;
+        s = projUI[prx_savprjst];
+        w = (s & 1) ? buttonOn : buttonCli;
+        midisend(0, NoteOnK, reledD, w); // buttonOn
+    );
+
+    (disp_2 & 1) ? (
+        // Display the 8 projectors status in 2nd pad line
+        n = 0;
+        loop (projucnt, ppro = projectors + n * projsize;
+            s = ppro[prx_savprjst];
+            w = (s === 1) ? colorGreen : (s === 2) ? colorRed : (s === 3) ? colorYellow : 0;
+            midisend(0, NoteOn, 0x30 + n, w);
+            (ppro === projUI) ? midisend(0, NoteOn, reledK, w);
+            n += 1;
+        );
+    );
+
+    zzrefreshUI = zzrefreshNxt;
+    zzrefreshNxt = 0;
+    donow ? (
+        // unable to update now ;
+        // reject update for later
+        willdo(timez + 2.1, donow, 0);
+    );
+
+);
+
+
+function APCinit()
+local ()
+(
+    // Declare associations controllers # and sliders names
+    zzzz_morph = midipairctlsl(0x30, "Morph.Dur."); //  morphing time
+    midipairctlsl(0x31, "Rand.Delay"); //  random delay
+    midipairctlsl(0x32, "Vol.Resp."); //   volume responsivity
+    midipairctlsl(0x33, "Scene"); //   scene
+    midipairctlsl(0x34, "Hyperslider"); //   hyper slider
+    midipairctlsl(0x35, "Ambitus"); //   hyper slider ambitus
+    midipairctlsl(0x36, "Blur"); //   hyper slider ambitus
+    //
+    oldopmod = sldopmod;
+    zzrefreshUI = zzrefreshNxt = refresh_all;
+    APCmini_inited = 1;
+    prjnum = slprjcur - 1;
+    MIDIshowtime = 1;
+
+    setModel(1); // default to APCmini mk2
+);
+
+
+function MIDI_init()
+(
+    APCinit();
+);
+
+
+// mbu is for "MIDI buffer"
+function MIDI_in(mbu, lng)
+local (km, p1, p2, ppro, fvol, fpro, mpro, MIDIdate, pstat)
+(
+    // (APCmini_inited === 0) ? APCinit();
+    km = mbu[0]; p1 = mbu[1]; p2 = mbu[2];
+    pstat = mpro = fpro = fvol = 0;
+    (lng === 3) ? (
+        MIDIdate = MIDInotedate[p1];
+
+
+        // A note on
+        (((km & 0xF0) === 0x90) && (p2 > 0)) ? (
+
+
+
+            // keep the "note on" date
+            (MIDInotedate[p1] >= 0) ? (
+                MIDInotedate[p1] = - timez; // as a negative value
+            ) : (
+                // a new note on ?
+                p1 = 256; // reject the note
+            );
+
+
+            // Some buttons are always active
+
+            ((p1 === 0x52) || (p1 === 0x70)) ? (
+                (p1 === 0x52) ? (
+                    Model = 0;
+                ) : (
+                    Model = 1;
+                );
+                // allow changes
+                changeallowed = interpallowed = 1;
+                hypermode = 0;
+                midisend(0, NoteOn, reledH, colorGreen);
+                CurrentPage = (CurrentPage === 0) ? 8 : 0;
+                zzrefreshUI = refresh_all;
+                MIDIshowtime = timez; // redisplay
+            ) :
+
+            ((p1 === 0x53) || (p1 === 0x71)) ? (
+                (p1 === 0x53) ? (
+                    Model = 0;
+                ) : (
+                    Model = 1;
+                );
+                CurrentPage = (CurrentPage === 1) ? 9 : 1;
+                zzrefreshUI = refresh_all;
+                MIDIshowtime = timez; // redisplay
+            ) :
+
+            ((p1 === 0x54) || (p1 === 0x72)) ? (
+                (p1 === 0x54) ? (
+                    Model = 0;
+                ) : (
+                    Model = 1;
+                );
+                CurrentPage = (CurrentPage === 2) ? 10 : 2;
+                zzrefreshUI = refresh_all;
+                MIDIshowtime = timez; // redisplay
+            ) :
+
+            ((p1 === 0x55) || (p1 === 0x73)) ? (
+                (p1 === 0x55) ? (
+                    Model = 0;
+                ) : (
+                    Model = 1;
+                );
+                CurrentPage = (CurrentPage === 3) ? 11 : 3;
+                zzrefreshUI = refresh_all;
+                MIDIshowtime = timez; // redisplay
+            ) :
+
+            ((p1 === 0x56) || (p1 === 0x74)) ? (
+                (p1 === 0x56) ? (
+                    Model = 0;
+                ) : (
+                    Model = 1;
+                );
+                CurrentPage = (CurrentPage === 4) ? 12 : 4;
+                zzrefreshUI = refresh_all;
+                MIDIshowtime = timez; // redisplay
+            ) :
+
+            ((p1 === 0x57) || (p1 === 0x75)) ? (
+                (p1 === 0x57) ? ( Model = 0 ) : ( Model = 1 );
+                CurrentPage = (CurrentPage === 5) ? 13 : 5;
+                zzrefreshUI = refresh_all;
+                MIDIshowtime = timez; // redisplay
+            ) :
+
+            ((p1 === 0x58) || (p1 === 0x76)) ? (
+                (p1 === 0x58) ? (
+                    Model = 0;
+                ) : (
+                    Model = 1;
+                );
+                CurrentPage = (CurrentPage === 6) ? 14 : 6;
+                zzrefreshUI = refresh_all;
+                MIDIshowtime = timez; // redisplay
+            );
+
+            ((p1 === 0x59) || (p1 === 0x77)) ? (
+                (p1 === 0x59) ? (
+                    Model = 0;
+                ) : (
+                    Model = 1;
+                );
+                CurrentPage = (CurrentPage === 7) ? 15 : 7;
+                zzrefreshUI = refresh_all;
+                MIDIshowtime = timez; // redisplay
+            );
+
+
+
+
+
+
+            // ==========================================================
+            (CurrentPage === 0) ? (
+
+                // This is a note on.
+                // Use this as an item number
+                (p1 === reledG) ? (
+                    // p1 == 60
+                    //immediate switch to a random item in the pad
+                    midisend(0, NoteOn, reledE, colorGreen);
+                    midisend(0, NoteOn, reledF, colorGreen);
+                    midisend(0, NoteOnB, reledG, colorChange);
+                    reledGtime = timez + delitime;
+                    willdo(reledGtime, refresh_05, 0);
+                    p1 = irand(16); // in 0 - 15
+                ) :
+                (p1 === reledF) ? (
+                    // p1 == 59
+                    // switch to a random item in current group
+                    midisend(0, NoteOn, reledE, colorGreen);
+                    midisend(0, NoteOnB, reledF, colorChange);
+                    midisend(0, NoteOn, reledG, colorGreen);
+                    reledFtime = timez + delitime;
+                    willdo(reledFtime, refresh_05, 0);
+                    p1 = 32 + irand(16); // in 0 - 15
+                ) ;
+
+
+                (p1 < 0x10) ? (
+                    // p1 in [0 .. 15] / 0x[0 .. F]
+                    // choose a configuration in the pad group
+                    projUI[prx_newchoice] = w = (paddef - firstgroup + p1) % 4096; // A number in [0 ... 4095]
+                    projUI[prx_prvchoice] = -1; // force update
+                    projUI[prx_ptrconf] = -3;  // no selected config
+                    projUI[prx_cpadval] = p1;  // selected entry
+                    // select the new configuration
+                    // change prev leds
+                    (reledA != unusedled) ? midisend(0, NoteOn, reledA, colorAOff);
+                    // turn the pad led red, then green
+                    reledA = p1;
+                    midisend(0, NoteOnB, reledA, colorChange);
+                    reledAtime = timez + delitime;
+                    willdo(reledAtime, refresh_01, 0);
+                    // turn "off" the item entry
+                    (reledC != unusedled) ? midisend(0, NoteOn, reledC, colorCOff);
+                    reledC = unusedled;
+                    projnum = projUI[prx_fident];
+                    signal_change(projnum, 2); // a new preset is loaded
+                    projUI[prx_citmval] = unusedled;
+                ) :
+
+
+                (p1 < 0x20) ? (
+                    // p1 in [16 .. 31] or 0x[10 .. 1F]
+                    // choose a new group
+                    selectedgroup = (p1 % 16) + 1;
+                    // Update our projector
+                    projUI[prx_svgroup] = selectedgroup;
+                    // Are we working with the currently displayed projector ?
+                    (projUI === currentpro) ? (
+                        // update the slider
+                        sldconfgrp = selectedgroup;
+                        sldconfgrpD = selectedgroup - 1;
+                        sliderchange(sldconfgrpD);
+                    );
+                    // change prev led
+                    (reledB != unusedled) ? midisend(0, NoteOn, reledB, colorBOff);
+                    // turn the led red, then yellow
+                    reledB = p1;
+                    midisend(0, NoteOnB, reledB, colorChange);
+                    reledBtime = timez + delitime;
+                    willdo(reledBtime, refresh_02, 0);
+                    projUI[prx_cgrpval] = selectedgroup -1; // keep in [0  15]
+                    projnum = projUI[prx_fident];
+                    signal_change(projnum, 4); // group change
+                ) :
+
+
+                (p1 < 0x30) ? (
+                    // p1 in [32 .. 47] or 0x[20 .. 2F]
+                    // choose an item in the selected group
+                    selecteditem = (p1 % 16) + 1;
+                    // Update our projector
+                    projUI[prx_svgroup] = selectedgroup;
+                    projUI[prx_savitem] = selecteditem;
+                    selectedscene = projUI[prx_svscene];
+                    // Are we working with the currently displayed projector ?
+                    (projUI === currentpro) ? (
+                        // update the slider
+                        sldconfgrp = selectedgroup;
+                        sldconfgrpD = selectedgroup - 1;
+                        sliderchange(sldconfgrpD);
+                        sldconfitm = selecteditem;
+                        sldconfitmD = selecteditem - 1;
+                        sliderchange(sldconfitmD);
+                    );
+                    // select the new configuration
+                    projUI[prx_newchoice] = w = anewchoice = (selectedscene - 1) * 256 + (selectedgroup-1) * 16 + (selecteditem-1);
+                    projUI[prx_prvchoice] = -1; // force update
+                    projUI[prx_ptrconf] = -3;  // no selected config
+                    // change prev leds
+                    (reledC != unusedled) ? midisend(0, NoteOn, reledC, colorCOff);
+                    // turn the led red for a while, then green
+                    reledC = p1;
+                    midisend(0, NoteOnB, reledC, colorChange);
+                    (reledA != unusedled) ? midisend(0, NoteOn, reledA, colorAOff);
+                    reledA = unusedled;
+                    projUI[prx_cpadval] = unusedled;
+                    projUI[prx_citmval] = p1 - 32; // in [0 .. 16]
+                    reledCtime = timez + delitime;
+                    willdo(reledCtime, refresh_03, 0);
+                    projnum = projUI[prx_fident];
+                    signal_change(projnum, 2); // new conf. loaded
+                ) :
+
+                (p1 < 0x38) ? (
+                    // p1 in [48 .. 55]
+                    // Change the status of a projector
+                    // Updated in the "note off" event
+                    zzrefreshUI |= refresh_20;
+                ) :
+
+                (p1 === reledH) ? (
+                    // stop changes
+                    (changeallowed) ? (
+                        changeallowed = 0;
+                        interpallowed = 0;
+                        midisend(0, NoteOn, reledH, colorRed);
+                    ) : (
+                        interpallowed ? (
+                            interpallowed = 0;
+                            midisend(0, NoteOn, reledH, colorRed);
+                        ) : (
+                            interpallowed = 1;
+                            midisend(0, NoteOn, reledH, colorYellow);
+                        );
+                    );
+                    zzrefreshUI |= refresh_04;
+                ) :
+
+                (p1 === reledJ) ? (
+                    // mode switch : yellow = changing, green = fixed
+                    (sldopmod > 1) ? (
+                        oldopmod = sldopmod;
+                        updtopmod(currentpro, 1, 1);
+                        midisend(0, NoteOn, reledJ, colorGreen);
+                    ) : (
+                        updtopmod(currentpro, max(2,min(6,oldopmod)), 1);
+                        midisend(0, NoteOn, reledJ, colorYellow);
+                    );
+                    zzrefreshUI |= refresh_04;
+                ) :
+
+                (p1 === reledE) ? (
+                    // Switch to hyperslider mode on history
+                    midisend(0, NoteOnB, reledE, colorChange);
+                    midisend(0, NoteOn, reledF, colorGreen);
+                    midisend(0, NoteOn, reledG, colorGreen);
+                    reledEtime = timez + delitime;
+                    willdo(reledEtime, refresh_04 | refresh_05, 0);
+                    hypermode = 1;
+                    hypchange = 1;
+                    histstart = historypnt;
+                    prvsldopmod = opmod = sldopmod = 7;
+                ) :
+
+                (p1 === reledX) ? (
+                    // Switch to graphic
+                    zzrefreshUI |= refresh_05;
+                ) :
+
+                (p1 === reledY) ? (
+                    // Switch clock
+                    zzrefreshUI |= refresh_05;
+                );
+            ) :
+            // ==========================================================
+            (CurrentPage === 8) ? (
+                // Choose a configuration in pad2 group
+                projUI[prx_newchoice] = w = (paddef - firstgroup + p1) % 4096; // A number in [0 ... 4095]
+                projUI[prx_prvchoice] = -1; // force update
+                projUI[prx_ptrconf] = -3;  // no selected config
+                projUI[prx_cpadval] = p1;  // selected entry
+                // select the new configuration
+                // change prev leds
+                (reledA2 != unusedled) ? midisend(0, NoteOn, reledA2, colorAOff);
+                // turn the pad led red, then green
+                reledA2 = p1;
+                midisend(0, NoteOnB, reledA2, colorChange);
+                reledA2time = timez + delitime;
+                willdo(reledA2time, refresh_01, 0);
+                // turn "off" the item entry
+                (reledC != unusedled) ? midisend(0, NoteOn, reledC, colorCOff);
+                reledC = unusedled;
+                projnum = projUI[prx_fident];
+                signal_change(projnum, 2); // a new config is loaded
+                projUI[prx_citmval] = unusedled;
+            ) :
+            // ==========================================================
+            (CurrentPage === 1) ? (
+
+                (p1 < 0x40) ? (
+                    // Choosing a preset
+                    (proprerefs[p1] != 0) ? (
+                        midisend(0, NoteOnB, p1, colorChange);
+                        willdo(timez + delitime, refresh_01, 0);
+                        projectorload(projUI, proprerefs[p1]);
+                        projnum = projUI[prx_fident];
+                        signal_change(projnum, 8); // preset loaded
+                    );
+                );
+
+            ) :
+            // ==========================================================
+            (CurrentPage === 2) ? (
+                (p1 < 0x40) ? (
+                    // Choosing an action
+                    (actlist[p1] != 0) ? (
+                        midisend(0, NoteOnB, p1, colorChange);
+                        willdo(timez + delitime, refresh_01, 0);
+                        perform_actionlist(actlist[p1]);
+                    );
+                );
+            ) :
+            // ==========================================================
+            (CurrentPage === 3) ? (
+                (p1 < 0x40) ? (
+                        willdo(timez + delitime, refresh_01, 0);
+                );
+            ) :
+            // ==========================================================
+            (CurrentPage === 4) ? (
+                (p1 < 0x40) ? (
+                        willdo(timez + delitime, refresh_01, 0);
+                );
+            );
+
+
+            // ==========================================================
+            // Common all pages
+            (((p1 >= 0x40) && (p1 <= 0x47)) || ((p1 >= 0x64) && (p1 <= 0x6B))) ? (
+                // p1 in [64 .. 71] or p1 in [100 .. 107]
+                // Select a different projector
+                (p1 <= 0x47) ? (
+                    prjnum = p1 - 0x40; Model = 0;
+                ) : (
+                    prjnum = p1 - 0x64; Model = 1;
+                );
+                (reledD != unusedled) ? midisend(0, NoteOn, reledD, buttonOff);
+                reledD = p1;
+                projUI = projectors + prjnum * projsize;
+                s = projUI[prx_savprjst];
+                w = (s & 1) ? buttonOn : buttonCli;
+                midisend(0, NoteOn, reledD, w);
+                mpro = 1;
+                // Now, update all the controls
+                slprjcur = prjnum + 1; // actual number
+                slprjcurD = slprjcur -1;
+                sliderchange(slprjcurD);
+                projsmd = 1;
+                slsignal = 1;
+                zzrefreshUI |= refresh_all;
+                reledAtime = 1;
+                reledA2time = 1;
+                reledBtime = 1;
+                reledCtime = 1;
+            ) :
+
+
+            /*
+            ((p1 === 0x58) || (p1 === 0x76)) ? (
+                (p1 === 0x58) ? (
+                    Model = 0;
+                ) : (
+                    Model = 1;
+                );
+                // reset some indicators
+                flg58 = 1 - flg58;
+                midisend(0, NoteOn, 0x58, flg58 ? 1 : 2);
+                midisend(0, NoteOn, 0x43, 0);
+                zzupdnowUI = zzupdone2 = 0;
+                willdo(timez + 30, 0, 2);
+            ) :
+
+
+            ((p1 === 0x59) || (p1 === 0x77)) ? (
+                (p1 === 0x59) ? (
+                    Model = 0;
+                ) : (
+                    Model = 1;
+                );
+                // reset volume to zero
+                vols1 = vols2 = 0; fvol = 2;
+                zzrefreshUI |= refresh_04;
+            ) :
+            */
+
+
+            ((p1 === 0x62) || (p1 === 0x7A)) ? (
+                (p1 === 0x62) ? (
+                    Model = 0;
+                ) : (
+                    Model = 1;
+                );
+                shiftB = p1; // shift button
+                zzrefreshUI = zzrefreshNxt = refresh_all;
+            );
+        ) :
+
+
+
+
+
+        // A note off
+        (((km & 0xF0) === 0x80) || (((km & 0xF0) === 0x90) && (p2 === 0))) ? (
+            MIDIdate = MIDInotedate[mbu[1]]; // keep the (negative) "note on" date
+
+
+            // off note for a projector
+            (((p1 >= 0x40) && (p1 <= 0x47)) || ((p1 >= 0x64) && (p1 <= 0x6B))) ? (
+                w = MIDIdate + timez;
+                ((w > 1.1) && (w < 6)) ? (
+                    (p1 <= 0x47) ? (
+                        prjnum = p1 - 0x40; Model = 0;
+                    ) : (
+                        prjnum = p1 - 0x64; Model = 1;
+                    );
+                    (reledD != unusedled) ? midisend(0, NoteOn, reledD, buttonOff);
+                    reledD = p1;
+                    projUI = projectors + prjnum * projsize;
+                    s = projUI[prx_savprjst];
+                    // Change the status of the projector
+                    s = (s & 1) ? 2 : 1; // switch the pro as mute/active
+                    updpstatus(projUI, s, 0);
+                    midisend(0, NoteOn, reledD, (s & 1) ? buttonOn : buttonCli);
+                    mpro = 1;
+                );
+            );
+
+
+
+
+
+            // ==========================================================
+            (CurrentPage === 0) ? (
+
+                (mbu[1] === reledK) ? (
+                    ppro = projUI;
+                    fpro = 1;
+                ) :
+
+                ((mbu[1] >= 0x30) && (mbu[1] <= 0x37)) ? (
+                    ppro = (mbu[1] - 0x30) * projsize + projectors;
+                    fpro = 1;
+                ) :
+
+                (mbu[1] === reledX) ? (
+                    ((MIDIdate + timez) < 1.1) ? (
+                        // short push. : set graphics on, toggle sliders
+                        midisend(0, NoteOnB, reledX, colorChange);
+                        reledPtime = timez + delitime;
+                        willdo(reledPtime, refresh_05, 0);
+                        statgraph = wrefresh = 1;
+                        togglesliders(-1);
+                    ) :
+                    ((MIDIdate + timez) < 6) ? (
+                        // Stop the graphic show
+                        midisend(0, NoteOn, reledX, colorBlack);
+                        statgraph = 0;
+                        // Log press + shift : all off
+                        togglesliders((MIDInotedate[shiftB] < 0) ? 0 : 1);
+                    );
+                ) :
+
+                (mbu[1] === reledY) ? (
+                    ((MIDIdate + timez) < 1.1) ? (
+                        // short push. : set clock on
+                        midisend(0, NoteOnB, reledY, colorChange);
+                        reledQtime = timez + delitime;
+                        willdo(reledQtime, refresh_05, 0);
+                        toggleclock(1); stattimer = 1 - stattimer; statgraph = 1;
+                    ) :
+                    ((MIDIdate + timez) < 6) ? (
+                        (MIDInotedate[shiftB] < 0) ? (
+                            // reset timer
+                            toggleclock(1);
+                            timet = timec;
+                            stattimer = 1;
+                        ) : (
+                            // Turn off the clock
+                            midisend(0, NoteOn, reledY, colorBlack);
+                            statclock = 0;
+                            toggleclock(0);
+                        );
+                    );
+                );
+            );
+
+            // note off date
+            MIDInotedate[mbu[1]] = timez;
+        ) :
+
+
+
+        // A Controller
+        ((km & 0xF0) === 0xB0) ? (
+
+            ((CurrentPage === 0) || (CurrentPage === 8))  ? (
+                (p1 === ctlV1) ? (
+                    vols1 = p2; fvol = 1;
+                ) :
+                (p1 === ctlV2) ? (
+                    vols2 = p2; fvol = 1;
+                ) :
+                ((p1 >= 0x30) && (p1 <= 0x36)) ? (
+                    midictlchange(projUI, p1, p2);
+                    // midisend(0, NoteOn, Btctl, (MIDIshowflags & ctrlsync) ? 1 : 0);
+                    fvol = 0;
+                    signal_change(32, p1); // a change relative to this continuous control
+                    zzrefreshUI |= refresh_01; // immediate
+                );
+            );
+
+        ); // Controller
+
+        (mpro) ? (
+            zzrefreshUI |= refresh_20 | refresh_06 | refresh_01 | refresh_02 | refresh_03 | refresh_04;
+            (CurrentPage === 0) ? (
+                // Display also the status of the projector in led reledK
+                midisend(0, NoteOn, reledK, (s === 1) ? colorGreen : (s === 2) ? colorRed : (s === 3) ? colorYellow : 0);
+                // Reset previous colors of changed leds
+                (reledA != unusedled) ? midisend(0, NoteOn, reledA, colorAOff);
+                (reledB != unusedled) ? midisend(0, NoteOn, reledB, colorBOff);
+                (reledC != unusedled) ? midisend(0, NoteOn, reledC, colorCOff);
+                // Set the appropriate values
+                reledA = min(unusedled, (projUI[prx_cpadval] & 0xF) + 0x00);
+                (reledA != unusedled) ? midisend(0, NoteOn, reledA, colorAOn);
+                reledB = min(unusedled, ((projUI[prx_svgroup]-1) & 0xF) + 0x10);
+                (reledB != unusedled) ? midisend(0, NoteOn, reledB, colorBOn);
+                reledC = min(unusedled, ((projUI[prx_savitem]-1) & 0xF) + 0x20);
+                (reledC != unusedled) ? midisend(0, NoteOn, reledC, colorCOn);
+            );
+            (CurrentPage === 8) ? (
+                (reledA2 != unusedled) ? midisend(0, NoteOn, reledA2, colorAOff);
+                // Set the appropriate values
+                reledA2 = min(unusedled, (projUI[prx_cpadval] & 0xF) + 0x00);
+                (reledA2 != unusedled) ? midisend(0, NoteOn, reledA2, colorAOn);
+            );
+            projnum = projUI[prx_fident];
+            pstat = 1;
+        );
+
+        (fpro) ? (
+            zzzzMIDI_n1 = MIDIdate;
+            zzzzMIDI_n2 = timez;
+            zzzzMIDI_n3 = MIDIdate + timez;
+            ((MIDIdate + timez) < 1.1) ? (
+                // Change the status of a projector
+                s = ppro[prx_savprjst]; // current status
+                s = (s % 3) + 1;
+                updpstatus(ppro, s, 0);
+            ) :
+            ((MIDIdate + timez) < 6) ? (
+                // Stop the projector
+                updpstatus(ppro, 0, 0);
+                s = 0;
+            );
+            // ppro[prxtr_16] = (ppro[prxtr_16] & 0x7FFF0) | s | 0x100;
+            zzrefreshUI |= refresh_06;
+            zzrefreshNxt |= refresh_06;
+            projsmd = 1;
+            projnum = ppro[prx_fident];
+            pstat = 1;
+        );
+
+        fvol ? (
+            volsrc = vols1 - vols2; // value in -127 + 127
+            // midisend(0, NoteOnK, Btctl, (volsrc == 0) ? 1 : 0);
+            // Change vol adjust
+            vadj = floor((volsrc + 127) / 254 * 10 * 40 + 0.5) / 10 - 20;
+            ((oldvadj === sldvad) || (vadj === sldvad) || (fvol === 2)) ? (
+                oldvadj = sldvad = vadj;
+                sliderchange(sldvad);
+                sliderevent(0);
+                volflags = ctrlsync;
+            ) :
+            ((abs(sldvad - vadj) / (abs(sldvad) + abs(vadj))) < 0.05) ? (
+                oldvadj = sldvad;
+                volflags = ctrlsync;
+            ) : (
+                volflags = 0;
+            );
+            // Show approx. value
+            MIDIshowpos = (volsrc + 127) >> 4;
+            MIDIshowtime = timez + showdelay;
+            MIDIshowforce = 1;
+            (fvol === 2) ? oldvadj = undefined;
+            fvol = 0;
+            MIDIshowflags = volflags;
+            // Graphic show
+            // projnum = projUI[prx_fident];
+            signal_change(20, 0); // slider "4"
+            zzrefreshUI |= refresh_01; // immediate
+        ); // fvol
+
+        (pstat) ? (
+            signal_change(projnum, 1);
+        );
+
+
+    ); // lng === 3
+
+
+
+    zzupdrefreshUI |= zzrefreshUI;
+
+    (Model != PrvModel) ? (
+        setModel(Model);
+    );
+);
+
+
+
+// Delayed action
+function thendo(flgs)
+(
+    (flgs === 1) ? (
+        MIDIshowtime = 0;
+    );
+);
+
+// Called every block
+function MIDI_handle()
+(
+    // Update occasionnaly, or when necessary
+    zzupdrefreshUI |= zzrefreshUI;
+    (slidersmod != 0) ? (
+        zzrefreshUI |= refresh_all;
+        slidersmod = 0;
+    );
+
+    (timez >= timen) ? (
+        // Automatic slow refresh of all zones
+        timen = timez + 4; // Every "x" seconds
+        zzucount -= 1;
+        zzubit = zzubit >> 1;
+        (zzucount <= 0) ? (
+            zzucount = 24;
+            zzubit = refresh_20;
+        );
+        zzrefreshUI |= zzubit;
+    );
+
+    (timez >= justafter) ? (
+        // Execute the nearest operation in time
+        theent = -1;
+        wtime = timez;
+        im = 0; loop (dolistsiz,
+            qd = dolistdate[im];
+            ((qd != 0) && (qd <= wtime)) ? (
+                wtime = qd;
+                theent = im;
+            );
+            im += 1;
+        );
+        (theent >= 0) ? (
+            zzrefreshUI |= dolistflgs[theent];
+            (dolistacts[theent] != 0) ? thendo(dolistacts[theent]);
+            dolistdate[theent] = dolistflgs[theent] = dolistacts[theent] = 0;
+        );
+        // Search next action date
+        justafter = timez + 300; // wait for some minutes
+        im = 0; loop (dolistsiz,
+            qd = dolistdate[im];
+            ((qd != 0) && (qd <= justafter)) ? (
+                justafter = qd;
+            );
+            im += 1;
+        );
+    );
+
+    ((MIDIshowtime != 0) && (timez > MIDIshowtime)) ? (
+        zzrefreshUI |= refresh_01;
+        willdo(timez + 0.1, refresh_01, 1);
+        MIDIshowtime =0;
+    );
+
+    zzrefreshUI ? updateLeds();
+    zzuleft = timen - timez;
+);

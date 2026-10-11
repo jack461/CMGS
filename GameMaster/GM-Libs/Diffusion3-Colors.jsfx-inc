@@ -1,0 +1,173 @@
+///--------------------------------------///
+///----------  color Utilities ----------///
+
+
+@init
+
+// This is to manage the classical RGB 24 bits codification
+function uix_pack_color(r,g,b) (((r&0xff)<<16) + ((g&0xff)<<8) + (b&0xff);) ;
+
+// A 32 bits config with a 8 bits alpha channel added
+function uix_pack_color(r,g,b,a) (
+    ((a <= 0) || (a >= 1)) ? a = 0;
+    ((r&0xff)<<16) + ((g&0xff)<<8) + (b&0xff) + ((0|(a*255))<<24);
+);
+
+uix_pblack = 0; // packed black
+uix_pwhite = 0xffffff; // packed white
+uix_pgreywhite = 0x999999; // packed grey white
+
+
+// Evaluate (using on the BT709 standard) the brightness of a R G B Color
+// returns : >= 128 is bright,  < 128 is dark  in [0 .. 255]
+function ui_bright2(r, g, b) (
+    (0.212671 * r + 0.715160 * g + 0.072169 * b);
+);
+function ui_bright(r, g, b) (
+    (0.212671 * r*r + 0.715160 * g*g + 0.072169 * b*b);
+);
+
+// Provide a contrast (white or black) color for packed color c
+// Based on the BT709 standard
+function ui_pcontrast(c) (
+    ((0.212671 * ((c >> 16) & 0xff) + 0.715160 * ((c >> 8) & 0xff) + 0.072169 * (c & 0xff)) > 128) ? uix_pblack : uix_pwhite;
+);
+
+// turn a packed color to grey
+function ui_pgreyed(c) local(x) (
+    x = 0|(0.212671 * ((c >> 16) & 0xff) + 0.715160 * ((c >> 8) & 0xff) + 0.072169 * (c & 0xff));
+    (x << 16) | (x << 8) | x;
+);
+
+// Set the graphic color variables values (in 0-1) from a 24 bits packed color
+function gfx_set_pcolor(c) (
+    gfx_r = ((c >> 16) & 0xff)/0xff;
+    gfx_g = ((c >> 8) & 0xff)/0xff;
+    gfx_b = (c & 0xff)/0xff;
+);
+
+////  Conversions packed_RGB to HSV and back
+
+//// Algorithms from Eugene Vishnevsky (http://www.cs.rit.edu/~ncs/color/t_convert.html)
+
+//      packed_rgb to h[0 360]_s[0 1]_v[0 1]
+function prgb_to_hsv(c, h*, s*, v*)
+local (r, g, b, mi, ma, del)
+(
+    r = ((c >> 16) & 0xff)/0xff; g = ((c >> 8) & 0xff)/0xff; b = (c & 0xff)/0xff;
+    mi = min(r, min(g,b)); ma = max(r, max(g,b));
+    del = ma - mi;
+    h = s = 0; v = ma;
+    (ma > 0) ? (
+          s = del / ma;
+          (r >= ma) ? (h = (g-b)/del;) : (g >= ma) ? (h = 2 + (b-r)/del;) : (h = 4 + (r-g)/del;);
+          h = h * 60; (h < 0) ? (h += 360;);
+    );
+);
+
+//    h[0 360]_s[0 1]_v[0 1] to packed_rgb
+function hsv_to_prgb(h, s, v)
+local (i, f, p, q, t, r, g, b)
+(
+    (s == 0) ? (
+        r = g = b = v;
+    ) : (
+        h = (h < 0) ? h + 360 : (h >= 360) ? h - 360 : h;
+        h = h/60; i = floor(h); f = h-i;
+        p = v * ( 1 - s );
+        q = v * ( 1 - s * f );
+        t = v * ( 1 - s * ( 1 - f ) );
+        (i == 0) ? (
+            r = v; g = t; b = p;
+        ) : (i == 1) ? (
+            r = q; g = v; b = p;
+        ) : (i == 2) ? (
+            r = p; g = v; b = t;
+        ) : (i == 3) ? (
+            r = p; g = q; b = v;
+        ) : (i == 4) ? (
+            r = t; g = p; b = v;
+        ) : (
+            r = v; g = p; b = q;
+        );
+    );
+    // try to avoid rounding errors
+    r = 0|(r*255+0.5); g = 0|(g*255+0.5); b = 0|(b*255+0.5);
+    (r << 16) | (g << 8) | b;
+);
+
+
+// Change a color
+//    !!! uses global variables uix_jcolor_h, uix_jcolor_s, uix_jcolor_v
+function ui_pcol_change(c)
+(
+    prgb_to_hsv(c, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+    /*
+         insert here transformations on hue, saturation and value
+    */
+    hsv_to_prgb(uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+);
+
+// Fade a color by multiplying saturation
+// and value by numbers < 1
+//    ex:
+//        new_color = ui_pcol_fade(my_color, 0.8, 0.7);
+//    !!! uses global variables uix_jcolor_h, uix_jcolor_s, uix_jcolor_v
+function ui_pcol_fade(c,s,v)
+(
+     prgb_to_hsv(c, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+     hsv_to_prgb(uix_jcolor_h, min(1, max(0, s*uix_jcolor_s)), min(1, max(0, v*uix_jcolor_v)));
+);
+
+// Provide a complementary color
+function ui_pcol_comp(c)
+local (h)
+(
+     prgb_to_hsv(c, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+     h = uix_jcolor_h + 180;
+     hsv_to_prgb(h, uix_jcolor_s, uix_jcolor_v);
+);
+
+// Derive a color from a given one
+//     c is the color
+//     R is a number, a combination of
+//          1 : clicked
+//          2 : selected
+//          4 : disabled
+//          8 : Greyed
+//          16 : Lighted
+function ui_pcolor_derived(c, R)
+(
+    (R != 0) ? (
+        prgb_to_hsv(c, uix_jcolor_h, uix_jcolor_s, uix_jcolor_v);
+        (R & 4) ? (
+             uix_jcolor_h = uix_jcolor_h + 35;
+             uix_jcolor_s = min(0.75, max (0.4, uix_jcolor_s));
+             // uix_jcolor_v = min(0.7, max (0.3, uix_jcolor_v));
+             // uix_jcolor_v = (uix_jcolor_v > 0.5) ? uix_jcolor_v - 0.4 : uix_jcolor_v - 0.2;
+             uix_jcolor_v = 0.65 * min(0.7, max (0.3, uix_jcolor_v));
+        );
+        (R & 8) ? (
+            uix_jcolor_s = uix_jcolor_s * 0.65;
+            uix_jcolor_v = uix_jcolor_v * 0.65;
+        );
+        (R & 16) ? (
+            uix_jcolor_s = uix_jcolor_s * 1.9;
+            uix_jcolor_v = uix_jcolor_v * 1.9;
+        );
+        (R & 2) ? (
+             uix_jcolor_h = uix_jcolor_h + 30;
+             uix_jcolor_s = uix_jcolor_s * 1.2;
+             uix_jcolor_v = uix_jcolor_v * 1.1;
+        );
+        (R & 1) ? (
+             uix_jcolor_h = uix_jcolor_h + 70;
+             uix_jcolor_s = max(0.3,uix_jcolor_s * 0.7);
+             uix_jcolor_v = max(0.2,uix_jcolor_v * 0.8);
+        );
+        uix_jcolor_h >= 360 ? uix_jcolor_h -= 360;
+        c = hsv_to_prgb(uix_jcolor_h, min(1, max(0, uix_jcolor_s)), min(1, max(0, uix_jcolor_v)));
+    );
+    c;
+);
+

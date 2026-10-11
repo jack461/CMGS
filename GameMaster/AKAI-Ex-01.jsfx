@@ -1,0 +1,101 @@
+desc: APCmini Exemple 1
+
+
+// J.J. Girardot
+/*
+    Utilisation de l'AKAI APCmini mk2
+
+    Exemple 1 : éclairer les notes jouées
+
+    Placer le plug-in sur une piste
+    Cliquer le bouton "Record"
+    Choisir "input MIDI Akai APCmini mk2 Control"
+    Placer la piste (bouton record clic droit) en "Monitor input" et "Record : disable (input monitoring only)"
+    Dans ROUTE :
+        Supprimer les envois de la piste au master (Master send channels)
+        Ajouter "MIDI hardware output : Akai APCmini mk2 Control"
+
+*/
+
+
+options:gfx_idle
+options:no_meter
+
+@init
+ext_midi_bus = 1;
+
+// MIDI objects
+
+memaddr = 0; // pour allouer "statiquement" de la mémoire
+
+memaddr += 16; // laisser libre les 16 premier mots
+
+midirsize = 65538; // une très grande zone de mémoire
+midirbuf = memaddr; memaddr += midirsize;
+
+recvlen = 0;
+offset = 0;
+
+NoteOn = 0x90;
+NoteOff = 0x80;
+
+// Description de l'AKAI APCmini
+nbtch = 64; // nombre de touches
+touche1 = 0; // numéro première touche
+AK_bus = 0; // on écrit sur ce bus
+touche_Off = 0;  // pour éteindre
+touche_On = 54;  // une couleur (indigo)
+
+NoteOnAk = 0x96; // canal 7 pour accès aux leds des touches en mode fixe
+
+
+// infos reçues
+M_kmd = 0;
+M_p1 = 0;
+M_p2 = 0;
+M_bus = 0;
+
+
+function eteindre()
+local (i)
+(
+    midi_bus = AK_bus;
+    i = 0; loop (128, // toutes les touches, y compris boutons de contrôle
+        midisend(0, NoteOnAk, i, touche_Off);
+        i += 1;
+    );
+);
+
+function MIDI_init()
+(
+    // En premier, éteindre toutes les touches de l'AKAI
+    eteindre();
+);
+
+
+
+MIDI_init();
+
+
+@block
+// Partie exécutée à chaque buffer reçu par le plug-in
+
+// Reçoit-on du MIDI ?
+while ((recvlen = midirecv_buf(offset, midirbuf, midirsize)) > 0) (
+    (recvlen <= 3) ? (
+        M_kmd = midirbuf[0]; M_p1 = midirbuf[1]; M_p2 = midirbuf[2]; M_bus = midi_bus;
+        // Le pad envoie les notes de 0 à 63
+        (((M_kmd & 0xF0) === NoteOn) && (M_p1 < 64)) ? (
+            // on éclaire la touche correspondante
+            midi_bus = AK_bus;
+            midisend(0, NoteOnAk, M_p1, touche_On);
+        ) :
+        (((M_kmd & 0xF0) === NoteOff) && (M_p1 < 64)) ? (
+            // on éteint la touche correspondante
+            midi_bus = AK_bus;
+            midisend(0, NoteOnAk, M_p1, touche_Off);
+        );
+    );
+);
+
+

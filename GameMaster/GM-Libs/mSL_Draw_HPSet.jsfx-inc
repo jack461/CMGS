@@ -1,0 +1,486 @@
+
+
+/*
+    Represent the HP Configuration in a graphic window
+
+
+
+*/
+
+
+
+<? no_init != 0 ? _suppress=1; ?>
+@init
+<? _suppress=0; ?>
+
+
+
+/*
+    Draw the window
+*/
+
+function HP_Draw_conf(box)
+local (tx, ty, tw, th, bx, by, flact, orgx, orgy, f, w, z, cv, c, i, j, r, drm, lhp, sthp, hpx, hpy, cc, alfv)
+(
+    // some variables first
+    flact = box[bx_activ];
+    f = box[bx_sfact];
+    z = box[bx_zfact];
+    Hf = 1.3;
+    tx = box[bx_xpos] + win_Xfr; // top x
+    ty = box[bx_ypos] + win_Yfr; // top y
+    tw = box[bx_needw]; // width of the box
+    th = box[bx_needh];  // height of the box
+    bx = tx + tw * sqr_w ;  // "bottom" x
+    by = ty + th * sqr_h ;  // "bottom" y
+    cv = (drm = box[bx_drmode]) & 0x3; // current view
+
+    (drm & bx__ShowConf) ? (
+        // Draw current conf
+        ((HP_CpCf != currentpro[prx_ptrconf]) && (currentpro[prx_ptrconf] > 16)) ? (
+            HP_CpCf = currentpro[prx_ptrconf]; // keep the conf
+            memset(HP_Model, 0, 129);
+            pcf = HP_CpCf + 1;
+            while ((w = pcf[0]) != endmark) (
+                pcf += 1; // w is a source
+                while ((d = pcf[0]) > 0) (
+                    (d <= 128) ? (
+                        HP_Model[d-1] += pcf[1];
+                    );
+                    pcf += 2;
+                );
+                (d > -3) ? (
+                    // skip to next source
+                    pcf += 1;
+                );
+            );
+        );
+    );
+
+    1 ? (
+        // Draw a black/colored frame
+        gfx_a = 1;
+        (drm & bx__BlackBg) ? (
+            // Black Background
+            gfx_r = gfx_g = gfx_b = 0;
+        ) : (
+            // Use current background
+            gfx_r = gxcred / 255;
+            gfx_g = gxcgreen / 255;
+            gfx_b = gxcblue / 255;
+        );
+        gfx_rect(box[bx_xpos] + win_Xfr, box[bx_ypos] + win_Yfr, tw * sqr_w - 1, th * sqr_h - 1);
+    );
+
+
+    // Is there a full frame around the box ?
+    (flact & bx__select) ? (
+        draw_around_box(box[bx_xpos], box[bx_ypos], box[bx_sqw]*sqr_w, box[bx_sqh]*sqr_h, 0x2F);
+    ) :
+    // Is this the selected view ?
+    (((flact & bx__boxaround) && (timez < box[bx_crdate] + uiBoxDuration)) || (flact & bx__drawhfrbox)) ? (
+        flact &= 0x7FFFFFFF - bx__drawhfrbox;
+        draw_around_box(box[bx_xpos], box[bx_ypos], box[bx_sqw]*sqr_w, box[bx_sqh]*sqr_h, 0x26);
+    );
+
+    gfx_r = gfxstdr; gfx_g = gfxstdg; gfx_b = gfxstdb; // Select contrasting colors.
+    // Show box as locked ?
+    (flact & bx__permlock) ? (
+        r = ceil(sqr_w / 5);
+        gfx_circle(win_Xfr + box[bx_xpos] + r, win_Yfr + box[bx_ypos] + r, r, 1, 1);
+    );
+    // Show box as permanent ?
+    (flact & bx__keepVisible) ? (
+        // show a triangle
+        gfx_triangle(win_Xfr + box[bx_xpos], win_Yfr + box[bx_bottom],
+            win_Xfr + box[bx_xpos] + 0.5 * sqr_w, win_Yfr + box[bx_bottom],
+            win_Xfr + box[bx_xpos], win_Yfr + box[bx_bottom] - 0.5 * sqr_h);
+    );
+
+    (flact & bx__update) ? (
+        box[bx_crdate] = timec; // create/reposit. date
+        flact &= 0x7FFFFFFF - bx__update;
+    );
+
+
+    memset(HP_Pos_X, 0, 129);
+    memset(HP_Pos_Y, 0, 129);
+    memset(HP_Flgs, 0, 129);
+    // The zero point
+    zxp = tx + (7 + box[bx_xshift]) * f;
+    zyp = ty + (7 + box[bx_yshift]) * f;
+    qf = 4 * f;
+    r = f * 0.25; // radius of circles
+    // The axes color
+    gfx_r = box[bx_red1] / 255;
+    gfx_g = box[bx_green1] / 255;
+    gfx_b = box[bx_blue1] / 255;
+    gfx_a = 1;
+    lhp = 0;
+
+    (cv === 0) ? (
+        // Classical perspective
+        #hpid = "Perspective";
+        // Draw the axes
+        orgx = tx + 5 * f;
+        orgy = ty + 9 * f;
+        // The x'x axis
+        gfx_x = orgx; gfx_y = orgy; gfx_lineto(tx + 13.5 * f,orgy,1);
+        // The z'z axis
+        gfx_x = orgx; gfx_y = orgy; gfx_lineto(orgx,ty + 0.5 * f, 1);
+        // The y'y axis
+        gfx_x = orgx; gfx_y = orgy; gfx_lineto(tx + 0.5 * f, ty + 13.5 * f,1);
+        // Compute the HP positions in the window
+        i = 0;
+        c = HP_Positions[-1];
+        while (i < c) (
+            n = HP_Positions[i];
+            (n > 0) ? (
+                HP_Pos_X[n] = hpx = zxp + qf * z * (HP_Positions[i+1] + 0.5 * HP_Positions[i+2]);
+                HP_Pos_Y[n] = hpy = zyp + qf * z * (-HP_Positions[i+3] - 0.5 * HP_Positions[i+2]);
+                // Draw it ?
+                ((tx < hpx - r) && (ty < hpy - r) && (bx > hpx + r) && (by > hpy + r)) ? (
+                    HP_Flgs[n] |= 1;
+                );
+                lhp = max(n, lhp);
+            );
+            i += 4;
+        );
+    ) :
+    (cv === 1) ? (
+        // x/y classical view
+        #hpid = "Top view";
+        // Draw the axes
+        // The horizontal x'x axis
+        gfx_x = tx + 0.5 * f; gfx_y = ty + 7 *f ; gfx_lineto(tx + 13.5 * f, ty + 7*f,1);
+        // The y'y axis
+        gfx_x = tx + 7*f; gfx_y = ty + 0.5 * f; gfx_lineto(tx + 7*f,ty + 13.5 * f, 1);
+        // Compute the HP positions in the window
+        i = 0;
+        c = HP_Positions[-1];
+        while (i < c) (
+            n = HP_Positions[i];
+            (n > 0) ? (
+                HP_Pos_X[n] = hpx = zxp + qf * z * (HP_Positions[i+1]);
+                HP_Pos_Y[n] = hpy = zyp - qf * z * (HP_Positions[i+2]);
+                // Draw it ?
+                ((tx < hpx - r) && (ty < hpy - r) && (bx > hpx + r) && (by > hpy + r)) ? (
+                    HP_Flgs[n] |= 1;
+                );
+                lhp = max(n, lhp);
+            );
+            i += 4;
+        );
+    ) :
+    (cv === 2) ? (
+        // Front view
+        #hpid = "Front view";
+        // Draw the axes
+        // The vertical z'z axis
+        gfx_x = tx + 7*f; gfx_y = ty + 0.5 * f; gfx_lineto(tx + 7*f,ty + 13.5 * f, 1);
+        // Compute the HP positions in the window
+        i = 0;
+        c = HP_Positions[-1];
+        while (i < c) (
+            n = HP_Positions[i];
+            (n > 0) ? (
+                HP_Pos_X[n] = hpx = zxp + qf * z * (HP_Positions[i+1]);
+                HP_Pos_Y[n] = hpy = zyp - qf * z * (-HP_Positions[i+3]);
+                // Draw it ?
+                ((tx < hpx - r) && (ty < hpy - r) && (bx > hpx + r) && (by > hpy + r)) ? (
+                    HP_Flgs[n] |= 1;
+                );
+                lhp = max(n, lhp);
+            );
+            i += 4;
+        );
+    ) :
+    (cv === 3) ? (
+        // Side view
+        #hpid = "Side view";
+        // Compute the HP positions in the window
+        i = 0;
+        c = HP_Positions[-1];
+        while (i < c) (
+            n = HP_Positions[i];
+            (n > 0) ? (
+                HP_Pos_X[n] = hpx = zxp + qf * z * (HP_Positions[i+2]);
+                HP_Pos_Y[n] = hpy = zyp - qf * z * (-HP_Positions[i+3]);
+                // Draw it ?
+                ((tx < hpx - r) && (ty < hpy - r) && (bx > hpx + r) && (by > hpy + r)) ? (
+                    HP_Flgs[n] |= 1;
+                );
+                lhp = max(n, lhp);
+            );
+            i += 4;
+        );
+    );
+
+    // Draw point "0" as a circle
+    gfx_r = box[bx_red2] / 255;
+    gfx_g = box[bx_green2] / 255;
+    gfx_b = box[bx_blue2] / 255;
+    gfx_circle(zxp,zyp,f * 0.16,1,1);
+    // end with a black circle
+    gfx_r = gfx_g = gfx_b = 0;
+    gfx_circle(zxp,zyp,f * 0.16+0.5,0,1);
+
+    // Draw the "power" circles ?
+    (drm & bx__ShowPow) ? (
+        i = 0;
+        while (i <= lhp) (
+            sthp = HP_Flgs[i];
+            (sthp & 1) ? (
+                // The HP is visible
+                hpx = HP_Pos_X[i];
+                hpy = HP_Pos_Y[i];
+                cc = HP_Power[i-1];
+                cc = cc * cc * Hf;
+                alfv = 1 /(cc * 2 + 1);
+                // Color
+                gfx_r = 216 / 255;
+                gfx_g = 140 / 255;
+                gfx_b = 20 / 255;
+                gfx_a = 1;
+                j = 0.5;
+                while (j < cc) (
+                    gfx_circle(hpx,hpy,r+j,0,1);
+                    j += 0.5;
+                    gfx_a = max(0, gfx_a - alfv);
+                );
+            );
+            i += 1;
+        );
+    );
+
+    // Draw the "conf. selected" circles ?
+    (drm & bx__ShowConf) ? (
+        i = 0;
+        gfx_a = 1;
+        while (i <= lhp) (
+            sthp = HP_Flgs[i];
+            (sthp & 1) ? (
+                // The HP is visible
+                hpx = HP_Pos_X[i];
+                hpy = HP_Pos_Y[i];
+                ((cc = HP_Model[i-1]) > 0) ? (
+                    cc = max(2, cc * 8);
+                    j = 0.5;
+                    gfx_r = 20 / 255;
+                    gfx_g = 140 / 255;
+                    gfx_b = 240 / 255;
+                    while (j < cc) (
+                        gfx_circle(hpx,hpy,r+j,0,1);
+                        j += 0.5;
+                    );
+                    // end with a black circle
+                    gfx_r = gfx_g = gfx_b = 0;
+                    gfx_circle(hpx,hpy,r+j,0,1);
+                );
+            );
+            i += 1;
+        );
+    );
+
+
+    // Draw all the HP
+    // gfx_setfont(box[bx_font2]);
+    // Find an appropriate size
+    (f < 35) ? (
+        gfx_setfont(1, "monaco", 12);
+    ) :
+    (f < 50) ? (
+        gfx_setfont(1, "monaco", 16);
+    ) :
+    (f < 65) ? (
+        gfx_setfont(1, "monaco", 24);
+    ) : (
+        gfx_setfont(1, "monaco", 32);
+    );
+    i = 0;
+    gfx_a = 1;
+    while (i <= lhp) (
+        sthp = HP_Flgs[i];
+        (sthp & 1) ? (
+            // The HP is visible
+            hpx = HP_Pos_X[i];
+            hpy = HP_Pos_Y[i];// First, fill the circle with black
+            gfx_r = gfx_g = gfx_b = 0;
+            gfx_circle(hpx,hpy,r,1,1);
+            // Draw the colored circle
+            gfx_r = box[bx_red2] / 255;
+            gfx_g = box[bx_green2] / 255;
+            gfx_b = box[bx_blue2] / 255;
+            gfx_circle(hpx,hpy,r,0,1);
+            gfx_circle(hpx,hpy,r+0.5,0,1);
+            gfx_circle(hpx,hpy,r+1,0,1);
+            sprintf(#hpn, "%d", i);
+            gfx_measurestr(#hpn,namw,namh);
+            gfx_x = hpx - namw * 0.45; gfx_y = hpy - namh * 0.40;
+            gfx_drawstr(#hpn);
+        );
+        i += 1;
+    );
+
+    gfx_setfont(4, "arial", 40, 'ib');
+    gfx_measurestr(#hpid,namw,namh);
+    gfx_x = tx + 7 * f - namw / 2;
+    gfx_y = ty + 13.5 * f - namh / 2;
+
+    (drm & bx__BlackBg) ? (
+        // Black Background => use white
+        gfx_r = gfx_g = gfx_b = 1;
+    ) : (
+        // use contrasting black or white
+        gfx_r = gfxstdr; gfx_g = gfxstdg; gfx_b = gfxstdb;
+    );
+
+    gfx_drawstr(#hpid);
+
+    box[bx_activ] = flact;
+);
+
+
+function HP_Dr_updsize(box, newf)
+local()
+(
+    (box[bx_sfact] != newf) ? (
+        box[bx_sfact] = newf;
+        box[bx_sqw] = ceil(HPDr_w * newf / sqr_w);
+        box[bx_sqh] = ceil(HPDr_h * newf / sqr_h);
+        box[bx_needw] = 0;
+        box[bx_needh] = 0;
+    );
+);
+
+
+/*
+    Allocate a box for the drawing
+*/
+function HP_Draw_Init(flg)
+local (box, c, n,f)
+(
+    box = c = n = 0;
+    while ((box === 0) && (c < dispboxcount)) (
+        ub = dispboxes + n * dispboxsize;
+        (ub[bx_activ] === 0) ? (
+            box = ub;
+            ub[bx_type] = bx_ty_hpset;
+        );
+        n = (n + 1) % dispboxcount; c+= 1;
+    );
+    (box != 0) ? (
+        // Initialize the box for the drawing
+        box[bx_activ] = bx__used | bx__boxaround | flg;
+        box[bx_posflgs] = bx__rstall|bx__drawmains;
+        ub[bx_name] = HP_Box_Id;
+        box[bx_psfact] = box[bx_sfact] = f = HPDr_f;
+        // Compute the needed size
+        box[bx_sqw] = ceil(HPDr_w * f / sqr_w);
+        box[bx_sqh] = ceil(HPDr_h * f / sqr_h);
+        box[bx_posit] = -1;
+        box[bx_needh] = box[bx_needw] = 0;
+        box[bx_red1] = 32;
+        box[bx_green1] = 240;
+        box[bx_blue1] = 40;
+        box[bx_font1] = "monaco";
+        box[bx_red2] = 180;
+        box[bx_green2] = 180;
+        box[bx_blue2] = 40;
+        box[bx_font2] = "monaco";
+        box[bx_endshow] = -1;
+        box[bx_zfact] = 1;
+        box[bx_drmode] = bx__ShowPow;
+        box[bx_xshift] = box[bx_yshift] = 0;
+        box[bx_crdate] = timec; // create/reposit. date
+        box[bx_check] = bx__bxcheck;
+        AAAAAHPSTATUS_1 = box;
+    );
+    box;
+);
+
+
+function HP_Draw_Pic(box, bxn)
+local (p, flact, bpx, bpy, bpw, bph, w, z)
+(
+    flact = box[bx_activ];
+    (flact & bx__drawbox) ? (
+        AAAAAHPSTATUS_7 = flact;
+        AAAAAHPSTATUS_8 = box[bx_posit];
+        // Check we have the room for drawing
+        p = -1;
+        bpw = box[bx_sqw]; bph = box[bx_sqh]; // needed size
+        AAAAAHPSTATUS_11 = bpw; AAAAAHPSTATUS_12 = bph;
+        AAAAAHPSTATUS_13 = ((flact & bx__posfound) && ((box[bx_posit]) >= 0));
+        // Could we already have what we need ?
+        ((flact & bx__posfound) && ((w = uim_utl(box[bx_posit])) >= 0)) ? (
+            AAAAAHPSTATUS_9 = dispalloc_a[w];
+            AAAAAHPSTATUS_10 = ((bxn << 24) | (bph << 12) | bpw);
+            AAAAAHPSTATUS_14 = (box[bx_needw] === bpw) && (box[bx_needh] === bph);
+            ((box[bx_needw] === bpw) && (box[bx_needh] === bph) && (dispalloc_a[w] === (z = (bxn << 24) | (bph << 12) | bpw))) ? (
+                p = box[bx_posit]; // ok. we keep it
+            ) : (
+                sprintf(#wxz, "  -o- Draw_Pic [%d ? %d, %d ? %d, %X ? %X]", box[bx_needw], bpw, box[bx_needh], bph, dispalloc_a[w], z);
+                mSL_log(SysLogBox, #wxz);
+                // free it first
+                uim_free((box[bx_posit]), box);
+                box[bx_posit] = p = -1;
+            );
+        );
+        (p < 0) ? (
+            p = uim_alloc(bpw, bph, box[bx_posflgs] & bx__allocmod, bxn);
+            (p < 0) ? (
+                // no space for displaying - retry with a small size
+                f = box[bx_sfact];
+                (f > box[bx_psfact]) ? (
+                    // try to reuse it
+                    box[bx_sfact] = f = box[bx_psfact];
+                ) : (
+                    // try to diminish it a little
+                    box[bx_sfact] = box[bx_psfact] = f = max(8, floor(f * 0.97));
+                );
+                box[bx_sqw] = ceil(HPDr_w * f / sqr_w);
+                box[bx_sqh] = ceil(HPDr_h * f / sqr_h);
+            );
+            AAAAAHPSTATUS_3 += 1; // reallocating
+            1 ? (
+                flact = box[bx_activ];
+                sprintf(#wxz, "  -o- alloc [%d:%d < %07X]  => %06X / 08X", bxn, box, flact, p,
+                   dispalloc_a[uim_utl(box[bx_posit])]); mSL_log(SysLogBox, #wxz);
+            );
+        );
+        (p >= 0) ? (
+            // a position is found at "p"
+            flact |= bx__posfound;
+            box[bx_posit] = p;
+            box[bx_needw] = bpw;
+            box[bx_needh] = bph;
+            box[bx_psfact] = box[bx_sfact]; // keep as a "working" value
+            bpx = p & 0xFFF;
+            bpy = p >> 12;
+            // compute the rounding box
+            box[bx_xpos] = bpx * sqr_w;
+            box[bx_ypos] = bpy * sqr_h + win_menu_height;
+            box[bx_right] = box[bx_xpos] + bpw * sqr_w;
+            box[bx_bottom] = box[bx_ypos] + bph * sqr_h;
+            box[bx_activ] = flact;
+            HP_Draw_conf(box);
+            flact = box[bx_activ];
+            flact &= 0x7FFFFFFF - bx__update;
+        );
+        ((timez > box[bx_endshow]) && (box[bx_endshow] > 0)) ? (
+            // prepare
+            (box[bx_endcoef] > 1) ? (
+                // we are at the end of displaying
+                flact &= 0x7FFFFFFF - bx__drawbox;
+            );
+        );
+    ) : (
+        (flact & bx__posfound) ? (
+            // free the position in screen
+            uim_free((box[bx_posit]), box);
+            flact &= 0x7FFFFFFF - bx__posfound;
+        );
+    );
+    box[bx_activ] = flact;
+);

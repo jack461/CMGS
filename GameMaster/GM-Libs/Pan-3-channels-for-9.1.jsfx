@@ -1,0 +1,62 @@
+// Jean-Jacques Girardot - 2013 - Mono pan to 3 channels for 9.1
+desc:Pan 3 channels for 9.1
+
+slider1:0.5<0,1,0.01>[L - C - R] Pan
+slider2:1<0,10,1{none,Front Left,Front Right,Center,LFE,Back Left,Back Right,Up Front Left,Up Front Right,Up Back Left,Up Back Right}>L selection
+slider3:3<0,10,1{none,Front Left,Front Right,Center,LFE,Back Left,Back Right,Up Front Left,Up Front Right,Up Back Left,Up Back Right}>C selection
+slider4:2<0,10,1{none,Front Left,Front Right,Center,LFE,Back Left,Back Right,Up Front Left,Up Front Right,Up Back Left,Up Back Right}>R selection
+slider5:0<-6,6,0.01>Volume adj. (dB)
+slider6:0<0,10,1{Stereo,Left,Right,Center,Lfe,Rear Left,Rear Right,Up Left,Up Right,Up Rear Left,Up Rear Right}>Source
+
+@init
+Lch=Cch=Rch=3;
+Lvol=Cvol=Rvol=0;
+osl=-1;
+m=0;
+Src=0;
+gvol=1;
+freembuf(0);
+
+@slider
+Lch=slider2;
+Cch=slider3;
+Rch=slider4;
+Src=slider6;
+(osl != slider1) ? (
+    osl = slider1;
+    (slider1 < 0.5) ? (
+        p = 2*slider1;
+        (p<0.5) ? (
+            w=2*p; m = w*w*w/2;
+        ) : (
+            w=2-2*p; m = (2-w*w*w)/2;
+        );
+        Lvol = sqrt(1-m);
+        Cvol = sqrt(m);
+        Rvol = 0;
+    ) : (
+        p = 2*slider1 - 1;
+        (p<0.5) ? (
+            w=2*p; m = w*w*w/2;
+        ) : (
+            w=2-2*p; m = (2-w*w*w)/2;
+        );
+        Lvol = 0;
+        Cvol = sqrt(1-m);
+        Rvol = sqrt(m);
+    );
+);
+gvol=10^(slider5/20);
+
+@sample
+(Src==0) ? (
+   mix=(spl0+spl1)*gvol/2.0;
+) : (
+   mix = spl(Src-1)*gvol;
+);
+
+i=0; loop (10, (spl(i) = 0; i+=1;) );
+(Lch > 0) ? spl(Lch-1)+=mix*Lvol;
+(Rch > 0) ? spl(Rch-1)+=mix*Rvol;
+(Cch > 0) ? spl(Cch-1)+=mix*Cvol;
+

@@ -33,30 +33,36 @@ desc:Synchronizer
         buffer, use "(spl_count + 1)" -- this is why the initial value is set to -1.
 */
 
-option:no_meter
+options:no_meter
 
 @init
 ext_noinit = 1;
 ext_nodenorm = 1; // don't forget this one !
-// Current sample number is T0 + 2^24 * T1
-// T0 and T1 are represented by S0 and S1, with
-// S0 = T0 / 2^48, and S1 = T1 / 2^48
-// S0 and S1 are sent using spl0 and spl1 in @sample
-T0 = T1 = S0 = S1 = 0;
-maxk = 4096 * 4096 ; // 2^24 = 16777216  Exact value
-T_fact = 4096 * 4096 * 4096 * 4096  ; // 2^48  Exact value
-T_div = 1 / T_fact; // 2^-48 Exact value
+
+/*
+Conceptually, we send in spl0 and spl1 the values T0 and T1, such that
+T0 + 2^24 * T1 is the sample number
+
+Since spl0 and spl1 should be less than 1, we represent T0 and T1 by
+S0 and S1, such that S0 = T0 / 2^48 and S1 = T1 / 2^48
+
+Hence the uses of Sinc = 2^-48 and Smax = 2^-24
+
+*/
+
+S0 = S1 = 0;
+Smax = 1 / (4096 * 4096) ; // 2^-24 = 1/16777216  Exact value
+Sinc = 1 / (4096 * 4096 * 4096 * 4096)  ; // 2^-48  Exact value
 
 @block
 
-(T0 >= maxk) ? (
-    T0 = T0 - maxk;
-    T1 += 1; // we don't really care for overflows in T1 :-)
-    S1 = T1 * T_div;
+(S0 >= Smax) ? (
+    S0 = S0 - Smax;
+    S1 += Sinc; // we don't really care for overflows in S1 :-)
 );
 
 @sample
 
-spl0 = T0 * T_div; // spl0 is also S0, not used.
+spl0 = S0;
 spl1 = S1;
-T0 += 1;
+S0 += Sinc;

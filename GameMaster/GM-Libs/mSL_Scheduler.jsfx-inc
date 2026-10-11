@@ -1,7 +1,7 @@
 /*
 
     A JSFX Scheduler  --  JJG - 2020-07-02
-    v2. Change structure - JJg - 2021-11-01
+    v2. Change structure - JJG- 2021-11-01
 
 
     do :
@@ -27,14 +27,17 @@
      );
 */
 
+
 @init
+
+
 twoPow32 = 2^32;
-ListSzmax = 262144; // 131072;
+ListSzmax = 262144; // 2^18  131072;
 // Number of bits used for the entry number
-SchedNBits = 12;
+SchedNBits = 14;
 SchedNEmax = 2 ^ SchedNBits;  // tasks count - a power of 2
 SchedNMask = SchedNEmax - 1; // mask for the entry number
-SchedWBit = 0x10000;
+SchedWBit = 0x10000; // wait bit
 SchedWBMask = SchedWBit - 1;
 SchedArea = 0; // address of the allocated block for lists
 SchedRelative = 0xFFFFFFFC;
@@ -76,16 +79,16 @@ ListEndidx = idx;
 
 // TASK description
 // Process Fields
+// HQB is for Head/Queue Block
 SchedNxtEnt = 0; // pointers to next event/entry
 SchedPrvEnt = 1; // pointers to previous event/entry
 SchedThrName = 2; // thread name + class
 SchedThList = 3; // thread list membership
-SchedDly = 4; // 8; // delay to next event
-SchedTailEnt = 5; // last ent in the HQB.
+SchedDly = 4; //// delay to next event
 SchedPid = 5; // process id
-SchedCode = 6; // 9; // code of action
-SchedStatus = 7; //6; // status du processus
-SchedThrdPt = 8; //7; // associated thread block
+SchedCode = 6; // code of action
+SchedStatus = 7; // status du processus
+SchedThrdPt = 8; // associated thread block
 SchedEntryN = 9; // entry number
 SchedPar1 = 10; // parameters / Mem. addresses
 SchedPar2 = 11; // parameters / Mem. addresses
@@ -125,7 +128,7 @@ SchedDelay = 0;
 // lists "structures" handling
 SchedLPtrs = Undef; // array of list pointers
 SchedLstCnt = 32; // number of different lists
-SchedLstSiz = 8; // size of a list
+SchedLstSiz = 8; // size of a list description
 SchedFreePts = 0; // Non allocated task blocks
 SchedInactPts = 0; // Non allocated mSL threads entries
 SchedActivPts = 0; // active processes
@@ -138,6 +141,7 @@ SchedRcyclPts = 0; // recycled messages
 SchedDlydTailPts = 0;  // delayed processes tail
 SchedListIdt = 2; // the identification of the list
 SchedOtherEnd = 3; // pointer to the "other end" of the list
+SchedTailEnt = 5; // last entry in the HQB.
 // Other references
 SchedFirstEnt = -1;
 SchedLastEnt = -1;
@@ -204,7 +208,7 @@ local (ent, siz)
 function SchedIsInList(lblk, blk)
 local (ent, siz)
 (
-    ((lblk != 0) && (lblk != 0)) ? (
+    ((lblk != 0) && (blk != 0)) ? (
         siz = 0;
         ent = SchedPrvEnt[lblk[SchedOtherEnd]]; // start at tail
         while ((ent !== blk) && (ent !== lblk) && (ent >= SchedFirstEnt) && (siz <= ListSzmax)) (
@@ -225,7 +229,8 @@ local (ent, siz)
 function SchedInsertHead(lblk, ent, flg)
 local (w)
 (
-    ((lblk != 0) && (((flg & 1) === 0) || (((flg & 1) === 1) && (ent >= SchedFirstEnt) && (ent <= SchedLastEnt)))) ? (
+    ((ent != 0) && (lblk != 0)
+    && (((flg & 1) === 0)   ||   (((flg & 1) === 1) && (ent >= SchedFirstEnt) && (ent <= SchedLastEnt)))) ? (
         w = lblk[SchedNxtEnt]; // previous first OR tail
         ent[SchedPrvEnt] = lblk;
         ent[SchedNxtEnt] = w;
@@ -247,7 +252,7 @@ function SchedInsertTail(lblk, ent, flg)
 local (tail, w)
 (
     ((ent != 0) && (lblk != 0)
-    &&  (((flg & 1) === 0) || (((flg & 1) === 1) && (ent >= SchedFirstEnt) && (ent <= SchedLastEnt)))) ? (
+    &&  (((flg & 1) === 0)   ||   (((flg & 1) === 1) && (ent >= SchedFirstEnt) && (ent <= SchedLastEnt)))) ? (
         tail = lblk[SchedOtherEnd]; // the end of the list
         w = tail[SchedPrvEnt]; // preceeding OR head
         ent[SchedPrvEnt] = w;
@@ -304,7 +309,7 @@ local (ent, tail, w)
 
 /*
     Remove entry ent from a list
-    // lblk: Currently  used only as a test
+    // lblk: Currently  used only as a test - can be zero
     // flg: 1 to test the ent is a process
     // flg: 2 to avoid error
 */
@@ -314,7 +319,8 @@ local (z, n, p)
     ((ent != 0)
     && (((flg & 1) === 0) || (((flg & 1) === 1) && (ent >= SchedFirstEnt) && (ent <= SchedLastEnt)))
     && ((nxt = ent[SchedNxtEnt]) != SchedNone)
-    && ((prv = ent[SchedPrvEnt]) != SchedNone) && (ent[SchedThList] === lblk) ) ? (
+    && ((prv = ent[SchedPrvEnt]) != SchedNone)
+    && ((lblk === 0) || (ent[SchedThList] === lblk))) ? (
         prv[SchedNxtEnt] = nxt;
         nxt[SchedPrvEnt] = prv;
         ent[SchedNxtEnt] = ent[SchedPrvEnt] = ent[SchedThList] = SchedNone;
@@ -428,7 +434,7 @@ local (i, ent, mm, idx)
     Sched_TimeLast = Sched_TimeNow = 0;
     SchedDelay = 0;
     i = 0; while (((mSL_StM_FreePt + 2 + i) % 8) != 0) (i+= 1;);
-    mm = make_array(ListSzmax * 8 + i, 'LSTS'); // a large block, zeroed
+    SchedMem = mm = make_array(ListSzmax * 8 + i, 'LSTS'); // a large block, zeroed
     SchBlcksEnd = mm + mm[-1]; // first non allocatable
     // Align to a frontier of 8
     while (i > 0) (mm[0] = 'fill'; mm += 1; i -= 1;);
@@ -474,7 +480,7 @@ local (i, ent, mm, idx)
     SchedFirstEnt = mm;
     SchedLastEnt = SchBlcksEnd - 8;
     // Create tasks - All tasks are contiguous in memory and use SchedEntSiz (24) words
-    i = 0; loop(SchedNEmax,  // 4096
+    i = 0; loop(SchedNEmax,  // 8192 -- was 4096
         ent = mm;
         //ent[SchedEntryN] = i; // the entry number
         ent[SchedPid] = i; // the entry number

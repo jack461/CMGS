@@ -3,107 +3,249 @@
 
     needs the "mSL_StM_Memory.jsfx-inc" library.
 */
+
 @init
 
-// By default, use first strings
-mSL_Str_TempC = mSL_Str_TempF = 32; mSL_Str_TempL = 512;
-mSL_Str_TempU = 0;
-mSL_Str_Remanent = 0;
-mSL_Str_RSize = 0;
-mSL_Str_RPt = 0;
-mSL_Str_PermC = mSL_Str_PermF = mSL_Str_TempL;
-mSL_Str_PermL = 1024;
+
+mSL_Str_First = 0;
+mSL_Str_Last = 0;
+mSL_Str_Range = 0;
+mSL_Str_Count = 0;
+mSL_Str_Use = 0;
+mSL_Str_Stack = 0;
+mSL_Str_Uptr = 0;
+mSL_Str_Aptr = 0;
 mSL_Str_CFree = mSL_Str_CUsed = 0;
-mSL_Str_PCFree = mSL_Str_PCUsed = 0;
-mSL_Str_TCFree = 0;
- 
+mSL_Str_Default = #mSL_Str_Default; // provide a default string
+
+// Internal result
+mSL_Str_Entry = 0;
+mSL_Str_Item = 0;
+
+// Flags
+mSL_Str_Flg_dispensable = 1;
+mSL_Str_Flg_temporary = 2;
+mSL_Str_Flg_inUse = 4;
+mSL_Str_Flg_permanent = 8;
+mSL_Str_Flg_unavailable = 32;
+mSL_Str_Flg_inStack = 64;
+mSL_Str_Flg_marked = 128;
+
+// By default, use first strings
+mSL_Str_TempC = mSL_Str_TempF = 32; mSL_Str_TempL = 1024;
+
+mSL_Str_Setsx = 0;
+mSL_Str_Setsiz = 20; // allows 10 pairs.
+mSL_Str_SetPt = 0;
+
+//Statistics
+mSL_Str_StGet = 0;
+mSL_Str_StTemp = 0;
+mSL_Str_StPerm = 0;
+mSL_Str_StFree = 0;
+mSL_Str_StGCD = 0;
+mSL_Str_StInST = 0;
+mSL_Str_StInTU = 0;
+mSL_Str_StInLO = 0;
+mSL_Str_StACycl = 0;
+// Declare some new strings
+function mSL_Str_Provide(first, last)
+local (res)
+(
+    (mSL_Str_Setsx === 0) ? (mSL_Str_Setsx = mSL_StM_Alloc(mSL_Str_Setsiz, 'strx', mSL_StM_FlClear));
+    res = mSL_Str_SetPt;
+    mSL_Str_Setsx[mSL_Str_SetPt] = first; mSL_Str_Setsx[mSL_Str_SetPt+1] = last;
+    mSL_Str_SetPt = (mSL_Str_SetPt + 2) % mSL_Str_Setsiz;
+    res;
+);
+
+// Build the structures that gather all strings
+function mSL_Str_MkStructs()
+global(mSL_Str_First, mSL_Str_Last, mSL_Str_Range, mSL_Str_Count, mSL_Str_Use, mSL_Str_Stack, mSL_Str_Flg_unavailable,
+    mSL_Str_Setsiz, mSL_Str_Setsx, mSL_StM_FlClear, mSL_Str_Flg_inStack, mSL_Str_Uptr, mSL_Str_CFree, mSL_Str_CUsed)
+local (i, j, k, low, hig)
+(
+    low = 0x10000000; hig = 0;
+    i = 0; loop(mSL_Str_Setsiz,
+        k = mSL_Str_Setsx[i];
+        (k != 0) ? (
+            (k < low) ? low = k;
+            (k > hig) ? hig = k;
+        );
+        i += 1;
+    );
+    mSL_Str_First = low; mSL_Str_Last = hig; mSL_Str_Range = hig-low+1;
+    // Get the areas
+    mSL_Str_Use = mSL_StM_Alloc(mSL_Str_Range + 1, 'stru', 0);
+    memset(mSL_Str_Use, mSL_Str_Flg_unavailable, mSL_Str_Range);
+    mSL_Str_Stack = mSL_StM_Alloc(mSL_Str_Range + 1, 'strs', mSL_StM_FlClear);
+    // Enter all the strings in the arrays
+    mSL_Str_Count = 0;
+    i = 0; while (i < mSL_Str_Setsiz) (
+        low = mSL_Str_Setsx[i]; hig = mSL_Str_Setsx[i+1];
+        ((low != 0) && (hig != 0) && (low <= hig)) ? (
+            while (low <= hig) (
+                k = low - mSL_Str_First;
+                mSL_Str_Use[k] = mSL_Str_Flg_inStack;
+                strcpy(low, "");
+                mSL_Str_Stack[mSL_Str_Count] = low;
+                mSL_Str_Count += 1;
+                low += 1;
+            );
+        );
+        i += 2;
+    );
+    // all the strings are in the stack
+    mSL_Str_Uptr = mSL_Str_Count - 1;
+    mSL_Str_CFree = mSL_Str_Count; mSL_Str_CUsed = 0;
+);
+
+// find, by all means, a free string
+function mSL_Str_Int_Get1()
+global(mSL_Str_Entry, mSL_Str_Item, mSL_Str_Uptr, mSL_Str_Stack, mSL_Str_Last, mSL_Str_Range, mSL_Str_Aptr, mSL_Str_StACycl,
+    mSL_Str_Use, mSL_Str_First, mSL_Str_Flg_inStack, mSL_Str_Flg_inUse, mSL_Str_Flg_dispensable, mSL_Str_Flg_temporary,
+    mSL_Str_TempC, mSL_Str_TempL, mSL_Str_TempF, mSL_Str_CUsed, mSL_Str_CFree, mSL_Str_StInST, mSL_Str_StInTU, mSL_Str_StInLO)
+local (itm, ent, i, k)
+(
+    mSL_Str_Entry = mSL_Str_Item = i = 0;
+    // First, look up in the stack
+    while ((mSL_Str_Item === 0) && (mSL_Str_Uptr >= 0))  (
+        (((itm = mSL_Str_Stack[mSL_Str_Uptr]) >= mSL_Str_First) && (itm <= mSL_Str_Last)
+        && (mSL_Str_Use[ent = itm - mSL_Str_First] === mSL_Str_Flg_inStack)) ? (
+            // use this entry
+            mSL_Str_Entry = ent; mSL_Str_Item = itm;
+            mSL_Str_CUsed += 1; mSL_Str_CFree -= 1; mSL_Str_StInST += 1;
+            // ) : (
+            // value in the stack is inappropriate for some reason
+        );
+        mSL_Str_Stack[mSL_Str_Uptr] = 0;
+        mSL_Str_Uptr -= 1;
+    );
+    // Second, perform a pass inside the uselist
+    while ((mSL_Str_Item === 0) && (i < mSL_Str_Range)) (
+        k = mSL_Str_Use[mSL_Str_Aptr];
+        (k === 0) ? (
+            // The entry is available
+            mSL_Str_Use[mSL_Str_Aptr] = mSL_Str_Flg_inUse;
+            mSL_Str_Item = mSL_Str_Aptr + mSL_Str_First;
+            mSL_Str_Entry = mSL_Str_Aptr; mSL_Str_StInTU += 1;
+        ) :
+        (k === mSL_Str_Flg_dispensable) ? (
+            mSL_Str_Use[mSL_Str_Aptr] = 0; // make it free
+        ) :
+        (k === mSL_Str_Flg_temporary) ? (
+            mSL_Str_Use[mSL_Str_Aptr] = mSL_Str_Flg_dispensable; // make it dispensable
+        );
+        mSL_Str_Aptr += 1;
+        (mSL_Str_Aptr >= mSL_Str_Range) ? (mSL_Str_Aptr = 0; mSL_Str_StACycl += 1;);
+        i += 0.333;
+    );
+    (mSL_Str_Item === 0) ? (
+        // Last chance allocate a low number string
+        (mSL_Str_TempC >= mSL_Str_TempL) ? (mSL_Str_TempC = mSL_Str_TempF) : (mSL_Str_TempC += 1);
+        mSL_Str_Item = mSL_Str_TempC;
+        mSL_Str_Entry = mSL_Str_Range; mSL_Str_StInLO += 1;
+    );
+    mSL_Str_Item;
+);
+
 function mSL_Str_GCPRinit(size)
 (
-    mSL_Str_RSize = max(1024, min(4096, 0|size));
-    mSL_Str_Remanent = mSL_StM_Alloc(mSL_Str_Count, 'strs', mSL_StM_FlClear);
+    0;
 );
 
 function mSL_Str_TInit(first, last)
 (
-    mSL_Str_TempC = mSL_Str_TempF = first; mSL_Str_TempL = last; mSL_Str_TCFree = last-first+1;
+    mSL_Str_Provide(first, last);
 );
 
-function mSL_Str_Tmp()
+function mSL_Str_Tmp(val)
+global (mSL_Str_Item, mSL_Str_Use, mSL_Str_Entry, mSL_Str_Flg_temporary, mSL_Str_StTemp)
 (
-    mSL_Str_TempU += 1;
-    (mSL_Str_TempC >= mSL_Str_TempL) ? (mSL_Str_TempC = mSL_Str_TempF) : (mSL_Str_TempC += 1);
+    mSL_Str_Int_Get1();
+    (mSL_Str_Item != 0) ? (
+        mSL_Str_Use[mSL_Str_Entry] = mSL_Str_Flg_temporary;
+        val === 0 ? val = "*TEMPORARY*";
+        strcpy(mSL_Str_Item, val);
+        mSL_Str_StTemp += 1;
+    );
+    mSL_Str_Item;
 );
 
 function mSL_Str_PInit(first, last)
 (
-    mSL_Str_PermC = mSL_Str_PermF = first; mSL_Str_PermL = last; mSL_Str_PCFree = last-first+1;
+    mSL_Str_Provide(first, last);
 );
 
 function mSL_Str_Perm()
+global(mSL_Str_Item, mSL_Str_Use, mSL_Str_Entry, mSL_Str_Flg_permanent, mSL_Str_StPerm)
 (
-    mSL_Str_PermC >= mSL_Str_PermL ? mSL_Str_Tmp() : (mSL_Str_PCUsed += 1; mSL_Str_PCFree -= 1; mSL_Str_PermC += 1);
+    mSL_Str_Int_Get1();
+    (mSL_Str_Item != 0) ? (
+        mSL_Str_Use[mSL_Str_Entry] = mSL_Str_Flg_permanent;
+        mSL_Str_StPerm += 1;
+    );
+    mSL_Str_Item;
 );
 
 function mSL_Str_Init(first, last)
-global(mSL_Str_First, mSL_Str_Last, mSL_Str_Count, mSL_Str_Use, mSL_Str_Stack, mSL_Str_Uptr,
-    mSL_Str_Default, mSL_StM_FlClear, #mSL_Str_Default, mSL_Str_CFree, mSL_Str_CUsed)
-local (i)
 (
-    mSL_Str_First = first; mSL_Str_Last = last; mSL_Str_Count = last-first+1;
-    mSL_Str_Use = mSL_StM_Alloc(mSL_Str_Count, 'stru', mSL_StM_FlClear);
-    mSL_Str_Stack = mSL_StM_Alloc(mSL_Str_Count, 'strs', 0);
-    i=0; loop(mSL_Str_Count, mSL_Str_Stack[i] = i+first; i+=1;);
-    mSL_Str_Uptr = mSL_Str_Count - 1;
-    mSL_Str_CFree = mSL_Str_Count; mSL_Str_CUsed = 0;
-    mSL_Str_Default = #mSL_Str_Default; // provide a default string
+    mSL_Str_Provide(first, last);
 );
 
 function mSL_Str_Alloc(val)
-global(mSL_Str_First, mSL_Str_Last, mSL_Str_Count, mSL_Str_Use, mSL_Str_Stack,
-    mSL_Str_Uptr, mSL_Str_Default, mSL_Str_CFree, mSL_Str_CUsed)
-local (s, z)
+global(mSL_Str_Use, mSL_Str_Entry, mSL_Str_Item, mSL_Str_Flg_inUse, mSL_Str_StGet)
 (
-    (mSL_Str_Uptr >= 0) && ((s = mSL_Str_Stack[mSL_Str_Uptr]) >= mSL_Str_First)
-                   && (s <= mSL_Str_Last) && (mSL_Str_Use[z = s - mSL_Str_First] == 0) ? (
-        mSL_Str_Use[z] = 1;
-        mSL_Str_Uptr -= 1;
-        mSL_Str_CUsed += 1; mSL_Str_CFree -= 1;
-    ) : (
-        s = mSL_Str_Tmp(); // provide a temporary string by default
+    mSL_Str_Int_Get1();
+    (mSL_Str_Item != 0) ? (
+        mSL_Str_Use[mSL_Str_Entry] = mSL_Str_Flg_inUse;
+        val === 0 ? val = "";
+        strcpy(mSL_Str_Item, val);
+        mSL_Str_StGet += 1;
     );
-    val == 0 ? val = "";
-    strcpy(s, val);
-    s;
+    mSL_Str_Item;
 );
 
 function mSL_Str_Free(str)
-global(mSL_Str_First, mSL_Str_Last, mSL_Str_Count, mSL_Str_Use, mSL_Str_Stack,
-    mSL_Str_Uptr, mSL_Str_Default, mSL_Str_CFree, mSL_Str_CUsed)
-local (n)
+global(mSL_Str_First, mSL_Str_Last, mSL_Str_Count, mSL_Str_Use, mSL_Str_Stack, mSL_Str_Flg_inUse, mSL_Str_Flg_dispensable,
+    mSL_Str_Flg_inStack, mSL_Str_Flg_temporary, mSL_Str_Uptr, mSL_Str_Default, mSL_Str_CFree, mSL_Str_CUsed,
+    mSL_Str_StFree)
+local (n, k)
 (
-    (str >= mSL_Str_First) && (str <= mSL_Str_Last) && (mSL_Str_Use[n = str - mSL_Str_First] == 1) ? (
-        mSL_Str_Use[n] = 0;
-        mSL_Str_Uptr +=1;
-        mSL_Str_Stack[mSL_Str_Uptr] = str;
-        strcpy(str, "");
-        mSL_Str_CUsed -= 1; mSL_Str_CFree += 1;
+    ((str >= mSL_Str_First) && (str <= mSL_Str_Last)) ? (
+        k = mSL_Str_Use[n = str - mSL_Str_First];
+        ((k === mSL_Str_Flg_inUse) || (k === mSL_Str_Flg_dispensable)) ? (
+            // return to the stack
+            mSL_Str_Use[n] = mSL_Str_Flg_inStack;
+            mSL_Str_Uptr +=1;
+            mSL_Str_Stack[mSL_Str_Uptr] = str;
+            strcpy(str, "");
+            mSL_Str_CUsed -= 1; mSL_Str_CFree += 1;
+            mSL_Str_StFree += 1;
+        ) :
+        (k === mSL_Str_Flg_temporary) ? (
+            mSL_Str_Use[n] = mSL_Str_Flg_dispensable;
+        );
     );
 );
 
 function mSL_isString(str)
-global(mSL_Str_First, mSL_Str_Last, mSL_Str_Count, mSL_Str_Use, mSL_Str_Stack, mSL_Str_Uptr, mSL_Str_Default)
+global(mSL_Str_First, mSL_Str_Last, mSL_Str_Use)
 (
-    (str >= mSL_Str_First) && (str <= mSL_Str_Last) && (mSL_Str_Use[str - mSL_Str_First] == 1);
+    (str >= mSL_Str_First) && (str <= mSL_Str_Last) && ((mSL_Str_Use[str - mSL_Str_First] & 0xf) !== 0);
 );
 
 
 function mSL_Str_RAlloc(val)
-local (s)
+global (mSL_Str_Item, mSL_Str_Use, mSL_Str_Entry, mSL_Str_Flg_permanent, mSL_Str_Item, mSL_Str_StPerm)
 (
-    s = mSL_Str_Alloc(val);
-    (mSL_Str_RSize > 0) ? (
-        mSL_Str_Remanent[mSL_Str_RPt] = s;
-        mSL_Str_RPt = (mSL_Str_RPt + 1) % mSL_Str_RSize;
+    mSL_Str_Int_Get1();
+    (mSL_Str_Item != 0) ? (
+        mSL_Str_Use[mSL_Str_Entry] = mSL_Str_Flg_permanent;
+        val === 0 ? val = "";
+        strcpy(mSL_Str_Item, val);
+        mSL_Str_StPerm += 1;
     );
-    s;
+    mSL_Str_Item;
 );
+
