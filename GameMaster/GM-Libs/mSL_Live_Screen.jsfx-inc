@@ -1,0 +1,1586 @@
+/*
+    mSL_Live_Screen : "Live" screen of Diffusion-3, usable by other plugins (part 1)
+    - colored animated background (gx* variables, colorlimits)
+    - fonts table (i_def_font, i_graphinit)
+    - display boxes : data structure (bx_*), squares allocator (uim_*), mk_display_box, box_order,
+      box_recall, box_change, draw_around_box, upd_box_size, update_window
+    Part 2 (mSL_Live_Screen_Display.jsfx-inc) contains display_boxes() and live_screen().
+    Diffusion-3 includes mSL_Draw_HPSet.jsfx-inc between the two parts, after setting
+    the preprocessor variable live_screen_hpset = 1 so that display_boxes() also draws the HP set boxes.
+    Hosts call live_screen_init() once (after make_array is available), then, in @gfx,
+    live_screen_tick() (if they do not update timec/timez themselves) and live_screen().
+    Requires : static memory (make_array), ui libs, mSL_Utilities (mSL_log), strings.
+*/
+
+// always included in @init (Diffusion-3, Interstys) or imported (GamePlayer)
+@init
+
+
+// Evaluate (using on the BT709 standard) the brightness of a R G B Color
+// returns : >= 128 is bright,  < 128 is dark  in [0 .. 255]
+function ui_bright2(r, g, b) (
+    (0.212671 * r + 0.715160 * g + 0.072169 * b);
+);
+function ui_bright(r, g, b) (
+    (0.212671 * r*r + 0.715160 * g*g + 0.072169 * b*b);
+);
+
+
+// Uses two colors for the limits of background color
+// Convention is : [red * 65536 | green * 256 | blue]
+function colorlimits(c1, c2)
+local (c1r, c1g, c1b, c2r, c2g, c2b)
+(
+    // Create limits from the proposed colors
+    c1r = (c1 >> 16) % 256; c1g = (c1 >> 8) % 256; c1b = c1 % 256;
+    c2r = (c2 >> 16) % 256; c2g = (c2 >> 8) % 256; c2b = c2 % 256;
+    gxmxred = max(c1r, c2r); gxmired = min(c1r, c2r);
+    gxmxgreen = max(c1g, c2g); gxmigreen = min(c1g, c2g);
+    gxmxblue = max(c1b, c2b); gxmiblue = min(c1b, c2b);
+    // Build appropriate light / dark colors in [0 .. 1]
+    // 510 = 2 * 255
+    /*
+    gxwrlired = (gxmxred + 255)/510;
+    gxwrligreen = (gxmxgreen+ 255)/510;
+    gxwrliblue = (gxmxblue + 255)/510;
+    gxwrdkred = gxmired/510;
+    gxwrdkgreen = gxmigreen/510;
+    gxwrdkblue = gxmiblue/510;
+    */
+    // 765 = 3 * 255
+    gxwrlired = (gxmxred + gxmxred + 255)/765;
+    gxwrligreen = (gxmxgreen + gxmxgreen + 255)/765;
+    gxwrliblue = (gxmxblue + gxmxblue + 255)/765;
+    gxwrdkred = 2*gxmired/765;
+    gxwrdkgreen = 2*gxmigreen/765;
+    gxwrdkblue = 2*gxmiblue/765;
+
+    gxcolor1 = c1;
+    gxcolor2 = c2;
+    gxcred = gxfred = floor((gxmxred + gxmired) / 2);
+    gxcgreen = gxfgreen = floor((gxmxgreen + gxmigreen) / 2);
+    gxcblue = gxfblue = floor((gxmxblue + gxmiblue) / 2);
+    gfxstdr = gxwrlired; gfxstdg = gxwrligreen; gfxstdb = gxwrliblue;
+    gxdkns = ui_bright(gxcred, gxcgreen, gxcblue);
+    gxtype = 1;
+    (gxdkns > gxlimlight) ? (
+        gxtype = 2;
+        gfxstdr = gxwrdkred; gfxstdg = gxwrdkgreen; gfxstdb = gxwrdkblue;
+    ); // switch to dark writing
+    coloriterate = 1;
+);
+
+
+// ----------------------------------Graphic Operations
+
+function i_def_font(num, name, size, mods)
+(
+    ((num >= 0) && (num < font_count)) ? (
+        font_names[num] = name;
+        font_sizes[num] = size;
+        font_modes[num] = mods;
+    );
+);
+
+function i_graphinit()
+local (ft)
+(
+    ft = 0;
+    loop (font_count,
+        font_names[ft] = "monaco";
+        font_sizes[ft] = 16;
+        font_modes[ft] = 0;
+        ft += 1;
+    );
+    // Define some fonts [0, 15 and 16 reserved]
+    i_def_font(1, "monaco", 12, 'ib');
+    i_def_font(2, "times", 16, 'ib');
+    i_def_font(3, "monaco", 20, 'b');
+    i_def_font(4, "arial", 28, 'ib');
+    i_def_font(5, "monaco", 32, 0);
+    i_def_font(6, "arial", 40, 'b');
+    i_def_font(7, "monaco", 64, 0);
+    i_def_font(8, "monaco", 80, 0);
+    i_def_font(9, "monaco", 120, 0);
+    i_def_font(15, "monaco", 20, 'i');
+    i_def_font(16, "monaco", 20, 'i');
+);
+
+
+
+function createdispboxes()
+local ()
+(
+    // Set all to zeroes
+    memset(dispboxes, 0, dispboxsize * dispboxcount);
+);
+
+
+
+box_count = 0;
+box_ord_v1 = 0;
+box_ord_v2 = 0;
+box_ord_v3 = 0;
+box_ord_v4 = 0;
+function box_order(sel, crit, kvl)
+local (box, idx, u, fl, i, j, k)
+(
+    memset(box_list, 0, boxwasize);
+    memset(box_vals, 0, boxwasize);
+    (kvl  === 1) ? (
+        // keep minimal x/y position
+        box_ord_v1 = box_ord_v2 = 65536;
+        box_ord_v3 = box_ord_v4 = 0;
+    );
+    // first, select the needed boxes
+    box = dispboxes;
+    idx = 0;
+    loop (dispboxcount,
+        u = 0;
+        fl = box[bx_activ];
+        (sel === 1) ? (
+            // all active boxes
+            u = (box[bx_check] === bx__bxcheck) && (fl & bx__used);
+        ) :
+        (sel === 2) ? (
+            // all selected boxes : active and selected
+            u = (box[bx_check] === bx__bxcheck) && ((fl & bx___sel) === bx___sel);
+        ) :
+        (
+            // default : all existing boxes
+            u = (box[bx_check] === bx__bxcheck);
+        );
+        (u) ? (
+            box_list[idx] = box; idx += 1;
+            (crit === 1) ? (
+                // use box x/y position
+                box_vals[idx] = box[bx_posit];
+            ) :
+            (
+                // default : use box index
+                box_vals[idx] = idx;
+            );
+            (kvl  === 1) ? (
+                box_ord_v1 = min(box_ord_v1, box[bx_sqx]);
+                box_ord_v2 = min(box_ord_v2, box[bx_sqy]);
+                box_ord_v3 = max(box_ord_v3, box[bx_sqw]);
+                box_ord_v4 = max(box_ord_v4, box[bx_sqh]);
+            );
+
+        );
+        box += dispboxsize;
+    );
+    box_count = idx;
+    // Phase 2 : sort the boxes
+    i = 0; loop (idx - 1,
+        j = i+1; loop (idx - j,
+            (box_vals[i] > box_vals[j]) ? (
+                k = box_list[i]; box_list[i] = box_list[j]; box_list[j] = k;
+                k = box_vals[i]; box_vals[i] = box_vals[j]; box_vals[j] = k;
+            );
+            j += 1;
+        );
+        i += 1;
+    );
+);
+
+
+// Use [red * 65536 | green * 256 | blue] convention
+function mk_display_box(name, str1, str2, duration, dflags, ft1, ft2, colr1, colr2,
+    posa, vala, posb, valb, posc, valc, posd, vald, pose, vale, posf, valf, posg, valg, posh, valh)
+local (box, n, ub, uz, c, flact, flags)
+(
+    // Is there already a box with this name ?
+    uuuubx = uuuubxn = box = uz = c = n = 0;
+    ub = dispboxes;
+    (name != 0) ? (
+        // search a box with this name, whatever is its status
+        while ((box === 0) && (c < dispboxcount)) (
+            (ub[bx_name] === name) ? (box = ub; n = c; );
+            ((uz === 0) && (ub[bx_activ] === 0)) ? (
+                uz = ub;
+            );
+            ub += dispboxsize; c += 1;
+        );
+    );
+    (box === 0) ? (
+        // Allocate a box
+        (dflags & bx__rstall) ? (bxptall = 0 ;);
+        c = 0;
+        while ((box === 0) && (c < dispboxcount)) (
+            ub = dispboxes + bxptall * dispboxsize;
+            (ub[bx_activ] === 0) ? (
+                box = ub; n = bxptall;
+                ub[bx_type] = bx_ty_msg;
+                ub[bx_posit] = -1;
+            );
+            bxptall = (bxptall + 1) % dispboxcount; c+= 1;
+        );
+        // box found ?
+        (box != 0) ? (
+            box[bx_font1] = ft1 > 0 ? ft1 : 3;
+            box[bx_font2] = ft2 > 0 ? ft2 : 3;
+            box[bx_string1] = 2 * n + 16; // use this string in the [0 1023] range
+            box[bx_string2] = 2 * n + 17; // use this string in the [0 1023] range
+            box[bx_initx] = box[bx_inity] = -1;
+        );
+    );
+    (box != 0) ? (
+        // A box is found
+        flact = (dflags & 0x7FFFFFF0) | box[bx_activ]; // get active flags, merge new ones
+        flags = (dflags & 0xF) | (box[bx_posflgs] & 0x7FFFFFF0); // set display flags, impose graphic mode
+        ((name === 0) || (box[bx_name] !== name)) ? (
+            // create a "new" box from available data
+            box[bx_name] = name;
+            flact |= bx__used | bx__update;
+            box[bx_crdate] = timec;
+        ) : (
+            // trying to reuse an existing box
+            (flact & bx__drawready) ? (
+                // seems we have nothing to do
+                (!(flact & bx__posfound)) ?  (lErr = 505;);
+            ) : (
+                flact &= 0x7FFFFFFF - bx__drawready - bx__drawended;
+                flact |= bx__update | bx__used;
+            );
+        );
+        (flact & bx__2strings) ? (
+            box[bx_interl] = 4;
+            (flact & bx__usestring2) ? (
+                box[bx_string2] = str2;
+            ) : (
+                strcpy(box[bx_string2], str2);
+            );
+            box[bx_icol2] = colr2 ;
+            (colr2 >= 0) ? (
+                box[bx_blue2] = colr2 % 256;
+                box[bx_green2] = (colr2 >> 8) % 256;
+                box[bx_red2] = (colr2 >> 16) % 256;
+            ) : (
+                flact |= bx__col2std;
+            );
+        ) : (
+            box[bx_interl] = 0;
+        );
+        (flact & bx__usestring1) ? (
+            box[bx_string1] = str1;
+        ) : (
+            strcpy(box[bx_string1], str1);
+        );
+        box[bx_icol1] = colr1;
+        (colr1 >= 0) ? (
+            box[bx_blue1] = colr1 % 256;
+            box[bx_green1] = (colr1 >> 8) % 256;
+            box[bx_red1] = (colr1 >> 16) % 256;
+        ) : (
+            flact |= bx__col1std;
+        );
+        box[bx_endshow] = (duration > 0) ? timez + duration : ((duration === 0) ? timez + uiStdDuration : -1);
+        box[bx_activ] = uuuuflact = flact;
+        box[bx_posflgs] = uuuuflags = flags;
+        box[bx_check] = bx__bxcheck;
+        // box[bx_posit] = -1;  // no initial position requested
+        uuuubx = box;
+        uuuubxn = 1 + (box - dispboxes) / dispboxsize;
+        // Other fields to update ?
+        ((posa > 0) && (posa < dispboxsize)) ? box[posa] = vala;
+        ((posb > 0) && (posb < dispboxsize)) ? box[posb] = valb;
+        ((posc > 0) && (posc < dispboxsize)) ? box[posc] = valc;
+        ((posd > 0) && (posd < dispboxsize)) ? box[posd] = vald;
+        ((pose > 0) && (pose < dispboxsize)) ? box[pose] = vale;
+        ((posf > 0) && (posf < dispboxsize)) ? box[posf] = valf;
+        ((posg > 0) && (posg < dispboxsize)) ? box[posg] = valg;
+        ((posh > 0) && (posh < dispboxsize)) ? box[posh] = valh;
+        // Possibly update font characteristics
+        ((box[bx_fname2] === 0) || (box[bx_fsize2] === 0)) ? (
+            ft2 = max(1, min(16, box[bx_font2]));
+            box[bx_fname2] = (font_names[ft2] != 0) ? font_names[ft2] : "monaco";
+            box[bx_fsize2] = (font_sizes[ft2] != 0) ? font_sizes[ft2] : 12;
+            box[bx_fmods2] = font_modes[ft2];
+        );
+        box[bx_font2] = 15;
+        ((box[bx_fname1] === 0) || (box[bx_fsize1] === 0)) ? (
+            // Update from std. defined values
+            ft1 = max(1, min(16, box[bx_font1]));
+            box[bx_fname1] = (font_names[ft1] != 0) ? font_names[ft1] : "monaco";
+            box[bx_fsize1] = (font_sizes[ft1] != 0) ? font_sizes[ft1] : 12;
+            box[bx_fmods1] = font_modes[ft1];
+        );
+        box[bx_font1] = 16;
+    );
+    box; // return the box
+);
+
+
+//
+function mk_display_box(name, str1, str2, duration, flags, ft1, ft2, colr1, colr2, posx, valx, posy, valy, posz, valz)
+(
+    mk_display_box(name, str1, str2, duration, flags, ft1, ft2, colr1, colr2, posx, valx, posy, valy, posz, valz, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+);
+
+function mk_display_box(name, str1, str2, duration, flags, ft1, ft2)
+(
+    mk_display_box(name, str1, str2, duration, flags, ft1, ft2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+);
+
+function mk_display_box(str1)
+(
+    mk_display_box(0, str1, 0, uiStdDuration, bx__boxaround, uiStdFont, 0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+);
+
+function mk_display_box(name, str1)
+(
+    mk_display_box(name, str1, 0, uiStdDuration, bx__boxaround, uiStdFont, 0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+);
+
+function mk_display_box(flags, str1, ft1, colr1, duration)
+(
+    mk_display_box(0, str1, 0, duration, flags, ft1, 0, colr1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+);
+
+
+/*
+    Convert an universal uim address to a local reference
+*/
+function uim_utl(val)
+(
+    val >= 0 ? (val & bx__maskw) + win_cols * (val >> bx__shifth) : -1;
+);
+
+function uim_ltu(val)
+(
+    val >= 0 ? (val % win_cols) + (floor(val/win_cols) << bx__shifth) : -1;
+);
+
+// 1+;
+// Free the UI block referenced at position "uadd" : "universal" address
+// dispalloc_a[add] is either {(boxnumber << bx__shiftn) + (ypos << bx__shifth) + xpos}, top left square,
+// or {topleft_x + win_cols * topleft_y}, any other square of the item
+// value is in "universal" coordinates in one case, in local in the other :-(
+function uim_free(uadd, box)
+local (add, sqadd, fl, i, j, p, r, w, cbx, zbx, bph, bpw, flact, flags, fErr)
+(
+    cbx = fl = fErr = 0;
+    zzzfreed = uadd;
+    sqadd = -1;
+    (uadd < 0) ? (
+        fErr = 490;
+        uim_trc3 ? (
+            sprintf(#wxz, "  *>* uim_free[%d,%d]: Err. 490  %X, %d", zzzfreed, box, zzzfrcnt, dispalloc_a);
+            mSL_log(SysLogBox, #wxz);
+        );
+    ) : (
+        sqadd = add = (uadd & bx__maskw) + win_cols * (uadd >> bx__shifth) ;
+        zzzfrcnt = dispalloc_a[add];
+        zbx = bx__bxn1;
+        fl = (add >= 0) && (add < win_max) && ((zbx = dispalloc_a[add]) > 1);
+    );
+    (fl && (zbx <= bx__bxn1)) ? (
+        // a square in an allocated object
+        add = zbx - 2;
+        zbx = dispalloc_a[add]; // should be the top/left square number
+    );
+    (fl === 0) ? (
+        fErr = 491;
+        uim_trc3 ? (
+            sprintf(#wxz, "  *>* uim_free[%X,%d,%d]: Err. 491  %X, %d", zzzfreed, add, box, zzzfrcnt, dispalloc_a); mSL_log(SysLogBox, #wxz);
+        );
+    );
+    (fl = fl && (zbx > bx__bxn1) && ((bpw = zbx & bx__maskw) > 0) && ((bph = (zbx >> bx__shifth) & bx__maskh) > 0)) ? (
+        cbx = dispboxes + dispboxsize * (p = (zbx >> bx__shiftn) - 1);
+        (zbx != (r = dispalloc_a[i = uim_utl(cbx[bx_posit])])) ? (
+            fErr = 492;
+            fl = 0;
+            uim_trc3 ? (
+                sprintf(#wxz, "  *>* uim_free[%X,%d,%d]: Err. 492  %d/%d/%d   %08X <> %08X <> %08X",
+                    zzzfreed, add, box, p, cbx, i, cbx[bx_bgidt], zbx, r);
+                mSL_log(SysLogBox, #wxz);
+            );
+        );
+        (fl) ? (
+            // check that all block are actually used
+            p = add; i = 0; w = 0;
+            while ((i < bph) && (w === 0)) (
+                r = p + i * win_cols; j = 0;
+                while ((j < bpw) && (w === 0)) (
+                    (dispalloc_a[r] > 1) ? (
+                        dispalloc_a[r] = 0;
+                    ) : (
+                        w = 1;
+                    );
+                    r += 1; j += 1;
+                );
+                i += 1;
+            );
+            (w === 0) ? (
+                // update the infos in the display box
+                cbx[bx_posit] = -2; // normal free
+                cbx[bx_bgidt] = -3;
+                flact = cbx[bx_activ];
+                flact &= 0x7FFFFFFF - bx__drawready - bx__posfound;
+                (flact & bx__used) ? ( flact |= bx__used | bx__update; );
+                (box <= 0) ? (
+                    // try to reposition as near as possible
+                    cbx[bx_posflgs] = (cbx[bx_posflgs] & bx__alloczzz) | 1;
+                );
+                cbx[bx_activ] = flact;
+                uim_trc1 ? (
+                    sprintf(#wxz, "  *=* uim_free[%d, %d]: Box Updated.  %X", cbx, box, flact);
+                    mSL_log(SysLogBox, #wxz);
+                );
+            );
+        );
+        ((fErr === 0) && ((fl === 0) || (w != 0))) ? (
+            fErr = 493;
+            uim_trc3 ? (
+                sprintf(#wxz, "  *>* uim_free[%X, %d]: Err. 493  %d, %d", zzzfreed, box, fl, w);
+                mSL_log(SysLogBox, #wxz);
+            );
+        );
+        ((box < dispboxes)) ? (box = cbx);
+    );
+    ((fErr !== 0) && (box >= dispboxes)) ? (
+        box[bx_activ] |= bx__poserr;
+        box[bx_errcode] = fErr;
+    );
+    ((sqadd >= 0) && (dispalloc_a[sqadd] > 1)) ? (
+        dispalloc_a[sqadd] = 0; // free it anyway...
+    );
+    zzzfrrtc = (w <<4) | fl;
+);
+
+
+
+// Check that the point (px,py) corresponds to a free rectangle of size (pw,ph)
+function uim_valid(px, py, pw, ph)
+local (w_1, h_1, z, c, l, p)
+(
+    w_1 = pw - 1; h_1 = ph - 1;
+    // Check the whole rectangle is inside the window
+    (z = ((px + w_1) < win_cols) && ((py + h_1) < win_lines) && (px >= 0) && (py >= 0)) ? (
+        p = px + win_cols * py;
+        // quick check opposite corners
+        (z = (dispalloc_a[p + w_1 + win_cols * h_1] === 0) && (dispalloc_a[p] === 0)) ? (
+            l = 0;
+            while (z && l < ph) (
+                c = 0;
+                while (z && c < pw) (
+                    z = (dispalloc_a[p+c] === 0);
+                    c += 1;
+                );
+                p += win_cols;
+                l += 1;
+            );
+        );
+    );
+    uim_trc4 ? (
+        sprintf(#wxz, "  *:* uim_valid[%d, %d : %d, %d] => %d", px, py, pw, ph, z); mSL_log(SysLogBox, #wxz);
+    );
+    z;
+);
+
+
+// (re)allocate a position for a box, using its internal parameters
+// bxn is the box number, in [1 .. dispboxcount]
+function uim_int_alloc(px, py, pw, ph, bxn)
+local (pos, mode, algo, box, fl, fnd, pw, ph, ipx, ipy, dpx, dpy, dh, limx, limy, state, tc, i, q, count, lc, tc_lim_2, tc_lim_1)
+(
+    fnd = -1;
+    ((bxn > 0) && (bxn <= dispboxcount)) ? (
+        box = dispboxes + dispboxsize * (bxn - 1); // address
+        pos = box[bx_posit]; // universal position
+        (pos < 0) ? (pos = 0);
+        (pos >= 0) ? (
+            mode = box[bx_posflgs] & 0xF;
+            fl = box[bx_activ];
+            (fl & bx__permlock) ? (
+                // try not to move the box
+                px = pos & bx__maskw; // initial position
+                py = pos >> bx__shifth;
+                mode = 1;
+            );
+            px = min(max(0,px), win_cols-2); py = min(max(0,py), win_lines - 1);
+            algo = state = 0;
+            lc = count = tc = 0;
+            tc_lim_2 = tc_lim_1 = win_cols * win_lines;
+            // tc_lim_2 = tc_lim_1 = 32;
+            zpx = px; zpy = py;
+
+            // Check first initial (px, py)
+            (uim_valid(px, py, pw, ph)) ? (
+                fnd = px + win_cols * py;
+            );
+
+            uim_trc2 ? (
+                sprintf(#wxz, "  *-* uim_int_alloc[%d/%d/%d]: fnd %d/%06X, %d:%d", bxn, mode, algo, fnd, uim_ltu(fnd), zpx, zpy);
+                mSL_log(SysLogBox, #wxz);
+            );
+
+            (fnd < 0) ? (
+                (mode === 1) ? (
+                    // search around the initial position in all directions
+                    while ((fnd < 0) && (tc < tc_lim_1))  (
+                        tc += 1;
+                        (state === 0) ? (
+                            state = 1;
+                            py -= 1; // same px
+                            count = lc = 1;
+                        ) :
+                        (state === 1) ? (
+                            (lc <= 0) ? ( // go SE
+                                state = 2;
+                                lc = count;
+                            ) : (
+                                // check position
+                                (uim_valid(px, py, pw, ph)) ? (
+                                    fnd = px + win_cols * py;
+                                ) : (
+                                    px += 1; py +=1;
+                                    lc -= 1;
+                                );
+                            );
+                        ) :
+                        (state === 2) ? (
+                            (lc <= 0) ? ( // go SW
+                                state = 3;
+                                lc = count;
+                            ) : (
+                                // check position
+                                (uim_valid(px, py, pw, ph)) ? (
+                                    fnd = px + win_cols * py;
+                                ) : (
+                                    px -= 1; py += 1;
+                                    lc -= 1;
+                                );
+                            );
+                        ) :
+                        (state === 3) ? (
+                            (lc <= 0) ? ( // go NW
+                                state = 4;
+                                lc = count;
+                            ) : (
+                                // check position
+                                (uim_valid(px, py, pw, ph)) ? (
+                                    fnd = px + win_cols * py;
+                                ) : (
+                                    px -= 1; py -= 1;
+                                    lc -= 1;
+                                );
+                            );
+                        ) :
+                        (state === 4) ? (
+                            (lc <= 0) ? ( // go NW
+                                state = 1;
+                                py -= 1; // keep px
+                                count += 1;
+                                lc = count;
+                            ) : (
+                                // check position
+                                (uim_valid(px, py, pw, ph)) ? (
+                                    fnd = px + win_cols * py;
+                                ) : (
+                                    px += 1; py -= 1;
+                                    lc -= 1;
+                                );
+                            );
+                        ) ;
+                    );
+                ) :
+                (mode === 2) ? (
+                    // around the bottom/right corner position ; move SW
+                    dpx = -1; dpy = 1; dh = -1;
+                    algo = 1;
+                ) :
+                (mode === 3) ? (
+                    // around the bottom/left corner position : move SE
+                    dpx = 1; dpy = 1; dh = -1;
+                    algo = 1;
+                ) :
+                (mode === 4) ? (
+                    // around the top/right corner position ; move NW
+                    dpx = -1; dpy = -1; dh = 1;
+                    algo = 1;
+                ) :
+                (mode === 5) ? (
+                    // around the top/left corner position : move NE
+                    dpx = 1; dpy = -1; dh = 1;
+                    algo = 1;
+                ) :
+                (mode === 6) ? (
+                    // horizontal from right bottom,
+                    dpx = -1; dpy = 0; dh = -1;
+                    (fl & bx__rstall) ? (
+                        zpx = win_cols - pw + 1; zpy = winlines - ph + 1;
+                    );
+                    algo = 2;
+                ) :
+                (mode === 7) ? (
+                    // horizontal from left bottom
+                    dpx = 1; dpy = 0; dh = -1;
+                    (fl & bx__rstall) ? (
+                        zpx = 0; zpy = winlines - ph + 1;
+                    );
+                    algo = 2;
+                ) :
+                (mode === 8) ? (
+                    // horizontal from right top
+                    dpx = -1; dpy = 0; dh = 1;
+                    (fl & bx__rstall) ? (
+                        zpx = win_cols - pw + 1; zpy = 0;
+                    );
+                    algo = 2;
+                ) :
+                (mode === 9) ? (
+                    // horizontal from left top
+                    dpx = 1; dpy = 0; dh = 1;
+                    (fl & bx__rstall) ? (
+                        zpx = 0; zpy = 0;
+                    );
+                    algo = 2;
+                ) : (
+                    // default mode : horizontal from left bottom
+                    dpx = 1; dpy = 0; dh = -1;
+                    (fl & bx__rstall) ? (
+                        zpx = 0; zpy = winlines - ph + 1;
+                    );
+                    algo = 2;
+                );
+            );
+            // Did we find a location ?
+            ((fnd < 0) && algo) ? (
+                (algo === 1) ? (
+                    ipx = px; ipy = py = py + dh; // create a starting position and keep same px
+                    count = lc = 2;
+                    while ((fnd < 0) && (tc < tc_lim_2))  (
+                        tc += 1;
+                        (lc <= 0) ? (
+                            py = ipy = ipy + dh;
+                            px = ipx; // keep same ipx
+                            count += 1; lc = count;
+                        ) : (
+                            // check position
+                            (uim_valid(px, py, pw, ph)) ? (
+                                fnd = px + win_cols * py;
+                            ) : (
+                                px = px + dpx; py = py + dpy;
+                                lc -= 1;
+                            );
+                        );
+                    );
+                ) :
+                (algo === 2) ? (
+                    // horizontal moves
+                    py = zpy; px = zpx;
+                    lc = win_cols - pw + 1 - px;
+                    while ((fnd < 0) && (tc < tc_lim_1)) (
+                        tc += 1;
+                        (lc <= 0) ? (
+                            px = zpx; py = py + dh;
+                            (py < 0) ? (py += win_lines - ph + 1);
+                            (py > win_lines - ph) ? (py = 0);
+                            lc = win_cols - pw + 1;
+                        ) : (
+                            // check position
+                            (uim_valid(px, py, pw, ph)) ? (
+                                fnd = px + win_cols * py;
+                            ) : (
+                                px = px + dpx;
+                                lc -= 1;
+                            );
+                        );
+                    );
+
+                );
+            );
+            (fnd >= 0) ? (
+                // mark the area "used"
+                i = 0;  // y pos
+                loop (ph, q = fnd + i * win_cols;
+                    loop(pw, dispalloc_a[q] = fnd + 2; q += 1;);
+                    i += 1;
+                );
+                dispalloc_a[fnd] = q = (bxn << bx__shiftn) | (ph << bx__shifth) | pw;
+                box[bx_posit] = uim_ltu(fnd);
+                box[bx_bgidt] = q;
+                // keep the sizes
+                box[bx_needw] = box[bx_sqw] = pw;
+                box[bx_needh] = box[bx_sqh] = ph;
+                box[bx_activ] |= bx__used | bx__update | bx__posfound ; // | bx__permlock;
+                box[bx_activ] &= 0x7FFFFFFF - bx__drawready ;
+                uim_trc2 ? (
+                    sprintf(#wxz, "  **= uim_int_alloc[%d/%d/%d]: fnd %d/%06X, %d", bxn, mode, algo, fnd, uim_ltu(fnd), tc);
+                    mSL_log(SysLogBox, #wxz);
+                );
+            ) : (
+                // no position found - will try later the usual algorithm
+                uim_trc2 ? (
+                    sprintf(#wxz, "  *!* uim_int_alloc[%d/%d/%d]: fnd %d/%06X, %d", bxn, mode, algo, fnd, uim_ltu(fnd), tc);
+                    mSL_log(SysLogBox, #wxz);
+                );
+                box[bx_activ] &= 0x7FFFFFFF - bx__drawready - bx__posfound - bx__permlock;
+                box[bx_bgidt] = box[bx_posit] = -4;
+            );
+        );
+    ) : (
+        uim_trc2 ? (
+            sprintf(#wxz, "  !!! uim_int_alloc[%d]: [%d,%d/%d,%d]", bxn, px, py, pw, ph); mSL_log(SysLogBox, #wxz);
+        );
+    );
+    fnd; // A local position uim_ltu(fnd);
+);
+
+
+// Allocate a rectangular array of graphic squares for box number "bxn"
+// we need [bpw x bph] squares
+function uim_alloc(bpw, bph, mode, bxn)
+local (box, pos, inc, fnd, px, py, pw, ph)
+(
+    fnd = -1;
+    ((bxn > 0) && (bxn <= dispboxcount)) ? (
+        box = dispboxes + dispboxsize * (bxn - 1); // address of the box
+        // flags = box[bx_posflgs];
+        // mode = flags & bx__allocmod;
+        pw = max(bpw, box[bx_sqw]);
+        ph = max(bph, box[bx_sqh]);
+        pos = -1;
+        // Determine the starting point
+        (mode < 0) ? (
+            mode = box[bx_posflgs] & bx__allocmod;
+        );
+        (mode === 0) ? (
+            pos = uiNxtSeq;
+        ) :
+        (mode === 1) ? (
+            // spiral around previous box position
+            // pos = uim_utl(box[bx_posit]);
+            px = box[bx_sqx];
+            py = box[bx_sqy];
+        ) :
+        (mode === 2) ? (
+            // spiral around bottom right
+            px = win_cols - pw -1;  // last column never allocatable
+            py = win_lines - ph + 1;
+        ) :
+        (mode === 3) ? (
+            // spiral around bottom left
+            px = 0;
+            py = win_lines - ph + 1;
+        ) :
+        (mode === 4) ? (
+            // spiral around top right
+            px = win_cols - pw - 1;
+            py = 0;
+        ) :
+        (mode === 5) ? (
+            // spiral around top left
+            px = 0;
+            py = 0;
+        ) :
+        (mode === 6) ? (
+            // Start linear from bottom right
+            px = win_cols - pw - 1;
+            py = win_lines - ph + 1;
+        ) :
+        (mode === 7) ? (
+            // Start linear from bottom left
+            px = 0;
+            py = win_lines - ph + 1;
+        ) :
+        (mode === 8) ? (
+            // Start linear from top right
+            px = win_cols - pw - 1;
+            py = 0;
+        ) :
+        (mode === 9) ? (
+            // Start linear from  top left
+            px = 0;
+            py = 0;
+        ) :
+        (mode === 10) ? (
+            // start from previous box position
+            px = box[bx_sqx];
+            py = box[bx_sqy];
+        ) :
+        (mode === 11) ? (
+            // random mode
+            pos = irand(win_max);
+        ) :
+        (
+            // default start
+            px = py = 0;
+        );
+        (pos >= 0) ? (
+            px = pos % win_cols;
+            py = floor(pos/win_cols);
+        );
+        ((px > win_cols - pw - 1)||(px < 0)) ? (px = 0);
+        ((py > win_lines - ph + 1)||(py < 0)) ? (py = 0);
+        fnd = uim_int_alloc(px, py, pw, ph, bxn);
+        // fnd = uim_checkpos(px, py, bpw, bph, flgs | uim__checkany | uim__allocate, bxn);
+        (fnd >= 0) ? (
+            (!(bx__rstall & box[bx_activ])) ? (
+                uiNxtSeq = fnd + pw; // keep next seq. pos to try
+            );
+            uim_trc2 ? (
+                sprintf(#wxz, "  *** uim_alloc[%d]: fnd %d/%x, %d [%d,%d/%d,%d]", bxn, fnd, uim_ltu(fnd), mode, px, py, pw, ph);
+                mSL_log(SysLogBox, #wxz);
+            );
+        ) : (
+            uim_trc2 ? (
+                sprintf(#wxz, "  **- uim_alloc[%d:%d]: fnd %d, %d [%d,%d/%d,%d]", bxn, box, fnd, mode, px, py, pw, ph);
+                mSL_log(SysLogBox, #wxz);
+            );
+        );
+    );
+    uim_ltu(fnd); // return the position as "universal"
+);
+
+
+function uim_realloc(px, py, pw, ph, bxn)
+(
+    uim_ltu(uim_int_alloc(px, py, pw, ph, bxn)); // return the position as "universal"
+);
+
+
+// Try to reactivate a box
+function box_recall(box, fadd, fsup)
+local (flact, colr)
+(
+    // is this address still a box ?
+    ((box[bx_check] === bx__bxcheck) && ((flact = box[bx_activ]) != 0)) ? (
+        (!(flact & bx__used)) ? (
+            // try to reactivate
+            flact |= bx__used | bx__fading;
+            flact &= 0x7FFFFFFF - bx__drawready;
+        );
+        (flact & bx__used) ? (
+            // add some time
+            (box[bx_endshow] > 0) ? (
+                box[bx_endshow] = max(box[bx_endshow], timec + uiKeepMemDur);
+            );
+            (flact & bx__fading) ? (
+                flact &= 0x7FFFFFFF - bx__fading;
+                // reset colors
+                ((colr = box[bx_icol1]) >= 0) ? (
+                    box[bx_blue1] = colr % 256;
+                    box[bx_green1] = (colr >> 8) % 256;
+                    box[bx_red1] = (colr >> 16) % 256;
+                );
+                ((colr = box[bx_icol2]) >= 0) ? (
+                    box[bx_blue2] = colr % 256;
+                    box[bx_green2] = (colr >> 8) % 256;
+                    box[bx_red2] = (colr >> 16) % 256;
+                );
+            );
+            flact &= 0x7FFFFFFF - bx__drawended - fsup;
+            flact |= bx__update | fadd;
+            box[bx_posflgs] = (box[bx_posflgs] & bx__alloczzz) | 1; // try to reposition
+        );
+        box[bx_activ] = flact;
+    );
+
+);
+
+
+// Force a box at position (mx, my) with size (mw, mh)
+function box_change(box, mx, my, mw, mh)
+local (w, i, j, k, ptpos, bxn)
+(
+    bxn = (box - dispboxes)/dispboxsize + 1;
+    uim_trc6 ? (
+        sprintf(#wxz, "Changing [%d:%d < %07X] to %06X   [%x,%x : %d,%d] {%d}", bxn,
+            box, box[bx_activ], mx + (my << bx__shifth),
+            mx, my, mw, mh, lErr);
+        mSL_log(SysLogBox, #wxz);
+    );
+    uim_free((box[bx_posit]), box); // first, free the box
+    w = 0;
+    i = mx; loop(mw,
+        j = my; loop(mh,
+            ptpos = i + j * win_cols; // we need this square
+            k = dispalloc_a[ptpos];
+            (k === 1) ? (w = 1); // Error
+            ((lErr === 0) && (w === 0) && (k > 1)) ? (
+                uim_trc6 ? (
+                    sprintf(#wxz, "  --- force free %d/%d  %d/%08X", i, j, ptpos, dispalloc_a[ptpos]);
+                    mSL_log(SysLogBox, #wxz);
+                );
+                uim_free(i + (j << bx__shifth), -1); // "remove" the owner
+            );
+            j += 1;
+        );
+        i += 1;
+    );
+    // realloc the area for the box
+    k = mx + my * win_cols + 2;
+    i = mx; loop(mw,
+        j = my; loop(mh,
+            ptpos = i + j * win_cols;
+            ((w === 0) && (dispalloc_a[ptpos] === 0)) ? (
+                dispalloc_a[ptpos] = k;
+            ) : (
+                w = 1;
+            );
+            j += 1;
+        );
+        i += 1;
+    );
+    (w === 0) ? (
+        dispalloc_a[ptpos = mx + my * win_cols] = k = (bxn << bx__shiftn) + (mh << bx__shifth) + mw;
+        box[bx_posit] = mx + (my << bx__shifth);
+        box[bx_lposit] = mx + (my * win_cols);
+        box[bx_bgidt] = k;
+        box[bx_needw] = box[bx_sqw] = mw;
+        box[bx_needh] = box[bx_sqh] = mh;
+        box[bx_initx] = box[bx_sqx] = mx;
+        box[bx_inity] = box[bx_sqy] = my;
+        box[bx_activ] |= bx__used | bx__update | bx__posfound | bx__permlock;
+        box[bx_activ] &= 0x7FFFFFFF - bx__drawready;
+        uim_trc6 ? (
+            sprintf(#wxz, "Box [%d:%d < %07X] now at %d (%d/%d)/%08X  [%d,%d]", bxn, box,
+                box[bx_activ], ptpos, mx, my, k, mw, mh);
+            mSL_log(SysLogBox, #wxz);
+        );
+    ) : (
+        uim_trc6 ? (
+            sprintf(#wxz, "Update error [%d:%d < %07X]", bxn, box, box[bx_activ]);
+            mSL_log(SysLogBox, #wxz);
+        );
+        box[bx_activ] &= 0x7FFFFFFF - bx__drawready;
+    );
+);
+
+
+/*
+    Dessiner les bords de la boîte située en ppx, ppy (nombre entiers ou décimaux)
+    de taille ppw, pph. Nombre exprimés en "squares" de taille sqr_w par sqr_h
+*/
+function draw_around_box(ppx, ppy, ppw, pph, what)
+local (px, py, pw, ph, i, e)
+(
+    px = floor(ppx / sqr_w); ppx += win_Xfr;
+    //ppx = floor(px * sqr_w) + win_Xfr; // position in pixels
+    py = floor(ppy / sqr_h); ppy += win_Yfr;
+    // ppy = floor(py * sqr_h) + win_Yfr;
+    pw = floor(ppw / sqr_w);
+    // ppw = (pw = floor(pw)) * sqr_w;
+    ph = floor(pph / sqr_h);
+    // pph = (ph = floor(ph)) * sqr_h;
+    e = 1;
+    (what & 0x10) ? e += 1;
+    (what & 0x20) ? e += 2;
+    (what & 0x40) ? e += 4;
+    // 1: draw black parts
+    gfx_r = gfx_g = gfx_b = 0; gfx_a = 1;
+    (what & 0x1) ? (
+        // draw top border
+        i = 0; loop (pw,
+            gfx_x = ppx + i * sqr_w;
+            gfx_y = ppy;
+            gfx_rect(gfx_x, gfx_y, sqr_hw, e);
+            i += 1;
+        );
+    );
+    (what & 0x2) ? (
+        // draw bottom border
+        i = 0; loop (pw,
+            gfx_x = ppx + sqr_hw + i * sqr_w;
+            gfx_y = ppy + pph - e;
+            gfx_rect(gfx_x, gfx_y, sqr_hw, e);
+            i += 1;
+        );
+    );
+    (what & 0x4) ? (
+        // draw left border
+        i = 0; loop (ph,
+            gfx_x = ppx;
+            gfx_y = ppy + i * sqr_h;
+            gfx_rect(gfx_x, gfx_y, e, sqr_hh);
+            i += 1;
+        );
+    );
+    (what & 0x8) ? (
+        // draw right border
+        i = 0; loop (ph,
+            gfx_x = ppx + ppw - e;
+            gfx_y = ppy + sqr_hh + i * sqr_h;
+            gfx_rect(gfx_x, gfx_y, e, sqr_hh);
+            i += 1;
+        );
+    );
+    // 2: draw white parts
+    gfx_r = gfx_g = gfx_b = 1; gfx_a = 1;
+    (what & 0x1) ? (
+        // draw top border
+        i = 0; loop (pw,
+            gfx_x = ppx + sqr_hw + i * sqr_w;
+            gfx_y = ppy;
+            gfx_rect(gfx_x, gfx_y, sqr_hw, e);
+            i += 1;
+        );
+    );
+    (what & 0x2) ? (
+        // draw bottom border
+        i = 0; loop (pw,
+            gfx_x = ppx + i * sqr_w;
+            gfx_y = ppy + pph - e;
+            gfx_rect(gfx_x, gfx_y, sqr_hw, e);
+            i += 1;
+        );
+    );
+    (what & 0x4) ? (
+        // draw left border
+        i = 0; loop (ph,
+            gfx_x = ppx;
+            gfx_y = ppy + sqr_hh + i * sqr_h;
+            gfx_rect(gfx_x, gfx_y, e, sqr_hh);
+            i += 1;
+        );
+    );
+    (what & 0x8) ? (
+        // draw right border
+        i = 0; loop (ph,
+            gfx_x = ppx + ppw - e;
+            gfx_y = ppy + i * sqr_h;
+            gfx_rect(gfx_x, gfx_y, e, sqr_hh);
+            i += 1;
+        );
+    );
+);
+
+
+
+function upd_box_size(box, mw, mh)
+local(f1, f2, aw, ah, boxnb, flags, w, h, ifs1, ifs2)
+(
+
+    flags = box[bx_activ];
+    (box[bx_type] === bx_ty_msg) ? (
+        ifs1 = box[bx_fsize1];
+        ifs2 = box[bx_fsize2];
+        boxnb = 1 + (box - dispboxes) / dispboxsize;
+        uim_trc6 ? (
+            sprintf(#wxz, "Upd. box fonts [%d:%d < %07X] <%d,%s,%d,%d>  <%d,%s,%d,%d>", boxnb, box, box[bx_activ],
+                box[bx_font1], box[bx_fname1], box[bx_fsize1], box[bx_fmods1],
+                box[bx_font2], box[bx_fname2], box[bx_fsize2], box[bx_fmods2]);
+            mSL_log(SysLogBox, #wxz);
+        );
+        // Change the box dimensions in squares
+        box[bx_sqw] = box[bx_needw] = floor(max(2, min(512, mw)));
+        box[bx_sqh] = box[bx_needh] = floor(max(1, min(400, mh)));
+        box[bx_minw] = mw * sqr_w;
+        box[bx_minh] = mh * sqr_h;
+        flags &= 0x7FFFFFFF - bx__drawready - bx__drawended ;
+        flags |= bx__used | bx__update | bx__posfound | bx__permlock;
+        // Available width/height in pixels
+        aw = max(sqr_w *2, box[bx_needw] * sqr_w - box[bx_extraw]);
+        ah = max(sqr_h, box[bx_needh] * sqr_h - box[bx_extrah]);
+        cycle = 1;
+
+        box[bx_font1] = 16;
+        box[bx_font2] = 15;
+        (flags & bx__2strings) ? (
+            // Should update two sizes simultanously.
+            while (cycle != 0) (
+                gfx_setfont(box[bx_font1], box[bx_fname1], box[bx_fsize1], box[bx_fmods1]);
+                gfx_measurestr(box[bx_string1],gl_w1,gl_h1);
+                gfx_setfont(box[bx_font2], box[bx_fname2], box[bx_fsize2], box[bx_fmods2]);
+                gfx_measurestr(box[bx_string2],gl_w2,gl_h2); // set gl_w2 and gl_h2
+                w = max(gl_w1, gl_w2); // width
+                h = gl_h1 + gl_h2 + box[bx_interl]; // height
+                (cycle === 1) ? (
+                    // try to increase
+                    ((w < aw) && (h < ah) && (box[bx_fsize1] < 512) && (box[bx_fsize2] < 512)) ? (
+                        box[bx_fsize1] += max(1, floor(box[bx_fsize1] * 0.1));
+                        box[bx_fsize2] += max(1, floor(box[bx_fsize2] * 0.1));
+                    ) : (
+                        cycle = 2;
+                    );
+                );
+                (cycle === 2) ? (
+                    // decrease until fit
+                    (((w > aw) || (h > ah)) && (box[bx_fsize1] > 6) && (box[bx_fsize2] > 6)) ? (
+                        box[bx_fsize1] -= max(1, floor(box[bx_fsize1] * 0.1));
+                        box[bx_fsize2] -= max(1, floor(box[bx_fsize2] * 0.1));
+                    ) : (
+                        cycle = 0;
+                    );
+                );
+            );
+        ) : (
+            // Should update only first font.
+            // 1 - increase while less.
+            while (cycle != 0) (
+                gfx_setfont(box[bx_font1], box[bx_fname1], box[bx_fsize1], box[bx_fmods1]);
+                gfx_measurestr(box[bx_string1],gl_w1,gl_h1);
+                w = gl_w1; // width
+                h = gl_h1; // height
+                (cycle === 1) ? (
+                    // try to increase
+                    ((w < aw) && (h < ah) && (box[bx_fsize1] < 512)) ? (
+                        box[bx_fsize1] += max(1, floor(box[bx_fsize1] * 0.1));
+                    ) : (
+                        cycle = 2;
+                    );
+                );
+                (cycle === 2) ? (
+                    // try to decrease
+                    (((w > aw) || (h > ah))  && (box[bx_fsize1] > 8)) ? (
+                        box[bx_fsize1] -= max(1, floor(box[bx_fsize1] * 0.1));
+                    ) : (
+                        cycle = 0;
+                    );
+                );
+            );
+        );
+        // Try to keep the box near its position
+        box[bx_posflgs] = (box[bx_posflgs] & bx__alloczzz) | 1;
+        box[bx_activ] = flags;
+        (box[bx_endshow] > 0) ? (
+            box[bx_endshow] = max(box[bx_endshow], timec + uiKeepMemDur);
+        );
+    ) :
+
+    (box[bx_type] === bx_ty_hpset) ? (
+        // Change the size factor
+        w = box[bx_sfact] * (mw + mh) / (box[bx_sqw] + box[bx_sqh]);
+        box[bx_sfact] = w;
+        box[bx_sqw] = ceil(HPDr_w * w / sqr_w);
+        box[bx_sqh] = ceil(HPDr_h * w / sqr_h);
+        box[bx_needw] = 0;
+        box[bx_needh] = 0;
+    ) ;
+
+    uim_trc6 ? (
+        sprintf(#wxz, "Upd. box size [%d:%d < %07X] <%d,%d> (%d,%d) -> (%d,%d)", boxnb, box,
+            box[bx_activ], mw, mh, ifs1, ifs2, box[bx_fsize1], box[bx_fsize2]);
+        mSL_log(SysLogBox, #wxz);
+    );
+);
+
+
+function update_window()
+local (pos_y, pos_y, win_pnt, box, bxn, wh, dlh, flact, c0, c1, c2, c3, f, win_middle, pos_x, win_mid)
+(
+    uim_trc5 ? (
+        sprintf(#wxz, "---->  Update Window  [%d, %d]", dispalloc_a, dispboxes);  mSL_log(SysLogBox, #wxz);
+    );
+    c0 = c1 = c2 = 0;
+    win_mod = timec + 3 ;
+    dlh = max(0, ui_jd_menuh - 2); // adjust available height
+    win_width = gfx_w; win_middle = win_height = gfx_h;
+    wh = win_height - dlh;
+    // recompute the alloc. table
+    memset(dispalloc_a, 1, dispallocmax); // all used
+    // free the appropriate entries
+    pos_y = 0; win_pnt = 0; win_cols = 0; win_lines = 0;
+    while (pos_y + sqr_h <= wh) (
+        // The row is available
+        pos_x = 0;
+        while (pos_x + sqr_w <= win_width) (
+            // The cell is free
+            dispalloc_a[win_pnt] = 0; pos_x += sqr_w;
+            win_pnt = min(win_pnt + 1, dispallocuse);
+        );
+        win_pnt += 1; // keep the used cell at the end of the row
+        (win_cols === 0) ? win_cols = win_pnt;
+        pos_y += sqr_h; win_lines += 1;
+    );
+    win_max = win_pnt;
+    win_mid = ceil(win_lines / 2);
+    // Compute the frame to use for the window
+    win_Xfr = floor((gfx_w - (win_cols - 1) * sqr_w)/2);
+    win_Yfr = floor((wh - win_lines * sqr_h)/2) + dlh;
+    //  drawable window
+    win_Yheight = win_lines * sqr_h;
+    win_Xwidth = (win_cols - 1) * sqr_w;
+    // Update corners idents.
+    uiTopLft = 0; uiTopRgt = (win_cols - 1);
+    uiBotLft = win_cols * (win_lines - 1); uiBotRgt = uiBotLft + (win_cols - 1);
+    // We need to update all the display boxes
+    box = dispboxes;
+    bxn = 1;
+    loop (dispboxcount,
+        ((flact = box[bx_activ]) != 0) ? (
+            c0 += 1;
+            (box[bx_check] != bx__bxcheck) ? (
+                sprintf(#wxz, "  -W- damaged [%d:%d < %07X]   %s", bxn, box, flact, mSL_edit_value(#VAL, box[bx_check]));
+                mSL_log(SysLogBox, #wxz);
+                flact = 0;
+            ) :
+            // is this a box we need to keep in place ?
+            (((wrefresh & 2) === 0) && (flact & bx__permlock)) ? (
+                // Try to reinstall in place
+                c2 += 1;
+                p = box[bx_posit]; // get previous pos from posit
+                f = uim_realloc(p & bx__maskw, p >> bx__shifth, box[bx_sqw], box[bx_sqh], bxn);
+                flact = box[bx_activ]; p = box[bx_posit];
+                uim_trc5 ? (
+                    sprintf(#wxz, "  -R- alloc [%d:%d < %07X] %06X (%d/%d) => %08X", bxn, box, flact, p, (p >= 0 ? p & bx__maskw : -1),
+                        (p >= 0 ? p >> bx__shifth : -1), (p >= 0 ? dispalloc_a[p] : 0));
+                    mSL_log(SysLogBox, #wxz);
+                );
+                // Unable to reallocate ?
+                (p < 0) ? (
+                    flact &= 0x7FFFFFFF - bx__drawready - bx__posfound - bx__permlock;
+                    flact |= bx__update;
+                    c3 += 1;
+                );
+            ) :
+            (flact & bx__used) ? (
+                c1 += 1;
+                // we don't need to free/reallocate the used boxes, just to change some flags
+                uim_trc5 ? (
+                    sprintf(#wxz, "  -U->     [%d:%d < %07X]", bxn, box, flact);  mSL_log(SysLogBox, #wxz);
+                );
+                flact |= bx__update;
+                flact &= 0x7FFFFFFF - bx__drawready - bx__posfound;
+            ) : (
+                uim_trc5 ? (
+                    sprintf(#wxz, "  -Z->     [%d:%d < %07X]", bxn, box, flact);  mSL_log(SysLogBox, #wxz);
+                );
+                flact = 0;
+            );
+            box[bx_activ] = flact;
+        );
+        box += dispboxsize;
+        bxn += 1;
+    );
+
+
+    wrefresh = 0;
+    uiNxtSeq = 0;
+    ui_XlocDoNow |= 1;
+    uim_trc5 ? (
+        sprintf(#wxz, "---->  Update End :  (%d, %d, %d, %d)", c0, c1, c2, c3);  mSL_log(SysLogBox, #wxz);
+    );
+
+);
+
+
+// ---------------------------------- Clock / timer
+// The clock box shows #clockstr, computed every second by live_screen() :
+// time of day (stattimer == 0, offset dechor hours) or timer (stattimer == 1, from timet, see clock_set_timer).
+// Call live_clock_init() once, after live_screen_init() AND after the mSL symbols tables (mSL_symbol).
+function live_clock_init()
+(
+    (clockid == 0) ? clockid = mSL_symbol("Clock");
+    #clockstr = "WW:WW:WW"; // create the box for displaying the date
+    clockbox = mk_display_box(clockid, #clockstr, 0, -1, bx__usestring1|bx__rstall|bx__boxaround|bx__drawmains, 8, 0);
+    clockbox[bx_extraw] = 50; // add some width
+);
+
+function toggleclock(par)
+local (flact)
+(
+    (par === -1) ? par = 1 - statclock;
+    statclock = (par != 0);
+    (statclock) ? (
+        (clockbox[bx_name] != clockid) ? (
+            // The box has been freed since last time we used it - recreate one
+            clockbox = mk_display_box(clockid, #clockstr, 0, -1, bx__usestring1|bx__rstall|bx__boxaround|bx__drawmains, 8, 0);
+            clockbox[bx_extraw] = 50; // add some width in pixels
+        ) : (
+            /*
+            flact = clockbox[bx_activ];
+            (flact & bx__drawready) ? (
+                // seems we have nothing to do
+                (!(flact & bx__posfound)) ? (
+                    lErr = 505;
+                );
+                flact &= 0x7FFFFFFF - bx__drawended;
+                flact |= bx__used | bx__col1std ; // restart with std. color
+            ) : (
+                flact &= 0x7FFFFFFF - bx__drawready - bx__drawended;
+                flact |= bx__used | bx__update | bx__col1std ;
+            );
+            flact |= bx__boxaround; // to indicate the action
+            clockbox[bx_activ] = flact;
+            */
+            box_recall(clockbox, bx__col1std, bx__drawended);
+            clockbox[bx_endshow] = -1;
+        );
+        clockbox[bx_crdate] = timez;
+    ) : (
+        (clockbox[bx_name] === clockid) ? (
+            flact = clockbox[bx_activ];
+            // toggle off
+            clockbox[bx_endshow] = 1; // this will eventually stop the clock
+            clockbox[bx_trelease] = max(clockbox[bx_trelease], timec + uiKeepClock); // this will eventually stop the clock
+            flact &= 0x7FFFFFFF - bx__update - bx___keep - bx__fading;
+            clockbox[bx_activ] = flact | bx__boxaround;
+            clockbox[bx_crdate] = timez;
+        );
+    );
+);
+
+
+function toggletimer(par)
+(
+    (par === -1) ? par = 1 - stattimer;
+    stattimer = (par != 0);
+    (clockbox[bx_name] === clockid) ? (
+        clockbox[bx_activ] |= bx__boxaround; // to indicate the action
+        // clockbox[bx_endshow] = -1;
+        clockbox[bx_crdate] = timez;
+    );
+);
+
+
+// Start the timer at "secs" seconds and show it : counts up if secs >= 0, counts down to 0 if secs < 0
+function clock_set_timer(secs)
+(
+    timet = timec - secs; // reset the timer
+    timedir = secs >= 0;
+    toggletimer(1);
+);
+
+
+// For hosts that do not maintain these times themselves (Diffusion-3 does it in @block)
+function live_screen_tick()
+(
+    timec = time();
+    timez = time_precise();
+    (timet == 0) ? timet = timec;
+    (timedir == 0) ? timedir = 1;
+);
+
+
+// Initialize the live screen data : call it once, after static memory (make_array) is available
+function live_screen_init()
+(
+    // UI related variables
+    dispboxsize = 64;
+    dispboxcount = 492;
+    boxwasize = 512;
+    dispallocmax = 16384;
+    // Cellule d'allocation
+    sqr_w = 24; // width of a drawable square
+    sqr_h = 24; // height of a drawable square
+    sqr_hw = sqr_w >> 1; // half width
+    sqr_hh = sqr_h >> 1; // half height
+    win_width = 0; // plug-in graphic window width [copy of gfx_w]
+    win_height = 0; // plug-in graphic window height [copy of gfx_h]
+    win_Xwidth = 0; // actual usable width of the drawable window
+    win_Yheight = 0; // actual usable height of the drawable window
+    win_Xfr = 0; // X offset from graphic window
+    win_Yfr = 0; // Y offset from graphic window
+    win_mod = 0;
+    win_chg = 0;
+    win_stat = 1;
+    win_cols = 0;
+    win_lines = 0;
+    win_pnt = 0;
+    win_max = 0;
+    dispallocuse = dispallocmax - 256;
+    bxptall = 0;
+
+    // Fonts management
+    font_count = 17;
+    font_names = make_array(font_count);
+    font_sizes = make_array(font_count);
+    font_modes = make_array(font_count);
+
+    dispboxes = make_array(dispboxsize * dispboxcount);
+    dispboxeslast = dispboxes + dispboxsize * (dispboxcount - 1);
+    dispalloc_a = make_array(dispallocmax);
+    box_list = make_array(boxwasize);
+    box_vals = make_array(boxwasize);
+
+    // --------------------------------------------------------
+    // --------------------------------------------------------
+    // --------------------------------------------------------
+    // dispboxes structure
+    // - size dispboxsize see  mk_display_box  display_boxes uim_alloc
+                boxidx = 0; // allocation pointer
+    // 0
+    bx_check = boxidx ; boxidx += 1; // check value for the box
+    bx_posflgs = boxidx ; boxidx += 1;  // Formating related flags
+    bx_name = boxidx ; boxidx += 1;  // Box identification
+    bx_activ = boxidx ; boxidx += 1; // Activity related flags
+    // Drawing
+    // 4
+    bx_sqx = boxidx ; boxidx += 1; // x position in graphic squares
+    bx_sqy = boxidx ; boxidx += 1; // y position in graphic squares
+    bx_sqw = boxidx ; boxidx += 1; // width in graphic squares
+    bx_sqh = boxidx ; boxidx += 1; // height in graphic squares
+    // 8
+    bx_xpos = boxidx ; boxidx += 1;  // Absolute drawing X position in the displayable (pixels)
+    bx_ypos = boxidx ; boxidx += 1;  // Absolute drawing Y position (pixels)
+    bx_right = boxidx ; boxidx += 1; // right (pixels)
+    bx_bottom = boxidx ; boxidx += 1; // bottom (in pixels)
+    // 12
+    bx_posit = boxidx ; boxidx += 1;  // Allocated mBox graphic position : (bx_sqy << bx__shifth) | bx_sqx
+    bx_lposit = boxidx ; boxidx += 1;  // Allocated mBox graphic position : (bx_sqy * win_cols) | bx_sqx
+    bx_bgidt = boxidx ; boxidx += 1;  // box graphic alloc. (coded position as (bxn << bx__shiftn) | (bx_sqh << bx__shifth) | bx_sqw
+    bx_trelease = boxidx ; boxidx += 1; // Release time
+    // 16
+    // Graphic
+    // String 1
+    bx_font1 = boxidx ; boxidx += 1; // font #1 idx
+    bx_fname1 = boxidx ; boxidx += 1; // font #1 name
+    bx_fsize1 = boxidx ; boxidx += 1; // font #1 size
+    bx_fmods1 = boxidx ; boxidx += 1; // font #1 smodifiers
+    // 20
+    bx_string1 = boxidx ; boxidx += 1; // String 1
+    bx_ypos1 = boxidx ; boxidx += 1; // String 1 ypos
+    bx_bott1 = boxidx ; boxidx += 1; // string1 height
+    bx_red1 = boxidx ; boxidx += 1;
+    // 24
+    bx_green1 = boxidx ; boxidx += 1;
+    bx_blue1 = boxidx ; boxidx += 1;
+    bx_icol1 = boxidx ; boxidx += 1; // packed initial color
+    bx_interl = boxidx ; boxidx += 1; // distance str1/str2
+    // 28
+    // String 2
+    bx_font2 = boxidx ; boxidx += 1; // font #2
+    bx_fname2 = boxidx ; boxidx += 1; // font #2 name
+    bx_fsize2 = boxidx ; boxidx += 1; // font #2 size
+    bx_fmods2 = boxidx ; boxidx += 1; // font #2 smodifiers
+    // 32
+    bx_string2 = boxidx ; boxidx += 1; // String 2
+    bx_ypos2 = boxidx ; boxidx += 1; // String 2 ypos
+    bx_bott2 = boxidx ; boxidx += 1; // string2 height
+    bx_red2 = boxidx ; boxidx += 1;
+    // 36
+    bx_green2 = boxidx ; boxidx += 1;
+    bx_blue2 = boxidx ; boxidx += 1;
+    bx_icol2 = boxidx ; boxidx += 1; // packed initial color
+    bx_endcoef = boxidx ; boxidx += 1; // wipe out alpha coeff
+    // 40
+    bx_minw = boxidx ; boxidx += 1; // min. width in pixels
+    bx_minh = boxidx ; boxidx += 1; // min. height in pixels
+    bx_extraw = boxidx ; boxidx += 1; // extra width in pixels for strings
+    bx_extrah = boxidx ; boxidx += 1; // extra height in pixels for strings
+    // 44
+    bx_needw = boxidx ; boxidx += 1; // need mBoxes wide in squares
+    bx_needh = boxidx ; boxidx += 1; // need mBoxes height in squares
+    bx_crdate = boxidx ; boxidx += 1; // box creation date
+    bx_endshow = boxidx ; boxidx += 1; // show end date
+    // 48
+    bx_sfact = boxidx ; boxidx += 1; // size factor (global drawing)
+    bx_psfact = boxidx ; boxidx += 1; // previous factor (global drawing)
+    bx_zfact = boxidx ; boxidx += 1; // zoom factor (inner drawing)
+    bx_drmode = boxidx ; boxidx += 1; // draw mode
+    // 52
+    bx_xshift = boxidx ; boxidx += 1; // center x/shift
+    bx_yshift = boxidx ; boxidx += 1; // center y/shift
+    bx_initw = boxidx ; boxidx += 1;  // initial width in squares
+    bx_inith = boxidx ; boxidx += 1;  // initial height in squares
+    // 56
+    bx_initx = boxidx ; boxidx += 1;  // initial x position in squares
+    bx_inity = boxidx ; boxidx += 1;  // initial y position in squares
+    bx_timefd = boxidx ; boxidx += 1;  // Box fade time
+    bx_errcode = boxidx ; boxidx += 1; // error code if found
+    // 60
+    bx_cnt = boxidx ; boxidx += 1;  // Box update count
+    bx_pname = boxidx ; boxidx += 1;  // Box previous identification
+    bx_type = boxidx ; boxidx += 1;  // Box type
+    // 64 ----- end
+    // Useful values
+    bx__bxcheck = 2147483512 / 128;
+    bx__shifth = 12; // 11;
+    bx__shiftn = 24; // 22;
+    bx__bxn1 = 1 << bx__shiftn;
+    bx__maskw = 0xFFF; // 0x7FF;
+    bx__maskh = 0xFFF; // 0x7FF;
+    bxFadeDelta = 0.115; // fade out in app. 30"
+    uim_trc1 = 0;
+    uim_trc2 = 0;
+    uim_trc3 = 0;
+    uim_trc4 = 0;
+    uim_trc5 = 0;
+    uim_trc6 = 1;
+    uim_trc7 = 0;
+    uim_trc8 = 0;
+    // Flags for "bx_activ"
+    bx__used =        0x0001;  // The box is used
+    bx__update =      0x0002; // it needs to be updated
+    //            =   0x0004; //
+    bx__drawready =   0x0008; // The box is ready to draw
+    bx__drawended =   0x0010; // the drawing is ended -- 16
+    bx__usestring1 =  0x0020; // point to string 1 rather than copying  --  32
+    bx__usestring2 =  0x0040; // point to string 2 rather than copying  --  64
+    bx__posfound =    0x0080; // allocation has been found for the box   --
+    bx__drawbox =     0x0100; // do draw the object   -- used for HP box
+    bx__drawhfrbox =  0x0200; // do draw the half frame   --
+    bx__select =      0x0400; // box selected, do draw the full frame
+    bx__permlock =    0x0800; // object is permanent and should not be moved -- 2048
+    bx__col1std =     0x1000; // color 1. is standard      --    4096
+    bx__col2std =     0x2000; // color 2. is standard      --    8192
+    bx__fading =      0x4000; // box fading out
+    bx__poserr =      0x8000; // an error has been found    --   32768
+    bx__2strings =    0x00010000; // the box should show two strings (else, just string 1) -- 65536
+    bx__boxaround =   0x00020000; // draw a box around when the box is new / modified -- 131072
+    bx__keepVisible = 0x00040000; // the box is reserved for later use  -- 262144
+    //            =   0x00080000; //
+    //            =   0x00100000; //
+    //            =   0x00200000; //
+    //            =   0x00400000; //
+    bx__rstall =      0x00800000; // search from zero for box allocation
+    //
+    bx___keep = bx__select | bx__permlock;
+    bx___sel = bx__used | bx__select;
+    // Flags for "bx_posflgs"
+    bx__allocmod = 0xF; // use 4 bits for allocation mode
+    bx__alloczzz = 0x7FFFFFF0 ;// 0x7FFFFFFF ~ bx__allocmod; // suppress bits for allocation mode
+    bx__drawctls = 7; // std mode for drawing modified controls
+    bx__drawmains = 9;
+    // Common flags
+    // Draw flags in "bx_drmode"
+    bx__ShowPow =    0x0010; // show hp power
+    bx__BlackBg =    0x0040; // use a black background
+    bx__ShowConf =   0x0080; // show current config on current projector
+    // Values for "bx_type"
+    bx_ty_msg =   1; // box type message
+    bx_ty_hpset = 2; // box type HP Set.
+    bx_ty_err =   0x3F; // box with error
+
+
+    gxcred = gxcgreen = gxcblue = 127;
+    gxfred = gxfgreen = gxfblue = 127;
+    gxvrinc = gxvrdec = gxvginc = gxvgdec = gxvbinc = gxvbdec = 1;
+    gxmxred = gxmxgreen = gxmxblue = 175;
+    gxmired = gxmigreen = gxmiblue = 85;
+    gxwrlired = gxwrligreen = gxwrliblue = 1;
+    gxwrdkred = gxwrdkgreen = gxwrdkblue = 0;
+    gfxstdr = 0; gfxstdg = 0; gfxstdb = 0;
+    gxcolor1 = gxcolor2 = 0;
+    coloriterate = 1;
+    gxeps = 0.5; //  0.875;
+    gxbase = 0.875;  //  1.0;
+    gxlim = 255.875;
+    gxdlay = 188;
+    gxtype = 0; // use dark
+    gxnotinited = 1;
+    gxworktodo = 1;
+    gxprvctime = 0;
+    gxlimlight = 182;
+    gxlimdark = 152;
+    uiNxtSeq = 0;
+    uiTopLft = 0;
+    uiTopRgt = 0;
+    uiBotLft = 0;
+    uiBotRgt = 0;
+    uiStdFont = 3;
+    uiStdColor = -1;
+    uiStdDuration = 45; // seconds
+    uiBoxDuration = 20; // seconds : frame block duration
+    uiStdRlease = 2 * 60; // seconds : keep allocated block duration
+    uiKeepMemDur = 3 * 60; // keep allocated memory duration
+    uiKeepClock = 10 * 60; // keep allocated memory duration for clock
+    uiKeepProj = 10 * 60; // keep allocated memory duration for projector
+
+    uiKeepErrBox = 10 * 60; // keep allocated memory duration for box with error
+
+    // Live screen state : default values (a host may change them later)
+    statgraph = 1; // graphics shown
+    prevgraph = 0;
+    stattimer = 0; // 0 : show time of day ; 1 : show a timer
+    statclock = 1; // clock box shown (see toggleclock)
+    wrefresh = 0;
+    dechor = 1; // time offset (hours) for the clock
+
+    i_graphinit(); // default fonts
+);
+

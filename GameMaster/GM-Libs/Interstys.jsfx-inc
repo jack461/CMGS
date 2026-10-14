@@ -95,8 +95,9 @@ its_Lin_Check = idx; idx += 1; // quick check
 its_Lin_BF1ST = idx; idx += 1; // Pointeur sur le premier buffer
 // Il peut y avoir jusqu'à 128 buffers, 1 pour chaque canal
 idx += 127;
+idx |= 3; // for rounding to a multiple of 4 minus 1
 its_Lin_Unuz2 = idx; idx += 1; // Sécurité : mot inutilisé
-its_Lin_BlkSize = (idx | 3) + 1; // round to a multiple of 4
+its_Lin_BlkSize = idx; // actual size
 // Status
 its_LinStat_Undef = 0;
 its_LinStat_Ready = 1;
@@ -201,9 +202,9 @@ its_Rdr_XFadeCnt = idx; idx += its_RdrMaxMulti; // X Fade counter
 its_Rdr_XFadeIdxPos = idx; idx += its_RdrMaxMulti; // X Fade position
 its_Rdr_XFadeIncr = idx; idx += its_RdrMaxMulti; // X Fade increment
 its_Rdr_XFadeCntNxt = idx; idx += its_RdrMaxMulti; // next X Fade counter
-//
+idx |= 3; // for rounding to a multiple of 4 minus 1
 its_Rdr_Unuz2 = idx; idx += 1; //  Securité : mot inutilisé
-its_Rdr_BlkSize = (idx | 3) + 1; // round to a multiple of 4
+its_Rdr_BlkSize = idx; // actual size
 
 its_RdrFlg_init = 0x0001; //  si lecteur initialisé
 its_RdrFlg_actif = 0x0002; // si lecteur en cours de lecture
@@ -284,8 +285,9 @@ its_Wrt_Tmp4 = idx; idx += 1; // temp 4
 its_Wrt_Tmp5 = idx; idx += 1; // temp 5
 its_Wrt_Tmp6 = idx; idx += 1; // temp 6
 // 30
+idx |= 3; // for rounding to a multiple of 4 minus 1
 its_Wrt_Unuz2 = idx; idx += 1; //  Securité : mot inutilisé
-its_Wrt_BlkSize = (idx | 3) + 1; // round to a multiple of 4
+its_Wrt_BlkSize = idx; // actual size
 
 its_WrtFlg_init = 0x0001; //  si writer initialisé
 // Etats
@@ -359,8 +361,9 @@ its_Efx_Dst8 = idx; idx += 1; //  Destination n°8
 //   40
 idx += 1;
 its_Efx_Check = idx; idx += 1; // quick check
+idx |= 3; // for rounding to a multiple of 4 minus 1
 its_Efx_Unuz2 = idx; idx += 1; //  Securité : mot inutilisé
-its_Efx_BlkSize = (idx | 3) + 1; // round to a multiple of 4  Taille du bloc
+its_Efx_BlkSize = idx; // actual size
 
 // Some constants
 its_EfxDist = its_Efx_Src2 - its_Efx_Src1;
@@ -389,6 +392,18 @@ its_EfxAct_Delete = 9;
 
 
 
+
+
+err_sys = 0; // generic error system
+err_sys_ini = 0; // generic initialization error system
+err_sys_rtm = 0; // generic run-time error system
+err_sys_gfx = 0; // generic graphic error system
+err_fclp = 0; // error when reading clips description file
+err_fplm = 0; // error in play modes description file
+err_fhpc = 0; // error in HP configuration description file
+err_fspm = 0; // error in space modes description file
+err_fbnk = 0; // error in partials/banks description file
+err_sdfr = 0; // error in sensors def reader
 
 spl_prev_count = spl_count = -1;
 T_fact = 4096 * 4096 * 4096 * 4096  ;
@@ -677,6 +692,10 @@ bfsx = 0; // buffer in the modulation table
 gmem[clPlAvail] = UTmem = __memtop(); // total memory available
 
 
+// These must be defined here
+padSScriptsNL = 4;
+padSScriptsNC = 4;
+K_padSScriptsSiz = padSScriptsNL * padSScriptsNC;
 
 // MAIN MEMORY STRUCTURE
 SharedLowMemory = 0;
@@ -685,8 +704,60 @@ SharedHighMemory = 0; // will be updated later
 SharedHighMemorySize = 0; // yet unknown
 
 // Some temporary work area
-wrk1 = SharedLowMemory + 64; // size : 64 words
-wrk2 = SharedLowMemory + 128;
+// 0 to 127 reserved
+wrk1 = SharedLowMemory + 128; // size : 64 words
+wrk2 = wrk1 + 64;
+wa128 = 128; // a 128 words work area : also wrk1 et wrk2
+wa256 = 256; // a 256 words work area
+wa512 = 512; // a (surprise !) 512 words work area
+//====== User modules : boxes and display stack (copied from GamePlayer, used by show_UserModule)
+//----
+//  Module/box flags
+ubx_inited = 1;
+ubx_modified = 2;
+ubx_final = 0x100; // contains final items
+ubx_recurs = 0x200; // contains other boxes
+//  User inner box description
+ubx_psize = idx = -1;
+//----
+ubx_ty = (idx += 1);    // Type of the box
+ubx_flgs = (idx += 1); // associated flags
+ubx_mref = (idx += 1);  // dynamic memory reference
+ubx_anc = (idx += 1);  // ancestor (relative)
+ubx_name = ubx_anc; // name of module as a string
+//----
+ubx_lcnt = (idx += 1);  // Number of direct descendants
+ubx_icnt = (idx += 1); // number of direct items
+ubx_1st = (idx += 1);  // 1st descendant (relative)
+ubx_tcnt = (idx += 1);  // total Number of descendants
+//----
+ubx_l  = (idx += 1); // left position
+ubx_t  = (idx += 1); // top position
+ubx_w  = (idx += 1);  // width
+ubx_h  = (idx += 1);  // height
+//----
+ubx_minw  = (idx += 1);  // min width
+ubx_maxw  = (idx += 1);  // max width
+ubx_thread = (idx += 1);  // thread base
+ubx_thrdid = (idx += 1);  // thread base idt
+//----
+ubx_isiz = (idx += 1); // size of a box
+//----
+idx = 0; // tos
+stk_btyp = idx;  // current bloc type
+stk_cbx = (idx -= 1);  // current box [relative]
+stk_rtsk = (idx -= 1); // return stack
+stk_rtst = (idx -= 1); // return state
+stk_mode = (idx -= 1); // work mode
+stk_h = (idx -= 1); // computed height
+stk_w = (idx -= 1); // computed width
+stk_t = (idx -= 1); // computed top
+stk_l = (idx -= 1); // computed left
+stk_i = (idx -= 1); // index in boxes
+stk_b = (idx -= 1); // base of boxes sequence
+stk_isiz = 1 - idx;
+// adjusts
+ubx_sbox_more = 4;
 //====== Reserve some memory to read/write presets
 idx = SharedLowMemory + SharedLowMemorySize;
 serialSize = 12288; // size of a preset
@@ -706,6 +777,19 @@ serialHead = 8; // 1st 8 words describe the kind of preset loaded
 serialLoad = serialSize - serialHead; // 12288 - 8 = 12280
 serialBlockV = serialBlock + serialHead;
 
+// Reserve some strings for the presets
+// (the preset strings are reserved after mSL_Str_MkStructs(), see "STATIC MEMORY")
+// 0 to 15 are for tabulations names (if any)
+idx = 16;
+Pr7_Date = idx; // save date of the preset
+
+idx = 48;
+// 48 to 64 are for scripts names in settings
+namScriptfiles = savedStrings + idx;
+idx += K_padSScriptsSiz;
+K_fileAliases = idx; // strings for files aliases
+idx += 64; // should we need more ?
+(idx >= K_savedStringsCnt) ? err_sys_ini = 9927; // preset string array overflow
 // serialBlock + 0
 // Subblock 1 - individual variables - @0, Size 128
 Pr7_pr_vers = 0;
@@ -716,7 +800,8 @@ Pr7_pr_aux2 = 3;
 Pr7_Partial0 = 32; // size:
 Pr7_StudConf = Pr7_Partial0 + 16;
 Pr7_StudRat = Pr7_StudConf + 8;  // size : 8 * 4
-Pr7_Free = Pr7_StudRat + 8 * 4;
+Pr7_StudLive = Pr7_StudRat + 8 * 4; // size : 8 -- 1 if the tab uses the "live" display
+Pr7_Free = Pr7_StudLive + 8;
 
 // Update tabulations width
 tbN = 0; loop (8,
@@ -725,7 +810,7 @@ tbN = 0; loop (8,
     tbN += 1;
 );
 
-dcbBlocksAll = idx = serialBlock + 128;
+idx = serialBlock + 128; // dcbBlocksAll stays at serialBlock+3072 (was overlapping the structures and parameters below)
 
 // Description interne des readers
 ReadersBlockSize = 8;
@@ -747,6 +832,16 @@ LinesStructE = idx; idx += LinesBlockSize;
 LinesStructF = idx; idx += LinesBlockSize;
 LinesStructG = idx; idx += LinesBlockSize;
 LinesStructH = idx; idx += LinesBlockSize;
+
+WriterBlockSize = 8;
+WriterStructA = idx; idx += WriterBlockSize;
+WriterStructB = idx; idx += WriterBlockSize;
+WriterStructC = idx; idx += WriterBlockSize;
+WriterStructD = idx; idx += WriterBlockSize;
+WriterStructE = idx; idx += WriterBlockSize;
+WriterStructF = idx; idx += WriterBlockSize;
+WriterStructG = idx; idx += WriterBlockSize;
+WriterStructH = idx; idx += WriterBlockSize;
 
 EffectsBlockSize = 12;
 EffectsStructA = idx; idx += LinesBlockSize;
@@ -798,8 +893,8 @@ mSL_Str_Init(#strFirst, #strLast); // allocate strings for strings allocator
 mSL_Str_TInit(#wstrFirst, #wstrLast); // allocate strings for temporary strings
 mSL_Str_PInit(#xstrFirst, #xstrLast); // allocate strings for permanent strings
 mSL_Str_MkStructs(); // Build string management structures
-
-
+// Reserve some strings for the presets : needs the string manager built just above
+ii = 0; loop(K_savedStringsCnt, savedStrings[ii] = mSL_Str_Perm(); ii+=1;);
 // see mm_highblocks
 //====== GLOBALS ======
 init_idents();
@@ -828,11 +923,6 @@ ui_lib_JJ_GUI_init(2);
 // REAL START OF BLOCKS ANALYZED BY THE GARBAGE COLLECTOR
 mm_lowblocks = make_array(2); // creates a gap of 2 words.
 mm_lowblocks[0] = 'Low_'; mm_lowblocks[1] = '_Mem';
-
-ui_lib_start = mSL_StM_BlockStart('uilb'); // ui lib block
-ui_lib_end = ui_setup(ui_lib_start);
-mSL_StM_BlockEnd(ui_lib_end);
-
 
 /*
 === MODULES ===
@@ -863,11 +953,13 @@ blockUsrDesc = make_array(dcbUXRefsSiz);
 #MainScreen = "Logs";
 #LiveScreen = "Live";
 
-// Fonts management
-font_count = 17;
-font_names = make_array(font_count);
-font_sizes = make_array(font_count);
-font_modes = make_array(font_count);
+// Live screen (shared with Diffusion-3) : fonts, display boxes, colored background
+<? include("GM-Libs/mSL_Live_Screen.jsfx-inc"); ?>
+<? include("GM-Libs/mSL_Live_Screen_Display.jsfx-inc"); ?>
+live_screen_init(); // also creates the fonts table (font_names, font_sizes, font_modes)
+colorlimits(0x000000, 0xFFFFFF); // limits of the animated background colors (as in Diffusion-3)
+live_tab_active = 0; // set when a tab is shown with the "live" display
+live_clock_init(); // clock box of the "live" display (needs mSL symbols)
 
 <? include("GM-Libs/mSL_Colors.jsfx-inc"); ?>
 
@@ -895,6 +987,9 @@ dcbMCount = dcbTabsCount * dcbPannelsMax; // number of different modules sets - 
 dcbWSize = dcbMSize * 2;
 dcbBSize = dcbWSize * dcbMCount;
 
+scbTempCopy = make_array(dcbWSize); // temporary copy of a pane (copy/paste/swap panes) - as in GamePlayer
+Simple_temp = make_array(10); // work area for Simple_Action(code, seq)
+
 
 FlagsTbSiz = 32;
 FlagsTbVals = make_array(FlagsTbSiz);
@@ -904,6 +999,7 @@ Flgs_Thrds = (idx += 1);
 Flgs_Evnts = (idx += 1);
 Flgs_Acts = (idx += 1);
 Flgs_Traces = (idx += 1);
+Flgs_Umods = (idx += 1);
 
 
 KRun_mSL_Thread = 10;
@@ -919,9 +1015,9 @@ uix_jtheme_menu = make_jmenu(
     ui_jmenu_opt_notitle,
     "Theme",
     // "&1 Default|&1 Black|&1 Tron|&1 Light Cyan|&1 Orange|&1 Blue|&1 Dark Cyan||&2 Small|&2 Large|| &3 1 pane|&3 2 panes|&3 3 panes|&3 4 panes"
-    "!&1 Default|&1 Black|&1 Tron|&1 Light Cyan|&1 Orange|&1 Blue|&1 Dark Cyan"
+    "!&1 Default|&1 Black|&1 Tron|&1 Light Cyan|&1 Orange|&1 Blue|&1 Dark Cyan|&1 Dark Green|&1 Dark Red|&1 Light Amber|&1 Neon Green|&1 Light Magenta"
     );
-uix_jtheme_rtc_max = 7;  // 7 entries in the menu
+uix_jtheme_rtc_max = 12;  // 12 entries in the menu
 // Correct a few things...
 ui_jcolor_inactive_grey = Color_Dark_Gray;
 ui_jGUI_prev = 0;
@@ -998,18 +1094,6 @@ uuuMslCPt = 0; // index in this table
 
 
 
-
-err_sys = 0; // generic error system
-err_sys_ini = 0; // generic initialization error system
-err_sys_rtm = 0; // generic run-time error system
-err_sys_gfx = 0; // generic graphic error system
-err_fclp = 0; // error when reading clips description file
-err_fplm = 0; // error in play modes description file
-err_fhpc = 0; // error in HP configuration description file
-err_fspm = 0; // error in space modes description file
-err_fbnk = 0; // error in partials/banks description file
-err_sdfr = 0; // error in sensors def reader
-
 SchedActive = 1; // scheduler activity
 
 
@@ -1026,6 +1110,14 @@ gc_run_count = 0;
 mm_rem_siz = 128;
 mm_rem_in = 0;
 gc_MMA = mm_rem_mm = make_array(mm_rem_siz); // A list of remanent/protected objects
+// Objects referenced only from static arrays or global variables must be listed here,
+// otherwise the garbage collector frees them (see gc_mark(mm_usr_prot)) - as in GamePlayer / Diffusion-3
+mm_usr_prot_siz = 64;
+mm_usr_prot_ptr = 0;
+mm_usr_prot = make_array(mm_usr_prot_siz); // A list of USR defined protected objets
+mm_usr_prot[mm_usr_prot_ptr] = blockUsrDesc; mm_usr_prot_ptr += 1; // modules descriptions
+mm_usr_prot[mm_usr_prot_ptr] = blockUsrRefs; mm_usr_prot_ptr += 1; // modules prototypes
+mm_usr_prot_param = 0; // slot for paramBlock (see initAllParameters)
 mm_list_siz = 49957;
 mm_list_in = 0;
 mm_list_pt = 0;
@@ -1105,6 +1197,8 @@ local(wrd)
 mSL_dcl_JSFX_vars();
 
 
+
+altTabsNames = savedStrings; // use first saved strings to save alternate tabsnames
 
 // Global objects
 
@@ -1222,6 +1316,14 @@ DebugTbTyps[idx] = 0x101; DebugTbAdds[idx] = 25; DebugTbDecs[idx] = 0; DebugTbNa
 DebugTbTyps[idx] = 0x101; DebugTbAdds[idx] = 26; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Line 2"; idx += 1;
 DebugTbTyps[idx] = 0x101; DebugTbAdds[idx] = 27; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Writer 2"; idx += 1;
 DebugTbTyps[idx] = 0x101; DebugTbAdds[idx] = 28; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Effect 2"; idx += 1;
+DebugTbTyps[idx] = 0x101; DebugTbAdds[idx] = 29; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Reader 3"; idx += 1;
+DebugTbTyps[idx] = 0x101; DebugTbAdds[idx] = 30; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Line 3"; idx += 1;
+DebugTbTyps[idx] = 0x101; DebugTbAdds[idx] = 31; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Writer 3"; idx += 1;
+DebugTbTyps[idx] = 0x101; DebugTbAdds[idx] = 32; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Effect 3"; idx += 1;
+DebugTbTyps[idx] = 0x101; DebugTbAdds[idx] = 33; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Reader 4"; idx += 1;
+DebugTbTyps[idx] = 0x101; DebugTbAdds[idx] = 34; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Line 4"; idx += 1;
+DebugTbTyps[idx] = 0x101; DebugTbAdds[idx] = 35; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Writer 4"; idx += 1;
+DebugTbTyps[idx] = 0x101; DebugTbAdds[idx] = 36; DebugTbDecs[idx] = 0; DebugTbNames[idx] = "Effect 4"; idx += 1;
 
 DebugCount = idx;
 
@@ -1325,6 +1427,9 @@ PtrsInWA = RD_CNT+1 + WR_CNT+1 + FX_CNT+1 + LN_CNT + 1;
 StaticWASize = PtrsInWA + SMPL_SIZE + 1;
 StaticWA = make_array(StaticWASize); // ensemble des pointeurs mémoire et cellules
 DuplWA = make_array(StaticWASize); // pour load/save des pointeurs mémoire
+// protect lines, readers, writers, effects (dynamic blocks) from the garbage collector
+mm_usr_prot[mm_usr_prot_ptr] = StaticWA; mm_usr_prot_ptr += 1;
+mm_usr_prot[mm_usr_prot_ptr] = DuplWA; mm_usr_prot_ptr += 1;
 AltWAdec = DuplWA - StaticWA; // décalage pour accès aux objets similaires des deux ensembles
 
 sinc_table = make_array(SINC_TABLE_SIZE+2); // // valeurs d'une fonction "sinc"
@@ -1365,7 +1470,7 @@ savwrk = make_array(BFFSIZ); // Work area for load/save conversion
 
 
 // Créations des tables d'objets et de cellules
-function updt_tables(wa)
+function updt_tables(wa) local(spl_tab)
 (
     Lines_Set = wa;
     Readers_set = Lines_Set + LN_CNT+1;
@@ -1739,7 +1844,7 @@ local (pfid, ref, value, force, addr, res, flg, kod, size, s, ip, k, k2, pt, kid
 // Read & Compile a mSL script file
 function
 mSL_load_file_inGFX(fname)
-local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars)
+local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_start, mSL_load_end)
 (
     mSL_load_start = gfxStartTime;
     mSL_errX = mSL_errC = 0;
@@ -1906,15 +2011,6 @@ local ()
 );
 
 
-/*
-    Gui operations
-*/
-function mSL_gui_ops(argc, argv)
-local ()
-(
-    Undef;
-);
-
 
 /*
     Events management operations
@@ -1930,7 +2026,7 @@ local (res, kw, ent, k, p1, p2, p3)
 /*
    These values, sometimes, need some resetting
 */
-function some_reset()
+function some_reset() local(slLnActnPrv, slTimerPrv)
 (
     slupdt = 1; // 1 si autres sliders modifiés
     wrupdt = 1; // set to 1 if writer modified
@@ -1952,8 +2048,8 @@ function some_reset()
     slReaderPrv = -1;
     slRSpeedPrv = -1;
     slRStatusPrv = -1;
-    slTypePrv = -1;
-    slEPhasePrv = -1;
+    slTypePrv = slType; // not -1 : a difference would create effect "slEffect" (see update_sliders)
+    slEPhasePrv = slEPhase; // idem
     slRdModePrv = -1;
     slRdSrcLNbPrv = -1;
     slRDlSizePrv = -1;
@@ -2569,7 +2665,23 @@ menu_Wrt_SIds = make_jmenu(
     ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "writer-Snum", WR_CNT, menu_Wrt_SIds_N);
 
-
+// Pad for the writer
+pad_Wrt_NL = 2;
+pad_Wrt_NC = 8;
+pad_Wrt_Siz = pad_Wrt_NL * pad_Wrt_NC;
+pad_Writer = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    pad_Wrt_NL, pad_Wrt_NC, pad_Wrt_Siz);
+pad_Wrt_Labs = pad_Writer + pad_Writer[ui_jpad_labs]; // addresses of labels
+pad_Wrt_Colrs = pad_Writer + pad_Writer[ui_jpad_clrs]; // addresses of colors
+pad_Wrt_Cells = pad_Writer + pad_Writer[ui_jpad_cells]; // addresses of cells desc.
+pad_Wrt_Vals = pad_Writer + pad_Writer[ui_jpad_values]; // addresses of cells desc.
+//
+ii = 0; loop(pad_Wrt_Siz,
+            pad_Wrt_Colrs[ii] = Col_Inactive;
+            pad_Wrt_Labs[ii] = "";
+            ii+=1;
+);
 //==========================================================
 //===== EFFECTS Handling
 // Effects_set[FX_CNT]
@@ -2646,7 +2758,6 @@ local (lcbl)
 function Ln_Clear(lnum)
 local (i, lcbl)
 (
-
     ((lnum >= 0) && (lnum <= LN_CNT) && ((lcbl = Lines_Set[lnum]) > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) ? (
         i = its_Lin_BF1ST; loop(lcbl[its_Lin_ChCnt],
             memset(lcbl[i], 0, lcbl[its_Lin_ActBSize]);
@@ -2682,6 +2793,7 @@ local (lcbl, buff, bsz, i, j, R)
         lcbl[its_Lin_Unuz1] = SECURE_BL; // "Interstys buffer"
         lcbl[its_Lin_Status] = its_LinStat_Ready;
         lcbl[its_Lin_Flgs] = 1;
+        lcbl[its_Lin_Numb] = lnum;
         lcbl[its_Lin_ChCnt] = channels;
         lcbl[its_Lin_SmplCnt] = lng;
         lcbl[its_Lin_RecFreq] = freq;
@@ -2693,6 +2805,7 @@ local (lcbl, buff, bsz, i, j, R)
         // Create the various buffers
         // lng is the expected size in samples, bsz is the size needed to represent the buffer
         lcbl[its_Lin_ActBSize] = bsz = lng + BF_LIM * 2;
+        lcbl[its_Lin_Tmp2] = lcbl[its_Lin_RecFreq];
         i = its_Lin_BF1ST; R = j = 0;
         while (j < channels) (
             (((lcbl[i] = mSL_Dyn_Alloc(bsz, KW_buff, 0)) < BASE_MEMORY)) ? (
@@ -2716,7 +2829,7 @@ local (lcbl, buff, bsz, i, j, R)
 
 // delete buffer "lnum" from Lines_Set
 function Ln_Delete(lnum)
-local (lcbl, i, j, cb)
+local (lcbl, i, j, cb, lbcl)
 (
     ((lnum >= 0) && (lnum <= LN_CNT)) ? (
         (((lbcl = Lines_Set[lnum]) > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) ? (
@@ -2770,8 +2883,10 @@ local (lcbl, err)
     (((lcbl = Lines_Set[lnb]) < BASE_MEMORY) || (lcbl[-2] !== KW_lcbl)) ? (
         (lcbl === 0) ? (
             (act === its_LinAct_Create) ? (
+                sprintf(#itm, "Ln_Action 7 -> %d -- %d %d %d", xx, tmp[0], tmp[1], tmp[2]);
+                mSL_log(SysLogBox, #itm);
                 // can create using tmp
-                Ln_Make(lnb, tmp[0], tmp[1], tmp[2]);
+                Ln_Make(lnb, srate, tmp[1], tmp[2]);
             );
         ) : (
             err = 203;
@@ -3415,7 +3530,7 @@ local (cb)
 
 
 function mkModuleMenu()
-local (i, tmp, bln, blu)
+local (i, tmp, bln, blu, itdsp, MM2, blockStrSpace, blockThemeBlack, blockThemeTron, blockThemeLightCyan, blockThemeOrange, blockThemeBlue, blockThemeDarkCyan, blockThemeDarkGreen, blockThemeDarkRed, blockThemeLightAmber, blockThemeNeonGreen, blockThemeLightMagenta)
 (
 
     i = 0; loop(dcbNamesCnt,
@@ -3479,6 +3594,31 @@ local (i, tmp, bln, blu)
     blockDispNames[blockEffectC] = "Effect C"; //
     blockEffectD = (itdsp += 1);
     blockDispNames[blockEffectD] = "Effect D"; //
+    blockEffectE = (itdsp += 1);
+    blockDispNames[blockEffectE] = "Effect E"; //
+    blockEffectF = (itdsp += 1);
+    blockDispNames[blockEffectF] = "Effect F"; //
+    blockEffectG = (itdsp += 1);
+    blockDispNames[blockEffectG] = "Effect G"; //
+    blockEffectH = (itdsp += 1);
+    blockDispNames[blockEffectH] = "Effect H"; //
+
+    blockWriterA = (itdsp += 1);
+    blockDispNames[blockWriterA] = "Writer A"; //
+    blockWriterB = (itdsp += 1);
+    blockDispNames[blockWriterB] = "Writer B"; //
+    blockWriterC = (itdsp += 1);
+    blockDispNames[blockWriterC] = "Writer C"; //
+    blockWriterD = (itdsp += 1);
+    blockDispNames[blockWriterD] = "Writer D"; //
+    blockWriterE = (itdsp += 1);
+    blockDispNames[blockWriterE] = "Writer E"; //
+    blockWriterF = (itdsp += 1);
+    blockDispNames[blockWriterF] = "Writer F"; //
+    blockWriterG = (itdsp += 1);
+    blockDispNames[blockWriterG] = "Writer G"; //
+    blockWriterH = (itdsp += 1);
+    blockDispNames[blockWriterH] = "Writer H"; //
 
     blockUsrFirst = itdsp+1;
     // Add users modules
@@ -3552,6 +3692,8 @@ local (i, tmp, bln, blu)
     blockDispNames[blockTabShftLeft] = "&/Shift tabs left"; //
     blockTabShftRight = (itdsp += 1);
     blockDispNames[blockTabShftRight] = "&/Shift tabs right"; //
+    blockTabLive = (itdsp += 1);
+    blockDispNames[blockTabLive] = "&/Live display"; // see genericLiveTab
     blockTabRename = (itdsp += 1);
     blockDispNames[blockTabRename] = "&/<Rename tab..."; //
     //
@@ -3570,7 +3712,17 @@ local (i, tmp, bln, blu)
     blockThemeBlue = (itdsp += 1);
     blockDispNames[blockThemeBlue] = "!&1 Blue"; //
     blockThemeDarkCyan = (itdsp += 1);
-    blockDispNames[blockThemeDarkCyan] = "!&1< Dark Cyan"; //
+    blockDispNames[blockThemeDarkCyan] = "!&1 Dark Cyan"; //
+    blockThemeDarkGreen = (itdsp += 1);
+    blockDispNames[blockThemeDarkGreen] = "!&1 Dark Green"; //
+    blockThemeDarkRed = (itdsp += 1);
+    blockDispNames[blockThemeDarkRed] = "!&1 Dark Red"; //
+    blockThemeLightAmber = (itdsp += 1);
+    blockDispNames[blockThemeLightAmber] = "!&1 Light Amber"; //
+    blockThemeNeonGreen = (itdsp += 1);
+    blockDispNames[blockThemeNeonGreen] = "!&1 Neon Green"; //
+    blockThemeLightMagenta = (itdsp += 1);
+    blockDispNames[blockThemeLightMagenta] = "!&1< Light Magenta"; //
     //
     //
     blockMenuITC = itdsp + 1 ;
@@ -3898,7 +4050,8 @@ local (i, j, u, v, flg, tbN, mblk, a, k)
             // various GUI related operations
             ((kit >=0) && (kit < dcbTabsCount)) ? (
                 // switch to screen "kit"
-                ui_screen_switch(uix_jG_switchr[kit]);
+                currScreenNb = kit;
+                ui_screen_switch(uix_jG_menuscr[kit]);
             );
 
         );
@@ -3921,6 +4074,9 @@ local (i, j, u, v, flg, tbN, mblk, a, k)
 (p_ActSize > paramCount) ? err_sys_ini = 9937; // paramCount error
 
 paramBlock = make_array(paramCount * paramEntSize);
+// protect the sliders blocks (pp_mSL_Ref) from the garbage collector
+(mm_usr_prot_param == 0) ? (mm_usr_prot_param = mm_usr_prot_ptr; mm_usr_prot_ptr += 1;);
+mm_usr_prot[mm_usr_prot_param] = paramBlock;
 // paramFlags = make_array(paramCount);
 // paramPrevValues = make_array(paramCount);
 param_last_touched = 1;
@@ -4071,7 +4227,7 @@ local ()
 
 // Affiche sur les sliders les caractéristiques du reader courant
 function display_Reader()
-local (bfr, flg, ds)
+local (bfr, flg, ds, slRdModePrev)
 (
     // Montrer au moins les sliders de base
     slider_show(slReader,gui_show_sliders);
@@ -4209,7 +4365,7 @@ local (bfr, flg, ds)
 );
 
 function display_Writer()
-local (bfr, flg)
+local (bfr, flg, W_pos)
 (
     // Montrer les sliders de base
     slider_show(slWriter,gui_show_sliders);
@@ -4716,7 +4872,7 @@ local (i, cbl)
 );
 
 function update_sliders()
-local (bfr, flg, tmp, act, tmdisp, i)
+local (bfr, flg, tmp, act, tmdisp, i, Prevreader, PrevLine, slRdWrefPrev, Preveffect, Prevwriter, smplcpy, smplmerge)
 (
     L__105 += 1;
     act = 0;
@@ -5518,7 +5674,7 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
 */
 function File_Handle(fname, lnb, lcbl)
 local (FFrRate, FlCC, Fhandle, Fformat, FFSize, cbfsiz, bread, ptbuf, bcnt, addbuffs, rdcnt,
-        rc, i, pb, ends)
+        rc, i, pb, ends, its_FilErr, bflen)
 (
     FFrRate = FlCC = its_FilErr = 0;
     Fhandle = file_open(fname);
@@ -5628,7 +5784,7 @@ local (FFrRate, FlCC, Fhandle, Fformat, FFSize, cbfsiz, bread, ptbuf, bcnt, addb
     Execute a read - the reader is defined and in status "reading"
 */
 function exec_reader(reader, nbr)
-local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc, loc_aux, SP, A, A_aux, playing)
+local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc, loc_aux, SP, A, A_aux, playing, l_valid, lax_valid)
 (
     its_RdrErrXe = (reader[its_Rdr_Check] !== BLOCK_CHECK);
     (its_RdrErrXe) ? (
@@ -6054,7 +6210,7 @@ local (lcbl, k, s, x, bp, val, vol)
 );
 
 function exec_fx(fx, nbr)
-local (fxcbl, ty, ptsrc, dst, cc, ccnt, i, zp)
+local (fxcbl, ty, ptsrc, dst, cc, ccnt, i, zp, err_effect)
 (
     (err_effect = (fx[its_Efx_Check] !== BLOCK_CHECK)) ? (
         err_effect = 0;
@@ -6134,7 +6290,7 @@ local (ps, pt, sv, sz)
 );
 
 function load_mem(file, area, size)
-local (pd, pt, sl)
+local (pd, pt, sl, rcr)
 (
     pd = sl = 0;
     while (size > 0) (
@@ -6344,6 +6500,409 @@ mSL_define_extensions();
 initAllParameters();
 dclAllParameters();
 
+// GC bounds : roots (mm_usr_prot, StaticWA, paramBlock...) and the dynamic memory must be
+// between mm_lowblocks and mm_highblocks, otherwise gc_mark ignores them
+mm_highblocks = make_array(2); // no block with memory references beyond that
+mm_highblocks[0] = 'High'; mm_highblocks[1] = '_Mem';
+
+
+/*
+    Gui operations
+*/
+function mSL_gui_ops(argc, argv)
+local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
+      s, k, w, xbox, chkprev, res_end, ptb, ptw, pts, pta, lct, ds, ref, txt)
+(
+    res = Undef;
+    (argc > 1) ? (
+        kw = argv[0];
+        npar = argv[1];
+
+        (kw === mSL_KW_slider) ? (
+            pp = 0;
+            ((npar === (0|npar)) && (npar >= 0) && (npar < paramCount)) ? (
+                pp = paramBlock + npar * paramEntSize;
+            ) :
+            ((npar > mSL_Sym_Low) && (npar < mSL_Sym_High) && (mSL_getinHT(paramHashTbl, npar) >= 0)) ? (
+                pp = paramBlock + (npar = mSL_getinHTaux) * paramEntSize;
+            );
+            (pp != 0) ? (
+                (argc >= 11) ? (
+                    parDclMode = 1;
+                    r = parDcl(npar, argv[2], argv[3], argv[4], argv[5], argv[6], argv[7], argv[8], argv[9], argv[10],
+                        ((argc >= 12) ? argv[11]: 0), ((argc >= 13) ? argv[12]: 0), ((argc >= 14) ? argv[13]: 0),
+                        ((argc >= 15) ? argv[14]: 0), ((argc >= 16) ? argv[15]: 0), ((argc >= 17) ? argv[16]: 0));
+                    (r === 0) ? (
+                        argc = 2; // return/build the entry
+                    ) : (
+                        // signal error
+                        sprintf(#u, "++Slider error: %d - %d", npar, r);mSL_log(SysLogBox, #u);
+                        argc = 2;
+                    );
+                );
+                ((argc === 2) && (pp[pp_Name] != 0) && (pp[pp_Name] != #pUndef)) ? (
+                    // return, if any, the slider block reference
+                    sr = pp[pp_mSL_Ref];
+                    ((sr > 0) && (mSL_bl_check(sr, 'sldr')) && (sr[-1] >= 12)) ? (
+                        res = sr;
+                    ) : (
+                        pp[pp_mSL_Ref] = res = mSL_Dyn_Alloc(12, 'sldr', mSL_StM_FlClear);
+                    );
+                    // Create/update the slider descriptor
+                    pp[pp_Addr] = res + 3;
+                    paramFlags[npar] |= pflg_ChkWrite;
+                    res[0] = mSL_KW_slider;
+                    res[1] = npar;
+                    res[2] = pp[pp_mSL_Code];
+                    res[3] = parGetV(npar);
+                    res[4] = pp[pp_Name];
+                    res[5] = pp[pp_SFmt];
+                    res[6] = pp[pp_MFmt];
+                );
+            );
+        ) :
+        (kw === mSL_KW_declare) ? (
+            (mSL_bl_check(npar, 'umod') && (argc >= 4)) ? (
+                idt = argv[2]; // uname
+                n = argv[3]; // module. num
+                (mSL_isString(idt) && (n === (0|n)) && (n >= 0) && (n <= dcbUModsSiz)) ? (
+                    // declare the module
+                    blockUsrNames[n] = idt;
+                    blockUsrRefs[n] = npar;
+                    res = n;
+                );
+            );
+        ) :
+        (kw === mSL_KW_update) ? (
+            ((npar === mSL_KW_sliders) || (npar === mSL_KW_Params)) ? (
+                // Rebuild parameters sliders
+                menu_Param_mSL = 0;
+                menu_Param_UBS = 0;
+                menu_Param_UBD = 0;
+                parDclMode = 0;
+                dclAllParameters();
+            ) :
+            (npar === mSL_KW_modules) ? (
+                // After creating new users modules
+                checkUsrMods(); // valid blocks
+                mkModuleMenu();// rebuild the menu
+            );
+        ) :
+        (kw === mSL_KW_sbox) ? (
+            // Creating a Slider Box
+            cnt = argc - 1; // count of expected sliders references
+            i = 1; n = 0; loop(cnt,
+                v = argv[i];
+                // lets check that v is a slider reference
+                mSL_bl_check(v, 'sldr') ? (n += 1);
+                i += 1;
+            );
+            (n === cnt) ? (
+                // all parameters are sliders. Let's create the container
+                res = mSL_Dyn_Alloc(ubx_isiz+cnt, 'sbox', mSL_StM_FlClear);
+                //----
+                res[ubx_ty] = 'sbox'; // this is a slider box
+                res[ubx_flgs] = ubx_final; // object is final
+                res[ubx_mref] = res;  // points to itself
+                res[ubx_anc] = 0; // not relevant for now
+                //----
+                res[ubx_lcnt] = 0; // no direct descendants
+                res[ubx_icnt] = cnt; // items count
+                res[ubx_1st] = 0; // not relevant for now
+                res[ubx_tcnt] = 0; // no descendants at all
+                //----
+                res[ubx_l] = 0; // not relevant for now
+                res[ubx_t] = 0; // not relevant for now
+                res[ubx_w] = Undef; // not known yet
+                res[ubx_h] = ui_jd_slidh * cnt; // actual value in pixels, "correct"
+                //----
+                res[ubx_minw] = Undef; // not known yet
+                res[ubx_maxw] = Undef; // not known yet
+                //----
+                i = 1; j = ubx_isiz; loop(cnt,
+                    res[j] = argv[i]; i += 1; j += 1;
+                );
+            );
+        ) :
+        (kw === mSL_KW_ibox) ? (
+            // Create an info box with a set of infos to display
+            cnt = argc - 1; // count of expected parameters
+            (cnt > 1) ? (
+                // all objects seem ok. Let's create the module
+                res = mSL_Dyn_Alloc((s = ubx_isiz+cnt+1), 'ibox', mSL_StM_FlClear);
+                //----
+                res[ubx_ty] = 'ibox'; // This is an infobox
+                res[ubx_flgs] = ubx_final; // object is final
+                res[ubx_mref] = res; // points to itself
+                res[ubx_name] = 0; // not relevant for now
+                //----
+                res[ubx_lcnt] = 0; // direct descendants count
+                res[ubx_icnt] = 1;  // one item
+                res[ubx_1st] = 0; // relative pointer to 1st descendant
+                res[ubx_tcnt] = 0; // total count of all descendants
+                //----
+                res[ubx_l] = Undef; // not known yet
+                res[ubx_t] = Undef; // not known yet
+                res[ubx_w] = Undef; // not known yet
+                res[ubx_h] = ui_jd_tboxs+5; // appropriate height
+                //----
+                res[ubx_minw] = ui_MinSubColSize; // min size
+                res[ubx_maxw] = 5 * ui_MinSubColSize; // not known yet
+                //----
+                // Copy references
+                ptb = res + ubx_isiz; // where to copy
+                ptb[0] = cnt;
+                i = 0; loop(cnt,
+                    i += 1; ptb += 1;
+                    ptb[0] = argv[i];
+                );
+            );
+        ) :
+        ((kw === mSL_KW_hbox)) ? (
+            // Create an horizontal box, expect a set of '*box'
+            xbox = 'hbox';
+            k = argc - 1; // count of parameters
+            chk = i = 1; chkprev = cnt = w = n = 0;
+            loop(k,
+                v = argv[i];
+                ((chk && chkprev && (v < 1024))) ? (
+                    w += 1;
+                    chkprev = 0;
+                ) :
+                (chk = (chk && mSL_bl_check(v) && ((v[-2] & 0xffffff) === 'box'))) ? (
+                    n += 1 + v[ubx_tcnt]; // count of internal objects
+                    cnt += 1;
+                    chkprev = 1;
+                );
+                i += 1;
+            );
+            chk ? (
+                // all objects seem ok. Let's create the module
+                res = mSL_Dyn_Alloc((s = ubx_isiz+2*cnt), xbox, mSL_StM_FlClear);
+                res_end = res + s;
+                //----
+                res[ubx_ty] = xbox; // This is an horizontal box
+                res[ubx_flgs] = 0; // not relevant for now
+                res[ubx_mref] = res; // points to itself
+                res[ubx_name] = 0; // not relevant for now
+                //----
+                res[ubx_lcnt] = cnt; // direct descendants count
+                res[ubx_icnt] = 0;  // no items
+                res[ubx_1st] = 0; // relative pointer to 1st descendant
+                res[ubx_tcnt] = n; // total count of all descendants
+                //----
+                res[ubx_l] = Undef; // not known yet
+                res[ubx_t] = Undef; // not known yet
+                res[ubx_w] = Undef; // not known yet
+                res[ubx_h] = Undef; // not known yet
+                //----
+                res[ubx_minw] = Undef; // not known yet
+                res[ubx_maxw] = Undef; // not known yet
+                //----
+                // Copy references
+                ptb = res + ubx_isiz; // where to copy references
+                ptw = ptb + cnt; // where to copy widths
+                k = argc - 1; // count of parameters
+                i = 1; chkprev = 0; w = 0;
+                loop(k,
+                    v = argv[i];
+                    ((chkprev && (v < 1024))) ? (
+                        ptw[w-1] = v;
+                        chkprev = 0;
+                    ) :
+                    (mSL_bl_check(v) && ((v[-2] & 0xffffff) === 'box')) ? (
+                        ptb[w] = v;
+                        ptw[w] = Undef; // default width
+                        chkprev = 1;
+                        w += 1;
+                    );
+                    i += 1;
+                );
+            );
+        ) :
+        ((kw === mSL_KW_vbox)) ? (
+            // Create a vertical box, expect a set of '*box'
+            xbox = 'vbox';
+            cnt = argc - 1; // count of expected references
+            chk = i = 1; n = 0; loop(cnt,
+                v = argv[i];
+                (chk = (chk && mSL_bl_check(v) && ((v[-2] & 0xffffff) === 'box'))) ? (
+                    n += 1 + v[ubx_tcnt]; // count of internal objects
+                );
+                i += 1;
+            );
+            chk ? (
+                // all objects seem ok. Let's create the module
+                res = mSL_Dyn_Alloc((s = ubx_isiz+n), xbox, mSL_StM_FlClear);
+                res_end = res + s;
+                //----
+                res[ubx_ty] = xbox; // This is a vertical box
+                res[ubx_flgs] = 0; // not relevant for now
+                res[ubx_mref] = res; // points to itself
+                res[ubx_name] = 0; // not relevant for now
+                //----
+                res[ubx_lcnt] = cnt; // direct descendants count
+                res[ubx_icnt] = 0;  // no items
+                res[ubx_1st] = 0; // relative pointer to 1st descendant
+                res[ubx_tcnt] = n; // total count of all descendants
+                //----
+                res[ubx_l] = Undef; // not known yet
+                res[ubx_t] = Undef; // not known yet
+                res[ubx_w] = Undef; // not known yet
+                res[ubx_h] = Undef; // not known yet
+                //----
+                res[ubx_minw] = Undef; // not known yet
+                res[ubx_maxw] = Undef; // not known yet
+                //----
+                // Copy references
+                ptb = res + ubx_isiz; // where to copy
+                i = 1; loop(cnt,
+                    ptb[0] = argv[i]; i += 1; ptb += 1;
+                );
+            );
+        ) :
+        (kw === mSL_KW_tbox) ? (
+            // Create a text box - Expect a string as parameter
+            txt = argv[1];
+            (chk = mSL_isString(txt)) ? (
+                res = mSL_Dyn_Alloc((s = ubx_isiz+1), 'tbox', mSL_StM_FlClear);
+                //----
+                res[ubx_ty] = 'tbox'; // this is a slider box
+                res[ubx_flgs] = ubx_final; // object is final
+                res[ubx_mref] = res;  // points to itself
+                res[ubx_anc] = 0; // not relevant for now
+                //----
+                res[ubx_lcnt] = 0; // no direct descendants
+                res[ubx_icnt] = 1; // items count
+                res[ubx_1st] = 0; // not relevant for now
+                res[ubx_tcnt] = 0; // no descendants at all
+                //----
+                res[ubx_l] = 0; // not relevant for now
+                res[ubx_t] = 0; // not relevant for now
+                res[ubx_w] = Undef; // not known yet
+                res[ubx_h] = ui_jd_vtext; // actual value in pixels, "correct"
+                //----
+                res[ubx_minw] = Undef; // not known yet
+                res[ubx_maxw] = Undef; // not known yet
+                //----
+                res[ubx_isiz] = txt; // the string number
+            );
+        ) :
+        (kw === mSL_KW_module) ? (
+            // Expect a module name
+            // idt = argv[1];
+            // chk = mSL_isString(idt);
+            cnt = argc - 1; // count of expected references
+            chk = i = 1; n = 0; loop(cnt,
+                v = argv[i];
+                (chk = (chk && mSL_bl_check(v) && ((v[-2] & 0xffffff) === 'box'))) ? (
+                    n += 1 + v[ubx_tcnt]; // count of internal objects
+                );
+                i += 1;
+            );
+            chk ? (
+                // all objects seem ok. Let's create the module
+                res = mSL_Dyn_Alloc((s = ubx_isiz+n*ubx_isiz), 'umod', mSL_StM_FlClear);
+                res_end = res + s;
+                //----
+                res[ubx_ty] = 'umod'; // This is a module
+                res[ubx_flgs] = 0; // not relevant for now
+                res[ubx_mref] = res; // points to itself
+                res[ubx_name] = 0; // not relevant for now
+                //----
+                res[ubx_lcnt] = cnt; // direct descendants count
+                res[ubx_icnt] = 0;  // no items
+                res[ubx_1st] = 0; // relative pointer to 1st descendant
+                res[ubx_tcnt] = n; // total count of all descendants
+                //----
+                res[ubx_l] = Undef; // not known yet
+                res[ubx_t] = Undef; // not known yet
+                res[ubx_w] = Undef; // not known yet
+                res[ubx_h] = Undef; // not known yet
+                //----
+                res[ubx_minw] = Undef; // not known yet
+                res[ubx_maxw] = Undef; // not known yet
+                res[ubx_thread] = mSL_current_thread; //current thread
+                res[ubx_thrdid] = mSL_current_thread[mSL_THR_UTId]; // current thread id
+                // res[ubx_xxxx] = 0; // ubx_xxxx is not defined : would overwrite res[ubx_ty]
+                //sprintf(#b, "a ===>    0:%d   //", res[ubx_ty]); mSL_log(SysLogBox, #b);
+                //----
+                // First insert direct references
+                ptb = res + ubx_isiz; // where to copy / create the boxes descriptions
+                pts = argv + 1; // local sources
+                lct = cnt; // local count
+                pta = res; // current ancestor : the module we are creating
+                while ((chk) && (ptb < res_end)) (
+                    // Create a local box from current src
+                    while ((chk) && (lct > 0)) (
+                        ds = pts[0];
+                        // this must be a correct reference
+                        (chk = (mSL_bl_check(ds) && ((ds[-2] & 0xffffff) === 'box'))) ? (
+                            // indicate first descendant
+                            (pta[ubx_1st] === 0) ? (pta[ubx_1st] = ptb - res;);
+                            lct -= 1;
+                            // insert the source
+                            //----
+                            ptb[ubx_ty] = ds[ubx_ty];
+                            ptb[ubx_flgs] = ds[ubx_flgs];
+                            ptb[ubx_mref] = ds;
+                            ptb[ubx_anc] = pta - res;
+                            //----
+                            ptb[ubx_lcnt] = ds[ubx_lcnt];
+                            ptb[ubx_icnt] = ds[ubx_icnt];;
+                            ptb[ubx_1st] = 0;
+                            ptb[ubx_tcnt] = ds[ubx_tcnt];
+                            //----
+                            ptb[ubx_t] = ds[ubx_t];
+                            ptb[ubx_l] = ds[ubx_l];
+                            ptb[ubx_w] = ds[ubx_w];
+                            ptb[ubx_h] = ds[ubx_h];
+                            //----
+                            ptb[ubx_minw] = ds[ubx_minw];
+                            ptb[ubx_maxw] = ds[ubx_maxw];
+                            //----
+                            pts += 1; // next source
+                            ptb += ubx_isiz; // where we will copy it
+                        );
+                    );
+                    (chk && (ptb < res_end) && (lct <= 0)) ? (
+                        // skip to next set source
+                        pta = pta + ubx_isiz; // new ancestor
+                        ref = pta[ubx_mref]; // just recheck
+                        (chk = (mSL_bl_check(ref))) ? (
+                            lct = ref[ubx_lcnt]; // number of direct references to include
+                            pts = ref + ubx_isiz; // point to this box references
+                        );
+                    );
+                );
+                // sprintf(#b, "b ===>    0:%d   //", res[ubx_ty]); mSL_log(SysLogBox, #b);
+            );
+            (!chk) ? (
+                res = Undef;
+            );
+        ) :
+        (kw === mSL_KW_delete) ? (
+            (npar === mSL_KW_modules) ? (
+                deleteUsrMods(); // delete all, then
+                mkModuleMenu();// rebuild the menu
+            ) :
+            (npar === mSL_KW_sliders) ? (
+                i = p_ActSize;
+                while (i < paramCount) (
+                    parRemove(i);
+                    i += 1;
+                );
+                menu_Param_mSL = 0;
+                menu_Param_UBS = 0;
+                menu_Param_UBD = 0;
+                parDclMode = 0;
+                dclAllParameters();
+            );
+        );
+    );
+    res;
+);//mSL_gui_ops
+
 
 // Insert here the mSL interpreter
 <? include("GM-Libs/mSL_Evaluator.jsfx-inc"); ?>
@@ -6386,7 +6945,7 @@ loadMode ? (
 
     doingLoad = 1;
     handling_load = 1;
-    lditmc = 0;
+    lditmc = 0; ldstud = 0; ldtnam = -1; // count of tabs names read (-1 : none in this preset)
     ldtotal = 0;
     lderr = 0;
     memset(DuplWA, 0, StaticWASize); // clean the load area pointer
@@ -6427,6 +6986,24 @@ loadMode ? (
                 );
             );
         ) :
+        (savtmp[0] === 'stud') ? (
+            // studio : tabs config (Pr7_*) and modules shown in each pane
+            ((savtmp[1] <= 128) && (savtmp[2] <= dcbBSize)) ? (
+                ldtotal += load_mem(0, serialBlock, savtmp[1]);
+                ldtotal += load_mem(0, dcbBlocksAll, savtmp[2]);
+                ldstud = 1;
+            ) : (
+                ldok = 0;
+                lderr = 140; // studio block too large
+            );
+        ) :
+        (savtmp[0] === 'tnam') ? (
+            ldtnam = savtmp[1]; // alternate tabs names (see "Rename tab...")
+            si = 0; loop(savtmp[1],
+                (si < dcbTabsCount) ? file_string(0, altTabsNames[si]) : file_string(0, #tnam_skip);
+                si += 1;
+            );
+        ) :
         (
             zzz_savtmp = savtmp[0];
             zzz_sastwa = 'stwa';
@@ -6439,7 +7016,7 @@ loadMode ? (
     (
         // load is ok
         str_mess += 1; str_mess > 32 ? str_mess = 16;
-        sprintf(str_mess, "Load (%d / %d), %d items.", ldok, lderr, lditmc);
+        sprintf(str_mess, "Load (%d / %d), %d items, %d tab names, studio %d.", ldok, lderr, lditmc, ldtnam, ldstud);
     );
 
     (lderr === 0) ? (
@@ -6459,6 +7036,16 @@ loadMode ? (
     build_savarea();
     siz1 = save_mem(0, savarea, SVASIZ);
     svtotal += siz1;
+    // Save the alternate tabs names (see "Rename tab...") : first, before the blocks
+    savtmp[0] = 'tnam'; savtmp[1] = dcbTabsCount; savtmp[2] = savtmp[3] = 0;
+    svtotal += save_mem(0, savtmp, TMPSIZ);
+    si = 0; loop(dcbTabsCount, file_string(0, altTabsNames[si]); si += 1;);
+    // Save the studio : tabs config (Pr7_* : panes count and widths, live display) and modules of each pane
+    savtmp[0] = 'stud'; savtmp[1] = 128; savtmp[2] = dcbBSize; savtmp[3] = 0;
+    svtotal += save_mem(0, savtmp, TMPSIZ);
+    svtotal += save_mem(0, serialBlock, 128);
+    svtotal += save_mem(0, dcbBlocksAll, dcbBSize);
+
     // siz4 = 0;
     // Save all objects, except lines set pointers and contents
     si = 0; loop(PtrsInWA,
@@ -6476,11 +7063,10 @@ loadMode ? (
         si += 1;
     );
 
-
     (
         // load is ok
         str_mess += 1; str_mess > 32 ? str_mess = 16;
-        sprintf(str_mess, "Save (%d / %d), %d items; %d words.", ldok, sverr, svitmc,svtotal);
+        sprintf(str_mess, "Save (%d / %d), %d items; %d words, %d tab names.", ldok, sverr, svitmc,svtotal, dcbTabsCount);
     );
 );
 
@@ -6519,6 +7105,12 @@ loop(RD_CNT,
     i += 1;
 );
 its_RdrSolos = j; // count of readers in solo mode
+
+// Check users modules every minute (as in GamePlayer)
+((0|(time() / 60)) !== usrModMn) ? (
+    usrModMn = 0|(time() / 60);
+    checkUsrMods();
+);
 
 
 @sample
@@ -6667,7 +7259,7 @@ local (z, SKeyedT)
     (KeyedT === 0) ? ui_key_next();
 );
 
-function do_GenericTabStart()
+function do_GenericTabStart() local(studio_pad_active)
 (
     ui_jmouse_cap |= mouse_cap;
     KeyedT = Keyed = 0; AAAA_Kmouse_cap = Kmouse_cap = ui_jmouse_cap;
@@ -6719,6 +7311,7 @@ function do_GenericTabEnd()
 );
 
 // ch = gfx_getchar();
+KeyedT = Keyed = 0; // do not replay a key left over from the previous frame
 ch = do_GenericKeyRead();
 uix_latestchar = KeyedT = 0;
 mcp = mouse_cap;
@@ -6726,6 +7319,12 @@ mcp = mouse_cap;
     mcp_indic = 20; // right clic in the graphic area
 );
 
+(ui_screen() === "control.prompt") ? (
+    uix_latestchar = ch; // the prompt gets all keys, no shortcuts
+) :
+(ch === 'g') ? (
+    gc_run(2); // run a garbage collection (as in FilePlayer, Diffusion-3, ScriptMaster)
+) :
 (ch === 'm') ? (
     gui_show_memory = gui_show_memory ? 0 : 1;
 ) :
@@ -7185,6 +7784,30 @@ local (n, w)
         (n === 28) ? (
             w = Effects_set[1];
         ) :
+        (n === 29) ? (
+            w = Readers_set[2];
+        ) :
+        (n === 30) ? (
+            w = Lines_set[2];
+        ) :
+        (n === 31) ? (
+            w = Writers_set[2];
+        ) :
+        (n === 32) ? (
+            w = Effects_set[2];
+        ) :
+        (n === 33) ? (
+            w = Readers_set[3];
+        ) :
+        (n === 34) ? (
+            w = Lines_set[3];
+        ) :
+        (n === 35) ? (
+            w = Writers_set[3];
+        ) :
+        (n === 36) ? (
+            w = Effects_set[3];
+        ) :
         (
             w = 0;
         );
@@ -7403,7 +8026,7 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
 */
 function show_Reader_Pad(RDBL, blockId)
 local (h1, h2, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi, i, xx, w, k, r, jmc,
-        rp, zi, zz, zzch, zzent, zzmcl, zzmmd, p1, p2)
+        rp, zi, zz, zzch, zzent, zzmcl, zzmmd, p1, p2, newlnb, rerr, spd, d1, clen, mvl)
 (
     h1 = uix_jpadHeight(pad_Rdr_NL); // height
     h2 = (RDBL[5] > 0) ? ui_jd_slidh * RDBL[5] + 6 : 0;
@@ -7700,31 +8323,7 @@ local (h1, h2, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi, i, 
                             */
                         ) :
                         (zzmcl === 11) ? (
-                                w = rcbl[its_Rdr_RCellT];
-                            /*
-                            (rok) ? (
-                                k = rcbl[its_Rdr_RCellN]+1;
-                                (w <= 0) ? (
-                                    rcbl[its_Rdr_RCellN] = rcbl[its_Rdr_RCell] = 0;
-                                ) :
-                                (w <= 4) ? (
-                                    ui_menu_tick(menu_128_0_Ids, k, 1);
-                                    xx = control_jmenu(menu_128_0_Ids);
-                                    ui_menu_tick(menu_128_0_Ids, k, 0);
-                                ) : (
-                                    ui_menu_tick(menu_256_1_Ids, k, 1);
-                                    xx = control_jmenu(menu_256_1_Ids);
-                                    ui_menu_tick(menu_256_1_Ids, k, 0);
-                                );
-                                (xx != 0) ? (
-                                    rcbl[its_Rdr_RCellN] = xx - 1;
-                                    rcbl[its_Rdr_RCell] = getCellIdent(rcbl[its_Rdr_RCellT], rcbl[its_Rdr_RCellN]);
-                                    sprintf(#itm, "Menu 11 -> %d %d %d", rcbl[its_Rdr_RCellT],
-                                        rcbl[its_Rdr_RCellN], rcbl[its_Rdr_RCell]);
-                                    mSL_log(SysLogBox, #itm);
-                                );
-                            );
-                            */
+                            w = rcbl[its_Rdr_RCellT];
                         ) :
                         (zzmcl === 12) ? (
                             (rok) ? (
@@ -8308,6 +8907,8 @@ local (h1, h2, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, dfCo
                         ) :
                         (zzmcl === 7) ? (
                             xx = control_jmenu(menu_Lin_Action);
+                            sprintf(#itm, "Menu 7 -> %d --> %d %d %d", xx, LDBL[0], LDBL[1], LDBL[2]);
+                            mSL_log(SysLogBox, #itm);
                             (xx != 0) ? (
                                 Ln_Action(lnr, xx - 1, LDBL);
                             );
@@ -8386,11 +8987,11 @@ local ()
             ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
 
             rdr = RDBL[0]; // number of effect to be displayed
+            rcbl = Effects_set[rdr];
             ui_split_top(h1);
                 ui_pad(1,2,2,2);
                 mSL_setStrArray(pad_Efx_Labs, pad_Rdr_Siz);
 
-                rcbl = Effects_set[rdr];
                 rok = (rcbl > BASE_MEMORY) && (rcbl[-2] === KW_effx);
                 CL1 = Color_Cornflower_Blue;
 
@@ -8424,9 +9025,75 @@ local ()
     );
 );
 
+
+/*
+    WDBL[0] : number of writer to display
+*/
+function show_Writer_Pad(WDBL, blockID)
+local (h1, h2, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, CL1, dfCol, i, zz, zzch,
+        zzent, zzmcl, zzmmd)
+(
+    h1 = uix_jpadHeight(pad_Wrt_NL); // height
+    h2 = (WDBL[5] > 0) ? ui_jd_slidh * WDBL[5] + 6 : 0;
+    uix_jneed = uix_jmini = h1+h2+ui_jd_ctgr;
+    (ui_height() >= uix_jmini) ? (
+        ui_split_top(uix_jneed);
+        ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
+            zzmi = ui_hover();
+            jmc = ui_jmouse_cap;
+            keepBlockInfos(blockId);
+            (zzmi) ? (
+                ui_push();
+                    // stack is now 2 levels deep
+                    ui_color(Col_Frame);
+                    ui_border(); // draws in purple
+                ui_pop();
+            );
+            control_group(blockDispNames[blockDispInverts[blockId]]);
+            ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+
+            wrt = WDBL[0]; // number of writer to be displayed
+            ui_split_top(h1);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_Wrt_Labs, pad_Wrt_Siz);
+                wcbl = Writers_set[wrt];
+                wok = (wcbl > BASE_MEMORY) && (wcbl[-2] === KW_writ);
+                CL1 = Color_Cornflower_Blue;
+                (wok) ? (
+                    dfCol = Col_InfoA ;
+                    i = 0; loop(pad_Wrt_Siz,
+                        pad_Wrt_Colrs[i] = dfCol;
+                        strcpy(pad_Wrt_Labs[i],"");
+                        i += 1;);
+                ) : (
+                    dfCol = Col_Inactive ;
+                    WDBL[5] = 0;
+                    i = 0; loop(pad_Wrt_Siz,
+                        pad_Wrt_Colrs[i] = dfCol;
+                        strcpy(pad_Wrt_Labs[i],"");
+                        i += 1;);
+                );
+                sprintf(pad_Wrt_Labs[0],"Writer %d", wrt+1);
+                zz = control_jpad(pad_Writer, WDBL[3], -1, 1);
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4; ui_GFXReason = 34;
+                    zzch = pad_Writer[ui_jpad_lkey];
+                    zzent = pad_Writer[ui_jpad_entkey]-1;
+                    zzmcl = pad_Writer[ui_jpad_last]-1;
+                    zzmmd = pad_Writer[ui_jpad_lmods];
+                );
+            ui_pop();
+
+            do_ModuleKeySave();
+        ui_pop();
+    );
+);
+
+
+
 flagpr = 1;
 function show_UserModule(module)
-local(umid, chk, i, statn, recomp, modInst, modSrc, ucod, uent, err)
+local(umid, chk, i, statn, recomp, modInst, modSrc, ucod, uent, err, ut, user_top, ul, user_left, uw, user_width, uh, user_height, rptb, ptbl, prvstk, ptstk, anc, typanc, cbxrpt, cbxref, typtb, crptb, addb, rcnt, adds, flgm, reh, w3)
 (
     // module is a module number
     // Lets check the existence of the object
@@ -8882,7 +9549,7 @@ local(umid, chk, i, statn, recomp, modInst, modSrc, ucod, uent, err)
 
 
 function genericItemsPos(bNumb)
-local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit)
+local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent)
 (
     blockMouseWasIn = 0;
     PanIdt = bNumb;
@@ -8995,6 +9662,7 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit)
             // Indicates the pane preferences
             s = p[block1Pane -1 + studDispPrf];
             str_setchar(s, 1, '!');
+            (serialBlock[Pr7_StudLive + TabIdt]) ? str_setchar(p[blockTabLive], 1, '!');
             0 ? (
                 sprintf(#dbg_trace1, "*ZZZ* [%d]  \"%s\"  (%d)  \"%s\" ", A99CBlock, blockDispNames[blockDispInverts[A99CBlock]], p[0],#Aws3);
             );
@@ -9053,6 +9721,10 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit)
                         mSL_log(SysLogBox, #dbg_trace1);
                     );
                     // ADump(blockDesc);
+                ) :
+                (kit === blockTabLive) ? (
+                    // switch this tab to the "live" display
+                    serialBlock[Pr7_StudLive + TabIdt] = 1;
                 ) :
                 (kit === blockTabRename) ? (
                     sprintf(#tmp, "New name for tabulation %d...", TabIdt);
@@ -9147,6 +9819,42 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit)
                 (igb === blockEffectD) ? (
                     show_Effect_Pad(EffectsStructD, blockEffectD);
                 ) :
+                (igb === blockEffectE) ? (
+                    show_Effect_Pad(EffectsStructE, blockEffectE);
+                ) :
+                (igb === blockEffectF) ? (
+                    show_Effect_Pad(EffectsStructF, blockEffectF);
+                ) :
+                (igb === blockEffectG) ? (
+                    show_Effect_Pad(EffectsStructG, blockEffectG);
+                ) :
+                (igb === blockEffectH) ? (
+                    show_Effect_Pad(EffectsStructH, blockEffectH);
+                ) :
+                (igb === blockWriterA) ? (
+                    show_Writer_Pad(WriterStructA, blockWriterA);
+                ) :
+                (igb === blockWriterB) ? (
+                    show_Writer_Pad(WriterStructB, blockWriterB);
+                ) :
+                (igb === blockWriterC) ? (
+                    show_Writer_Pad(WriterStructC, blockWriterC);
+                ) :
+                (igb === blockWriterD) ? (
+                    show_Writer_Pad(WriterStructD, blockWriterD);
+                ) :
+                (igb === blockWriterE) ? (
+                    show_Writer_Pad(WriterStructE, blockWriterE);
+                ) :
+                (igb === blockWriterF) ? (
+                    show_Writer_Pad(WriterStructF, blockWriterF);
+                ) :
+                (igb === blockWriterG) ? (
+                    show_Writer_Pad(WriterStructG, blockWriterG);
+                ) :
+                (igb === blockWriterH) ? (
+                    show_Writer_Pad(WriterStructH, blockWriterH);
+                ) :
                 (igb === blockMemory1) ? (
                     show_Memory(memoryBox1);
                 ) :
@@ -9170,8 +9878,55 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit)
 );
 
 
+// Studio menu while a tab uses the "live" display (shift right click anywhere in the tab)
+function genericLiveMenu(bNumb)
+local (p, i, xx, kit)
+(
+    PanIdt = bNumb;
+    blockDesc = dcbBlocksAll + bNumb * dcbWSize;
+    p = menu_Stud_Mod + ui_jmenu_items;
+    i = 0; while (i < blockMenuITC) ( str_setchar(p[i], 1, ui_jmenu_chSP); i += 1; );
+    str_setchar(p[block1Pane -1 + studDispPrf], 1, '!');
+    str_setchar(p[blockTabLive], 1, '!');
+    xx = control_jmenu(menu_Stud_Mod);
+    xx ? (
+        ui_GFXdoNow |= 1;
+        kit = jmenu_res2item(menu_Stud_Mod, xx);
+        (kit === blockTabLive) ? (
+            // back to the panes display
+            serialBlock[Pr7_StudLive + TabIdt] = 0;
+        ) :
+        (kit === blockTabRename) ? (
+            sprintf(#tmp, "New name for tabulation %d...", TabIdt);
+            ui_screen_open("control.prompt");
+            ui_screen_arg(0, altTabsNames[TabIdt]);
+            ui_screen_arg(1, #tmp);
+        ) :
+        (kit >= blockThemeDefault) ? (
+            uix_jtheme = kit - blockThemeDefault;
+        ) :
+        ((kit >= blockFirst) && (kit < blockDispITC)) ? (
+            0; // modules are not shown in the "live" display
+        ) :
+        (kit > 0) ? (
+            mSL_GUI_Generic(3, bNumb, 0, kit); // panes, tabs...
+        );
+    );
+);
+
+// "Live" display of a tab : animated background and display boxes (see mSL_Live_Screen)
+function genericLiveTab()
+(
+    live_tab_active = 1;
+    live_screen_tick();
+    live_screen();
+    uix_gfx_clear = gfx_clear; // keep the live background (used by update_theme / control_start)
+    genericLiveMenu(TabIdt * dcbPannelsMax);
+);
+
+
 function genericTabSet(tbNum)
-local (ww, t)
+local (ww, t, BankLink)
 (
     do_GenericTabStart();
     //colMouseWasIn = -1;
@@ -9179,6 +9934,9 @@ local (ww, t)
     TabIdt = max(0, min(7, 0|tbNum));
     studDispPrf = studDispPCnt = max(1, min(4, 0|(serialBlock[Pr7_StudConf+TabIdt])));
 
+    (serialBlock[Pr7_StudLive + TabIdt]) ? (
+        genericLiveTab();
+    ) : (
     ww = gfx_w / ui_retina();
 
 
@@ -9230,6 +9988,7 @@ local (ww, t)
     ) : (
         genericItemsPos(TabIdt * dcbPannelsMax);
     );
+    ); // live / panes
     do_GenericTabEnd();
 );
 
@@ -9252,6 +10011,8 @@ local (ww, t)
             uix_default_fontface = ui_jdefault_fontface;
         );
 
+        (live_tab_active == 0) ? uix_gfx_clear = -1; // live background only for "live" tabs
+        live_tab_active = 0;
         update_theme();
 
         currScreen = ui_screen();
@@ -9332,10 +10093,10 @@ local (ww, t)
 
         //SCREEN--DEFAULT
         (
-        ui_GFXdoNow |= 3;
-        do_GenericTabStart();
+            ui_GFXdoNow |= 3;
+            do_GenericTabStart();
             control_system();
-        do_GenericTabEnd();
+            do_GenericTabEnd();
         );
 
     );
@@ -9349,3 +10110,6 @@ local (ww, t)
 );
 
 uix_latestchar = 0;
+
+ui_end_do_gfx();
+

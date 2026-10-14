@@ -339,6 +339,7 @@ static_Mem = idx; // +++ 23760
 // Static memory management : starts after the serial block
 mSL_StM_Init(idx); // init static memory
 current_Memory_Mode = mSL_MMd_Static; // starting now, allow use of "make_array"
+mm_lowblocks = make_array(2); // creates a gap of 2 zeroes - GC lower bound : every root array must be above
 //AGMW020 = GMW();
 mSL_Str_Init(#strFirst, #strLast); // allocate strings for strings allocator
 //AGMW030 = GMW();
@@ -347,11 +348,16 @@ mSL_Str_TInit(#wstrFirst, #wstrLast); // allocate strings for temporary strings
 mSL_Str_PInit(#xstrFirst, #xstrLast); // allocate strings for permanent strings
 mSL_Str_GCPRinit(2000); // GC protected remanent strings
 mSL_Str_MkStructs(); // Build string management structures
+// Live screen (shared with Diffusion-3) : fonts, display boxes, colored background
+live_screen_init(); // needs make_array
+colorlimits(0x000000, 0xFFFFFF); // limits of the animated background colors (as in Diffusion-3)
+live_tab_active = 0; // set when a tab is shown with the "live" display
 //AGMW050 = GMW();
 //====== GLOBALS ======
 init_idents();
 mSL_Init_Keywords();
 mSL_Init_long_Keywords();
+live_clock_init(); // clock box of the "live" display (needs mSL symbols)
 init_log_boxes();
 
 
@@ -376,7 +382,7 @@ function guess_machine_type()
 );
 
 function init_paths_strings()
-local ()
+local (PathsStrings)
 (
     PathsStrings = make_array(32);
     PathsStrings[GM_Project_Path] = #D_GM_Project_Path;
@@ -616,9 +622,9 @@ uix_jtheme_menu = make_jmenu(
     ui_jmenu_opt_notitle,
     "Theme",
     // "&1 Default|&1 Black|&1 Tron|&1 Light Cyan|&1 Orange|&1 Blue|&1 Dark Cyan||&2 Small|&2 Large|| &3 1 pane|&3 2 panes|&3 3 panes|&3 4 panes"
-    "!&1 Default|&1 Black|&1 Tron|&1 Light Cyan|&1 Orange|&1 Blue|&1 Dark Cyan"
+    "!&1 Default|&1 Black|&1 Tron|&1 Light Cyan|&1 Orange|&1 Blue|&1 Dark Cyan|&1 Dark Green|&1 Dark Red|&1 Light Amber|&1 Neon Green|&1 Light Magenta"
     );
-uix_jtheme_rtc_max = 7;  // 7 entries in the menu
+uix_jtheme_rtc_max = 12;  // 12 entries in the menu
 // Correct a few things...
 ui_jcolor_inactive_grey = Color_Dark_Gray;
 ui_jGUI_prev = 0;
@@ -981,7 +987,7 @@ local (als, str, strsize, pts, ch, lge, fFo)
 
 function
 enterClipName(name, clNum, strset)
-local (namlg, id, cn, idlg, bc, cs, l, clId, acnt)
+local (namlg, id, cn, idlg, bc, cs, l, clId, acnt, nlg)
 (
     // First, build the description
     namlg = strlen(name);
@@ -1261,7 +1267,7 @@ local (ii)
 
 
 function installClipSet(clNum, strFList)
-local (pts, aln, strsiz, ch, clnb, lge, namepos, newstr, x)
+local (pts, aln, strsiz, ch, clnb, lge, namepos, newstr, x, ptname)
 (
     // Instal all the entries of strFList in the clClAlias table.
     // Format is " ccc lll NNNNNNNNNNNNN ccc lll NNNNNNNN ccc lll NNNNNNNNNNN .... ccc lll NNNNNNNN "
@@ -2039,16 +2045,21 @@ Pr7_MACHINE_Type = 27;
 Pr7_Partial0 = 32; // size: BKEsize = 12 values
 
 // BKEsize = 12; // size of a bank entry
-Pr7_StudConf = Pr7_Partial0 + BKEsize;  // up to 8 panes
-Pr7_StudRat = Pr7_StudConf + 8;  // size : 8 * 4
-Pr7_Free = Pr7_StudRat + 8 * 4;
+// Pr7_Partial0 + BKEsize (44) to 127 : free
+
+// Studio configuration - @128 - up to dcbTabsMax tabs
+dcbTabsMax = 16; // max number of tabs
+Pr7_StudConf = 128;  // size : dcbTabsMax -- number of panes in each tab
+Pr7_StudRat = Pr7_StudConf + dcbTabsMax;  // size : dcbTabsMax * 4
+Pr7_StudLive = Pr7_StudRat + dcbTabsMax * 4; // size : dcbTabsMax -- 1 if the tab uses the "live" display
+Pr7_Free = Pr7_StudLive + dcbTabsMax; // 224 to 511 : free
 
 
 // Initialize studio configuration
 p = serialBlock + Pr7_StudConf;
-ii = 0; loop(8, p[ii] = 1; ii+= 1;);
+ii = 0; loop(dcbTabsMax, p[ii] = 1; ii+= 1;);
 p = serialBlock + Pr7_StudRat;
-ii = 0; loop(8*4, p[ii] = 600; ii+= 1;);
+ii = 0; loop(dcbTabsMax*4, p[ii] = 600; ii+= 1;);
 // Subblock 2 - Packed strings -
 
 // Subblock 3 - Play pad - @512,  a total of 4*padStTotSiz= 512
@@ -2076,9 +2087,7 @@ paramStatus = serialDelta;  // The address of all parameters status
 serialDelta += paramCount;
 //
 
-// serialBlock + 3072
-// Defining displayable control blocks
-dcbBlocksAll = serialDelta = serialBlock+3072; //  at least 2048
+// serialBlock + 3072 to 5119 : free (was the displayable control blocks, now @7200)
 
 // serialBlock + 5120
 serialDelta = serialBlock + 5120; //
@@ -2101,9 +2110,16 @@ serialDelta = serialBlock + 6144; //
 Pr7_SysLinks = serialDelta; // keep up to 256 MIDI links
 
 
-serialDelta = serialBlock + 7200; // free area
+serialDelta = serialBlock + 7200;
 FlagsTbSiz = 32;
 FlagsTbVals = serialDelta - FlagsTbSiz;
+
+// serialBlock + 7200
+// Defining displayable control blocks : dcbTabsMax * 4 panes * 64 words = 4096
+dcbBlocksAll = serialDelta;
+serialDelta += 4096;
+
+// serialBlock + 11296 : free area
 /// Actual use
 serialUse = serialDelta - serialBlock;
 // Check de non débordement
@@ -3201,9 +3217,18 @@ uix_jG_menuscr[ii+=1] = "Studio D";
 uix_jG_menuscr[ii+=1] = "Studio E";
 uix_jG_menuscr[ii+=1] = "Live 1";
 uix_jG_menuscr[ii+=1] = "Live 2";
+uix_jG_menuscr[ii+=1] = "Studio F";
+uix_jG_menuscr[ii+=1] = "Studio G";
+uix_jG_menuscr[ii+=1] = "Studio H";
+uix_jG_menuscr[ii+=1] = "Studio I";
+uix_jG_menuscr[ii+=1] = "Studio J";
+uix_jG_menuscr[ii+=1] = "Studio K";
+uix_jG_menuscr[ii+=1] = "Live 3";
+uix_jG_menuscr[ii+=1] = "Live 4";
 uix_jG_menuscr[ii+=1] = -1;
 //——————————————
 dcbTabsCount = ii; // menu bar max -- number of tabs
+(dcbTabsCount > dcbTabsMax) ? err_sys_ini = 9923; // too many tabs
 uix_jmbsel = 0;
 uix_jmbprv = 0;
 uix_switch = 0;
@@ -3216,7 +3241,7 @@ dcbMCount = dcbTabsCount * dcbPannelsMax; // number of different modules sets - 
 // we currently use 64 * 2 words, so 128 for each menu
 dcbWSize = dcbMSize * 2;
 dcbBSize = dcbWSize * dcbMCount;
-(dcbBSize > 2048) ? err_sys_ini = 9924; // serialBlock error
+(dcbBSize > 4096) ? err_sys_ini = 9924; // serialBlock error
 
 /*
 === MODULES ===
@@ -3269,7 +3294,7 @@ local (blu, i, k)
 );
 
 function mkModuleMenu()
-local (i, tmp, bln, blu)
+local (i, tmp, bln, blu, blockStrSpace, blockThemeBlack, blockThemeTron, blockThemeLightCyan, blockThemeOrange, blockThemeBlue, blockThemeDarkCyan, blockThemeDarkGreen, blockThemeDarkRed, blockThemeLightAmber, blockThemeNeonGreen, blockThemeLightMagenta)
 (
 
     i = 0; loop(dcbNamesCnt,
@@ -3428,6 +3453,8 @@ local (i, tmp, bln, blu)
     blockDispNames[blockTabShftLeft] = "&/Shift tabs left"; //
     blockTabShftRight = (itdsp += 1);
     blockDispNames[blockTabShftRight] = "&/Shift tabs right"; //
+    blockTabLive = (itdsp += 1);
+    blockDispNames[blockTabLive] = "&/Live display"; // see genericLiveTab
     blockTabRename = (itdsp += 1);
     blockDispNames[blockTabRename] = "&/<Rename tab..."; //
     //
@@ -3446,7 +3473,17 @@ local (i, tmp, bln, blu)
     blockThemeBlue = (itdsp += 1);
     blockDispNames[blockThemeBlue] = "!&1 Blue"; //
     blockThemeDarkCyan = (itdsp += 1);
-    blockDispNames[blockThemeDarkCyan] = "!&1< Dark Cyan"; //
+    blockDispNames[blockThemeDarkCyan] = "!&1 Dark Cyan"; //
+    blockThemeDarkGreen = (itdsp += 1);
+    blockDispNames[blockThemeDarkGreen] = "!&1 Dark Green"; //
+    blockThemeDarkRed = (itdsp += 1);
+    blockDispNames[blockThemeDarkRed] = "!&1 Dark Red"; //
+    blockThemeLightAmber = (itdsp += 1);
+    blockDispNames[blockThemeLightAmber] = "!&1 Light Amber"; //
+    blockThemeNeonGreen = (itdsp += 1);
+    blockDispNames[blockThemeNeonGreen] = "!&1 Neon Green"; //
+    blockThemeLightMagenta = (itdsp += 1);
+    blockDispNames[blockThemeLightMagenta] = "!&1< Light Magenta"; //
     //
     //
     blockMenuITC = itdsp + 1 ;
@@ -3791,7 +3828,8 @@ local (i, j, u, v, flg, tbN, mblk, a, k)
             // various GUI related operations
             ((kit >=0) && (kit < dcbTabsCount)) ? (
                 // switch to screen "kit"
-                ui_screen_switch(uix_jG_switchr[kit]);
+                uix_jmbsel = kit;
+                ui_screen_switch(uix_jG_menuscr[kit]);
             );
 
         );
@@ -4472,7 +4510,7 @@ clearClipSets();
 
 function
 closeClipSet()
-local (ps, n)
+local (ps, n, cw)
 (
     ps = ClSetTab + ClSetTAPtr; // current set
     (((n = ps[0]) >= 0) && (n < ClSetPSize) && (ClSetPtr[n] === -1)) ? (
@@ -5925,7 +5963,7 @@ local (ccnt, xp, zz, u, v, f, g, lg, p, src, err, redir, ent, lsiz, pm, ps, pd, 
     (err === 0) ? src : - err;
 );
 
-function SensorsClear()
+function SensorsClear() local(SensorsDef)
 (
     MIDISeqPtr = 0;
     SensorsDef = 1;
@@ -6424,7 +6462,7 @@ checkPartial(part, flgs, id)
 function
 doPlayClip(xpart, xsel, xflgs, xtype, xaux)
 local(Xkmd, z, v1, v2, v3, part, bladd, klc, khc, newpart, primeX, k, p, pc, ic, clmin, clmax,
-    str, strsiz, pts, ch, isl, it, dec, als, lge, c1, c2, ii, ik, ix, iy, iz, v, v3, v4, clcck)
+    str, strsiz, pts, ch, isl, it, dec, als, lge, c1, c2, ii, ik, ix, iy, iz, v, v3, v4, clcck, GvErrP6)
 (
     GvErr = 0;
     GvErrP1 = GvErrP2 = GvErrP3 = GvErrP4 = GvErrP5 = GvErrP6 = -1;
@@ -6960,7 +6998,7 @@ local(Xkmd, z, v1, v2, v3, part, bladd, klc, khc, newpart, primeX, k, p, pc, ic,
 // flgs = 1 : loop  flgs = 2 : mute
 function
 doPlayRItem(item, flgs)  // result not used - Unit passed in GXUnit
-local (z, r, ii)
+local (z, r, ii, newitem)
 (
     // allocate a player
     z = w = g = 0;
@@ -7027,7 +7065,7 @@ local (r)
     Look for the first entry to play in a record list
 */
 function replayJumpTo(plg, date, direction)
-local (pld, ple, plg, pln, plgtpln, pt, phz)
+local (pld, ple, plg, pln, plgtpln, pt, phz, plgt, replayLogActive)
 (
     pt = pld = ple = pln = phz = 0;
     plg === 0 ? plg = PlLogCurrent;
@@ -8623,7 +8661,7 @@ Simple_temp = make_array(10);
 
 
 
-mm_lowblocks = make_array(2); // creates a gap of 2 zeroes.
+// mm_lowblocks : created right after the static memory init (paramBlock, mm_usr_prot... must be above it)
 mSL_GC_Protected = make_array(1123, mSL_KODE_protect);
 
 // Create the scheduler structure
@@ -9097,7 +9135,7 @@ function
 Set_Table(tbl)
 local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback, rd_err, pt, zpt, totsize, tout, pttr,
     Cl_n, Cl_dB, ii, s1, s2, s3, s4, s5, ty, n, ps, cp, cnt, kct, vmin, vmax, pos, stnext, kmax, cvl, LWA, LWAsiz,
-    xp1, xp2, AddT, flgneg)
+    xp1, xp2, AddT, flgneg, LWpt, ClipSetsVersion, err_pos)
 (
     xp1 = xp2 = cvl = ptr = flgneg = 0;
     LWA = 0; LWAsiz = 32000; // a large work area
@@ -11992,7 +12030,7 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
 function
 Simple_Action(src)
 local (zz, xp, mr, ccnt, ent, s1, mpt, w1, pindx, err, p, flgs, auxKmd, auxRes,
-    par1, par2, par3, par4, par5, par6, par7, par8)
+    par1, par2, par3, par4, par5, par6, par7, par8, xp4, entc)
 (
     flgs = FlagsTbVals[Flgs_Acts]; // trace flags
     auxKmd = ccnt = xp = err = 0;
@@ -14932,7 +14970,8 @@ local(res, kw, Un, p, fdly, i, j, loc, v, k, pq)
 */
 function
 mSL_gui_ops(argc, argv)
-local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt)
+local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
+      s, k, w, xbox, chkprev, res_end, ptb, ptw, pts, pta, lct, ds, ref, txt)
 (
     res = Undef;
     (argc > 1) ? (
@@ -14944,7 +14983,7 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt)
             ((npar === (0|npar)) && (npar >= 0) && (npar < paramCount)) ? (
                 pp = paramBlock + npar * paramEntSize;
             ) :
-            ((npar > mSL_Sym_Low) && (npar < mSL_Sym_High) && (mSL_getinHT(paramHashTbl, ref) >= 0)) ? (
+            ((npar > mSL_Sym_Low) && (npar < mSL_Sym_High) && (mSL_getinHT(paramHashTbl, npar) >= 0)) ? (
                 pp = paramBlock + (npar = mSL_getinHTaux) * paramEntSize;
             );
             (pp != 0) ? (
@@ -15245,7 +15284,7 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt)
                 res[ubx_maxw] = Undef; // not known yet
                 res[ubx_thread] = mSL_current_thread; //current thread
                 res[ubx_thrdid] = mSL_current_thread[mSL_THR_UTId]; // current thread id
-                res[ubx_xxxx] = 0; //
+                // res[ubx_xxxx] = 0; // ubx_xxxx is not defined : would overwrite res[ubx_ty]
                 //sprintf(#b, "a ===>    0:%d   //", res[ubx_ty]); mSL_log(SysLogBox, #b);
                 //----
                 // First insert direct references
@@ -18538,9 +18577,9 @@ loadMode ? (
 
         // Check pannels configurations
         p = serialBlock + Pr7_StudConf;
-        ii = 0; loop(8, p[ii] = max(1, min(4, 0|p[ii])); ii+= 1;);
+        ii = 0; loop(dcbTabsMax, p[ii] = max(1, min(4, 0|p[ii])); ii+= 1;);
         p = serialBlock + Pr7_StudRat;
-        ii = 0; loop(8*4, p[ii] = max(180, min(1800, 0|p[ii])); ii+= 1;);
+        ii = 0; loop(dcbTabsMax*4, p[ii] = max(180, min(1800, 0|p[ii])); ii+= 1;);
 
 
         define_loaded();
@@ -18852,117 +18891,6 @@ AGMXXX += 1;
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 @gfx
 gfxStartTime = time_precise() + timeD;
 gfxWStat = gfx_getchar(65536);
@@ -19088,8 +19016,8 @@ local (z, SKeyedT)
         ) :
         (KeyedT === 'f11') ? (
             uix_switch += 1;
-            uix_jG_switchr[uix_switch] < 0 ? uix_switch = 0;
-            ui_screen_switch(uix_jG_switchr[uix_switch]);
+            uix_jG_menuscr[uix_switch] < 0 ? uix_switch = 0;
+            ui_screen_switch(uix_jG_menuscr[uix_switch]);
         ) :
         ((KeyedT === 124)||((KeyedT === 9) && (Kmouse_cap === 8))) ? (
             // switch to previous tabulation
@@ -19322,7 +19250,7 @@ local (fhd, lct, el, flg, i1, i2, l1, l2)
 
 // Read & Compile a mSL script file
 function mSL_load_file_inGFX(fname)
-local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars)
+local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_start, mSL_load_end)
 (
     mSL_load_start = gfxStartTime;
     mSL_errX = mSL_errC = 0;
@@ -21379,7 +21307,7 @@ local(str, str2, uix_jneed, uix_jmini, key, jmc, val, zz, zzch, zzent, zzmcl, zz
 
 function show_Clips_Selection()
 local(iw, ix, iy, iz, str, uv, uw, ux, zz, zzmi, m, mcc, r, cc, sr, ds, dm, curB, emin, emax, cnt, rerun,
-      nli, lx, cx, nc, jmc, ent, ezer, epos, eneg, elcnt, ehcnt, h1, h2, h3, j4, xcell, uix_jneed)
+      nli, lx, cx, nc, jmc, ent, ezer, epos, eneg, elcnt, ehcnt, h1, h2, h3, j4, xcell, uix_jneed, restHfact, nA, ecnt, showSel)
 (
     // restHfact = 0.88;
     restHfact = 1;
@@ -22127,7 +22055,7 @@ select_unit(Un)
 
 function
 show_Units(flg)
-local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h1, uix_jneed, uix_jmini, pm, cn, wg, jmc, zzmi)
+local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h1, uix_jneed, uix_jmini, pm, cn, wg, jmc, zzmi, uAcnt, lqmode)
 (
     str = #;
     h1 = uix_jpadHeight(padcNl_Units) ;
@@ -23874,7 +23802,7 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
 
 function show_PlayLog()
 local (h1, h2, h3, h3min, uix_jneed, uix_jmini, da, dl, elc, flPl, ig, ij, is, it, jmc, pq, xx, r, td, u,
-    k, kit, val, inc, ivs, nv, alt, zz, zzch, zzent, zzmcl, zzmmd, zzmi, axion)
+    k, kit, val, inc, ivs, nv, alt, zz, zzch, zzent, zzmcl, zzmmd, zzmi, axion, xstoppl, alt1, alt2, y3)
 (
     h1 = uix_jpadHeight(1); // height
     h2 = ui_jd_slidh * 2 + 4;
@@ -24963,7 +24891,7 @@ local (ig, ip)
 function
 show_Dyn_pars()
 local(h1, h2, h3, h4, h5, uix_jmini, uix_jneed, zzmi, zzch, zzmcl, zzmmd, zzent, pa, paty, jmc, ig,
-    ih, p, v, x, y, ik, psrc, f1, f2, flgm, chz)
+    ih, p, v, x, y, ik, psrc, f1, f2, flgm, chz, Col3, Col4, shcell, ColX)
 (
     h1 = uix_jpadHeight(padDynParNL); // height
     h2 = uix_jpadHeight(padDynFlgNL) * 0.9; // height
@@ -25622,7 +25550,7 @@ local(h1, h2, h3, h4, h5, uix_jmini, uix_jneed, zzmi, zzch, zzmcl, zzmmd, zzent,
 //====== mSL Scripts ======
 function
 show_ProcessesMgr()
-local (h1, h2, uix_jneed, uix_jmini, ig, r, w, xx, zzmi, jmc, zz, zzch, zzent, zzmcl, errv, zzmmd)
+local (h1, h2, uix_jneed, uix_jmini, ig, r, w, xx, zzmi, jmc, zz, zzch, zzent, zzmcl, errv, zzmmd, mm_dur_maxU)
 (
     h1 = uix_jpadHeight(padScriptsNL); // height
     h2 = uix_jBoxHeight(10); // second block height
@@ -25872,7 +25800,7 @@ local (h1, h2, uix_jneed, uix_jmini, ig, r, w, xx, zzmi, jmc, zz, zzch, zzent, z
 function
 show_Links_Pad()
 local (h1, h2, uix_jneed, uix_jmini, str, p, u, par_reduce, cty, col, ig, sic, ty, xtp, mc, lst, fmt, xkey, xmds, flgm,
-    z, zz, zzch, zzent, zzmcl, zzmi, zzmmd)
+    z, zz, zzch, zzent, zzmcl, zzmi, zzmmd, param_current_val)
 (
     h1 = uix_jpadHeight(2); // height
     h2 = SysLinksActive ? ui_jd_slidh  + 4 : 0; // display one slider
@@ -26802,7 +26730,7 @@ local(h1, rc, str, zz, zzch, zzent, zzmcl, zzmi, zzmmd, rtc, part, select, u, u_
 
 function
 show_Play_Control()
-local (h1, pl, uix_jneed, zz, zzch, zzent, zzmcl, zx, zzmi, zzmmd, key, jmc, val, p, uix_jmini)
+local (h1, pl, uix_jneed, zz, zzch, zzent, zzmcl, zx, zzmi, zzmmd, key, jmc, val, p, uix_jmini, mMod)
 (
     h1 = uix_jpadHeight(padcNl_PCtrl); // A 2 lines Pad
     uix_jneed = uix_jmini = h1+ui_jd_ctgr;
@@ -27323,7 +27251,7 @@ local (uix_jneed, uix_jmini, ig, zzmi)
 flagpr = 1;
 function
 show_UserModule(module)
-local(umid, chk, i, statn, recomp, modInst, modSrc, ucod, uent, err)
+local(umid, chk, i, statn, recomp, modInst, modSrc, ucod, uent, err, ut, user_top, ul, user_left, user_width, uh, user_height, rptb, ptbl, prvstk, ptstk, anc, typanc, cbxrpt, cbxref, typtb, crptb, addb, rcnt, adds, reh, w3)
 (
     // module is a module number
     // Lets check the existence of the object
@@ -27779,7 +27707,7 @@ local(umid, chk, i, statn, recomp, modInst, modSrc, ucod, uent, err)
 
 function
 genericItemsPos(bNumb)
-local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit)
+local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent)
 (
     blockMouseWasIn = 0;
     PanIdt = bNumb;
@@ -27892,6 +27820,7 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit)
             // Indicates the pane preferences
             s = p[block1Pane -1 + studDispPrf];
             str_setchar(s, 1, '!');
+            (serialBlock[Pr7_StudLive + TabIdt]) ? str_setchar(p[blockTabLive], 1, '!');
             0 ? (
                 sprintf(#dbg_trace1, "*ZZZ* [%d]  \"%s\"  (%d)  \"%s\" ", A99CBlock, blockDispNames[blockDispInverts[A99CBlock]], p[0],#Aws3);
             );
@@ -27950,6 +27879,10 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit)
                         mSL_log(SysLogBox, #dbg_trace1);
                     );
                     // ADump(blockDesc);
+                ) :
+                (kit === blockTabLive) ? (
+                    // switch this tab to the "live" display
+                    serialBlock[Pr7_StudLive + TabIdt] = 1;
                 ) :
                 (kit === blockTabRename) ? (
                     sprintf(#tmp, "New name for tabulation %d...", TabIdt);
@@ -28104,6 +28037,53 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit)
 );
 
 
+// Studio menu while a tab uses the "live" display (shift right click anywhere in the tab)
+function genericLiveMenu(bNumb)
+local (p, i, xx, kit)
+(
+    PanIdt = bNumb;
+    blockDesc = dcbBlocksAll + bNumb * dcbWSize;
+    p = menu_Stud_Mod + ui_jmenu_items;
+    i = 0; while (i < blockMenuITC) ( str_setchar(p[i], 1, ui_jmenu_chSP); i += 1; );
+    str_setchar(p[block1Pane -1 + studDispPrf], 1, '!');
+    str_setchar(p[blockTabLive], 1, '!');
+    xx = control_jmenu(menu_Stud_Mod);
+    xx ? (
+        ui_GFXdoNow |= 1;
+        kit = jmenu_res2item(menu_Stud_Mod, xx);
+        (kit === blockTabLive) ? (
+            // back to the panes display
+            serialBlock[Pr7_StudLive + TabIdt] = 0;
+        ) :
+        (kit === blockTabRename) ? (
+            sprintf(#tmp, "New name for tabulation %d...", TabIdt);
+            ui_screen_open("control.prompt");
+            ui_screen_arg(0, altTabsNames[TabIdt]);
+            ui_screen_arg(1, #tmp);
+        ) :
+        (kit >= blockThemeDefault) ? (
+            uix_jtheme = kit - blockThemeDefault;
+        ) :
+        ((kit >= blockFirst) && (kit < blockDispITC)) ? (
+            0; // modules are not shown in the "live" display
+        ) :
+        (kit > 0) ? (
+            mSL_GUI_Generic(3, bNumb, 0, kit); // panes, tabs...
+        );
+    );
+);
+
+// "Live" display of a tab : animated background and display boxes (see mSL_Live_Screen)
+function genericLiveTab()
+(
+    live_tab_active = 1;
+    live_screen_tick();
+    live_screen();
+    uix_gfx_clear = gfx_clear; // keep the live background (used by update_theme / control_start)
+    genericLiveMenu(TabIdt * dcbPannelsMax);
+);
+
+
 function
 genericTabSet(tbNum)
 local (ww, t)
@@ -28114,6 +28094,9 @@ local (ww, t)
     TabIdt = tbNum;
     studDispPrf = studDispPCnt = max(1, min(4, 0|(serialBlock[Pr7_StudConf+TabIdt])));
 
+    (serialBlock[Pr7_StudLive + TabIdt]) ? (
+        genericLiveTab();
+    ) : (
     ww = gfx_w / ui_retina();
 
 
@@ -28174,6 +28157,7 @@ local (ww, t)
     ) : (
         genericItemsPos(TabIdt * dcbPannelsMax);
     );
+    ); // live / panes
     studio_pad_active ? do_StudioPadKeyboard();
     do_GenericTabEnd();
 );
@@ -28213,6 +28197,8 @@ must_do_gfx() ? (
         uix_default_fontface = ui_jdefault_fontface;
     );
 
+    (live_tab_active == 0) ? uix_gfx_clear = -1; // live background only for "live" tabs
+    live_tab_active = 0;
     update_theme();
     (uix_jtheme_known != uix_jtheme) ? (
         uix_jtheme_known = uix_jtheme;
@@ -28316,46 +28302,15 @@ must_do_gfx() ? (
     );
     //colMouseWasIn = -1;
 
-    //SCREEN—MAIN
-    currScreen === "Main" ? (
-        genericTabSet(0);
+    //SCREEN—TABS (Main, Studios, Lives)
+    tbFound = -1; ii = 0;
+    while ((tbFound < 0) && (ii < dcbTabsCount)) (
+        (currScreen === uix_jG_menuscr[ii]) ? tbFound = ii;
+        ii += 1;
+    );
+    (tbFound >= 0) ? (
+        genericTabSet(tbFound);
     ) :
-
-    //SCREEN—STUDIO-A
-    currScreen === "Studio A" ? (
-        genericTabSet(1);
-    ) :
-
-    //SCREEN—STUDIO-B
-    currScreen === "Studio B" ? (
-        genericTabSet(2);
-    ) :
-
-    //SCREEN—STUDIO-C
-    currScreen === "Studio C" ? (
-        genericTabSet(3);
-    ) :
-
-    //SCREEN—STUDIO-D
-    currScreen === "Studio D" ? (
-        genericTabSet(4);
-    ) :
-
-    //SCREEN—STUDIO-D
-    currScreen === "Studio E" ? (
-        genericTabSet(5);
-    ) :
-
-    //SCREEN—Live 1
-    currScreen === "Live 1" ? (
-        genericTabSet(6);
-    ) :
-
-    //SCREEN—Live 2
-    currScreen === "Live 2" ? (
-        genericTabSet(7);
-    ) :
-
 
     //SCREEN—DEFAULT
     (

@@ -75,7 +75,7 @@ local (ii)
         uix_jG_menuscr = make_array(32); // up to 31 main tabs
         uix_jG_menuscr[ii=0] = "Main";
         uix_jG_menuscr[ii+=1] = -1;
-        uix_jtheme_ctlsiz = make_array(10); // up to 10 themes
+        uix_jtheme_ctlsiz = make_array(16); // up to 16 themes
         ui_lib_JJ_inited = 1;
     );
 
@@ -128,6 +128,12 @@ local (ii)
         uix_jtheme_ctlsiz[7] = ui_jd_vtext + 13;
         uix_jtheme_ctlsiz[8] = ui_jd_vtext + 13;
         uix_jtheme_ctlsiz[9] = ui_jd_vtext + 13;
+        uix_jtheme_ctlsiz[10] = ui_jd_vtext + 13;
+        uix_jtheme_ctlsiz[11] = ui_jd_vtext + 13;
+        uix_jtheme_ctlsiz[12] = ui_jd_vtext + 13;
+        uix_jtheme_ctlsiz[13] = ui_jd_vtext + 13;
+        uix_jtheme_ctlsiz[14] = ui_jd_vtext + 13;
+        uix_jtheme_ctlsiz[15] = ui_jd_vtext + 13;
     ) :
 
 
@@ -181,6 +187,12 @@ local (ii)
         uix_jtheme_ctlsiz[7] = ui_jd_vtext + 12;
         uix_jtheme_ctlsiz[8] = ui_jd_vtext + 12;
         uix_jtheme_ctlsiz[9] = ui_jd_vtext + 12;
+        uix_jtheme_ctlsiz[10] = ui_jd_vtext + 12;
+        uix_jtheme_ctlsiz[11] = ui_jd_vtext + 12;
+        uix_jtheme_ctlsiz[12] = ui_jd_vtext + 12;
+        uix_jtheme_ctlsiz[13] = ui_jd_vtext + 12;
+        uix_jtheme_ctlsiz[14] = ui_jd_vtext + 12;
+        uix_jtheme_ctlsiz[15] = ui_jd_vtext + 12;
     );
 
     uix_default_fontsize = ui_jdefault_fontsize;
@@ -191,12 +203,50 @@ local (ii)
 );
 
 
+// Editing a slider value with the "control.prompt" screen (same as "rename tab").
+// The prompt is asynchronous : the slider is identified by (label, mini, maxi, def),
+// and the edited value is taken into account the next time this slider is displayed.
+uix_jsl_ed_pending = 0;
+
+function slider_ctl_edit(label, val, mini, maxi, def)
+(
+    sprintf(#uix_jsl_ed_tmp, label, val);
+    sprintf(#uix_jsl_ed_title, "New value for  %s", #uix_jsl_ed_tmp);
+    sprintf(#uix_jsl_ed_orig, "%g", val);
+    strcpy(#uix_jsl_ed_text, #uix_jsl_ed_orig);
+    uix_jsl_ed_lab = label; uix_jsl_ed_min = mini; uix_jsl_ed_max = maxi; uix_jsl_ed_def = def;
+    uix_jsl_ed_pending = 1;
+    ui_screen_open("control.prompt");
+    ui_screen_arg(0, #uix_jsl_ed_text);
+    ui_screen_arg(1, #uix_jsl_ed_title);
+);
+
+// returns 1 if this slider has been edited, the new value is in uix_jsl_ed_val
+function slider_ctl_edited(label, var, mini, maxi, def)
+local (r)
+(
+    r = 0;
+    (uix_jsl_ed_pending && (ui_screen() != "control.prompt") && (uix_jsl_ed_lab == label)
+            && (uix_jsl_ed_min == mini) && (uix_jsl_ed_max == maxi) && (uix_jsl_ed_def == def)) ? (
+        uix_jsl_ed_pending = 0;
+        // unchanged text (or "cancel") : nothing to do
+        (strcmp(#uix_jsl_ed_text, #uix_jsl_ed_orig) != 0) ? (
+            uix_jsl_ed_val = ui_parsenumber(#uix_jsl_ed_text, var);
+            uix_jsl_ed_val = max(min(mini, maxi), min(max(mini, maxi), uix_jsl_ed_val));
+            r = 1;
+        );
+    );
+    r;
+);
+
 function slider_ctl(label, var, mini, maxi, slope, def, rnd)
 local (r, w, k, ssv, ssx, ssvd)
 (
     ui_split_top(ui_jd_slidh);
         ui_pad(5,0,5,0);
         uix_jsl_val = ssv = ssx = var;
+        // value edited in the prompt ?
+        slider_ctl_edited(label, var, mini, maxi, def) ? ssv = uix_jsl_ed_val;
         r = 0;
         ui_hover() ? (
             ui_click(2) ? r |= 8;
@@ -209,7 +259,11 @@ local (r, w, k, ssv, ssx, ssvd)
             ui_textnumber(ssvd, label);
             // did we clicked inside the label ?
             ui_hover() ? (
-                ui_click(1) ? r |= 4;
+                ui_click(1) ? (
+                    r |= 4;
+                    // edit the value
+                    slider_ctl_edit(label, ui_jround(ssv, rnd), mini, maxi, def);
+                );
                 ui_click(2) ? r |= 8;
             );
         ui_pop();
@@ -232,6 +286,8 @@ local (r, z, w, k, ssv, ssx, ssvd)
     ui_split_top(ui_jd_slidh);
         ui_pad(5,0,5,0);
         uix_jsl_val = ssv = ssx = var;
+        // value edited in the prompt ?
+        slider_ctl_edited(label, var, mini, maxi, def) ? ssv = uix_jsl_ed_val;
         r = 0;
         ui_hover() ? (
             ui_click(2) ? r |= 8;
@@ -251,7 +307,11 @@ local (r, z, w, k, ssv, ssx, ssvd)
             ui_textnumber(ssvd, label);
             // did we clicked inside the label ?
             ui_hover() ? (
-                ui_click(1) ? r |= 4;
+                ui_click(1) ? (
+                    r |= 4;
+                    // edit the value
+                    slider_ctl_edit(label, ui_jround(ssv, rnd), mini, maxi, def);
+                );
                 ui_click(2) ? r |= 8;
             );
         ui_pop();
@@ -556,6 +616,21 @@ function update_theme() local(main)
     ) :
     (uix_jtheme == 6) ? (
         control_start(main, "bitmap-simple", 4);
+    ) :
+    (uix_jtheme == 7) ? (
+        control_start(main, "bitmap-simple", 5);
+    ) :
+    (uix_jtheme == 8) ? (
+        control_start(main, "bitmap-simple", 6);
+    ) :
+    (uix_jtheme == 9) ? (
+        control_start(main, "bitmap-simple", 7);
+    ) :
+    (uix_jtheme == 10) ? (
+        control_start(main, "bitmap-simple", 8);
+    ) :
+    (uix_jtheme == 11) ? (
+        control_start(main, "bitmap-simple", 9);
     ) : (
         control_start(main, "default");
     );
