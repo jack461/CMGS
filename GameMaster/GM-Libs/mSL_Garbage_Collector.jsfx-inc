@@ -5,6 +5,8 @@
 // The Garbage_Collector code
 // We use a conservative one, where anything that looks like a memory bock can be marked "active"...
 mSL_GC_BDMG = 0; // Global "block damaged" counter
+mSL_GC_Err = 0; // Last GC error (3333 damaged block, 3336 rebuild, 3337 overflow, 3338 bad size in phase 2)
+mSL_GC_Ovf = 0; // Set when the hash table or the list of objects overflowed : nothing is freed by this GC
 
 // Enter a "verified" block in the "protect" area
 function gc_protect(obj)
@@ -43,15 +45,20 @@ local (ent, cnt, k, ty, s)
             // enter the object at this location
             mm_hash_mm[ent] = obj;
             (flg & 1) ? (
-                // and in the list
-                mm_list_mm[mm_list_in] = obj;  mm_list_in = (mm_list_in + 1) % mm_list_siz;
-                ((mm_list_cnt += 1) > mm_list_mxc) ? mm_list_mxc =  mm_list_cnt;
-                cnt = mm_Knew;
+                // and in the list - keep at least one empty slot, it ends the list
+                (mm_list_cnt >= mm_list_siz - 1) ? (
+                    mSL_GC_Ovf = 1; // the object won't be examined
+                ) : (
+                    mm_list_mm[mm_list_in] = obj;  mm_list_in = (mm_list_in + 1) % mm_list_siz;
+                    ((mm_list_cnt += 1) > mm_list_mxc) ? mm_list_mxc =  mm_list_cnt;
+                );
                 (FlagsTbVals[Flgs_GC] & 32) ? (
                     sprintf(#ms, "* Enter: %d", obj);
                     mSL_log(SysLogBox, #ms);
                 );
             );
+        ) : (cnt === 0) ? (
+            mSL_GC_Ovf = 1; // hash table full : the object can't be marked
         );
     );
 );
@@ -126,19 +133,11 @@ local (i, obj, ptr)
     memset(mm_hash_mm, 0, mm_hash_siz); // very large hash table for objects
     memset(mm_list_mm, 0, mm_list_siz); // large circular list of objects to examine
     memset(mm_tmp_mm, 0, mm_tmp_siz); // small list of objects to free
-    mm_tmp_in = mm_list_pt = mm_list_in = 0;
+    mm_tmp_in = mm_list_pt = mm_list_in = mm_list_cnt = 0;
+    mSL_GC_Err = mSL_GC_Ovf = 0;
     // Decide the empty tables are already known and do not need any further processing
     // Also objects we DO NOT WISH to process...
     gc_check(mSL_current_memory, 0); // it won't be processed
-    //
-    AAAGC_Filler = 0;
-    AAAGC_Freed = 0;
-    AAAGC_Blocks = 0;
-    AAAGC_Marked = 0;
-    AAAGC_lwd = 0;
-    AAAGC_lwd0 = 0;
-    AAAGC_mpt = 0;
-    AAAGC_mpt0 = 0;
     // Enter all the "protected" objects
     i = 0; loop(mm_total_siz,
         obj = mm_rem_mm[i]; i+= 1;
@@ -151,10 +150,32 @@ local (i, obj, ptr)
 
 
 /*
+    Mark the objects referenced by a scheduler entry, and its message queue
+*/
+function gc_mark_entry(ent)
+local (mss, msq, smg)
+(
+    gc_mark(SchedThrdPt[ent]);
+    gc_mark(SchedPar1[ent]);
+    gc_mark(SchedPar2[ent]); // potentially a message
+    gc_mark(SchedPar3[ent]);
+    gc_mark(SchedPar4[ent]);
+    gc_mark(SchedPar5[ent]);
+    gc_mark(SchedPar6[ent]);
+    msq = ent+SchedHQB; smg = 0; // internal message queue
+    mss = SchedPrvEnt[msq[SchedOtherEnd]]; // start at tail, as in SchedListSize
+    while ((mss != msq) && (mss >= SchedFirstEnt) && (smg <= SchedNEmax)) (
+        gc_mark(mss); // mark it
+        smg += 1; mss = SchedPrvEnt[mss];
+    );
+);
+
+
+/*
     Mark every mSL process in a process list
 */
 function gc_mark_list(lblk)
-local (ent, siz, mss, msq, smg)
+local (ent, siz)
 (
     ent = SchedPrvEnt[lblk[SchedOtherEnd]]; // start at tail
     siz = 0;
@@ -164,26 +185,7 @@ local (ent, siz, mss, msq, smg)
             sprintf(#ms, "Sched mark: %d [%d %d %d]", ent, SchedStatus[ent], SchedThrdPt[ent], SchedPar1[ent]);
             mSL_log(SysLogBox, #ms);
         );
-        gc_mark(SchedThrdPt[ent]);
-        gc_mark(SchedPar1[ent]); // yes but why ?
-        gc_mark(SchedPar2[ent]); // potentially a message
-        gc_mark(SchedPar3[ent]); //
-        gc_mark(SchedPar5[ent]); //
-        gc_mark(SchedPar6[ent]); //
-        AAAGC_Marked += 1;
-        // Mark the message queue ?
-        msq = ent+SchedHQB; smg = 0; // internal message queue
-        while (((mss = SchedPrvEnt[msq[SchedOtherEnd]]) != msq)
-                  && (mss >= SchedFirstEnt) && (smg <= SchedNEmax)) (
-            gc_mark(mss); // mark it
-            smg += 1; mss = SchedPrvEnt[mss];
-        );
-        /*
-        (SchedListSize(ent+SchedHQB) > 0) ? (
-            // There is at least a message in the queue
-            gc_mark(SchedHQB[ent]);
-        );
-        */
+        gc_mark_entry(ent);
         ent = SchedPrvEnt[ent];
         siz += 1;
     );
@@ -191,7 +193,6 @@ local (ent, siz, mss, msq, smg)
 
 
 function gc_mark_active()
-local (ent, siz)
 (
 
     (FlagsTbVals[Flgs_GC] & 1) ? ( mSL_log(SysLogBox, "Mark Protected."); );
@@ -217,14 +218,9 @@ local (ent, siz)
     (mSL_dispatch_entry > 0) ? (
         ((SchedStatus[mSL_dispatch_entry] & SchmSLThrUsed) != SchmSLThrUsed) ? (
             sprintf(#ms, "!!Active thread mark: %d",  SchedStatus[mSL_dispatch_entry]);
+            mSL_log(SysLogBox, #ms);
         );
-        gc_mark(SchedPar1[mSL_dispatch_entry]);
-        gc_mark(SchedPar2[mSL_dispatch_entry]); // potentially a message
-        gc_mark(SchedThrdPt[mSL_dispatch_entry]);
-        (SchedListSize(mSL_dispatch_entry+SchedHQB) > 0) ? (
-            // There is at least a message in the queue; it's enough to mark one
-            gc_mark(SchedHQB[mSL_dispatch_entry]);
-        );
+        gc_mark_entry(mSL_dispatch_entry); // the whole message queue, as for the other threads
         mSL_Thread_mark = mSL_dispatch_entry;
     );
 
@@ -271,7 +267,7 @@ function gc_run(p)
 
 
 function gc_sweep()
-local (mpt, lwd, ty, s, s2, ub, xty, fl)
+local (mpt, lwd, ty, s, s2, ub, xty, fl, k)
 (
     mm_show_ttf = 0; // total free
     mm_show_ttu = 0;  // total used
@@ -282,11 +278,17 @@ local (mpt, lwd, ty, s, s2, ub, xty, fl)
     mm_show_flr = 0;  // fillers blocks
     mm_show_chflr = 0;  // change to fillers blocks
     fl = 0;
-    AAAGC_mpt0 = mpt = mSL_new_memory+mSL_MM_1BKey; // Point to the 1st block in memory.
-    AAAGC_lwd0 = lwd = mm_highmem;
+    mpt = mSL_new_memory+mSL_MM_1BKey; // Point to the 1st block in memory.
+    lwd = mm_highmem;
+    mSL_GC_Ovf ? (
+        // Some objects could not be marked : free nothing, just unmark
+        mSL_GC_Err = 3337;
+        sprintf(#ms, "Sweep: GC tables overflow %d - nothing freed (list max %d / %d)", mSL_GC_Err, mm_list_mxc, mm_list_siz);
+        mSL_log(SysLogBox, #ms);
+    );
 
     0 ? (
-    sprintf(#ms, "Sweep Phase 1 Start - Err= %d Mem=%d/%d Mpt=%d", mSL_errX, mSL_current_memory, mSL_new_memory, mpt);
+    sprintf(#ms, "Sweep Phase 1 Start - Err= %d Mem=%d/%d Mpt=%d", mSL_GC_Err, mSL_current_memory, mSL_new_memory, mpt);
     mSL_log(SysLogBox, #ms);
     );
 
@@ -308,16 +310,16 @@ local (mpt, lwd, ty, s, s2, ub, xty, fl)
         (
             s2 = mpt[s+2]; xty = mpt[s+3];
             // Let's check the block
-            ((ty >= mSL_MT_FreeSt) && (ty <= mSL_MKey_max) && (s >= 0) && (xty === (ty ~ mSL_CC_Chksum))
+            ((ty >= mSL_MT_FreeSt) && (ty <= mSL_MKey_max) && (s >= 0) && (mpt + s + 4 <= lwd)
+            && (xty === (ty ~ mSL_CC_Chksum))
             && ((s === s2) || (s === - s2) || ((s === 0) && (s2 === -1)))) ? (
-                // The block is correct. Should it be freed ?
-                AAAGC_Blocks += 1;
+                // The block is correct (a marked block has a negative tail length). Should it be freed ?
                 ((ty === mSL_MT_FreeSt) || (ty === mSL_MT_ToFreeSt)) ? (
                     // Already a free block
                     mm_show_ttf += s; mm_show_frbl += 1;
                     mpt[0] = mSL_MT_ToFreeSt; mpt[s+2] = s; mpt[s+3] = mSL_MT_ToFreeNd; // Change it to "to be freed"
                 ) :
-                ((s2 >= 0)) ? (
+                ((s2 >= 0) && !mSL_GC_Ovf) ? (
                     // it must be freed
                     // but we can't free it now, since it could be merged with the next block,
                     // and we would be loosing track of this one...
@@ -343,22 +345,22 @@ local (mpt, lwd, ty, s, s2, ub, xty, fl)
                 mpt += s + 4; // skip to next block
             ) : (
                 mSL_GC_BDMG += 1;
-                mSL_errX = 3333; // GC error
+                mSL_GC_Err = 3333; // GC error
                 sprintf(#ms, "Sweep: Damaged Block %d at (%d) [%s %s ... %s %s]",
-                    mSL_errX, mpt+2, mSL_edit_value(#SGC1, ty, 0), mSL_edit_value(#SGC2, s, 0),
+                    mSL_GC_Err, mpt+2, mSL_edit_value(#SGC1, ty, 0), mSL_edit_value(#SGC2, s, 0),
                     mSL_edit_value(#SGC3, s2, 0), mSL_edit_value(#SGC4, xty, 0));
                 mSL_log(SysLogBox, #ms);
                 mm_show_dmgb += 1;
-                // Can we try to correct it ?
-                (
+                // Can we try to correct it ? Only with a plausible size, otherwise "mpt += s + 4" could loop for ever
+                ((s >= 0) && (s === floor(s)) && (mpt + s + 4 <= lwd) && (
                     ((ty >= mSL_MT_FreeSt) && (xty === (ty ~ mSL_CC_Chksum)))
                     ||
                     ((ty === mSL_MT_FreeSt) && (xty === mSL_MT_ToFreeNd))
                     ||
                     ((s > 0) && ((s === s2) || (s === -s2)))
                     ||
-                    ((ty >= mSL_MT_FreeSt) && (mpt+s+2 <= (mSL_current_memory + mSL_current_memory[mSL_MM_HighAd])))
-                ) ? (
+                    (ty >= mSL_MT_FreeSt)
+                )) ? (
                     // Try to change the type of the block
                     // s seem correct
                     fl = 1;
@@ -370,7 +372,7 @@ local (mpt, lwd, ty, s, s2, ub, xty, fl)
 
                 (fl === 1) ? (
                     fl = 0;
-                    mSL_errX = 0;
+                    mSL_GC_Err = 0;
                     mm_show_rpdb += 1;
                     mpt[0] = 'DMGB'; mpt[1] = s; mpt[s+2] = s; mpt[s+3] = (mpt[0] ~ mSL_CC_Chksum);
                     sprintf(#ms, "Sweep: Correcting block type <1> at (%d) [%s %s ... %s %s]", mpt+2,
@@ -381,19 +383,19 @@ local (mpt, lwd, ty, s, s2, ub, xty, fl)
                 ) :
                 (fl === 2) ? (
                     fl = 0;
-                    mSL_errX = 0;
+                    mSL_GC_Err = 0;
                     mm_show_rpdb += 1;
                     k = 0;
-                    while (mpt[k] === 0) ( k += 1;);
+                    while ((mpt + k < lwd) && (mpt[k] === 0)) ( k += 1;);
                     (k < 7) ? (
                         sprintf(#ms, "Sweep: Entering <%d> fillers at (%d)", k, mpt);
                         mSL_log(SysLogBox, #ms);
                         memset(mpt, mSL_Filler, k);
                     ) : (
-                        mpt[0] = 'DMGB'; mpt[1] = k-4; mpt[s+2] = k-4; mpt[s+3] = (mpt[0] ~ mSL_CC_Chksum);
+                        mpt[0] = 'DMGB'; mpt[1] = k-4; mpt[k-2] = k-4; mpt[k-1] = (mpt[0] ~ mSL_CC_Chksum);
                         sprintf(#ms, "Sweep: Correcting block type <2> at (%d) [%s %s ... %s %s]", mpt+2,
-                            mSL_edit_value(#SGC1, mpt[0], 0),  mSL_edit_value(#SGC2, s, 0),
-                            mSL_edit_value(#SGC3, s2, 0), mSL_edit_value(#SGC4, mpt[s+3], 0));
+                            mSL_edit_value(#SGC1, mpt[0], 0),  mSL_edit_value(#SGC2, k-4, 0),
+                            mSL_edit_value(#SGC3, mpt[k-2], 0), mSL_edit_value(#SGC4, mpt[k-1], 0));
                         mSL_log(SysLogBox, #ms);
                     );
                     mpt += k;
@@ -414,13 +416,13 @@ local (mpt, lwd, ty, s, s2, ub, xty, fl)
         s = mSL_new_memory; mSL_current_memory = mSL_new_memory = 0;
         s2 = mSL_Dyn_Init(s, 0, 0);
         (mSL_new_memory != s) ? (
-            mSL_errX = 3336;
+            mSL_GC_Err = 3336;
         );
     );
 
     0 ? (
     sprintf(#ms, "Sweep End Phase 1 =>  Mem=%d  Err=%d\nUsbl=%d  Frbl=%d  Used=%d  Filr=%d\nFree=%d  Dmgb=%d  Rpdb=%d  Chfl=%d",
-        s2, mSL_errX, mm_show_usbl, mm_show_frbl, mm_show_ttu, mm_show_flr, mm_show_ttf, mm_show_dmgb, mm_show_rpdb,mm_show_chflr);
+        s2, mSL_GC_Err, mm_show_usbl, mm_show_frbl, mm_show_ttu, mm_show_flr, mm_show_ttf, mm_show_dmgb, mm_show_rpdb,mm_show_chflr);
         mSL_log(SysLogBox, #ms);
     );
 
@@ -435,7 +437,7 @@ local (mpt, lwd, ty, s, s2, ub, xty, fl)
     mpt = mSL_new_memory+mSL_MM_1BKey; // Point to the 1st block in memory.
 
     0 ? (
-    sprintf(#ms, "Sweep Phase 2 Start - Err= %d Mem=%d/%d Mpt=%d", mSL_errX, mSL_current_memory, mSL_new_memory, mpt);
+    sprintf(#ms, "Sweep Phase 2 Start - Err= %d Mem=%d/%d Mpt=%d", mSL_GC_Err, mSL_current_memory, mSL_new_memory, mpt);
     mSL_log(SysLogBox, #ms);
     );
 
@@ -443,9 +445,16 @@ local (mpt, lwd, ty, s, s2, ub, xty, fl)
         ty = mpt[0]; s= mpt[1];
         (ty === mSL_Filler) ? (
             mpt += 1; // skip to next
-            AAAGC_Filler += 1;
             mm_show_ttf += 1;
             mm_show_flr += 1;
+        ) :
+        ((s < 0) || (s !== floor(s)) || (mpt + s + 4 > lwd)) ? (
+            // Should not happen after phase 1 : don't jump backward, don't free anything more
+            mSL_GC_Err = 3338;
+            sprintf(#ms, "Sweep: Bad block size %d at (%d) [%s %s]", mSL_GC_Err, mpt+2,
+                mSL_edit_value(#SGC1, ty, 0), mSL_edit_value(#SGC2, s, 0));
+            mSL_log(SysLogBox, #ms);
+            mpt += 1;
         ) :
         (
             s2 = mpt[s+2]; xty = mpt[s+3];
@@ -457,7 +466,8 @@ local (mpt, lwd, ty, s, s2, ub, xty, fl)
                 ub = mm_tmp_mm[mm_tmp_in]; mm_tmp_mm[mm_tmp_in] = mpt+2; // provide address of the content
                 mm_tmp_in = (mm_tmp_in + 1) % mm_tmp_siz;
                 (ub != 0) ? (
-                    mSL_Dyn_Free(ub); AAAGC_Freed += 1;
+                    mSL_Dyn_Free(ub);
+                    (mSL_errM != 0) ? mSL_GC_Err = mSL_errM; // keep the allocator error
                 );
                 mm_show_ttf += s; mm_show_frbl += 1;
             ) : (
@@ -469,27 +479,79 @@ local (mpt, lwd, ty, s, s2, ub, xty, fl)
     );
 
 
-    (mSL_errX === 0) ? (
+    (mSL_GC_Err === 0) ? (
         // free all remaining blocks
         loop (mm_tmp_siz,
             ub = mm_tmp_mm[mm_tmp_in];
-            (ub != 0) ? (mSL_Dyn_Free(ub); mm_tmp_mm[mm_tmp_in] = 0; AAAGC_Freed += 1; );
+            (ub != 0) ? (mSL_Dyn_Free(ub); mm_tmp_mm[mm_tmp_in] = 0; (mSL_errM != 0) ? mSL_GC_Err = mSL_errM; );
             mm_tmp_in = (mm_tmp_in + 1) % mm_tmp_siz;
         );
     );
 
     0 ? (
     sprintf(#ms, "Sweep End Phase 2 =>  Mem=%d  Err=%d  Usbl=%d  Frbl=%d  Used=%d  Filr=%d  Free=%d  Dmgb=%d",
-        mSL_new_memory, mSL_errX, mm_show_usbl, mm_show_frbl, mm_show_ttu, mm_show_flr, mm_show_ttf, mm_show_dmgb);
+        mSL_new_memory, mSL_GC_Err, mm_show_usbl, mm_show_frbl, mm_show_ttu, mm_show_flr, mm_show_ttf, mm_show_dmgb);
     mSL_log(SysLogBox, #ms);
     );
 
-    AAAGC_lwd = lwd;
-    AAAGC_mpt = mpt;
-
-    mSL_errX = 0; // reset error
+    // Report the GC error to the caller (mSL_errM is reset by the caller before the GC)
+    mSL_errM = max(mSL_errM, mSL_GC_Err);
 );
 
+
+
+/*
+    After the sweep phase of a GC (call it after gc_sweep) :
+    - clear the marks set by gc_mark on the strings (mSL_Str_Flg_marked),
+    - age the unmarked temporary strings (temporary -> dispensable -> free),
+    - if "recycle", put back in the stack the unmarked strings "in use" (Diffusion-3).
+      A string referenced only from a JSFX variable or a static array is never marked :
+      "recycle" would reuse it while it is still in use. Nothing is recycled when the GC overflowed.
+    The counters mSL_Str_CFree / mSL_Str_CUsed are recomputed.
+*/
+function mSL_Str_sweep_strings(recycle)
+local (i, k, mk, s, used)
+(
+    (mSL_Str_Use !== 0) ? (
+        mSL_GC_Ovf ? recycle = 0;
+        used = 0;
+        i = 0;
+        loop(mSL_Str_Range,
+            k = mSL_Str_Use[i];
+            mk = k & mSL_Str_Flg_marked;
+            k &= 0x7F; // without the mark
+            mk ? (
+                // referenced : a dispensable string becomes temporary again
+                (k === mSL_Str_Flg_dispensable) ? k = mSL_Str_Flg_temporary;
+            ) :
+            (k === mSL_Str_Flg_temporary) ? (
+                k = mSL_Str_Flg_dispensable;
+            ) :
+            (k === mSL_Str_Flg_dispensable) ? (
+                k = 0;
+            ) :
+            (recycle && ((k === mSL_Str_Flg_inUse) || (k === 0)) && (mSL_Str_Uptr < mSL_Str_Range)) ? (
+                // Put it back in the stack
+                s = i + mSL_Str_First;
+                k = mSL_Str_Flg_inStack;
+                mSL_Str_Uptr += 1;
+                mSL_Str_Stack[mSL_Str_Uptr] = s;
+                strcpy(s, "*RECYCLED*");
+                mSL_Str_StGCD += 1;
+            );
+            ((k > 0) && (k <= 0xF)) ? used += 1;
+            mSL_Str_Use[i] = k;
+            i += 1;
+        );
+        mSL_Str_CFree = mSL_Str_Uptr + 1; mSL_Str_CUsed = used;
+        (mSL_Str_StInLO > mSL_Str_LOrep) ? (
+            sprintf(#ms, "Strings pool exhausted : %d low strings (%d..%d) reused - they may still be in use",
+                mSL_Str_StInLO - mSL_Str_LOrep, mSL_Str_TempF, mSL_Str_TempL);
+            mSL_log(SysLogBox, #ms);
+            mSL_Str_LOrep = mSL_Str_StInLO;
+        );
+    );
+);
 
 
 mm_mpt = 0;
@@ -506,15 +568,15 @@ local (m, lwd, ty, s, s2, xty, ub, dmf, dmgb, chk)
 
     mm_mpt = mSL_new_memory+mSL_MM_1BKey; // Point to the 1st block in memory.
     0 ? (
-    sprintf(#ms, "Mem walk Start - Err= %d Mem=%d/%d  Mpt=%d", mSL_errX, mSL_current_memory, mSL_new_memory, mm_mpt);
+    sprintf(#ms, "Mem walk Start - Err= %d Mem=%d/%d  Mpt=%d", mSL_errM, mSL_current_memory, mSL_new_memory, mm_mpt);
     mSL_log(SysLogBox, #ms);
     );
 
-    chk = (((s = m[-1]) > 65536) && (m[-2] === mSL_KODE_memory) && (m[s]===s) && (m[s+1] === (mSL_KODE_memory ~ mSL_CC_Chksum))
+    chk = (((s = m[-1]) >= 131068) && (m[-2] === mSL_KODE_memory) && (m[s]===s) && (m[s+1] === (mSL_KODE_memory ~ mSL_CC_Chksum))
             && (m[s-1]===mSL_End_Mark) && (m[mSL_MM_LowAd]===(mm_lowmem-mSL_new_memory))
             && (m[mSL_MM_HighAd]===(mm_highmem-mSL_new_memory)) && (m[mSL_MM_MemSiz]===mm_sizmem) && GMW());
     !chk ? (
-        (s <= 65536) ? (
+        (s < 131068) ? (
             sprintf(#ms, "** Hdr Size incorrect %d", s);
             mSL_log(SysLogBox, #ms);
         ) :
@@ -573,8 +635,8 @@ local (m, lwd, ty, s, s2, xty, ub, dmf, dmgb, chk)
             (
                 // Let's check the block
                 xty = mm_mpt[s+3]; s2= mm_mpt[s+2];
-                ((ty === mSL_MT_FreeSt) || (ty === mSL_MT_FreeSt)) ? (
-                    // The block is tagged as "free"
+                ((ty === mSL_MT_FreeSt) || (ty === mSL_MT_ToFreeSt)) ? (
+                    // The block is tagged as "free" (or "to be freed", after an interrupted GC)
                     ((s >= 0) && (s === s2) && (xty === (ty ~ mSL_CC_Chksum))) ? (
                         mm_show_frbl += 1; mm_show_ttf += s; // update total size
                         (s >= 2097152) ? ( mm_bl_huge += 1; ) :
@@ -627,7 +689,7 @@ local (m, lwd, ty, s, s2, xty, ub, dmf, dmgb, chk)
                                     mSL_edit_value(#SGC2, s, 0), mSL_edit_value(#SGC3, s2, 0),
                                     mSL_edit_value(#SGC4, xty, 0));
                         mSL_log(SysLogBox, #ms);
-                        mm_wk_errC += 1;Sweep
+                        mm_wk_errC += 1;
                     );
                     dmf = 1; mm_mpt += 1;
                 );
@@ -647,7 +709,7 @@ local (m, lwd, ty, s, s2, xty, ub, dmf, dmgb, chk)
     );
 
     0 ? (
-        sprintf(#ms, "Mem walk End - Err= %d Mem=%d/%d", mSL_errX, mSL_current_memory, mSL_new_memory);
+        sprintf(#ms, "Mem walk End - Err= %d Mem=%d/%d", mSL_errM, mSL_current_memory, mSL_new_memory);
         mSL_log(SysLogBox, #ms);
     );
 

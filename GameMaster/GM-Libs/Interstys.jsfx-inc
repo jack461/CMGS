@@ -11,6 +11,12 @@ gfx_ext_retina = 1;
 version = 0x000103;
 
 tStart = tUnix = start_time = time();
+// Evaluate an approximation of time_precise vs time (as in GamePlayer and Diffusion-3)
+tSUnix = time(); tPLoc = time_precise(); timeD = tSUnix - tPLoc;
+tSUnix = time(); tPLoc = time_precise(); timeD += tSUnix - tPLoc;
+tSUnix = time(); tPLoc = time_precise(); timeD += tSUnix - tPLoc;
+tSUnix = time(); tPLoc = time_precise(); timeD += tSUnix - tPLoc;
+timeD = timeD/4;
 
 SL_COUNT= <? printf("%d", slnum); ?>; // nombre de sliders utilisés
 CH_NB = <? printf("%d", CH_NB); ?>; // nombre de canaux gérés [typiquement 128]
@@ -475,6 +481,8 @@ KW_buff = 'buff';
 <? include("GM-Libs/ui-lib.jsfx-inc"); ?>
 // The adaptation of ui-lib
 <? include("GM-Libs/mSL_ui_LibJJ.jsfx-inc"); ?>
+
+<? include("GM-Libs/mSL_ui_audio.jsfx-inc"); ?>
 // The menus manager
 <? include("GM-Libs/mSL_ui_Menus.jsfx-inc"); ?>
 // The 8x8 Pad
@@ -801,7 +809,9 @@ Pr7_Partial0 = 32; // size:
 Pr7_StudConf = Pr7_Partial0 + 16;
 Pr7_StudRat = Pr7_StudConf + 8;  // size : 8 * 4
 Pr7_StudLive = Pr7_StudRat + 8 * 4; // size : 8 -- 1 if the tab uses the "live" display
-Pr7_Free = Pr7_StudLive + 8;
+Pr7_UiStyle = Pr7_StudLive + 8; // ui_jstyle (look of the GUI) - saved with the 'stud' block
+Pr7_UiTheme = Pr7_UiStyle + 1; // uix_jtheme (theme of the GUI) - saved with the 'stud' block
+Pr7_Free = Pr7_UiTheme + 1;
 
 // Update tabulations width
 tbN = 0; loop (8,
@@ -813,7 +823,7 @@ tbN = 0; loop (8,
 idx = serialBlock + 128; // dcbBlocksAll stays at serialBlock+3072 (was overlapping the structures and parameters below)
 
 // Description interne des readers
-ReadersBlockSize = 8;
+ReadersBlockSize = 12; // RDBL : see show_Reader_Pad
 ReadersStructA = idx; idx += ReadersBlockSize;
 ReadersStructB = idx; idx += ReadersBlockSize;
 ReadersStructC = idx; idx += ReadersBlockSize;
@@ -822,6 +832,10 @@ ReadersStructE = idx; idx += ReadersBlockSize;
 ReadersStructF = idx; idx += ReadersBlockSize;
 ReadersStructG = idx; idx += ReadersBlockSize;
 ReadersStructH = idx; idx += ReadersBlockSize;
+// Display of a reader : RDBL[8] = waveform height (no waveform under its_RdrWaveMin), RDBL[9] = waveform zoom [1 .. 100]
+its_RdrWaveH = 100; // default waveform height
+its_RdrWaveMin = 24; // smaller : no waveform
+ii = 0; loop(8, p = ReadersStructA + ii * ReadersBlockSize; p[8] = its_RdrWaveH; p[9] = 1; ii += 1;);
 
 LinesBlockSize = 8;
 LinesStructA = idx; idx += LinesBlockSize;
@@ -875,6 +889,7 @@ p_play_S_High = idx; idx += 1; // region high limit
 p_play_S_Len = idx; idx += 1; // region length
 p_play_S_Pos = idx; idx += 1; // region position
 p_play_XFade = idx; idx += 1; // xfade time
+p_play_Zoom = idx; idx += 1; // zoom of the waveform of a reader (a display property, kept in RDBL[9])
 
 // Global variables
 blockDesc = 0;  // description of the current block
@@ -889,6 +904,7 @@ PanIdt = 0;
 ///===== STATIC MEMORY =====
 mSL_StM_Init(BASE_MEMORY); // init static memory at this position
 current_Memory_Mode = mSL_MMd_Static; // starting now, allow use of "make_array"
+TabAddrMin = mSL_StM_FreePt; // min. address recognized for an array (see mSL_Evaluator)
 mSL_Str_Init(#strFirst, #strLast); // allocate strings for strings allocator
 mSL_Str_TInit(#wstrFirst, #wstrLast); // allocate strings for temporary strings
 mSL_Str_PInit(#xstrFirst, #xstrLast); // allocate strings for permanent strings
@@ -929,13 +945,14 @@ mm_lowblocks[0] = 'Low_'; mm_lowblocks[1] = '_Mem';
 */
 
 // The Main menu
-dcbNamesCnt = 128; // up to 128 strings in the dcb Menu - 79+32 used
+dcbNamesCnt = 160; // up to 160 strings in the dcb Menu - 117 used with 32 user modules
 // memory block for the menu
 GUI_Main_Menu_Block = mSL_StM_Alloc(ui_jmenu_items+dcbNamesCnt, 'Menu', mSL_StM_FlClear);
 
 blockDispNames = make_array(dcbNamesCnt);
 blockDispIdts = make_array(dcbNamesCnt);
 blockDispInverts = make_array(dcbNamesCnt);
+blockModNames = make_array(dcbNamesCnt); // module names, by module number (see mkModuleMenu)
 
 // User modules
 dcbUModsSiz = 32;
@@ -962,6 +979,22 @@ live_tab_active = 0; // set when a tab is shown with the "live" display
 live_clock_init(); // clock box of the "live" display (needs mSL symbols)
 
 <? include("GM-Libs/mSL_Colors.jsfx-inc"); ?>
+
+// Shared display modules : scheduler pad (mSL_show_Utilities.jsfx-inc)
+<? shw_part = 1; include("GM-Libs/mSL_show_Utilities.jsfx-inc"); ?>
+shw_Sched_Init();
+shw_Proc_Init();
+shw_AppName = "Interstys"; // in the names of the log files (sysout)
+// Audio waveforms (mSL_ui_audio.jsfx-inc) : work tables and colors ; waveform of a line in show_Line_Pad
+ui_audio_init();
+its_LinWaveH = 120; // height of the waveform of a line
+its_LinWaveMax = 4; // max channels shown (the loudest ones)
+// Colors of the markers and of the region in the waveforms
+its_WaveColWrt = 0x20FF20; // writing head : green
+its_WaveColRdr = 0xFFE020; // reading head : yellow
+its_WaveColAux = 0xFF8C20; // auxiliary reading head (during a cross fade) : orange
+its_WaveColReg = 0x4080FF; // loop region (shaded)
+its_WaveColRegLim = 0x909090; // limits of the cross fades around the region
 
 // Some global variables
 
@@ -1000,6 +1033,7 @@ Flgs_Evnts = (idx += 1);
 Flgs_Acts = (idx += 1);
 Flgs_Traces = (idx += 1);
 Flgs_Umods = (idx += 1);
+Flgs_GC = (idx += 1); // GC traces (see mSL_Garbage_Collector)
 
 
 KRun_mSL_Thread = 10;
@@ -1365,6 +1399,21 @@ function doMslCompile(fname)
     )
 );
 
+/* After a compilation attempt (successful or not) : free the compiler's structures,
+   keep the lock if other files are waiting (several files dropped : they are compiled next),
+   otherwise empty the list and release the lock taken by doMslCompile */
+function doMslCompileDone()
+local (i)
+(
+    mSL_bl_clear(mSL_GC_Protected); // free compiler's structures
+    i = 0; while ((i < uuuMslTSiz) && (uuuMslTabs[i] === 0)) (i += 1;);
+    (i >= uuuMslTSiz) ? (
+        uuuMslTPt = uuuMslFn = 0; // the list is empty
+        atomic_set(mSL_Lock,  max(0, atomic_get(mSL_Lock) - 1));
+    );
+);
+
+
 
 // The event operations
 <? include("GM-Libs/mSL_Events.jsfx-inc"); ?>
@@ -1497,7 +1546,7 @@ mm_limit_b[0] = 'END_'; mm_limit_b[1] = 'MEMR';
 
 
 // Build the dynamic memory
-mSL_errX = mSL_errC = 0;
+mSL_errX = mSL_errC = mSL_errM = 0;
 mSL_current_memory = mSL_new_memory = 0; // make sure it is clear
 AAAAC_5 = mSL_make_memory(C_memrArea, C_memrSize);
 
@@ -1847,7 +1896,7 @@ mSL_load_file_inGFX(fname)
 local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_start, mSL_load_end)
 (
     mSL_load_start = gfxStartTime;
-    mSL_errX = mSL_errC = 0;
+    mSL_errX = mSL_errC = mSL_errM = 0;
     ent = 0; fhd = -1;
     //(mSL_errC === 0) ? (
     //    SchedListEmpty(SchedInactPts) ? (
@@ -1892,7 +1941,7 @@ local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_
                         SchedCode[ent] = KRun_mSL_Thread; // start running a thread
                         mSL_init_thread(ent); // perform initalization
                         // ADump(mSL_main_cod); // just a trace
-                        mSL_errX = max(mSL_errX, mSL_errC);
+                        mSL_errX = max(mSL_errX, max(mSL_errC, mSL_errM));
                         (mSL_errX === 0) ? (
                             (FlagsTbVals[Flgs_Scripts] & 1) ? (
                                 sprintf(#gfxu, "Load OK - Ent: %d", ent);
@@ -1915,7 +1964,7 @@ local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_
 
     (mSL_C_fH >= 0) ? (file_close(mSL_C_fH); mSL_C_fH = -1;);
     (fhd >= 0) ? (file_close(fhd); fhd = -1;);
-    mSL_errX = max(mSL_errX, mSL_errC);
+    mSL_errX = max(mSL_errX, max(mSL_errC, mSL_errM));
 
     (mSL_errX === 0) ? (
         (ent > 0) ? SchedInsertTail(SchedLockdPts, ent, SchETypeThrd);
@@ -2937,7 +2986,7 @@ menu_Lin_SIds_N[0] = "None";
 <? i=1; loop(LN_CNT, printf("menu_Lin_SIds_N[%d] = \"Line %d\";", i, i); i +=1;); ?>
 menu_Lin_SIds = make_jmenu(
     ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-            "line-num", LN_CNT+1, menu_Lin_SIds_N);
+            "line-names", LN_CNT+1, menu_Lin_SIds_N);
 
 // Menu 3 for LINES : the status
 menu_Lin_Status_N = make_array(2);
@@ -3530,7 +3579,7 @@ local (cb)
 
 
 function mkModuleMenu()
-local (i, tmp, bln, blu, itdsp, MM2, blockStrSpace, blockThemeBlack, blockThemeTron, blockThemeLightCyan, blockThemeOrange, blockThemeBlue, blockThemeDarkCyan, blockThemeDarkGreen, blockThemeDarkRed, blockThemeLightAmber, blockThemeNeonGreen, blockThemeLightMagenta)
+local (i, g, it, fid, ttl, gl0, gl1, gl2, gl3, othFirst, tmp, bln, blu, itdsp, MM2, blockStrSpace, blockThemeBlack, blockThemeTron, blockThemeLightCyan, blockThemeOrange, blockThemeBlue, blockThemeDarkCyan, blockThemeDarkGreen, blockThemeDarkRed, blockThemeLightAmber, blockThemeNeonGreen, blockThemeLightMagenta)
 (
 
     i = 0; loop(dcbNamesCnt,
@@ -3619,6 +3668,10 @@ local (i, tmp, bln, blu, itdsp, MM2, blockStrSpace, blockThemeBlack, blockThemeT
     blockDispNames[blockWriterG] = "Writer G"; //
     blockWriterH = (itdsp += 1);
     blockDispNames[blockWriterH] = "Writer H"; //
+    blockScheduler = (itdsp += 1);
+    blockDispNames[blockScheduler] = "Scheduler"; // see mSL_show_Utilities
+    blockProcessesMgr = (itdsp += 1);
+    blockDispNames[blockProcessesMgr] = "Processes Manager"; // see mSL_show_Utilities
 
     blockUsrFirst = itdsp+1;
     // Add users modules
@@ -3633,6 +3686,30 @@ local (i, tmp, bln, blu, itdsp, MM2, blockStrSpace, blockThemeBlack, blockThemeT
     );
     blockUsrLast = itdsp;
     //
+    // The numbers above are the module numbers (kept in the panes descriptions, saved with the project).
+    // The "Modules" submenu shows them in another order : first 4 sub-menus (Lines, Readers, Writers, Effects),
+    // then the other modules, sorted alphabetically.
+    // blockDispIdts[menu item] = module number (0 for a sub-menu title), blockDispInverts[module number] = menu item
+    i = 0; loop(blockUsrLast + 1, blockModNames[i] = blockDispNames[i]; i += 1;);
+    it = blockFirst;
+    g = 0; loop(4,
+        (g === 0) ? (ttl = ">Lines"; fid = blockLineA;) :
+        (g === 1) ? (ttl = ">Readers"; fid = blockReaderA;) :
+        (g === 2) ? (ttl = ">Writers"; fid = blockWriterA;) : (ttl = ">Effects"; fid = blockEffectA;);
+        blockDispNames[it] = ttl; blockDispIdts[it] = 0; it += 1;
+        i = 0; loop(8, blockDispNames[it] = blockModNames[fid + i]; blockDispIdts[it] = fid + i; it += 1; i += 1;);
+        (g === 0) ? (gl0 = it - 1) : (g === 1) ? (gl1 = it - 1) : (g === 2) ? (gl2 = it - 1) : (gl3 = it - 1);
+        g += 1;
+    );
+    othFirst = it;
+    i = blockFirst; while (i <= blockUsrLast) (
+        !(((i >= blockLineA) && (i <= blockLineH)) || ((i >= blockReaderA) && (i <= blockReaderH))
+            || ((i >= blockWriterA) && (i <= blockWriterH)) || ((i >= blockEffectA) && (i <= blockEffectH))) ? (
+            blockDispNames[it] = blockModNames[i]; blockDispIdts[it] = i; it += 1;
+        );
+        i += 1;
+    );
+    itdsp = it - 1;
     blockDispITC = itdsp+1; // item count
     // for the menu
     blockStrSpace = (itdsp += 1);
@@ -3723,17 +3800,21 @@ local (i, tmp, bln, blu, itdsp, MM2, blockStrSpace, blockThemeBlack, blockThemeT
     blockDispNames[blockThemeNeonGreen] = "!&1 Neon Green"; //
     blockThemeLightMagenta = (itdsp += 1);
     blockDispNames[blockThemeLightMagenta] = "!&1< Light Magenta"; //
+    (itdsp += 1); // separator
+    blockStyleSoft = (itdsp += 1);
+    blockDispNames[blockStyleSoft] = "&/Soft style"; // combined with the theme ; see ui_jstyle (saved in serialBlock[Pr7_UiStyle])
     //
     //
     blockMenuITC = itdsp + 1 ;
     // ======
     // Alphabetical sort of modules
 
-    // Alphabetically sort modules names - insure future compatibility by keeping same number for previous modules
-    mSL_Sort_Strings(blockDispITC, blockFirst, blockDispNames, blockDispIdts, 0, 0);
-    // build invert table
+    // Alphabetically sort the other modules names - the module numbers stay the same
+    mSL_Sort_Strings(blockDispITC, othFirst, blockDispNames, blockDispIdts, 0, 0);
+    // build invert table (module number -> menu item)
     i = blockFirst; while(i<blockDispITC) (
-        blockDispInverts[blockDispIdts[i]] = i; i += 1;
+        (blockDispIdts[i] > 0) ? blockDispInverts[blockDispIdts[i]] = i;
+        i += 1;
     );
 
     // provide a block for the menu
@@ -3744,6 +3825,11 @@ local (i, tmp, bln, blu, itdsp, MM2, blockStrSpace, blockThemeBlack, blockThemeT
     // Set the "<" in last module item
     tmp  = menu_Stud_Mod[ui_jmenu_items + blockDispITC - 1];
     str_setchar(tmp, 5, '<');
+    // and in the last item of the 4 sub-menus
+    str_setchar(menu_Stud_Mod[ui_jmenu_items + gl0], 5, '<');
+    str_setchar(menu_Stud_Mod[ui_jmenu_items + gl1], 5, '<');
+    str_setchar(menu_Stud_Mod[ui_jmenu_items + gl2], 5, '<');
+    str_setchar(menu_Stud_Mod[ui_jmenu_items + gl3], 5, '<');
     //ADump(menu_Stud_Mod-2);
     0 ? (
         sprintf(#zz, "Creating Sudio: %d", menu_Stud_Mod);
@@ -5665,6 +5751,7 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_play_S_Pos, "Loop position",  "LoopRPos",  i_UB|i_SP, "%.3f s", "Loop position: %.3f s",   0,   3600,    0,  0.001, 0);
     parDcl(p_play_S_Len, "Loop Length",  "LoopRLen",  i_UB|i_SP, "%.5f s", "Loop Length: %.5f s",   0.00001,   3600,    0,  0.00001, 6);
     parDcl(p_play_XFade, "Cross Fade", "CrssFade", i_UB|i_SP, "%.2f ms", "Cross Fade : %.2f ms", 0.01, 20000, 10, 0.01, 6);
+    parDcl(p_play_Zoom, "Zoom", "WaveZoom", i_UB|i_SP, "%.0f", "Zoom : %.0f", 1, 100, 1, 1, 0);
 );
 
 
@@ -6126,7 +6213,7 @@ local (lcbl, k, s, x, bp, val, vol)
             its_WrtErrXe = 312; // erreur - invalid line reference
         ) :
         ((writer[its_Wrt_Unuz1] != SECURE_BL) || (writer[its_Wrt_Unuz2] != SECURE_BL)) ? (
-            its_RdrErrXe = 317; // erreur - writer block damaged
+            its_WrtErrXe = 317; // erreur - writer block damaged
         ) :
         ((writer[its_Wrt_SmplCnt] != lcbl[its_Lin_SmplCnt]) || (writer[its_Wrt_ChNbr] != lcbl[its_Lin_ChCnt])) ? (
             its_WrtErrXe = 318; // erreur - line information mismatched
@@ -6141,9 +6228,9 @@ local (lcbl, k, s, x, bp, val, vol)
                 writer[its_Wrt_Last] = lcbl[its_Lin_Last];
                 writer[its_Wrt_SmplCnt] = lcbl[its_Lin_SmplCnt];
             );
-            ((writer[its_Wrt_Abspos] < writer[its_Rdr_Start])
-                || (writer[its_Wrt_Abspos] > writer[its_Rdr_Last])) ? (
-                writer[its_Wrt_Abspos] = reader[its_Rdr_Start];
+            ((writer[its_Wrt_Abspos] < writer[its_Wrt_Start])
+                || (writer[its_Wrt_Abspos] >= writer[its_Wrt_Last])) ? (
+                writer[its_Wrt_Abspos] = writer[its_Wrt_Start];
             );
             writer[its_Wrt_Check] = BLOCK_CHECK;
             its_WrtErrXe = 0;
@@ -6165,10 +6252,10 @@ local (lcbl, k, s, x, bp, val, vol)
                 k[lcbl[its_Lin_BF1ST + s]] = val = vol * val;
                 // when at start/end of buffer, duplicate samples in guard area
                 (k < writer[its_Wrt_Start] + BF_LIM) ? (
-                    k[lcbl[its_Lin_BF1ST + s] + lcbl[its_Wrt_SmplCnt]] = val;
+                    k[lcbl[its_Lin_BF1ST + s] + writer[its_Wrt_SmplCnt]] = val;
                 ) :
                 (k > writer[its_Wrt_Last] - BF_LIM) ? (
-                    k[lcbl[its_Lin_BF1ST + s] - lcbl[its_Wrt_SmplCnt]] = val;
+                    k[lcbl[its_Lin_BF1ST + s] - writer[its_Wrt_SmplCnt]] = val;
                 );
             );
             s += 1;
@@ -6910,6 +6997,9 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
 
 TabAddrMax = mSL_StM_FreePt; // max. address recognized for an array
 SharedHighMemory = lastmemory = make_array(2); // last use of the function
+// End of the static allocations : from now on, make_array is refused (as in the other applications) ;
+// mSL_Dyn_Alloc does not depend on this mode (it uses the dynamic memory created by mSL_make_memory)
+current_Memory_Mode = mSL_MMd_Dynamic;  // change allocation mode
 
 
 
@@ -6992,6 +7082,8 @@ loadMode ? (
                 ldtotal += load_mem(0, serialBlock, savtmp[1]);
                 ldtotal += load_mem(0, dcbBlocksAll, savtmp[2]);
                 ldstud = 1;
+                ui_jstyle = (serialBlock[Pr7_UiStyle] != 0); // look of the GUI
+                uix_jtheme = max(0, min(uix_jtheme_rtc_max - 1, 0|serialBlock[Pr7_UiTheme])); // theme of the GUI
             ) : (
                 ldok = 0;
                 lderr = 140; // studio block too large
@@ -7080,6 +7172,7 @@ doingLoad = doingSave = 0;
 
 
 @block
+gm_time_keep(); // shared gmem time fields, if nobody keeps them (see mSL_clip_lib)
 chcnt = num_ch;
 
 // We achieve preset loading here to avoid conflicts with readers/writers
@@ -7110,6 +7203,53 @@ its_RdrSolos = j; // count of readers in solo mode
 ((0|(time() / 60)) !== usrModMn) ? (
     usrModMn = 0|(time() / 60);
     checkUsrMods();
+);
+
+// EVERY SECOND (as in Diffusion-3 / GamePlayer) : processes counting and mSL lock management
+((0|time()) !== mslSecond) ? (
+    mslSecond = 0|time();
+    // Manage process counting (shown in the Scripts pad and the Processes Manager)
+    mSL_act = count_p_list(SchedActivPts) + (mSL_active_Thread > 0);
+    mSL_wait = count_p_list(SchedDlydPts) + count_p_list(SchedEvntPts);
+    mSL_plck = count_p_list(SchedSuspPts) + count_p_list(SchedLockdPts);
+    mSL_pmsg = count_p_list(SchedRcyclPts);
+    mSL_inactv = SchedListSize(SchedFreePts);
+    mSL_maxact = max(mSL_maxact, mSL_act);
+
+    // Release a lock left for too long (unless all processes are locked after an error)
+    ((mSL_Lock != 0) && (mSL_loc_tim <= 0) && (SchedLockAll === 0)) ? (
+        mSL_Lock < 0 ? mSL_Lock = - mSL_Lock;
+        atomic_add(mSL_loc_tim,20); // "gfx" ticks, so about 2"
+        atomic_set(mSL_Lock,  max(0, mSL_Lock - 1));
+    );
+
+    // The compiler could not get memory : run a GC
+    mSL_malloc_failed ? (
+        atomic_add(mSL_Lock,1);
+        atomic_add(mSL_loc_tim,10);
+        gc_run_phaz = 1;
+        mSL_malloc_failed = 0; // unset flag
+    );
+
+    // Restart the locked processes, one per second (Scripts pad, after an error)
+    (Schedrestart1 && (SchedLockAll === 0)) ? (
+        (SchedListNonEmpty(SchedEvntPts)) ? (
+            xgent = SchedDetachHead(SchedEvntPts);
+            SchedInsertTail(SchedLockdPts, xgent, SchETypeThrd);
+            mSL_log(SysLogBox, "SchedEvntPts  ——> SchedLockdPts");
+        ) :
+        (SchedListNonEmpty(SchedSuspPts)) ? (
+            xgent = SchedDetachHead(SchedSuspPts);
+            SchedInsertTail(SchedLockdPts, xgent, SchETypeThrd);
+            mSL_log(SysLogBox, "SchedSuspPts  ——> SchedLockdPts");
+        ) ;
+        Schedrestart1 = 0;
+    );
+
+    // Files still waiting to be compiled
+    (uuuMslFn != 0) ? (
+        atomic_set(mSL_Lock, max(1,atomic_get(mSL_Lock)));
+    );
 );
 
 
@@ -7409,16 +7549,17 @@ mSL_loc_tim = max(mSL_loc_tim - 1, 0);
             mSL_loc_tim = max(2, mSL_loc_tim + 2); // no GC for some time
             // Perform a GC
             mSL_gc_start = time_precise() + timeD;
-            mSL_errX = mSL_errC = 0;
+            mSL_errX = mSL_errC = mSL_errM = 0;
             gc_start();
             gc_release_unused_thread();
             gc_mark_active();
             gc_mark(0); // make sure the last blocks have been checked
             // execute the sweep phase
             gc_sweep();
+            mSL_Str_sweep_strings(0); // clear the strings marks, age the temporary strings
             gc_run_phaz = 3; // This is over
             mSL_gc_end = time_precise() + timeD;
-            mSL_errX = max(mSL_errX, mSL_errC);
+            mSL_errX = max(mSL_errX, max(mSL_errC, mSL_errM));
             ((FlagsTbVals[Flgs_GC] & 1) && mSL_errX) ? (
                 sprintf(#gfxu, "GC Err: %d - Dur %.2f ms", mSL_errX,
                         1000 * (mSL_gc_end - mSL_gc_start));
@@ -7451,6 +7592,7 @@ mSL_loc_tim = max(mSL_loc_tim - 1, 0);
                         uuuMslTPt = uuuMslFent = uuuMslFn = 0; // reset indicators
                     ) : (
                         uuuMslFent = mSL_load_file_inGFX(uuuMslFname);
+                        (uuuMslFent === 0) ? doMslCompileDone(); // compilation failed : go on with the other files
                     );
                 );
                 mSL_loc_tim += 2; // again save some time
@@ -7469,11 +7611,10 @@ mSL_loc_tim = max(mSL_loc_tim - 1, 0);
                 );
                 mSL_log(SysLogBox, #s);
             );
-            mSL_bl_clear(mSL_GC_Protected); // free compiler's structures
             uuuMslFent = 0;
             uuuMslLastFname = uuuMslFname;
             uuuMslFname = 0;
-            atomic_set(mSL_Lock,  max(0, mSL_Lock - 1));
+            doMslCompileDone(); // free the compiler's structures; release the lock if no other file is waiting
         );
     );
 
@@ -7713,6 +7854,14 @@ while (SchedActive &&
     forceupdt = 0;
 );
 
+// A pad asked for too many cells (damaged pad ?) : see the guard in control_jpad (mSL_ui_Pads)
+((ui_jpad_bad_cnt != ui_jpad_bad_seen) && (time() != ui_jpad_bad_t)) ? (
+    ui_jpad_bad_seen = ui_jpad_bad_cnt; ui_jpad_bad_t = time(); // at most one message per second
+    sprintf(#padbad, "PAD ANOMALY: pad %d asks %g lines x %g columns (pad_Reader %d, pad_Writer %d, pad_Effect %d, pad_Line %d)",
+        ui_jpad_bad_pad, ui_jpad_bad_nl, ui_jpad_bad_nc, pad_Reader, pad_Writer, pad_Effect, pad_Line);
+    mSL_log(SysLogBox, #padbad);
+);
+
 
 function keepBlockInfos(bCurrent)
 local(i)
@@ -7727,6 +7876,9 @@ local(i)
         );
     );
 );
+
+// Shared display modules : show_Scheduler_Pad(title, blkId) (mSL_show_Utilities.jsfx-inc)
+<? shw_part = 2; include("GM-Libs/mSL_show_Utilities.jsfx-inc"); ?>
 
 
 
@@ -7928,8 +8080,8 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                     (u_ch === '5') ? (box[5] = 5;) :
                     (u_ch === '6') ? (box[5] = 6;) :
                     (u_ch === '7') ? (box[5] = 7;) :
-                    (u_ch === '8') ? (box[5] = 8;) ;
-                    //(u_ch === 'p') ? (sysout(SysLogBox);) :
+                    (u_ch === '8') ? (box[5] = 8;) :
+                    (u_ch === 'p') ? (sysout(box);) ; // log in a text file (see mSL_show_Utilities)
                     Keyed = KeyedT = 0;  // u_ch has not been used
                 );
             );
@@ -8014,6 +8166,59 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
     );
 );
 
+// Markers of the heads on line "lcbl", for the next ui_audio_wave :
+// green for the writers ; yellow for the readers (orange for the auxiliary head during a cross fade)
+// rdrsel : number of the reader to show, or -1 for all the readers (each marker then shows the reader number)
+function its_wave_marks(lcbl, rdrsel)
+local (i, x, m, p, lab)
+(
+    i = 0; loop(WR_CNT,
+        (((x = Writers_set[i]) != 0) && (x[its_Wrt_Lcbl] == lcbl) && (x[its_Wrt_Status] == its_WrtStat_Writing)) ? (
+            ui_audio_mark(x[its_Wrt_Abspos], its_WaveColWrt);
+        );
+        i += 1;
+    );
+    i = 0; loop(RD_CNT,
+        (((rdrsel < 0) || (rdrsel == i)) && ((x = Readers_set[i]) != 0) && (x[its_Rdr_Lcbl] == lcbl)
+            && (x[its_Rdr_Status] == its_RdrStat_Reading)) ? (
+            lab = (rdrsel < 0) ? i + 1 : 0;
+            m = 0; loop(max(1, min(its_RdrMaxMulti, x[its_Rdr_MultiCnt])),
+                // (very) negative positions are used for fade in / fade out : no marker
+                ((p = x[its_Rdr_Abspos + m]) >= 0) ? ui_audio_mark(p, its_WaveColRdr, lab);
+                (x[its_Rdr_XFadeCnt + m] > 0) ? (
+                    ((p = x[its_Rdr_AbsAuxpos + m]) >= 0) ? ui_audio_mark(p, its_WaveColAux, lab);
+                );
+                m += 1;
+            );
+        );
+        i += 1;
+    );
+);
+
+// Waveform of the channels read by reader "rcbl" (number "rdr") in line "lcbl", zoom in [1, 100]
+// The region (if it does not cover the whole line) and the zoom work in all the reading modes, so that the
+// limits can be set before switching to a loop mode : the zoom goes from the whole line to [its_Rdr_RegSOut, its_Rdr_RegEOut)
+function its_wave_reader(lcbl, rcbl, rdr, zoom)
+local (fa, fb, ra, rb, nch, ch0)
+(
+    fa = lcbl[its_Lin_Start]; fb = lcbl[its_Lin_Last];
+    ra = rcbl[its_Rdr_RegSOut]; rb = rcbl[its_Rdr_RegEOut];
+    // only when the region is smaller than the line (for the whole line, RegSOut = Start and RegEOut = Last)
+    ((ra > fa + 1) || (rb < fb - 1)) ? (
+        ui_audio_band(rcbl[its_Rdr_RegSIn], rcbl[its_Rdr_RegEIn], its_WaveColReg, 0.25);
+        ui_audio_mark(ra, its_WaveColRegLim);
+        ui_audio_mark(rb, its_WaveColRegLim);
+    );
+    ui_audio_zoom(fa, fb, ra, rb, zoom); // the whole line if the region covers it (or is not defined)
+    its_wave_marks(lcbl, rdr);
+    ch0 = max(0, min(lcbl[its_Lin_ChCnt] - 1, rcbl[its_Rdr_Bf1stChan]));
+    nch = max(0, min(rcbl[its_Rdr_BfChanUsed], lcbl[its_Lin_ChCnt] - ch0)); // only the channels read
+    ui_aud_chan0 = ch0; // each channel keeps the color of its number in the line
+    ui_audio_wave(0, nch, lcbl + its_Lin_BF1ST + ch0, lcbl[its_Lin_ActBSize],
+        ui_aud_za, ui_aud_zb, ui_aud_Sep | ui_aud_Axis, its_LinWaveMax);
+);
+
+
 /*
    RDBL[0] = reader to display
    RDBL[1] = reader type
@@ -8023,16 +8228,23 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
    RDBL[5] = Neded sliders count
    RDBL[6] = region length size option
    RDBL[7] = region length option
+   RDBL[8] = waveform height (no waveform if smaller than its_RdrWaveMin)
+   RDBL[9] = waveform zoom [1 .. 100] (slider "Zoom")
 */
 function show_Reader_Pad(RDBL, blockId)
-local (h1, h2, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi, i, xx, w, k, r, jmc,
+local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi, i, xx, w, k, r, jmc,
         rp, zi, zz, zzch, zzent, zzmcl, zzmmd, p1, p2, newlnb, rerr, spd, d1, clen, mvl)
 (
     h1 = uix_jpadHeight(pad_Rdr_NL); // height
     h2 = (RDBL[5] > 0) ? ui_jd_slidh * RDBL[5] + 6 : 0;
-    uix_jneed = uix_jmini = h1+h2+ui_jd_ctgr;
+    // waveform, between the pad and the sliders, if the reader has a line
+    rcbl = Readers_set[RDBL[0]];
+    h3 = ((rcbl > BASE_MEMORY) && (rcbl[-2] === KW_read) && ((lcbl = rcbl[its_Rdr_Lcbl]) > BASE_MEMORY)
+        && (lcbl[-2] === KW_lcbl) && (RDBL[8] >= its_RdrWaveMin)) ? RDBL[8] : 0;
+    uix_jneed = h1+h2+h3+ui_jd_ctgr;
+    uix_jmini = h1+h2+ui_jd_ctgr;
     (ui_height() >= uix_jmini) ? (
-        ui_split_top(uix_jneed);
+        ui_split_top(min(uix_jneed, ui_height()));
             ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
             rdr = RDBL[0]; // number of reader to be displayed
             rcbl = Readers_set[rdr];
@@ -8082,7 +8294,7 @@ local (h1, h2, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi, i, 
                 CL1 = Color_Cornflower_Blue;
                 (rok) ? (
                     dfCol = Col_InfoA ;
-                    RDBL[5] = 8;
+                    RDBL[5] = (h3 > 0) ? 9 : 8; // + "Zoom" slider when the waveform is shown
                     i = 0; loop(pad_Rdr_Siz,
                         pad_Rdr_Colrs[i] = dfCol;
                         strcpy(pad_Rdr_Labs[i],"");
@@ -8521,6 +8733,18 @@ local (h1, h2, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi, i, 
 
             ui_pop();
 
+            // Waveform of the channels read (see its_wave_reader and mSL_ui_audio.jsfx-inc)
+            (rok && (h3 > 0)) ? (
+                lcbl = rcbl[its_Rdr_Lcbl];
+                w = min(h3, ui_height() - h2); // the sliders keep their place
+                (((lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) && (w >= its_RdrWaveMin)) ? (
+                    ui_split_top(w);
+                        ui_pad(1,2,1,2);
+                        its_wave_reader(lcbl, rcbl, rdr, RDBL[9]);
+                    ui_pop();
+                );
+            );
+
             rok ? (
                 // Displayed only when reader is defined
 
@@ -8760,6 +8984,15 @@ local (h1, h2, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi, i, 
                         rdupdt = 1;
                     );
 
+                    // zoom of the waveform (a display property : RDBL[9])
+                    (RDBL[5] > 8) ? (
+                        paramValues[p_play_Zoom] = RDBL[9];
+                        r = parCtl(p_play_Zoom);
+                        (r != 0) ? (
+                            RDBL[9] = (r === 8) ? 1 : max(1, min(100, parV(p_play_Zoom))); // right clic : zoom 1
+                        );
+                    );
+
                 ui_pop();
 
             ); // rok
@@ -8780,12 +9013,16 @@ local (h1, h2, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi, i, 
    LDBL[2] = channel count
 */
 function show_Line_Pad(LDBL, blockId)
-local (h1, h2, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, dfCol, zzch, zzent, zzmcl,
+local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, dfCol, zzch, zzent, zzmcl,
         zzmmd, p1, p2, nlnr)
 (
     h1 = uix_jpadHeight(pad_Lin_NL); // height
     h2 = ui_jd_slidh * 1 + 4;
-    uix_jneed = uix_jmini = h1+h2+ui_jd_ctgr;
+    // waveform, if the line exists (see mSL_ui_audio.jsfx-inc)
+    lcbl = Lines_Set[LDBL[0]];
+    h3 = ((lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) ? its_LinWaveH : 0;
+    uix_jneed = h1+h2+h3+ui_jd_ctgr;
+    uix_jmini = h1+h2+ui_jd_ctgr;
     (ui_height() >= uix_jmini) ? (
         ui_split_top(uix_jneed);
             ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
@@ -8941,6 +9178,18 @@ local (h1, h2, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, dfCo
                     wrupdt = 1;
                 );
             ui_pop();
+
+            // Waveform of the line (all the channels buffers, the loudest ones)
+            (lok && (h3 > 0) && (ui_height() > 8)) ? (
+                ui_push();
+                    ui_pad(1,2,1,2);
+                    // heads of the writers and of all the readers of this line (numbered)
+                    its_wave_marks(lcbl, -1);
+                    // the samples are in [its_Lin_Start, its_Lin_Last) of each buffer (BF_LIM guard samples around)
+                    ui_audio_wave(h3, lcbl[its_Lin_ChCnt], lcbl + its_Lin_BF1ST, lcbl[its_Lin_ActBSize],
+                        lcbl[its_Lin_Start], lcbl[its_Lin_Last], ui_aud_Sep | ui_aud_Axis, its_LinWaveMax);
+                ui_pop();
+            );
 
             do_ModuleKeySave();
         ui_pop();
@@ -9663,6 +9912,8 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent)
             s = p[block1Pane -1 + studDispPrf];
             str_setchar(s, 1, '!');
             (serialBlock[Pr7_StudLive + TabIdt]) ? str_setchar(p[blockTabLive], 1, '!');
+            ui_jstyle ? str_setchar(p[blockStyleSoft], 1, '!');
+            str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
             0 ? (
                 sprintf(#dbg_trace1, "*ZZZ* [%d]  \"%s\"  (%d)  \"%s\" ", A99CBlock, blockDispNames[blockDispInverts[A99CBlock]], p[0],#Aws3);
             );
@@ -9694,7 +9945,7 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent)
                         );
                     );
                 ) :
-                ((kit >= blockFirst) && (kit < blockDispITC)) ? (
+                ((kit >= blockFirst) && (kit < blockDispITC) && (blockDispIdts[kit] > 0)) ? (
                     // we choose a module entry
                     p = menu_Stud_Mod + ui_jmenu_items + kit ; // correct here
                     wst = p[0]; k = blockDispIdts[kit]; // k is ok
@@ -9731,6 +9982,9 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent)
                     ui_screen_open("control.prompt");
                     ui_screen_arg(0, altTabsNames[TabIdt]);
                     ui_screen_arg(1, #tmp);
+                ) :
+                (kit === blockStyleSoft) ? (
+                    serialBlock[Pr7_UiStyle] = ui_jstyle = !ui_jstyle;
                 ) :
                 (kit >= blockThemeDefault) ? (
                     uix_jtheme = kit - blockThemeDefault;
@@ -9864,6 +10118,12 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent)
                 (igb === blockSysLog) ? (
                     show_SysLog(blockSysLog, SysLogBox);
                 ) :
+                (igb === blockScheduler) ? (
+                    show_Scheduler_Pad(blockDispNames[blockDispInverts[blockScheduler]], blockScheduler);
+                ) :
+                (igb === blockProcessesMgr) ? (
+                    show_ProcessesMgr(blockDispNames[blockDispInverts[blockProcessesMgr]], blockProcessesMgr);
+                ) :
                 ((igb >= blockUsrFirst) && (igb <= blockUsrLast)) && (blockUsrChecks[blockUsrNum[igb - blockUsrFirst]]) ? (
                     show_UserModule(igb);
                 );
@@ -9888,6 +10148,8 @@ local (p, i, xx, kit)
     i = 0; while (i < blockMenuITC) ( str_setchar(p[i], 1, ui_jmenu_chSP); i += 1; );
     str_setchar(p[block1Pane -1 + studDispPrf], 1, '!');
     str_setchar(p[blockTabLive], 1, '!');
+    ui_jstyle ? str_setchar(p[blockStyleSoft], 1, '!');
+    str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
     xx = control_jmenu(menu_Stud_Mod);
     xx ? (
         ui_GFXdoNow |= 1;
@@ -9901,6 +10163,9 @@ local (p, i, xx, kit)
             ui_screen_open("control.prompt");
             ui_screen_arg(0, altTabsNames[TabIdt]);
             ui_screen_arg(1, #tmp);
+        ) :
+        (kit === blockStyleSoft) ? (
+            serialBlock[Pr7_UiStyle] = ui_jstyle = !ui_jstyle;
         ) :
         (kit >= blockThemeDefault) ? (
             uix_jtheme = kit - blockThemeDefault;
@@ -10013,6 +10278,7 @@ local (ww, t, BankLink)
 
         (live_tab_active == 0) ? uix_gfx_clear = -1; // live background only for "live" tabs
         live_tab_active = 0;
+        serialBlock[Pr7_UiTheme] = uix_jtheme; // saved with the preset ('stud' block)
         update_theme();
 
         currScreen = ui_screen();
@@ -10098,6 +10364,7 @@ local (ww, t, BankLink)
             control_system();
             do_GenericTabEnd();
         );
+        my_menu_bar_overlay(uix_jG_menuscr); // "soft" look : the tabs bar over the panes (see ui-lib-JJ-GUI)
 
     );
 ) : (

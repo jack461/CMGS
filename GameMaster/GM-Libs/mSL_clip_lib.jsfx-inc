@@ -527,6 +527,41 @@ AAAtday = gmem[timeDay];
     gmem[timeSecOfRun] = tUnix - tStart;
 );
 
+/*
+    Shared time keeping : the time fields of gmem (timeYear ... timeSecOfDay, timeUnix, timeDelta)
+    GamePlayer always keeps them up to date (in @block). The other applications call gm_time_keep() at the start
+    of their @block : the first one which finds that nobody keeps them (date never set, or gmem[timeUnix] not
+    refreshed for more than 2 seconds, i.e. the keeper was removed) takes care of them from then on.
+*/
+gm_time_keeper = 0; // 1 when this application keeps the time fields
+gm_time_last = 0;
+function gm_time_keep() local (t)
+(
+    t = time();
+    (!gm_time_keeper) ? (
+        ((gmem[timeYear] == 0) || ((t - gmem[timeUnix]) > 2)) ? (
+            gm_time_keeper = 1;
+            (gmem[timeDelta] == 0) ? gmem[timeDelta] = timeD;
+            locT.DTG_init(1);
+            tUnix = gm_time_last = t;
+            gmem[timeDay] = -1; // force recomputation
+            locT.DTG_update(t);
+            timeGMemUpdate(); // may update winter time
+            locT.DTG_update(t);
+            timeGMemUpdate(); // now is good
+        );
+    );
+    gm_time_keeper ? (
+        gmem[timeUnix] = t;
+        (t != gm_time_last) ? (
+            // every second
+            tUnix = gm_time_last = t;
+            locT.DTG_update(t);
+            timeGMemUpdate();
+        );
+    );
+);
+
 #edt = "";
 function edTime(dur) local (dz, hr, mn, sc) (
     dur = (dur<=0) ? 0 : dur;

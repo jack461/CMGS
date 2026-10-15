@@ -337,45 +337,6 @@ function mSL_StM_show()
 );
 
 
-function mSL_Str_sweep_strings()
-global(mSL_Str_Range, mSL_Str_Use, mSL_Str_Flg_marked, mSL_Str_Flg_dispensable, mSL_Str_Flg_temporary, mSL_Str_First,
-    mSL_Str_Flg_inUse, mSL_Str_Flg_inStack, mSL_Str_Uptr, mSL_Str_Stack, mSL_Str_CUsed, mSL_Str_CFree, mSL_Str_StGCD,
-    #wxt, SysLogBox)
-local (i, k, s)
-(
-    i = 0;
-    loop(mSL_Str_Range,
-        k = mSL_Str_Use[i];
-        (k & mSL_Str_Flg_marked) ? (
-            k &= 0x7FFFFF - mSL_Str_Flg_marked;
-            (k === mSL_Str_Flg_dispensable) ? k = mSL_Str_Flg_temporary;
-        ) : (
-            // Not marked - can be recycled
-            (k === mSL_Str_Flg_temporary) ? (
-                k = mSL_Str_Flg_dispensable;
-            ) :
-            (k === mSL_Str_Flg_dispensable) ? (
-                k = 0;
-            ) :
-            ((k === mSL_Str_Flg_inUse) || (k === 0)) ? (
-                // Put it back in the stack
-                s = i + mSL_Str_First;
-                // sprintf(#wxt, "* Recycle %d @ %d", s, i); mSL_log(SysLogBox, #wxt);
-                k = mSL_Str_Flg_inStack;
-                mSL_Str_Uptr = min(mSL_Str_Range, 1+mSL_Str_Uptr);
-                mSL_Str_Stack[mSL_Str_Uptr] = s ;
-                strcpy(s, "*RECYCLED*");
-                mSL_Str_CUsed -= 1; mSL_Str_CFree += 1;
-                mSL_Str_StGCD += 1;
-            );
-        );
-        mSL_Str_Use[i] = k;
-        i += 1;
-    );
-
-);
-
-
 // Print a sequence of strings
 //   Known as "GM_Log"
 function mSL_133(argc, argv)
@@ -613,6 +574,7 @@ SharedHighMemorySize = 0; // yet unknown
 idx = SharedLowMemory + SharedLowMemorySize;
 mSL_StM_Init(idx); // init static memory
 current_Memory_Mode = mSL_MMd_Static; // starting now, allow use of "make_array"
+TabAddrMin = mSL_StM_FreePt; // min. address recognized for an array (see mSL_Evaluator)
 mSL_Str_Init(#strFirst, #strLast); // allocate strings for strings allocator
 mSL_Str_TInit(#wstrFirst, #wstrLast); // allocate strings for temporary strings
 mSL_Str_PInit(#xstrFirst, #xstrLast); // allocate strings for permanent strings
@@ -641,9 +603,27 @@ ui_lib_JJ_GUI_init(2);
 
 uix_jG_menuscr[ii=0] = #MainScreen;
 uix_jG_menuscr[ii+=1] = #LiveScreen;
+uix_jG_menuscr[ii+=1] = "Studio A";
+uix_jG_menuscr[ii+=1] = "Studio B";
+uix_jG_menuscr[ii+=1] = "Studio C";
+uix_jG_menuscr[ii+=1] = "Studio D";
+uix_jG_menuscr[ii+=1] = "Live 2";
+uix_jG_menuscr[ii+=1] = "Live 3";
 uix_jG_menuscr[ii+=1] = -1;
 dcbTabsCount = ii; // menu bar max -- number of tabs
 uix_jmbsel = 0;
+uix_jG_menuscrSz = dcbTabsCount + 2; // tabs width in the menu bar
+
+// Tabs and panes configuration (see mSL_Panes.jsfx-inc), saved in @serialize
+serialSize = 128;
+serialBlock = make_array(serialSize);
+Pr7_StudConf = 8;  // size : 8 -- number of panes of each tab
+Pr7_StudRat = Pr7_StudConf + 8;  // size : 8 * 4 -- panes widths
+Pr7_StudLive = Pr7_StudRat + 8 * 4; // size : 8 -- 1 if the tab uses the "live" display
+Pr7_UiStyle = Pr7_StudLive + 8; // ui_jstyle (look of the GUI)
+Pr7_UiTheme = Pr7_UiStyle + 1; // uix_jtheme (theme of the GUI)
+Pr7_Free = Pr7_UiTheme + 1;
+dcbBlocksAll = 0; // allocated by pns_Init()
 
 // Alternate tabs names, edited with "Rename tab..." (right click in the menu bar), saved in @serialize
 altTabsNames = make_array(dcbTabsCount);
@@ -662,6 +642,12 @@ uix_jtheme_rtc_max = 0;  // no themes in this menu : the entry is returned in ui
 live_screen_init(); // data of the live screen (fonts, boxes, colors) - same place as before
 
 <? include("GM-Libs/mSL_Colors.jsfx-inc"); ?>
+
+// Shared display modules : scheduler pad (mSL_show_Utilities.jsfx-inc)
+<? shw_part = 1; include("GM-Libs/mSL_show_Utilities.jsfx-inc"); ?>
+shw_Sched_Init();
+shw_Proc_Init();
+shw_AppName = "Diffusion3"; // in the names of the log files (sysout)
 
 
 // colorlimits() : see mSL_Live_Screen.jsfx-inc
@@ -697,6 +683,7 @@ Flgs_Thrds = (idx += 1);
 Flgs_Evnts = (idx += 1);
 Flgs_Acts = (idx += 1);
 Flgs_Traces = (idx += 1);
+Flgs_GC = (idx += 1); // GC traces (see mSL_Garbage_Collector)
 
 
 KRun_mSL_Thread = 10;
@@ -930,7 +917,6 @@ pcfdef = newpcdef = make_array(16);   // Default configuration. Inited later
 // Define main projector and some others
 projUI = currentpro = mainpro = projectors = make_array(projareasize); // 80 * 64
 firstakous = projectors;
-mSL_Str_GCPRinit(2000); // create GC protected remanent strings
 
 
 
@@ -1032,6 +1018,21 @@ function doMslCompile(fname)
     )
 );
 
+/* After a compilation attempt (successful or not) : free the compiler's structures,
+   keep the lock if other files are waiting (several files dropped : they are compiled next),
+   otherwise empty the list and release the lock taken by doMslCompile */
+function doMslCompileDone()
+local (i)
+(
+    mSL_bl_clear(mSL_GC_Protected); // free compiler's structures
+    i = 0; while ((i < uuuMslTSiz) && (uuuMslTabs[i] === 0)) (i += 1;);
+    (i >= uuuMslTSiz) ? (
+        uuuMslTPt = uuuMslFn = 0; // the list is empty
+        atomic_set(mSL_Lock,  max(0, atomic_get(mSL_Lock) - 1));
+    );
+);
+
+
 
 // The event operations
 <? include("GM-Libs/mSL_Events.jsfx-inc"); ?>
@@ -1129,7 +1130,7 @@ mm_limit_b[0] = 'END_'; mm_limit_b[1] = 'MEMR';
 
 
 // Build the dynamic memory
-mSL_errX = mSL_errC = 0;
+mSL_errX = mSL_errC = mSL_errM = 0;
 mSL_current_memory = mSL_new_memory = 0; // make sure it is clear
 AAAAC_5 = mSL_make_memory(C_memrArea, C_memrSize);
 
@@ -1977,7 +1978,7 @@ mSL_load_file_inGFX(fname, num)
 local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_start, mSL_load_end)
 (
     mSL_load_start = gfxStartTime;
-    mSL_errX = mSL_errC = 0;
+    mSL_errX = mSL_errC = mSL_errM = 0;
     ent = 0; fhd = -1;
     //(mSL_errC === 0) ? (
     //    SchedListEmpty(SchedInactPts) ? (
@@ -2024,7 +2025,7 @@ local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_
                         SchedCode[ent] = KRun_mSL_Thread; // start running a thread
                         mSL_init_thread(ent); // perform initalization
                         // ADump(mSL_main_cod); // just a trace
-                        mSL_errX = max(mSL_errX, mSL_errC);
+                        mSL_errX = max(mSL_errX, max(mSL_errC, mSL_errM));
                         (mSL_errX === 0) ? (
                             (FlagsTbVals[Flgs_Scripts] & 1) ? (
                                 sprintf(#gfxu, "Load OK - Ent: %d", ent);
@@ -2047,7 +2048,7 @@ local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_
 
     (mSL_C_fH >= 0) ? (file_close(mSL_C_fH); mSL_C_fH = -1;);
     (fhd >= 0) ? (file_close(fhd); fhd = -1;);
-    mSL_errX = max(mSL_errX, mSL_errC);
+    mSL_errX = max(mSL_errX, max(mSL_errC, mSL_errM));
 
     (mSL_errX === 0) ? (
         (ent > 0) ? SchedInsertTail(SchedLockdPts, ent, SchETypeThrd);
@@ -2365,6 +2366,38 @@ local (res, kw, ent, k, p1, p2, p3)
 <? include("GM-Libs/mSL_Evaluator.jsfx-inc"); ?>
 
 
+//====== TABS AND PANES (mSL_Panes.jsfx-inc) ======
+// Modules of Diffusion 3, shown in the Studio menu (shift + right clic)
+function pns_Host_Modules(itdsp)
+(
+    blockMainInfos = (itdsp += 1);
+    blockDispNames[blockMainInfos] = "Main Status";
+    blockSysLog = (itdsp += 1);
+    blockDispNames[blockSysLog] = "System Log";
+    blockMemory1 = (itdsp += 1);
+    blockDispNames[blockMemory1] = "Memory 1";
+    blockMemory2 = (itdsp += 1);
+    blockDispNames[blockMemory2] = "Memory 2";
+    blockScheduler = (itdsp += 1);
+    blockDispNames[blockScheduler] = "Scheduler";
+    blockProcessesMgr = (itdsp += 1);
+    blockDispNames[blockProcessesMgr] = "Processes Manager";
+    itdsp;
+);
+
+<? pns_part = 1; include("GM-Libs/mSL_Panes.jsfx-inc"); ?>
+pns_Init();
+mkModuleMenu();
+memoryBox1[19] = blockMemory1; // for keepBlockInfos
+memoryBox2[19] = blockMemory2;
+
+// Default configuration : "Logs" as before (2 panes), "Live" with the live display
+serialBlock[Pr7_StudConf] = 2;
+dcbBlocksAll[0] = blockMainInfos; dcbBlocksAll[1] = blockSysLog;
+dcbBlocksAll[dcbWSize] = blockMemory1; dcbBlocksAll[dcbWSize+1] = blockMemory2;
+serialBlock[Pr7_StudLive + 1] = 1;
+
+
 //// All local GC protected blocks
 
 
@@ -2479,8 +2512,7 @@ local (cq, cx, flu, flk, kuz, zplm)
 );
 
 
-// Mock-up function
-function keepBlockInfos(b) ( 0; );
+// keepBlockInfos : see mSL_Panes.jsfx-inc
 gui_show_syslog = gui_show_memory = 1;
 SysLogBox[5] = 6;
 SysLogBox[6] = 0;
@@ -4041,6 +4073,7 @@ slidersmod = 1;
 
 @block
 
+gm_time_keep(); // shared gmem time fields, if nobody keeps them (see mSL_clip_lib)
 tUnix = timec = time();
 // Compute precise duration since last @block execution
 timez = time_precise();
@@ -4970,9 +5003,10 @@ wxy = timesy - timesz;
 
 
 @serialize
-// Only the alternate tabs names are saved (older projects contain nothing)
+// Saved : the alternate tabs names ('tnam'), then the tabs and panes configuration ('stud')
 (file_avail(0) >= 0) ? (
     // ===LOAD===
+    stud_ok = 0;
     (file_avail(0) > 0) ? (
         file_var(0, tnam_mark);
         (tnam_mark === 'tnam') ? (
@@ -4983,11 +5017,37 @@ wxy = timesy - timesz;
             );
         );
     );
+    (file_avail(0) > 0) ? (
+        file_var(0, stud_mark);
+        (stud_mark === 'stud') ? (
+            file_var(0, stud_siz1);
+            file_var(0, stud_siz2);
+            ((stud_siz1 === serialSize) && (stud_siz2 === dcbBSize)) ? (
+                file_mem(0, serialBlock, serialSize);
+                file_mem(0, dcbBlocksAll, dcbBSize);
+                stud_ok = 1;
+            );
+        );
+    );
+    stud_ok ? (
+        ui_jstyle = (serialBlock[Pr7_UiStyle] != 0); // look of the GUI
+        uix_jtheme = max(0, min(11, 0|serialBlock[Pr7_UiTheme])); // theme of the GUI
+        // Check panes configurations
+        stud_p = serialBlock + Pr7_StudConf;
+        stud_i = 0; loop(dcbTabsCount, stud_p[stud_i] = max(1, min(4, 0|stud_p[stud_i])); stud_i += 1;);
+        stud_p = serialBlock + Pr7_StudRat;
+        stud_i = 0; loop(dcbTabsCount*4, stud_p[stud_i] = max(180, min(1800, 0|stud_p[stud_i])); stud_i += 1;);
+    );
 ) : (
     // ===SAVE===
     tnam_mark = 'tnam'; file_var(0, tnam_mark);
     tnam_cnt = dcbTabsCount; file_var(0, tnam_cnt);
     tnam_i = 0; loop(tnam_cnt, file_string(0, altTabsNames[tnam_i]); tnam_i += 1;);
+    stud_mark = 'stud'; file_var(0, stud_mark);
+    stud_siz1 = serialSize; file_var(0, stud_siz1);
+    stud_siz2 = dcbBSize; file_var(0, stud_siz2);
+    file_mem(0, serialBlock, serialSize);
+    file_mem(0, dcbBlocksAll, dcbBSize);
 );
 
 
@@ -5105,6 +5165,16 @@ function do_GenericKeyRead()
 // display_boxes() and live_screen() : HP set boxes are drawn by HP_Draw_Pic (mSL_Draw_HPSet, just above)
 <? live_screen_hpset = 1; live_screen_in_gfx = 1; ?>
 <? include("GM-Libs/mSL_Live_Screen_Display.jsfx-inc"); ?>
+
+// keeps a key not used by a module (used by mSL_show_Utilities)
+function do_ModuleKeySave()
+(
+    (KeyedT === 0) ? ( KeyedT = Keyed; Keyed = 0; );
+    KeyedT;
+);
+
+// Shared display modules : show_Scheduler_Pad(title, blkId) (mSL_show_Utilities.jsfx-inc)
+<? shw_part = 2; include("GM-Libs/mSL_show_Utilities.jsfx-inc"); ?>
 
 
 
@@ -5288,7 +5358,7 @@ mSL_loc_cnt0 += 1;
             atomic_add(mSL_loc_tim,2);
             // Perform a GC
             mSL_gc_start = time_precise() + timeD;
-            mSL_errX = mSL_errC = 0;
+            mSL_errX = mSL_errC = mSL_errM = 0;
             gc_start();
             gc_release_unused_thread();
             gc_mark_active();
@@ -5297,10 +5367,10 @@ mSL_loc_cnt0 += 1;
             gc_run_phaz = 2; // This is over
             gc_sweep();
             //
-            mSL_Str_sweep_strings();
+            mSL_Str_sweep_strings(1); // strings marks; recycle unmarked strings "in use"
             gc_run_phaz = 3; // This is over
             mSL_gc_end = time_precise() + timeD;
-            mSL_errX = max(mSL_errX, mSL_errC);
+            mSL_errX = max(mSL_errX, max(mSL_errC, mSL_errM));
             (mSL_errX) ? (
                 sprintf(#dbg_trace11, "GC %d Err: %d - Dur %.2f ms", mSL_errX,
                         1000 * (mSL_gc_end - mSL_gc_start));
@@ -5364,6 +5434,7 @@ mSL_loc_cnt0 += 1;
                         );
                         //
                         uuuMslFent = mSL_load_file_inGFX(uuuMslFname, uuuig);
+                        (uuuMslFent === 0) ? doMslCompileDone(); // compilation failed : go on with the other files
                     );
                 );
                 atomic_add(mSL_loc_tim,2); // save some time
@@ -5387,11 +5458,10 @@ mSL_loc_cnt0 += 1;
                 mSL_log(SysLogBox, #s);
             );
             atomic_add(mSL_loc_tim,2); // again save some time
-            mSL_bl_clear(mSL_GC_Protected); // free compiler's structures
             uuuMslFent = 0;
             uuuMslLastFname = uuuMslFname;
             uuuMslFname = 0;
-            atomic_set(mSL_Lock,  max(0, mSL_Lock - 1));
+            doMslCompileDone(); // free the compiler's structures; release the lock if no other file is waiting
         );
     );
 
@@ -5511,6 +5581,7 @@ local (uix_jneed, uix_jmini, k, w, siz, u_ch, ent, nbcol)
 
 
             zzmi = ui_hover();
+            keepBlockInfos(blockMainInfos);
             (zzmi) ? (
                 ui_push();
                     // stack is now 2 levels deep
@@ -5562,7 +5633,7 @@ local (uix_jneed, uix_jmini, k, w, siz, u_ch, ent, nbcol)
                 siz += 1; ui_show("Memory", mm_show_ttu, mm_show_ttf, "%d / %d");
                 siz += 1; ui_show("Blocks", mm_show_frbl, mm_show_usbl, mm_show_flr, "%d / %d / %d");
                 siz += 1; ui_show("Alloc", AAA_C__1, AAA_M_ptw, AAA_M_bs, AAA_M_tailsize, "%d / %d / %d / %d");
-                siz += 1; ui_show("GC Errs", mSL_errX, mSL_GC_BDMG, mm_show_dmgb, mm_show_rpdb, "%d / %d / %d / %d");
+                siz += 1; ui_show("GC Errs", mSL_GC_Err, mSL_GC_BDMG, mm_show_dmgb, mm_show_rpdb, "%d / %d / %d / %d");
                 siz += 1; ui_show("GC", gc_count, mSL_Dyn_LogCnt, mSL_Dyn_fLogCnt, mSL_Dyn_rLogCnt, "%d / %d / %d / %d");
                 siz += 1; ui_show("Options", mSL_Dyn_RecycleF, mm_show_limit, (0|(100*mm_show_ratio))/100, "rcy:%d / lim:%.2f:%.2f");
                 siz += 1; ui_show("Strings", mSL_Str_CUsed, mSL_Str_CFree, mSL_Str_StACycl, mSL_Str_StInLO, "%d / %d / %d / %d");
@@ -5683,7 +5754,7 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                     (u_ch === '6') ? (box[5] = 6;) :
                     (u_ch === '7') ? (box[5] = 7;) :
                     (u_ch === '8') ? (box[5] = 8;) :
-                    //(u_ch === 'p') ? (sysout(SysLogBox);) :
+                    (u_ch === 'p') ? (sysout(box);) : // log in a text file (see mSL_show_Utilities)
                     (
                         KeyedT = u_ch;  // u_ch has not been used
                     );
@@ -5949,8 +6020,10 @@ while (efi) (
         0 ? (sprintf(#drpfil, "Dropped file : \"%s\"", #s); mk_display_box(#drpfil););
         efs = mSL_Str_Tmp();
         strcpy(efs, #s);
+        dropped_x = mouse_x; dropped_y = mouse_y; dropped_cap = mouse_cap;
+        ui_GFXdoNow |= 1; // Make sure we react as soon as possible
         (match ("*.txt", efs)) ? (
-            // Expect to be a preset
+            // Expect to be a preset ?
             // fname_ld = efs; // the file name
             // doreload = 1;
             freceived = 17213.5
@@ -6597,6 +6670,54 @@ local (lpp, pval, upp, tladd, bval, bxn, box, del)
     gr_check();
 );
 
+//====== TABS AND PANES : HOST FUNCTIONS (see mSL_Panes.jsfx-inc) ======
+function do_GenericTabStart()
+(
+    ui_jmouse_cap |= mouse_cap;
+    KeyedT = Keyed = 0; Kmouse_cap = ui_jmouse_cap;
+    ui_Xtime_period = 1; // refresh screen every second
+    // panes : read the key now (shift + left/right arrows resize the panes)
+    (serialBlock[Pr7_StudLive + TabIdt] == 0) ? do_GenericKeyRead();
+);
+
+function do_GenericTabEnd()
+(
+    // panes : the keys not used by the modules
+    (serialBlock[Pr7_StudLive + TabIdt] == 0) ? do_main_actions();
+);
+
+function pns_LiveDisplay()
+(
+    ui_Xtime_period = 0.0625; // refresh screen quite often
+    colored_screen();
+    mouse_hover();
+);
+
+function show_Module(igb)
+(
+    (igb === blockMainInfos) ? (
+        show_local_Infos();
+    ) :
+    (igb === blockSysLog) ? (
+        show_SysLog(blockSysLog, SysLogBox);
+    ) :
+    (igb === blockMemory1) ? (
+        show_Memory(memoryBox1);
+    ) :
+    (igb === blockMemory2) ? (
+        show_Memory(memoryBox2);
+    ) :
+    (igb === blockScheduler) ? (
+        show_Scheduler_Pad("Scheduler", blockScheduler);
+    ) :
+    (igb === blockProcessesMgr) ? (
+        show_ProcessesMgr("Processes Manager", blockProcessesMgr);
+    );
+);
+
+<? pns_part = 2; include("GM-Libs/mSL_Panes.jsfx-inc"); ?>
+
+
 //====== GRAPHIC EXECUTION START ======
 
 must_do_gfx() ? (
@@ -6614,11 +6735,10 @@ must_do_gfx() ? (
     );
 
 
-   uix_gfx_clear = -1;
+    (live_tab_active == 0) ? uix_gfx_clear = -1; // live background only for "live" tabs
+    live_tab_active = 0;
     currScreen = ui_screen();
-    currScreen === #LiveScreen ? (
-        uix_gfx_clear = gxcred + gxcgreen * 256 + gxcblue * 65536;
-    );
+    serialBlock[Pr7_UiTheme] = uix_jtheme; // saved with the project ('stud' block)
     update_theme();
 
     ui_font();
@@ -6636,36 +6756,9 @@ must_do_gfx() ? (
     );
 
 
-    //SCREENS
-    currScreen === #MainScreen ? (
-        ui_Xtime_period = 1; // refresh screen every second
-        do_main_actions();
-
-        gui_show_infos ? (
-            show_local_Infos();
-        );
-
-        gui_show_syslog ? (
-            show_SysLog(0, SysLogBox);
-        );
-        gui_show_memory ? (
-            (gfx_w > gfx_colM_width) ? (
-                ui_split_leftratio(0.5);
-                show_Memory(memoryBox1);
-                ui_pop();
-            );
-            show_Memory(memoryBox2);
-        );
-    ) :
-
-
-    currScreen === #LiveScreen ? (
-        uix_gfx_clear = gxcred + gxcgreen * 256 + gxcblue * 65536;
-        ui_Xtime_period = 0.0625; // refresh screen quite often
-        colored_screen();
-
-
-        mouse_hover();
+    //SCREENS : the tabs, with panes or the live display (see mSL_Panes.jsfx-inc)
+    pns_ShowTabs(currScreen) ? (
+        0;
     ) :
 
 
@@ -6673,6 +6766,7 @@ must_do_gfx() ? (
     (
         control_system();
     );
+    my_menu_bar_overlay(uix_jG_menuscr); // "soft" look : the tabs bar over the panes (see ui-lib-JJ-GUI)
 
 
 );

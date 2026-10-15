@@ -1,0 +1,887 @@
+/*
+    mSL_Panes.jsfx-inc
+    Tabs and panes management (the "Studio" menu, shift + right clic), shared by the CMGS plugins
+    (c)Jean-Jacques Girardot
+    Taken from Interstys (itself taken from GamePlayer).
+
+    Each tab shows up to 4 panes, each pane shows a list of "modules", or the tab uses the "live" display.
+
+    The file has two parts, selected by the preprocessor variable "pns_part" :
+
+    1 - data and menu, to include in @init, while "make_array" allocates static memory :
+            (preprocessor) pns_part = 1; include("GM-Libs/mSL_Panes.jsfx-inc");
+            then : pns_Init(); mkModuleMenu();
+        The host must define before part 1 :
+            pns_Host_Modules(itdsp)  declares the host modules in the menu, for example :
+                                        blockSysLog = (itdsp += 1); blockDispNames[blockSysLog] = "System Log";
+                                     and returns the last "itdsp" used
+        and before pns_Init() :
+            dcbTabsCount             number of tabs (uix_jG_menuscr), altTabsNames (alternate tabs names)
+            serialBlock, Pr7_StudConf, Pr7_StudRat, Pr7_StudLive
+                                     the panes configuration is in serialBlock + Pr7_StudConf (dcbTabsCount words : panes count),
+                                     serialBlock + Pr7_StudRat (dcbTabsCount * 4 : panes widths),
+                                     serialBlock + Pr7_StudLive (dcbTabsCount : 1 if the tab uses the "live" display)
+            dcbBlocksAll             (optional) where to keep the modules lists, dcbBSize words ; allocated if 0
+            ui_MinSize1Pane...       (optional) panes sizes ; defaults as in Interstys
+
+    2 - display, to include in @gfx :
+            (preprocessor) pns_part = 2; include("GM-Libs/mSL_Panes.jsfx-inc");
+        The host must define before part 2 :
+            do_GenericTabStart(), do_GenericTabEnd()   called around the display of a tab
+            show_Module(igb)         displays the module "igb" (a block number declared in pns_Host_Modules)
+            pns_LiveDisplay()        draws a tab in "live" mode
+        Then, in @gfx :
+            pns_ShowTabs(ui_screen())   displays the current tab ; returns 0 if the screen is not a tab
+
+    Part 1 provides : pns_Init(), mkModuleMenu(), mSL_GUI_Generic(opr, bNumb, module, kit), keepBlockInfos(bCurrent)
+    Part 2 provides : genericItemsPos(bNumb), genericLiveMenu(bNumb), genericLiveTab(), genericTabSet(tbNum), pns_ShowTabs(scr)
+*/
+
+
+<? pns_part == 2 ? _suppress = 1; ?>
+@init
+<? _suppress = 0; ?>
+<? pns_part != 1 ? _suppress = 1; ?>
+
+//====== PANES : DATA ======
+function pns_Init()
+local (i, p)
+(
+    dcbPannelsMax = 4; // up to 4 pannels in each tabulation
+    dcbMSize = 32; // max number of different displayable modules in each pane
+    dcbMax = dcbMSize - 1;
+    dcbMCount = dcbTabsCount * dcbPannelsMax; // number of different modules sets
+    // we currently use 64 * 2 words, so 128 for each menu
+    dcbWSize = dcbMSize * 2;
+    dcbBSize = dcbWSize * dcbMCount;
+    (dcbBlocksAll == 0) ? dcbBlocksAll = make_array(dcbBSize);
+    memset(dcbBlocksAll, 0, dcbBSize);
+    scbTempCopy = make_array(dcbWSize); // temporary copy of a pane (copy/paste/swap panes)
+
+    // Panes configuration : 1 pane, standard widths, no "live" display
+    p = serialBlock + Pr7_StudConf;
+    i = 0; loop(dcbTabsCount, p[i] = 1; i += 1;);
+    p = serialBlock + Pr7_StudRat;
+    i = 0; loop(dcbTabsCount * 4, p[i] = 600; i += 1;);
+    p = serialBlock + Pr7_StudLive;
+    i = 0; loop(dcbTabsCount, p[i] = 0; i += 1;);
+
+    // Panes sizes
+    (ui_MinSize1Pane == 0) ? (
+        ui_MinSize1Pane = 312;
+        ui_MinSize4Panes = 4 * ui_MinSize1Pane;
+        ui_MinSize3Panes = 3 * ui_MinSize1Pane;
+        ui_MinSize2Panes = 2 * ui_MinSize1Pane; // min size for 2 panes
+        ui_MaxSize1Pane = 16 * ui_MinSize1Pane; // max size for 1 pane
+        ui_BestSize1Pane = 0|(16 * ui_MinSize1Pane); // best size for 1 pane
+        ui_MinSubColSize = 0|(ui_MinSize1Pane/2.5);
+    );
+
+    // The Studio menu
+    dcbNamesCnt = 128; // up to 128 strings in the dcb Menu
+    GUI_Main_Menu_Block = mSL_StM_Alloc(ui_jmenu_items+dcbNamesCnt, 'Menu', mSL_StM_FlClear);
+    blockDispNames = make_array(dcbNamesCnt);
+    blockDispIdts = make_array(dcbNamesCnt);
+    blockDispInverts = make_array(dcbNamesCnt);
+
+    // User modules (created by mSL scripts - see mSL_gui_ops in GamePlayer and Interstys)
+    dcbUModsSiz = 32;
+    dcbUModsCnt = 0;
+    blockUsrNames = make_array(dcbUModsSiz);
+    blockUsrIds = make_array(dcbUModsSiz);
+    blockUsrNum = make_array(dcbUModsSiz);
+    blockUsrRefs = make_array(dcbUModsSiz);
+    blockUsrChecks = make_array(dcbUModsSiz);
+    dcbUXRefsSiz = 64;
+    blockUsrCode = make_array(dcbUXRefsSiz);
+    blockUsrDesc = make_array(dcbUXRefsSiz);
+
+    // Global variables
+    blockDesc = 0;  // description of the current block
+    blockMouseWasIn = 0; //  in which block was the mouse ?
+    cModule = 0; // "current" module
+    copiedMod = 0; // "copied" module
+    TabIdt = 0;
+    PanIdt = 0;
+    menu_Stud_Mod = 0;
+);
+
+
+//====== PANES : THE STUDIO MENU ======
+function mkModuleMenu()
+local (i, j, tmp, itdsp, blockStrSpace, blockThemeBlack, blockThemeTron, blockThemeLightCyan, blockThemeOrange, blockThemeBlue,
+    blockThemeDarkCyan, blockThemeDarkGreen, blockThemeDarkRed, blockThemeLightAmber, blockThemeNeonGreen, blockThemeLightMagenta)
+(
+
+    i = 0; loop(dcbNamesCnt,
+        blockDispNames[i] = "";
+        blockDispIdts[i] = i;
+        blockDispInverts[i] = i;
+        i+=1;
+    ); // unused entries set to ""
+
+    // - the numbers                                // xx Returned from menu
+    blockCurrMod = itdsp = 0;
+    blockDispNames[blockCurrMod] = "&/Current";    // 1
+    blockModules = (itdsp += 1);
+    blockDispNames[blockModules] = ">Modules";    // not counted
+    blockFirst = itdsp + 1;
+
+    // The modules of the host
+    itdsp = pns_Host_Modules(itdsp);
+
+    blockUsrFirst = itdsp+1;
+    // Add users modules
+    memset(blockUsrNum, 0, dcbUModsSiz);
+    i=j=0; loop (dcbUModsSiz,
+        (blockUsrChecks[i]) ? (
+            blockUsrIds[i] = (itdsp += 1);
+            blockUsrNum[j] = i; j += 1;
+            blockDispNames[itdsp] = blockUsrNames[i];
+        );
+        i += 1;
+    );
+    blockUsrLast = itdsp;
+    //
+    blockDispITC = itdsp+1; // item count
+    // for the menu
+    blockStrSpace = (itdsp += 1);
+    blockDispNames[(itdsp += 1)] = ">Modules Disposition";
+    blockStrMvUp = (itdsp += 1);
+    blockDispNames[blockStrMvUp] = "&/Move up";
+    blockStrMvDwn = (itdsp += 1);
+    blockDispNames[blockStrMvDwn] = "&/Move down";
+    blockStrMvTop = (itdsp += 1);
+    blockDispNames[blockStrMvTop] = "&/Move top";
+    blockStrMvBottom = (itdsp += 1);
+    blockDispNames[blockStrMvBottom] = "&/Move Bottom";
+    blockStrMvLeft = (itdsp += 1);
+    blockDispNames[blockStrMvLeft] = "&/Move left";
+    blockStrMvRight = (itdsp += 1);
+    blockDispNames[blockStrMvRight] = "&/Move right";
+    blockCopyModule = (itdsp += 1);
+    blockDispNames[blockCopyModule] = "&/Copy module";
+    blockPasteModule = (itdsp += 1);
+    blockDispNames[blockPasteModule] = "&/<Paste module";
+    //
+    (itdsp += 1); // separator
+    blockDispNames[(itdsp += 1)] = ">Panes Arrangement";
+    blockPaneMvLeft = (itdsp += 1);
+    blockDispNames[blockPaneMvLeft] = "&/Move pane left";
+    blockPaneMvRight = (itdsp += 1);
+    blockDispNames[blockPaneMvRight] = "&/Move pane right";
+    blockPaneShftLeft = (itdsp += 1);
+    blockDispNames[blockPaneShftLeft] = "&/Shift panes left";
+    blockPaneShftRight = (itdsp += 1);
+    blockDispNames[blockPaneShftRight] = "&/Shift panes right";
+    blockCpyPane = (itdsp += 1);
+    blockDispNames[blockCpyPane] = "&/Copy pane";
+    blockPstPane = (itdsp += 1);
+    blockDispNames[blockPstPane] = "&/Paste pane";
+    (itdsp += 1); // separator
+    block1Pane = (itdsp += 1);
+    blockDispNames[block1Pane] = "&P1 pane";
+    block2Pane = (itdsp += 1);
+    blockDispNames[block2Pane] = "&P2 panes";
+    block3Pane = (itdsp += 1);
+    blockDispNames[block3Pane] = "&P3 panes";
+    block4Pane = (itdsp += 1);
+    blockDispNames[block4Pane] = "&P4 panes";
+    blockReset = (itdsp += 1);
+    blockDispNames[blockReset] = "&/Reset Sizes";
+    (itdsp += 1); // separator
+    blockPaneClear = (itdsp += 1);
+    blockDispNames[blockPaneClear] = "&/Clear Pane";
+    blockAllPaneClear = (itdsp += 1);
+    blockDispNames[blockAllPaneClear] = "&/<Clear all panes";
+    //
+    (itdsp += 1); // separator
+    blockDispNames[(itdsp += 1)] = ">Tabs Management";
+    blockDispNames[itdsp += 1] = "&~ignored";
+    blockTabShftLeft = (itdsp += 1);
+    blockDispNames[blockTabShftLeft] = "&/Shift tabs left"; //
+    blockTabShftRight = (itdsp += 1);
+    blockDispNames[blockTabShftRight] = "&/Shift tabs right"; //
+    blockTabLive = (itdsp += 1);
+    blockDispNames[blockTabLive] = "&/Live display"; // see genericLiveTab
+    blockTabRename = (itdsp += 1);
+    blockDispNames[blockTabRename] = "&/<Rename tab..."; //
+    //
+    (itdsp += 1); // separator
+    blockDispNames[(itdsp += 1)] = ">Theme";
+    blockThemeDefault = (itdsp += 1);
+    blockDispNames[blockThemeDefault] = "!&1Default"; //
+    blockThemeBlack = (itdsp += 1);
+    blockDispNames[blockThemeBlack] = "!&1 Black"; //
+    blockThemeTron = (itdsp += 1);
+    blockDispNames[blockThemeTron] = "!&1 Tron"; //
+    blockThemeLightCyan = (itdsp += 1);
+    blockDispNames[blockThemeLightCyan] = "!&1 Light Cyan"; //
+    blockThemeOrange = (itdsp += 1);
+    blockDispNames[blockThemeOrange] = "!&1 Orange"; //
+    blockThemeBlue = (itdsp += 1);
+    blockDispNames[blockThemeBlue] = "!&1 Blue"; //
+    blockThemeDarkCyan = (itdsp += 1);
+    blockDispNames[blockThemeDarkCyan] = "!&1 Dark Cyan"; //
+    blockThemeDarkGreen = (itdsp += 1);
+    blockDispNames[blockThemeDarkGreen] = "!&1 Dark Green"; //
+    blockThemeDarkRed = (itdsp += 1);
+    blockDispNames[blockThemeDarkRed] = "!&1 Dark Red"; //
+    blockThemeLightAmber = (itdsp += 1);
+    blockDispNames[blockThemeLightAmber] = "!&1 Light Amber"; //
+    blockThemeNeonGreen = (itdsp += 1);
+    blockDispNames[blockThemeNeonGreen] = "!&1 Neon Green"; //
+    blockThemeLightMagenta = (itdsp += 1);
+    blockDispNames[blockThemeLightMagenta] = "!&1< Light Magenta"; //
+    (itdsp += 1); // separator
+    blockStyleSoft = (itdsp += 1);
+    blockDispNames[blockStyleSoft] = "&/Soft style"; // combined with the theme ; see ui_jstyle (saved in serialBlock[Pr7_UiStyle])
+    //
+    //
+    blockMenuITC = itdsp + 1 ;
+    // ======
+    // Alphabetically sort modules names - insure future compatibility by keeping same number for previous modules
+    mSL_Sort_Strings(blockDispITC, blockFirst, blockDispNames, blockDispIdts, 0, 0);
+    // build invert table
+    i = blockFirst; while(i<blockDispITC) (
+        blockDispInverts[blockDispIdts[i]] = i; i += 1;
+    );
+
+    // provide a block for the menu
+    ui_jmenu_provided_block = GUI_Main_Menu_Block ;
+    menu_Stud_Mod = make_jmenu(
+        ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_shrclick | ui_jmenu_opt_notitle,
+            "Studio", blockMenuITC, blockDispNames);
+    // Set the "<" in last module item
+    tmp  = menu_Stud_Mod[ui_jmenu_items + blockDispITC - 1];
+    str_setchar(tmp, 5, '<');
+);
+
+
+/*
+     Perform a GUI operation
+        opr: operation class: 0, 1, 2, 3...
+        bNumb: the pannel (0 to dcbMCount-1) on which the operation will apply
+        module= a "module" number
+        kit = the suboperation number
+*/
+function
+mSL_GUI_Generic(opr, bNumb, module, kit)
+local (i, j, u, v, flg, tbN, pnN, mblk, a, k, p)
+(
+    flg = 1;
+    tbN = -1; // Tabulation number
+    mblk = 0; // Current block address
+    // Check we have a correct blockDesc
+    ((bNumb >= 0) && (bNumb < dcbMCount)) ? (
+        mblk = dcbBlocksAll + bNumb * dcbWSize;
+        tbN = bNumb >> 2;
+    ) :
+    ((blockDesc >= dcbBlocksAll) && (blockDesc < (dcbBlocksAll + dcbMCount * dcbWSize))) ? (
+        bNumb = 0|((blockDesc - dcbBlocksAll)/dcbWSize);
+        mblk = dcbBlocksAll + bNumb * dcbWSize;
+        tbN = bNumb >> 2;
+    ) : (
+        flg = 0;
+    );
+    pnN = bNumb - tbN * 4; // pane number in the tab (0 to 3)
+
+    ((module < blockFirst) || (module >= blockDispITC)) ? (module = 0; );
+
+
+    flg ? (
+        (module === 0) ? (module = mblk[dcbWSize - 1];);
+        (opr === 1) ? (
+            // add module "module" to the current block
+            i = 0; while ((mblk[i] != 0) && (mblk[i] != module)) ( i+= 1;);
+            mblk[i] = module;
+        ) :
+        (opr === 2) ? (
+            // remove module "module" from the current block
+            i = j = 0;
+            while ((j < dcbMax) && ((u = mblk[j]) !== 0)) (
+                (module === u) ? ( j+= 1; );
+                mblk[i] = mblk[j];
+                i += 1 ; j += 1;
+            );
+        ) :
+        (opr === 3) ? (
+            // perform action "kit"
+            (kit === blockStrMvUp) ? (
+                // move up current module
+                (module > 0) ? (
+                    i = 0; while (i < dcbMax) (
+                        u = mblk[i]; v = mblk[i+1];
+                        (v === module) ? (
+                            mblk[i] = v; mblk[i+1] = u; i = dcbMax;
+                        );
+                        i += 1;
+                    );
+                );
+            ) :
+            (kit === blockStrMvDwn) ? (
+                // move down current module
+                (module > 0) ? (
+                    i = 0; while (i < dcbMax) (
+                        u = mblk[i]; v = mblk[i+1];
+                        ((u === module) && (v !== 0)) ? (
+                            mblk[i] = v; mblk[i+1] = u; i = dcbMax;
+                        );
+                        i += 1;
+                    );
+                );
+            ) :
+            (kit === blockStrMvTop) ? (
+                // move top current module
+                (module > 0) ? (
+                    i = dcbMax-1; while (i >= 0) (
+                        u = mblk[i]; v = mblk[i+1];
+                        (v === module) ? (
+                            mblk[i] = v; mblk[i+1] = u;
+                        );
+                        i -= 1;
+                    );
+                );
+            ) :
+            (kit === blockStrMvBottom) ? (
+                // move bottom current module
+                (module > 0) ? (
+                    i = 0; while (i < dcbMax) (
+                        u = mblk[i]; v = mblk[i+1];
+                        ((u === module) && (v !== 0))  ? (
+                            mblk[i] = v; mblk[i+1] = u;
+                        );
+                        i += 1;
+                    );
+                );
+            ) :
+            (kit === blockStrMvLeft) ? (
+                // move left current module
+                (module > 0) ? (
+                    // Remove module from current pane
+                    i = j = 0;
+                    while (i < dcbMax) (
+                        (module === mblk[j]) ? (  j+= 1; );
+                        mblk[i] = mblk[j];
+                        i += 1 ; j += 1;
+                    );
+                    // Add module to left pane
+                    v = tbN * 4 + ((pnN + 3) % 4); // pane at the left
+                    u = dcbBlocksAll + v * dcbWSize; // its description
+                    i = 0; while ((u[i] != 0) && (u[i] != module))  ( i+= 1;);
+                    u[i] = module;
+                );
+            ) :
+            (kit === blockStrMvRight) ? (
+                // move right current module
+                (module > 0) ? (
+                    // Remove module from current pane
+                    i = j = 0;
+                    while (i < dcbMax) (
+                        (module === mblk[j]) ? (  j+= 1; );
+                        mblk[i] = mblk[j];
+                        i += 1 ; j += 1;
+                    );
+                    // Add module to right pane
+                    v = tbN * 4 + ((pnN + 1) % 4); // pane at the right
+                    u = dcbBlocksAll + v * dcbWSize; // its description
+                    i = 0; while ((u[i] != 0) && (u[i] != module))  ( i+= 1;);
+                    u[i] = module;
+                );
+            ) :
+            (kit === blockCopyModule) ? (
+                (module > 0) ? (
+                    copiedMod = module;
+                );
+            ) :
+            (kit === blockPasteModule) ? (
+                (copiedMod > 0) ? (
+                    // add module "copiedMod" to the current block
+                    i = 0; while ((mblk[i] != 0) && (mblk[i] != copiedMod)) ( i+= 1;);
+                    mblk[i] = copiedMod;
+                );
+            ) :
+            (kit === blockPaneClear) ? (
+                memset(mblk, 0, dcbWSize);
+            ) :
+            (kit === blockAllPaneClear) ? (
+                memset(dcbBlocksAll, 0, dcbBSize);
+            ) :
+            (kit === blockCpyPane) ? (
+                memcpy(scbTempCopy, mblk, dcbWSize);
+            ) :
+            (kit === blockPstPane) ? (
+                memcpy(mblk, scbTempCopy, dcbWSize);
+            ) :
+            (kit === block1Pane) ? (
+                serialBlock[Pr7_StudConf+tbN] = 1;
+            ) :
+            (kit === block2Pane) ? (
+                serialBlock[Pr7_StudConf+tbN] = 2;
+            ) :
+            (kit === block3Pane) ? (
+                serialBlock[Pr7_StudConf+tbN] = 3;
+            ) :
+            (kit === block4Pane) ? (
+                serialBlock[Pr7_StudConf+tbN] = 4;
+            ) :
+            (kit === blockReset) ? (
+                p = serialBlock + Pr7_StudRat + 4 * tbN;
+                p[0] = p[1] = p[2] = p[3] = 600;
+            ) :
+            (kit === blockPaneMvLeft) ? (
+                p = serialBlock + Pr7_StudRat + 4 * tbN;
+                v = tbN * 4 + (a = (pnN + 3) % 4); // pane at the left
+                // exchange sizes
+                k = p[a]; p[a] = p[pnN]; p[pnN] = k;
+                // exchange contents
+                u = dcbBlocksAll + v * dcbWSize;
+                memcpy(scbTempCopy, mblk, dcbWSize);
+                memcpy(mblk, u, dcbWSize);
+                memcpy(u, scbTempCopy, dcbWSize);
+            ) :
+            (kit === blockPaneMvRight) ? (
+                p = serialBlock + Pr7_StudRat + 4 * tbN;
+                v = tbN * 4 + (a = (pnN + 1) % 4); // pane at the right
+                // exchange sizes
+                k = p[a]; p[a] = p[pnN]; p[pnN] = k;
+                // exchange contents
+                u = dcbBlocksAll + v * dcbWSize;
+                memcpy(scbTempCopy, mblk, dcbWSize);
+                memcpy(mblk, u, dcbWSize);
+                memcpy(u, scbTempCopy, dcbWSize);
+            ) :
+            (kit === blockPaneShftLeft) ? (
+                p = serialBlock + Pr7_StudRat + 4 * tbN;
+                k = p[0]; p[0] = p[1]; p[1] = p[2]; p[2] = p[3]; p[3] = k;
+                u = dcbBlocksAll + tbN * 4 * dcbWSize; // left pane
+                memcpy(scbTempCopy, u, dcbWSize);
+                memcpy(u, u+dcbWSize, dcbWSize);
+                memcpy(u+dcbWSize, u+2*dcbWSize, dcbWSize);
+                memcpy(u+2*dcbWSize, u+3*dcbWSize, dcbWSize);
+                memcpy(u+3*dcbWSize, scbTempCopy, dcbWSize);
+            ) :
+            (kit === blockPaneShftRight) ? (
+                p = serialBlock + Pr7_StudRat + 4 * tbN;
+                k = p[3]; p[3] = p[2]; p[2] = p[1]; p[1] = p[0]; p[0] = k;
+                u = dcbBlocksAll + (tbN * 4 + 3) * dcbWSize; // right pane
+                memcpy(scbTempCopy, u, dcbWSize);
+                memcpy(u, u-dcbWSize, dcbWSize);
+                memcpy(u-dcbWSize, u-2*dcbWSize, dcbWSize);
+                memcpy(u-2*dcbWSize, u-3*dcbWSize, dcbWSize);
+                memcpy(u-3*dcbWSize, scbTempCopy, dcbWSize);
+            ) :
+            (kit === blockTabShftLeft) ? (
+                // Shift content left
+                i=0; loop(4,
+                    u = dcbBlocksAll + i * dcbWSize;
+                    p = serialBlock + Pr7_StudRat + i;
+                    k = p[0];
+                    memcpy(scbTempCopy, u, dcbWSize);
+                    loop(dcbTabsCount-1,
+                        memcpy(u, u + 4 * dcbWSize, dcbWSize);
+                        u += 4 * dcbWSize;
+                        p[0] = p[4]; p += 4;
+                    );
+                    p[0] = k;
+                    memcpy(u, scbTempCopy, dcbWSize);
+                    i += 1;
+                );
+                // Shift panes count, live flag and names
+                k = serialBlock[Pr7_StudConf]; a = serialBlock[Pr7_StudLive]; u = altTabsNames[0];
+                i=0; loop(dcbTabsCount-1,
+                    serialBlock[Pr7_StudConf+i] = serialBlock[Pr7_StudConf+i+1];
+                    serialBlock[Pr7_StudLive+i] = serialBlock[Pr7_StudLive+i+1];
+                    altTabsNames[i] = altTabsNames[i+1];
+                    i += 1;
+                );
+                serialBlock[Pr7_StudConf+i] = k;
+                serialBlock[Pr7_StudLive+i] = a;
+                altTabsNames[i] = u;
+            ) :
+            (kit === blockTabShftRight) ? (
+                // Shift content right
+                i=0; loop(4,
+                    u = dcbBlocksAll + ((dcbTabsCount-1) * 4 + i) * dcbWSize;
+                    p = serialBlock + Pr7_StudRat + (dcbTabsCount-1) * 4 + i;
+                    k = p[0];
+                    memcpy(scbTempCopy, u, dcbWSize);
+                    loop(dcbTabsCount-1,
+                        memcpy(u, u - 4 * dcbWSize, dcbWSize);
+                        u -= 4 * dcbWSize;
+                        p[0] = p[-4]; p -= 4;
+                    );
+                    p[0] = k;
+                    memcpy(u, scbTempCopy, dcbWSize);
+                    i += 1;
+                );
+                // Shift panes count, live flag and names
+                k = serialBlock[Pr7_StudConf + dcbTabsCount-1]; a = serialBlock[Pr7_StudLive + dcbTabsCount-1];
+                u = altTabsNames[dcbTabsCount-1];
+                i=dcbTabsCount-1; loop(dcbTabsCount-1,
+                    serialBlock[Pr7_StudConf+i] = serialBlock[Pr7_StudConf+i-1];
+                    serialBlock[Pr7_StudLive+i] = serialBlock[Pr7_StudLive+i-1];
+                    altTabsNames[i] = altTabsNames[i-1];
+                    i -= 1;
+                );
+                serialBlock[Pr7_StudConf] = k;
+                serialBlock[Pr7_StudLive] = a;
+                altTabsNames[0] = u;
+            ) ;
+        ) :
+        (opr === 4) ? (
+            // various GUI related operations
+            ((kit >=0) && (kit < dcbTabsCount)) ? (
+                // switch to screen "kit"
+                currScreenNb = kit;
+                uix_jmbsel = kit;
+                ui_screen_switch(uix_jG_menuscr[kit]);
+            );
+        );
+    );
+);
+
+
+// keeps the position of the displayed module "bCurrent" (used to find the "current" module)
+function keepBlockInfos(bCurrent)
+local(i)
+(
+    blockDesc ? (
+        // keep position
+        i = 0; loop (dcbMSize - 1,
+            (blockDesc[i] === bCurrent) ? (
+                blockDesc[i+dcbMSize] = A99PBlock = (ui_top_retina()*10000)+ui_height_retina();
+            );
+            i += 1;
+        );
+    );
+);
+
+<? _suppress = 0; ?>
+
+
+
+<? pns_part != 2 ? _suppress = 1; ?>
+
+//====== PANES : DISPLAY ======
+function genericItemsPos(bNumb)
+local(xx, igb, u, v, i, j, k, p, s, wst, kit, x, d, e)
+(
+    blockMouseWasIn = 0;
+    PanIdt = bNumb;
+    ((bNumb >=0) && (bNumb < dcbMCount) && menu_Stud_Mod) ? (
+        blockDesc = dcbBlocksAll + bNumb * dcbWSize;
+        (ui_hover()) ? (
+            colMouseWasIn = studDispCol;
+            ((KeyedT === 'rght') && (Kmouse_cap === 8)) ? (
+                // try to increase colum size
+                p = serialBlock + Pr7_StudRat + 4 * TabIdt;
+                ((colMouseWasIn === 0) && (studDispPCnt >= 2)) ? (
+                    // increase first col. size
+                    k = min(20, max(0, p[1] - ui_MinSize1Pane));p[0] += k; p[1] -= k;
+                ) :
+                ((colMouseWasIn === 1) && (studDispPCnt === 2)) ? (
+                    // increase 2nd col. size
+                    k = min(20, max(0, p[0] - ui_MinSize1Pane)); p[1] += k; p[0] -= k;
+                ) :
+                ((colMouseWasIn === 1) && (studDispPCnt >= 3)) ? (
+                    // increase 2nd col. size
+                    k = min(20, max(0, p[2] - ui_MinSize1Pane)); p[1] += k; p[2] -= k;
+                ) :
+                ((colMouseWasIn === 2) && (studDispPCnt === 3)) ? (
+                    // increase 3nd col. size
+                    k = min(20, max(0, p[0] - ui_MinSize1Pane)); p[2] += k; p[0] -= k;
+                ) :
+                ((colMouseWasIn === 2) && (studDispPCnt === 4)) ? (
+                    // increase 3nd col. size
+                    k = min(20, max(0, p[3] - ui_MinSize1Pane)); p[2] += k; p[3] -= k;
+                ) :
+                ((colMouseWasIn === 3) && (studDispPCnt === 4)) ? (
+                    // increase 4nd col. size
+                    k = min(20, max(0, p[0] - ui_MinSize1Pane)); p[3] += k; p[0] -= k;
+                ) ;
+                KeyedT = 0;
+            ) :
+            ((KeyedT === 'left') && (Kmouse_cap === 8)) ? (
+                // try to increase colum size
+                p = serialBlock + Pr7_StudRat + 4 * TabIdt;
+                ((colMouseWasIn === 0) && (studDispPCnt === 4)) ? (
+                    // increase first col. size
+                    k = min(20, max(0, p[3] - ui_MinSize1Pane));p[0] += k; p[3] -= k;
+                ) :
+                ((colMouseWasIn === 0) && (studDispPCnt === 3)) ? (
+                    // increase first col. size
+                    k = min(20, max(0, p[2] - ui_MinSize1Pane));p[0] += k; p[2] -= k;
+                ) :
+                ((colMouseWasIn === 0) && (studDispPCnt === 2)) ? (
+                    // increase first col. size
+                    k = min(20, max(0, p[1] - ui_MinSize1Pane));p[0] += k; p[1] -= k;
+                ) :
+                ((colMouseWasIn === 1) && (studDispPCnt >= 2)) ? (
+                    // increase first col. size
+                    k = min(20, max(0, p[0] - ui_MinSize1Pane));p[1] += k; p[0] -= k;
+                ) :
+                ((colMouseWasIn === 2) && (studDispPCnt >= 3)) ? (
+                    // increase 2nd col. size
+                    k = min(20, max(0, p[1] - ui_MinSize1Pane)); p[2] += k; p[1] -= k;
+                ) :
+                ((colMouseWasIn === 3) && (studDispPCnt === 4)) ? (
+                    // increase 2nd col. size
+                    k = min(20, max(0, p[2] - ui_MinSize1Pane)); p[3] += k; p[2] -= k;
+                ) ;
+                KeyedT = 0;
+            );
+            // Update col. size
+            blockMouseWasIn = blockDesc[dcbWSize - 1];
+            // we may need to update the menu
+            p = menu_Stud_Mod + ui_jmenu_items;
+            i=0; while (i < blockMenuITC) (
+                str_setchar(p[i], 1, ui_jmenu_chSP);
+                i += 1;
+            );
+            i=0; loop(dcbMSize,
+                (k = blockDesc[i]) ? (
+                    ((k > 0) && (k < blockDispITC)) ? (
+                        j = blockDispInverts[k];
+                        s = p[j]; str_setchar(s, 1, '!');
+                    ) : (
+                        blockDesc[i] = 0;
+                    );
+                );
+                i += 1;
+            );
+            //is there a "current" block ?
+            // update "clicked in"
+            blockDesc[dcbWSize - 1] = 0;
+            A99m = mouse_y;
+            i = 0; while ((k = blockDesc[i]) != 0) (
+                u = blockDesc[i+dcbMSize]; v = u/10000; u = u %10000; // the block
+                ((A99m >= v) && (A99m < (u+v))) ? (
+                    // clicked in the box
+                    blockDesc[dcbWSize - 1] = k;
+                );
+                i += 1;
+            );
+            cModule = A99CBlock = k = blockDesc[dcbWSize - 1];
+            strncpy(#Aws3, p[0], 6);
+            (k != 0) ? (
+                strcat(#Aws3, blockDispNames[blockDispInverts[k]]);
+                str_setchar(#Aws3, 1, '!');
+            ) : (
+                strcat(#Aws3, "-");
+            );
+            strcpy(p[0], #Aws3);
+            // Indicates the pane preferences
+            s = p[block1Pane -1 + studDispPrf];
+            str_setchar(s, 1, '!');
+            (serialBlock[Pr7_StudLive + TabIdt]) ? str_setchar(p[blockTabLive], 1, '!');
+            ui_jstyle ? str_setchar(p[blockStyleSoft], 1, '!');
+            str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
+
+            xx = control_jmenu(menu_Stud_Mod);
+            xx ? (
+                ui_GFXdoNow |= 1;
+                kit = jmenu_res2item(menu_Stud_Mod, xx);
+                (kit === 0) ? (
+                    (cModule > 0) ? (
+                        copiedMod = cModule;
+                        i = j = 0;
+                        while (i < dcbMax) (
+                            (cModule === blockDesc[j]) ? (  j+= 1; );
+                            blockDesc[i] = blockDesc[j];
+                            i += 1 ; j += 1;
+                        );
+                    );
+                ) :
+                ((kit >= blockFirst) && (kit < blockDispITC)) ? (
+                    // we choose a module entry
+                    p = menu_Stud_Mod + ui_jmenu_items + kit ; // correct here
+                    wst = p[0]; k = blockDispIdts[kit]; // k is ok
+
+                    (x = (str_getchar(wst, 1, 'cu') === '!')) ? (
+                        // We must add the new module at the end of the list
+                        i = 0; while (blockDesc[i] != 0) ( i+= 1;);
+                        blockDesc[i] = e = k; d = i;
+                    ) : (
+                        // the module was selected. We suppress it from the list
+                        i = j = 0;
+                        while (j < dcbMax) (
+                            (k === blockDesc[j]) ? ( d = j; e = k; j+= 1; );
+                            blockDesc[i] = blockDesc[j];
+                            i += 1 ; j += 1;
+                        );
+                    );
+                ) :
+                (kit === blockTabLive) ? (
+                    // switch this tab to the "live" display
+                    serialBlock[Pr7_StudLive + TabIdt] = 1;
+                ) :
+                (kit === blockTabRename) ? (
+                    sprintf(#pns_tmp, "New name for tabulation %d...", TabIdt);
+                    ui_screen_open("control.prompt");
+                    ui_screen_arg(0, altTabsNames[TabIdt]);
+                    ui_screen_arg(1, #pns_tmp);
+                ) :
+                (kit === blockStyleSoft) ? (
+                    serialBlock[Pr7_UiStyle] = ui_jstyle = !ui_jstyle;
+                ) :
+                (kit >= blockThemeDefault) ? (
+                    uix_jtheme = kit - blockThemeDefault;
+                ) :
+                (
+                    mSL_GUI_Generic(3, bNumb, cModule, kit);
+                );
+            );
+        );
+
+
+        // move bottom system log if present
+        (blockSysLog > 0) ? (
+            i = 0; while (i < dcbMax) (
+                u = blockDesc[i]; v = blockDesc[i+1];
+                ((u === blockSysLog) && (v !== 0))  ? (
+                    blockDesc[i] = v; blockDesc[i+1] = u;
+                );
+                i += 1;
+            );
+        );
+
+
+        // Hors interaction : mise en place des blocs
+        Bigx = 0; loop(dcbMSize, igb = blockDesc[Bigx];  // = DISPLAY BLOCKS =
+            (igb > 0) ? (
+                show_Module(igb); // provided by the host
+            );
+            Bigx += 1;
+        );
+    );
+    blockDesc = 0;
+    studDispCol += 1;
+);
+
+
+// Studio menu while a tab uses the "live" display (shift right click anywhere in the tab)
+function genericLiveMenu(bNumb)
+local (p, i, xx, kit)
+(
+    PanIdt = bNumb;
+    blockDesc = dcbBlocksAll + bNumb * dcbWSize;
+    p = menu_Stud_Mod + ui_jmenu_items;
+    i = 0; while (i < blockMenuITC) ( str_setchar(p[i], 1, ui_jmenu_chSP); i += 1; );
+    str_setchar(p[block1Pane -1 + studDispPrf], 1, '!');
+    str_setchar(p[blockTabLive], 1, '!');
+    ui_jstyle ? str_setchar(p[blockStyleSoft], 1, '!');
+    str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
+    xx = control_jmenu(menu_Stud_Mod);
+    xx ? (
+        ui_GFXdoNow |= 1;
+        kit = jmenu_res2item(menu_Stud_Mod, xx);
+        (kit === blockTabLive) ? (
+            // back to the panes display
+            serialBlock[Pr7_StudLive + TabIdt] = 0;
+        ) :
+        (kit === blockTabRename) ? (
+            sprintf(#pns_tmp, "New name for tabulation %d...", TabIdt);
+            ui_screen_open("control.prompt");
+            ui_screen_arg(0, altTabsNames[TabIdt]);
+            ui_screen_arg(1, #pns_tmp);
+        ) :
+        (kit === blockStyleSoft) ? (
+            serialBlock[Pr7_UiStyle] = ui_jstyle = !ui_jstyle;
+        ) :
+        (kit >= blockThemeDefault) ? (
+            uix_jtheme = kit - blockThemeDefault;
+        ) :
+        ((kit >= blockFirst) && (kit < blockDispITC)) ? (
+            0; // modules are not shown in the "live" display
+        ) :
+        (kit > 0) ? (
+            mSL_GUI_Generic(3, bNumb, 0, kit); // panes, tabs...
+        );
+    );
+    blockDesc = 0;
+);
+
+// "Live" display of a tab (pns_LiveDisplay is provided by the host)
+function genericLiveTab()
+(
+    live_tab_active = 1;
+    pns_LiveDisplay();
+    uix_gfx_clear = gfx_clear; // keep the live background (used by update_theme / control_start)
+    genericLiveMenu(TabIdt * dcbPannelsMax);
+);
+
+
+function genericTabSet(tbNum)
+local (ww, p)
+(
+    TabIdt = max(0, min(dcbTabsCount - 1, 0|tbNum)); // set before do_GenericTabStart (the host may use it)
+    do_GenericTabStart();
+    studDispPrf = studDispPCnt = max(1, min(4, 0|(serialBlock[Pr7_StudConf+TabIdt])));
+
+    (serialBlock[Pr7_StudLive + TabIdt]) ? (
+        genericLiveTab();
+    ) : (
+        ww = gfx_w / ui_retina();
+        (studDispPCnt === 4) ? (
+            (ww < ui_MinSize4Panes) ? studDispPCnt = 3;
+        );
+        (studDispPCnt === 3) ? (
+            (ww < ui_MinSize3Panes) ? studDispPCnt = 2;
+        );
+        (studDispPCnt === 2) ? (
+            (ww < ui_MinSize2Panes) ? studDispPCnt = 1;
+        );
+
+        studDispCol = 0;
+        p = serialBlock + Pr7_StudRat + 4 * TabIdt;
+        (studDispPCnt === 4)  ? (
+            ui_split_leftratio(max(1, p[0])/max(1, p[0] + p[1] + p[2] + p[3]));
+                genericItemsPos(TabIdt * dcbPannelsMax);
+            ui_pop();
+            ui_split_leftratio(max(1, p[1])/max(1, p[1] + p[2] + p[3]));
+                genericItemsPos(TabIdt * dcbPannelsMax + 1);
+            ui_pop();
+            ui_split_leftratio(max(1, p[2])/max(1, p[2] + p[3]));
+                genericItemsPos(TabIdt * dcbPannelsMax + 2);
+            ui_pop();
+                genericItemsPos(TabIdt * dcbPannelsMax + 3);
+        ) :
+        (studDispPCnt === 3)  ? (
+            ui_split_leftratio(max(1, p[0])/max(1, p[0] + p[1] + p[2]));
+                genericItemsPos(TabIdt * dcbPannelsMax);
+            ui_pop();
+            ui_split_leftratio(max(1, p[1])/max(1, p[1] + p[2]));
+                genericItemsPos(TabIdt * dcbPannelsMax + 1);
+            ui_pop();
+                genericItemsPos(TabIdt * dcbPannelsMax + 2);
+        ) :
+        (studDispPCnt === 2)  ? (
+            ui_split_leftratio(max(1, p[0])/max(1, p[0] + p[1]));
+                genericItemsPos(TabIdt * dcbPannelsMax);
+            ui_pop();
+                genericItemsPos(TabIdt * dcbPannelsMax + 1);
+        ) : (
+            genericItemsPos(TabIdt * dcbPannelsMax);
+        );
+    ); // live / panes
+    do_GenericTabEnd();
+);
+
+
+// Displays the tab whose screen is "scr" ; returns 0 if "scr" is not a tab
+function pns_ShowTabs(scr)
+local (i, tb)
+(
+    tb = -1; i = 0;
+    while ((tb < 0) && (i < dcbTabsCount)) (
+        (scr === uix_jG_menuscr[i]) ? tb = i;
+        i += 1;
+    );
+    (tb >= 0) ? (
+        genericTabSet(tb);
+        1;
+    ) : 0;
+);
+
+<? _suppress = 0; ?>

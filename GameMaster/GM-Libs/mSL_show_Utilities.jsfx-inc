@@ -1,0 +1,626 @@
+/*
+    mSL_show_Utilities.jsfx-inc
+    Display modules ("show_...") shared by GamePlayer, Interstys and Diffusion-3
+    (c)Jean-Jacques Girardot
+
+    The file has two parts, selected by the preprocessor variable "shw_part" :
+
+    1 - data, to include in @init, after mSL_Utilities, mSL_ui_Pads, mSL_Scheduler, ui-lib-JJ-GUI and mSL_Colors :
+            (preprocessor) shw_part = 1; include("GM-Libs/mSL_show_Utilities.jsfx-inc");
+            then call shw_Sched_Init();
+
+    2 - display functions, to include in @gfx, after the host functions they call :
+            (preprocessor) shw_part = 2; include("GM-Libs/mSL_show_Utilities.jsfx-inc");
+
+    The host must define, before part 2 :
+        keepBlockInfos(blockId)     -- keeps the position of a displayed module (may do nothing)
+        do_ModuleKeySave()          -- keeps a key not used by the module (Keyed -> KeyedT, may do nothing)
+    and may define cmdCap (modifiers for the "alternate" clic), ui_MinSize1Pane, ui_BestSize1Pane.
+
+    ====== Scheduler pad ======
+        shw_Sched_Init()                  creates the pad (padSched...), SchedActv, and the tasks labels
+        SchedTaskLabs[5..15]              labels of the tasks buttons (default "Task A" ... "Task K")
+        SchedTaskUniq[5..15]              1 : a clic replaces the waiting task of the same code
+        shw_Sched_AutoUpd                 1 (default) : the display updates SchedActv once per second.
+                                          Set it to 0 if the host calls shw_Sched_Update() itself.
+        shw_Sched_Update()                marks in SchedActv the codes of the waiting tasks
+        show_Scheduler_Pad(title, blkId)  displays the pad in the current pane
+
+    ====== Log export ======
+        sysout(logbox)                    writes the log "logbox" in a text file, through GMAuxiliary.eel (command 30) :
+                                          "<logbox[9]>-<shw_AppName>-<date>.txt" in the project folder
+                                          (key "p" in the System Log module ; GMAuxiliary.eel must be running)
+        shw_AppName                       name of the application, in the file names (set by the host)
+        nowIs()                           current date and time as a string ("dd/mm/yyyy hh:mm:ss")
+
+    ====== Processes manager (mSL scripts, threads, memory, GC) ======
+        shw_Proc_Init()                   creates the pad (padScriptsp...) and the threads types names
+        shw_Proc_DeferKill                0 (default) : "Kill Scripts" calls mSL_kill_all_thread() at once ;
+                                          1 : sets flagKillAllThreads, the host kills the threads (GamePlayer, in @block)
+        shw_Proc_GCFlg                    -1 (default) : right clic on "Run GC" runs gc_run(2) ;
+                                          >= 0 : gc_run(FlagsTbVals[shw_Proc_GCFlg])
+        menu_Scripts, scripts_tab         (host, optional) menu of the mSL scripts : right clic on "Load"
+        show_ProcessesMgr(title, blkId)   displays the processes manager in the current pane
+*/
+
+
+<? shw_part == 2 ? _suppress = 1; ?>
+@init
+<? _suppress = 0; ?>
+<? shw_part != 1 ? _suppress = 1; ?>
+
+//====== Scheduler Tasks ======
+function shw_Sched_Init()
+local (ii)
+(
+    padSchNL = 2;
+    padSchNC = 8;
+    padSchSiz = padSchNL * padSchNC;
+    padSched = make_jpad(
+        ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+        padSchNL, padSchNC, padSchSiz);
+    //
+    padSchLabs = padSched + padSched[ui_jpad_labs]; // addresses of labels
+    padSchColrs = padSched + padSched[ui_jpad_clrs]; // addresses of colors
+    padSchCells = padSched + padSched[ui_jpad_cells]; // addresses of cells desc.
+    padSchVals = padSched + padSched[ui_jpad_values]; // addresses of values
+    //
+    ii = 0; loop(padSchSiz,
+                padSchColrs[ii] = Col_Inactive;
+                padSchLabs[ii] = "";
+                ii+=1;
+    );
+
+    SchedActv = make_array(padSchSiz);
+    // Tasks buttons (codes 5 to 15)
+    SchedTaskLabs = make_array(padSchSiz);
+    SchedTaskUniq = make_array(padSchSiz);
+    SchedTaskLabs[5] = "Task A";
+    SchedTaskLabs[6] = "Task B";
+    SchedTaskLabs[7] = "Task C";
+    SchedTaskLabs[8] = "Task D";
+    SchedTaskLabs[9] = "Task E";
+    SchedTaskLabs[10] = "Task F";
+    SchedTaskLabs[11] = "Task G";
+    SchedTaskLabs[12] = "Task H";
+    SchedTaskLabs[13] = "Task I";
+    SchedTaskLabs[14] = "Task J";
+    SchedTaskLabs[15] = "Task K";
+    shw_Sched_AutoUpd = 1;
+    shw_Sched_UpdT = -1;
+    (cmdCap == 0) ? cmdCap = 0x4 | 0x20; // On Mac: allow "cmd" or "ctrl" as "alternate" modifiers
+);
+
+
+// Marks in SchedActv the codes of the waiting tasks
+function shw_Sched_Update()
+local (esent, xend, k, n)
+(
+    memset(SchedActv, 0, padSchSiz);
+    esent = SchedDlydPts[SchedNxtEnt];
+    xend = SchedDlydPts[SchedOtherEnd];
+    n = 0;
+    while ((esent != xend) && (n < 10000)) (
+        (((k = SchedCode[esent]) >= 0) && (k < padSchSiz)) ? SchedActv[k] = 1;
+        esent = SchedNxtEnt[esent];
+        n += 1; // the list may be modified by another thread
+    );
+);
+
+
+//================ Log export ==================
+shw_AppName = "";
+
+function nowIs()
+local(str)
+(
+    str = #;
+    sprintf(str, "%02d/%02d/%04d ", gmem[timeDay], gmem[timeMonth], gmem[timeYear]);
+    edTimeL(gmem[timeSecOfDay]);
+    strcat(str, #edt);
+);
+
+
+function sysout(logbox)
+local (i, j, k, l, m, dst, ss, bsiz, s1st, bn, cc, an)
+(
+    (gmem[versionGMScript] != 0) ? (
+        // Edit the name of the file to print
+        l = strlen(bn = logbox[9]);
+        dst = xplStr2;
+        i = 0; while (l > 0) (
+            gmem[dst+i] = str_getchar(bn, i, 'cu');
+            i += 1; l -= 1;
+        );
+        // construct the name : log name, application name, date
+        ((an = shw_AppName) != 0) && (strlen(an) > 0) ? (
+            gmem[dst+i] = '-'; i += 1;
+            l = strlen(an); j = 0;
+            while (l > 0) ( gmem[dst+i] = str_getchar(an, j, 'cu'); i += 1; j += 1; l -= 1; );
+        );
+        gmem[dst+i] = '-'; i += 1;
+        ss = nowIs();
+        gmem[dst+i] = str_getchar(ss, 6, 'cu'); i += 1;
+        gmem[dst+i] = str_getchar(ss, 7, 'cu'); i += 1;
+        gmem[dst+i] = str_getchar(ss, 8, 'cu'); i += 1;
+        gmem[dst+i] = str_getchar(ss, 9, 'cu'); i += 1;
+        gmem[dst+i] = '-'; i += 1;
+        gmem[dst+i] = str_getchar(ss, 3, 'cu'); i += 1;
+        gmem[dst+i] = str_getchar(ss, 4, 'cu'); i += 1;
+        gmem[dst+i] = '-'; i += 1;
+        gmem[dst+i] = str_getchar(ss, 0, 'cu'); i += 1;
+        gmem[dst+i] = str_getchar(ss, 1, 'cu'); i += 1;
+        l = strlen(ss) - 10;
+        j = 10; while (l > 0) (
+            cc = str_getchar(ss, j, 'cu');
+            ((cc < '0') || (cc > '9')) ? (cc = '-';) ;
+            gmem[dst+i] = cc;
+            i += 1; l -= 1; j += 1;
+        );
+        gmem[dst+i-1] = 'txt.';
+        gmem[dst+i] = 0;
+        // mSL_g6unpackArray(#s, dst, 0);
+        // mSL_log(SysLogBox, #s);
+
+
+        // ready to output the contents
+        bsiz = logbox[2]; s1st = logbox[1]; k = logbox[3];
+        i = 0; j = 0; l = 0; m = 0;
+        dst = infoBStarts;
+
+        k = 1;
+        while ((i < bsiz) && (j < infoBSize)) (
+            #txt = s1st + k;
+            j = mSL_g6packStr(dst, #txt, j, infoBSize, 7); k = (k + 1) % bsiz; i += 1;
+        );
+
+        gmem[scptPar2] = xplStr2;
+        gmem[scptPar3] = infoBStarts;
+
+        gmem[dateRqst] = gmem[dateCfrm] = time_precise() + timeD;
+        gmem[cmndKode] = 30;
+    ) : (
+        mSL_log(SysLogBox, "No auxiliary script present");
+    );
+);
+
+
+//================ Processes manager ==================
+function shw_Proc_Init()
+local (ii)
+(
+    padScriptsNL = 2;
+    padScriptsNC = 8;
+    padScriptsSiz = padScriptsNL * padScriptsNC;
+    padScriptsp = make_jpad(
+        ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+        padScriptsNL, padScriptsNC, padScriptsSiz);
+
+    padScriptsLabs = padScriptsp + padScriptsp[ui_jpad_labs]; // addresses of labels
+    padScriptsColrs = padScriptsp + padScriptsp[ui_jpad_clrs]; // addresses of colors
+    padScriptsCells = padScriptsp + padScriptsp[ui_jpad_cells]; // addresses of cells desc.
+    padScriptsVals = padScriptsp + padScriptsp[ui_jpad_values]; // addresses of values
+    //
+    ii = 0; loop(padScriptsSiz,
+                padScriptsColrs[ii] = Col_Inactive;
+                padScriptsLabs[ii] = "";
+                ii+=1;
+    );
+    showThrdent = 0;
+    showThrdType = 0;
+    showThrdTypeCnt = 6;
+    showThrdTypeNms = make_array(showThrdTypeCnt);
+    showThrdTypeNms[0] = "All";
+    showThrdTypeNms[1] = "Active";
+    showThrdTypeNms[2] = "Working";
+    showThrdTypeNms[3] = "Waiting";
+    showThrdTypeNms[4] = "Locked";
+    showThrdTypeNms[5] = "Free";
+    shw_Proc_DeferKill = 0;
+    shw_Proc_GCFlg = -1;
+    (cmdCap == 0) ? cmdCap = 0x4 | 0x20; // On Mac: allow "cmd" or "ctrl" as "alternate" modifiers
+);
+
+<? _suppress = 0; ?>
+
+
+
+<? shw_part != 2 ? _suppress = 1; ?>
+
+//====== Scheduler GFX ======
+function
+show_Scheduler_Pad(title, blkId)
+local (h1, h2, uix_jneed, uix_jmini, str, ig, u, v, zz, zzch, zzent, zzmcl, zzmmd, zzmi, jmc)
+(
+    (shw_Sched_AutoUpd && (time() != shw_Sched_UpdT)) ? (
+        shw_Sched_UpdT = time();
+        shw_Sched_Update();
+    );
+    h1 = uix_jpadHeight(padSchNL); // height
+    // h2 = uix_jBoxHeight(2);
+    h2 = 0;
+    uix_jneed = uix_jmini = h1+h2+ui_jd_ctgr;
+    str = #;
+    (ui_height() >= uix_jmini) ? (
+        ui_split_top(uix_jneed);
+            ui_set_rect(ui_left(), ui_top(),
+                (ui_BestSize1Pane > 0) ? max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())) : ui_width(), ui_height());
+            zzmi = ui_hover();
+            keepBlockInfos(blkId);
+            (zzmi) ? (
+                ui_push();
+                    // stack is now 2 levels deep
+                    ui_color(Col_Frame);
+                    ui_border(); // draws in purple
+                ui_pop();
+            );
+            control_group(title);
+            ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+
+            ui_split_top(h1);
+                ui_pad(1,2,3,2);
+                mSL_setStrArray(padSchLabs, padSchSiz);
+                jmc = ui_jmouse_cap;
+                //
+                (SchedActive) ? (
+                    (jmc & cmdCap) ? (
+                        padSchLabs[0] = "Turn off";
+                        padSchColrs[0] = Color_Std_Orange;
+                    ) : (
+                        padSchLabs[0] = "Scheduler on";
+                        padSchColrs[0] = Col_Cmnds ;
+                    ) ;
+                ) : (
+                    padSchLabs[0] = "Sch. off";
+                    padSchColrs[0] = Col_Inactive ;
+                );
+
+
+                (jmc & cmdCap) ? (
+                    padSchLabs[3] = "Kill";
+                    padSchColrs[3] = Col_CmdStp ;
+                ) : (
+                    padSchLabs[3] = "Now";
+                    padSchColrs[3] = Col_InfoC ;
+                );
+
+
+                padSchLabs[4] = "";
+                padSchColrs[4] = Col_Inactive ;
+
+                ig = 5;
+                while (ig < padSchSiz) (
+                    padSchLabs[ig] = SchedTaskLabs[ig];
+                    padSchColrs[ig] = (SchedActv[ig] != 0) ?  Color_Blizzard_Blue : Col_InfoC;
+                    ig += 1;
+                );
+
+
+                (SchedListNonEmpty(SchedDlydPts)) ? (
+                    u = SchedDlydPts[SchedNxtEnt];
+                    v = SchedCode[u];
+                    ((v >= 5) && (v <= 15)) ? (
+                        sprintf(padSchLabs[1], "%s ->", padSchLabs[v]);
+                    ) : (
+                        sprintf(padSchLabs[1], "Next: %d", SchedCode[u]);
+                    );
+                    padSchColrs[1] = Col_InfoD ;
+                    sprintf(padSchLabs[2], "%.1f", max(0, SchedDly[u] - Sched_TimeNow));
+                    padSchColrs[2] = Col_InfoD ;
+                ) : (
+                    padSchLabs[1] = "no event";
+                    padSchColrs[1] = Col_Inactive ;
+                    padSchLabs[2] = "";
+                    padSchColrs[2] = Col_Inactive ;
+                );
+
+                zz = control_jpad(padSched);
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4; ui_GFXReason = 34;
+                    zzch = padSched[ui_jpad_lkey];
+                    zzent = padSched[ui_jpad_entkey]-1;
+                    zzmcl = padSched[ui_jpad_last]-1;
+                    zzmmd = padSched[ui_jpad_lmods];
+
+                    (zz & ui_jpad_ev_lmc) ? (  // left mouse clic
+                        (zzmcl === 0) ? (
+                            ((jmc & cmdCap) && SchedActive) ? (SchedActive = 0;) : SchedActive =  1 ;
+                        ) :
+                        (zzmcl === 3) ? (
+                            (jmc & cmdCap) ? (
+                                SchedControl = 1; // kill
+                            ) : (
+                                SchedControl = 2; // now
+                            );
+                        ) :
+                        ((zzmcl >= 5) && (zzmcl <= 15)) ? (
+                            (SchedTaskUniq[zzmcl]) ? SchedRemove(SchedDlydPts, zzmcl);
+                            Schedule(SchedRelative, 0.0001, zzmcl);
+                        );
+                    );
+
+                    (zz & ui_jpad_ev_rmc) ? (  // right mouse clic
+                        (zzmcl === 0) ? (
+                            SchedActive =  1 ;
+                        ) :
+                        (zzmcl === 4) ? (
+                            SchedControl = 5; // clear all waiting tasks
+                        ) :
+                        ((zzmcl >= 5) && (zzmcl <= 15)) ? (
+                            SchedRemove(SchedDlydPts, zzmcl);
+                        );
+                    );
+                );
+
+                (zz & ui_jpad_ev_key) ? (
+                    Keyed = zzch; // do not use keys
+                );
+
+            ui_pop();
+
+
+            do_ModuleKeySave();
+        ui_pop();
+    );
+);
+
+
+//====== mSL Scripts : processes manager ======
+function
+show_ProcessesMgr(title, blkId)
+local (h1, h2, h3, uix_jneed, uix_jmini, ig, r, w, xx, zzmi, jmc, zz, zzch, zzent, zzmcl, errv, zzmmd, mm_dur_maxU)
+(
+    h1 = uix_jpadHeight(padScriptsNL); // height
+    h2 = uix_jBoxHeight(10); // second block height
+    h3 = uix_jBoxHeight(2); // minimum 2nd block height
+    uix_jneed = h1+h2+ui_jd_ctgr;
+    uix_jmini = h1+h3+ui_jd_ctgr;
+    (ui_height() >= uix_jmini) ? (
+        ui_split_top(uix_jneed);
+            ui_set_rect(ui_left(), ui_top(),
+                (ui_BestSize1Pane > 0) ? max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())) : ui_width(), ui_height());
+            zzmi = ui_hover();
+            jmc = ui_jmouse_cap;
+            keepBlockInfos(blkId);
+            (zzmi) ? (
+                ui_push();
+                    // stack is now 2 levels deep
+                    ui_color(Col_Frame);
+                    ui_border(); // draws in purple
+                ui_pop();
+            );
+            control_group(title);
+
+
+            ui_split_top(h1);
+                ui_pad(1,2,3,2);
+                mSL_setStrArray(padScriptsLabs, padScriptsSiz);
+                ig = 0; loop(padScriptsSiz,
+                    padScriptsColrs[ig] = Col_Inactive;
+                    ig+=1;
+                );
+
+                padScriptsLabs[0] = "Load";
+                padScriptsColrs[0] = Col_Cmnds;
+
+                padScriptsLabs[1] = "Show Mem.";
+                padScriptsColrs[1] = Color_Fern_Green;
+
+                padScriptsLabs[2] = "Run GC";
+                padScriptsColrs[2] = Color_Dark_Olive_Green;
+
+                (zz = atomic_get(mSL_Lock)) ? (
+                    sprintf(padScriptsLabs[3], "Locked [%d]", zz);
+
+                    padScriptsColrs[3] = (zz === 1) ? Color_Indian_Red : (zz === 2) ? Color_Deep_Cadmium_Red : (zz === 3) ? Color_Deep_Reddish_Orange :  Color_Deep_Red;
+                ) : (
+                    padScriptsLabs[3] = "Unlocked";
+                    padScriptsColrs[3] = Col_InfoC;
+                );
+
+                sprintf(padScriptsLabs[4], "Xop: %d", mSL_xop_cnt);
+                padScriptsColrs[4] = (jmc & cmdCap) ? Col_Cmnds : SchedLockAll ? Color_Purple : mSL_act ? Col_InfoA : Col_InfoC;
+
+
+                sprintf(padScriptsLabs[5], "Fr.Thrds %d", SchedListSize(SchedInactPts));
+                padScriptsColrs[5] = ((mSL_act+mSL_wait+mSL_plck) > 0) ?  Color_Light_Green : Col_InfoC;
+
+                (jmc & cmdCap) ? (
+                    padScriptsLabs[6] = "Kill Scripts";
+                    padScriptsColrs[6] = Color_Deep_Cadmium_Red;
+                ) : (
+                    sprintf(padScriptsLabs[6], "Fr.Ents %d", SchedListSize(SchedFreePts));
+                    padScriptsColrs[6] = ((mSL_act+mSL_wait+mSL_plck) > 0) ?  Color_Light_Green : Col_InfoC;
+                );
+
+                (jmc & cmdCap) ? (
+                    padScriptsLabs[7] = "Unlock Scripts";
+                    padScriptsColrs[7] = Color_Fern_Green;
+                ) : (
+                    errv = mSL_errC ? mSL_errC : (mSL_errX ? mSL_errX : mSL_errM);
+                    errv ? (
+                        sprintf(padScriptsLabs[7], "Err: %d", errv);
+                        padScriptsColrs[7] = SchedLockAll ? Color_Purple : Col_Error;
+                    ) : (
+                        padScriptsLabs[7] = "No err.";
+                        padScriptsColrs[7] = SchedLockAll ? Color_Purple : Col_InfoC;
+                    );
+                );
+
+                padScriptsLabs[8] = showThrdTypeNms[showThrdType];
+                padScriptsColrs[8] = Col_InfoC;
+
+                zz = control_jpad(padScriptsp);
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 1;
+                    zzch = padScriptsp[ui_jpad_lkey];
+                    zzent = padScriptsp[ui_jpad_entkey]-1;
+                    zzmcl = padScriptsp[ui_jpad_last]-1;
+                    zzmmd = padScriptsp[ui_jpad_lmods];
+
+                    (zz & ui_jpad_ev_lmc) ? (  // left mouse clic
+                        (zzmcl === 1) ? (
+                            mSL_log(SysLogBox, "Memory.");
+                            mem_walk(0); mem_show();
+                        ):
+                        (zzmcl === 2) ? (
+                            mSL_log(SysLogBox, "GC run.");
+                            gc_run(2);
+                        ):
+                        (zzmcl === 3) ? (
+                            atomic_get(mSL_Lock) ? (
+                                (zzmmd & cmdCap) ? (
+                                    atomic_add(mSL_Lock, -min(10, atomic_get(mSL_Lock)));
+                                ) : (
+                                    atomic_add(mSL_Lock, -1);
+                                );
+                            );
+                        ):
+                        (zzmcl === 6) ? (
+                            (jmc & cmdCap) ? (
+                                shw_Proc_DeferKill ? flagKillAllThreads = 1 : mSL_kill_all_thread();
+                            );
+                        ):
+                        (zzmcl === 7) ? (
+                            mSL_errC = mSL_errX = mSL_errM = 0; // reset error
+                            (zzmmd & cmdCap) ? (
+                                SchedLockAll = 0;
+                                mSL_gc_MaxDur = mm_cyc_maxU = mm_dur_maxU = 0;
+                                mm_cyc_max=0; mm_dur_max = 0; gmaxd = 0; lmaxd = 0;
+                                memset(mm_cyc_mm, 0, mm_cyc_siz);
+                                memset(mm_dur_mm, 0, mm_cyc_siz);
+                            );
+                        );
+                    );
+
+                    (zz & ui_jpad_ev_rmc) ? (  // right mouse clic
+                        (zzmcl === 0) ? (
+                            (menu_Scripts != 0) ? (
+                                xx = control_jmenu(menu_Scripts);
+                                (xx != 0) ? (
+                                    doMslCompile(scripts_tab[xx-1]);
+                                );
+                            );
+                        ):
+                        (zzmcl === 1) ? (
+                            mSL_log(SysLogBox, "Memory.");
+                            mem_walk(1); mem_show();
+                        ):
+                        (zzmcl === 2) ? (
+                            (shw_Proc_GCFlg >= 0) ? (
+                                mSL_log(SysLogBox, sprintf(#, "GC start.  %X", FlagsTbVals[shw_Proc_GCFlg]));
+                                gc_run(FlagsTbVals[shw_Proc_GCFlg]);
+                            ) : (
+                                mSL_log(SysLogBox, "GC start.");
+                                gc_run(2);
+                            );
+                        ):
+                        (zzmcl === 3) ? (
+                            (zzmmd & cmdCap) ? (
+                                atomic_add(mSL_Lock,10);
+                            ) : (
+                                atomic_add(mSL_Lock,1);
+                            );
+                            atomic_add(mSL_loc_tim,mSL_loc_tadd);
+                        ):
+                        (zzmcl === 4) ? (
+                            (zzmmd & cmdCap) ? (
+                                SchedLockAll ? (
+                                    SchedLockAll = 0;
+                                ) : (
+                                    Schedrestart1 = 1;
+                                    mSL_log(SysLogBox, "——> Schedrestart1");
+                                    atomic_add(mSL_Lock,1);
+                                );
+                            );
+                        ):
+                        (zzmcl === 5) ? (
+                            XV = ! XV ;
+                        ):
+                        (zzmcl === 7) ? (
+                            (zzmmd & cmdCap) ? (
+                                // Lock all processes
+                                SchedLockAll = 1;
+                                atomic_add(mSL_Lock,max(1,mSL_Lock));
+                            ) : (
+                                mSL_errC = mSL_errX = mSL_errM = 0; // reset error
+                                mSL_gc_MaxDur = mm_cyc_maxU = mm_dur_maxU = 0;
+                                mm_cyc_max=0; mm_dur_max = 0; gmaxd = 0; lmaxd = 0;
+                                memset(mm_cyc_mm, 0, mm_cyc_siz);
+                                memset(mm_dur_mm, 0, mm_cyc_siz);
+                            );
+                        );
+                    );
+
+                    (zz & ui_jpad_ev_key) ? (
+                        Keyed = zzch;
+                    );
+
+                );
+
+            ui_pop();
+
+            mm_cyc_maxU = max(mm_cyc_max, mm_cyc_maxU);
+            mm_dur_maxU = max(mm_dur_max, mm_dur_maxU);
+
+            ui_split_top(h2);
+            w = ui_width();
+            r = (w > 4* ui_MinSubColSize) ? 4 : (w > 3* ui_MinSubColSize) ? 3 : 2;
+                ui_new_column(1/r);
+                    ui_show("X Version", XV, "%d");
+                    ui_show("Mem size", mm_sizmem, "%d");
+                    ui_show("Free mem", mm_show_ttf, "%d");
+                    ui_show("Free % m.", 100 * mm_show_ttf/mm_sizmem, "%.2f %%");
+                    ui_show("Free blocks", mm_show_frbl, "%d");
+                    ui_show("Free [Huge]", mm_bl_huge, "%d");
+                    ui_show("Free Strings", mSL_Str_Uptr, "%d");
+                    ui_show("Temp Str use", mSL_Str_TempU, "%d");
+                    ui_show("Instr./second", mm_xec_cnt, "%d");
+                    ui_show("Max. Inst./s.", mm_xec_max, "%d");
+                ui_new_column();
+                    ui_show("Used mem", mm_show_ttu, "%d");
+                    ui_show("Used % m.", 100 * mm_show_ttu/mm_sizmem, "%.2f %%");
+                    ui_show("Used blocks", mm_show_usbl, "%d");
+                    ui_show("Free [Big]", mm_bl_big, "%d");
+                    ui_show("Tmp. Inst./bl", mm_cyc_max, "%d");
+                    ui_show("Tmp. Dur/bl", mm_dur_max*1000, "%.2f ms.");
+                    ui_show("malloc #", mSL_mallocated, "%d");
+                    ui_show("mfree #", mSL_mfreed, "%d");
+                    ui_show("low []", mm_lowblocks, "%d");
+                    ui_show("high []", mm_highblocks, "%d");
+                (r > 2) ? (
+                ui_new_column();
+                    ui_show("GC count", gc_run_count, "%d");
+                    ui_show("Obj. List count", mm_list_mxc, "%d");
+                    ui_show("mSL Lock", atomic_get(mSL_Lock), "%d");
+                    ui_show("wrng fr:", mSL_wfr, "%d");
+                    ui_show("Free [Mini]", mm_bl_mini, "%d");
+                    ui_show("Free [Large]", mm_bl_large, "%d");
+                    ui_show("Max. Inst./bl", mm_cyc_maxU, "%d");
+                    ui_show("Max. Dur/bl", mm_dur_maxU*1000, "%.2f ms.");
+                    ui_show("Active", mSL_dispatch_entry, "%d");
+                    ui_show("Thread. @", mSL_active_Thread, "%d");
+                );
+                (r > 3) ? (
+                ui_new_column();
+                    ui_show("Pr.Active", mSL_act, "%d");
+                    ui_show("Pr.Wait", mSL_wait, "%d");
+                    ui_show("Pr.Lock", mSL_plck, "%d");
+                    ui_show("Fr.msgs", mSL_pmsg, "%d");
+                    ui_show("Free [Med.]", mm_bl_medium, "%d");
+                    ui_show("Max.gc.dur", mSL_gc_MaxDur*1000, "%.2f ms.");
+                    ui_show("Max xop.d", gmaxd*1000, "%.2f ms.");
+                    ui_show("Max GLp", lmaxd*1000, "%.2f ms.");
+                    ui_show("Max stack", mSL_High_Stack, "%d");
+                    ui_show("Th. mark.", mSL_Thread_mark, "%d");
+                );
+                ui_pop();
+
+            ui_pop();
+
+            do_ModuleKeySave();
+        ui_pop();
+    );
+);
+
+<? _suppress = 0; ?>

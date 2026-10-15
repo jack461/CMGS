@@ -2,7 +2,7 @@
 @init
 
 /*
-   A Static Memory allocation  -- V3 -- Jack641
+   A Static Memory allocation  -- V4 -- Jack641
 
    This library can be used to allocate memory blocks.
 
@@ -17,10 +17,9 @@
         [ ~ type ]     actually: type ~ 0x7FFFFFFF;
 
 
-   mSL_StM_Init(); //
-       // initialize memory management, starting allocation at "0"
    mSL_StM_Init(x); //
-       // initialize, starting allocation at address "x"
+       // initialize, starting allocation at address "x" (never 0 : the first words of the memory are reserved,
+       // e.g. for the 'MAIN' marker checked by GMW())
 
    mSL_StM_Alloc(size, type, flags);
        // allocate a block of size "size" words,
@@ -35,6 +34,16 @@
    mSL_StM_Check(); // verify the memory
 
    mSL_StM_FreePt always points to the first non used memory address
+
+   make_array(size) / make_array(size, type) : a cleared block, only while current_Memory_Mode is mSL_MMd_Static ;
+       returns 0 when refused or when the memory is full (see mSL_StM_Err and #dbg_desc).
+
+   Error codes (mSL_StM_Err) :
+       (4 digits, so that "grep 0109" finds the places : the leading 0 does not change the value)
+       0101 low marker missing ; 0103 allocation while a block is dangling ; 0104 memory full ;
+       0105 BlockStart while a block is dangling ; 0106 BlockEnd without block ; 0107 BlockStart : not enough memory ;
+       0109 make_array outside of the static mode ;
+       0111..0114 invalid block found by mSL_StM_Check() ; 0115..0118 invalid block given to mSL_StM_Check(block)
 */
 
 
@@ -45,8 +54,8 @@ mSL_MMd_Dynamic = 2;
 <? StM_globals = "mSL_StM_Start, mSL_StM_Low, mSL_StM_High, mSL_StM_Key_min, mSL_StM_Key_max,
     mSL_CC_Chksum, mSL_StM_Zone, mSL_StM_Loc, mSL_StM_MaxRq, mSL_StM_FreePt,
     mSL_StM_BlockType, mSL_StM_BlockSize, mSL_StM_Top, mSL_StM_Err, mSL_StM_ErrLoc,
-    mSL_StM_ErrAux, mSL_StM_GlobFlgs, mSL_StM_Dangling, mSL_StM_TMask, mSL_MMd_Static,
-    mSL_StM_FlClear, mSL_StM_FlAlign, mSL_StM_FlCheck, mSL_StM_FlSigErr, mSL_StM_FlFill, mSL_MMd_Dynamic
+    mSL_StM_ErrAux, mSL_StM_GlobFlgs, mSL_StM_Dangling, mSL_MMd_Static,
+    mSL_StM_FlClear, mSL_StM_FlAlign, mSL_StM_FlCheck, mSL_StM_FlSigErr, mSL_StM_FlFill, mSL_MMd_Dynamic,
     mSL_StM_BCount, mSL_StM_BTSize, mSL_StM_BSzMin, mSL_StM_BSzMax, current_Memory_Mode,
     #dbg_desc";
 ?>
@@ -163,34 +172,36 @@ function mSL_StM_Alloc(size, type, flags)
 local (add, fill, s)
 (
     s = #;
-    mSL_StM_BCount += 1;
     add = mSL_StM_FreePt + 2;
-    flags |= mSL_StM_GlobFlgs; // merge with global flags
+    size = 0|min(mSL_StM_MaxRq, max(0, size));
+    flags = 0|(flags | mSL_StM_GlobFlgs); // merge with global flags
     // Check there is no "bloc en cours"
     (mSL_StM_Dangling) ? (
         add = 0;
         mSL_StM_Err = 0103; mSL_StM_ErrLoc = 0;
     ) :
-    ((size + mSL_StM_FreePt) > mSL_StM_Top) ? (
+    // room for the block, its header and trailer (4 words), and a possible filler block (alignment)
+    ((mSL_StM_FreePt + size + 4 + ((flags & mSL_StM_FlAlign) ? 0x10000 : 0)) > mSL_StM_Top) ? (
+        add = 0;
         mSL_StM_Err = 0104; mSL_StM_ErrLoc = 0;
     ) : (
         (flags & mSL_StM_FlCheck) ? (
             mSL_StM_Check();
         );
     );
-    ((flags & mSL_StM_FlSigErr) && (mSL_StM_Err != 0)) ? (
+    ((add == 0) || ((flags & mSL_StM_FlSigErr) && (mSL_StM_Err != 0))) ? (
         sprintf(s, "MemError %d at %d", mSL_StM_Err, mSL_StM_ErrLoc);
         strcpy(#dbg_desc, s);
         add = 0;
     );
     add ? (
-        size = 0|min(mSL_StM_MaxRq, max(0, size));
+        mSL_StM_BCount += 1; // count of allocated blocks
         type = 0|min(mSL_StM_Key_max, max(mSL_StM_Key_min, type));
-        flags = 0|flags;
         // Should the block be inside a 64k zone ?
         ((flags & mSL_StM_FlAlign) && ((add & mSL_StM_Zone) != ((add + size - 1) & mSL_StM_Zone))) ? (
             // create a filler block of the appropriate size
             fill = 0x10000 - (mSL_StM_FreePt & mSL_StM_Loc) - 6;
+            (fill < 0) ? fill += 0x10000; // too close to the boundary : align on the next one
             add[-2] = 'fill';
             add[-1] = fill;
             mSL_StM_FreePt = add + fill + 2;
@@ -228,7 +239,10 @@ local (add, size)
         // block already dangling
         mSL_StM_Err = 0105; mSL_StM_ErrLoc = 0;
     ) :
-    (mSL_StM_FreePt[0] == mSL_StM_High) && (mSL_StM_FreePt < mSL_StM_Top - 128) ? (
+    ((mSL_StM_FreePt[0] != mSL_StM_High) || (mSL_StM_FreePt >= mSL_StM_Top - 128)) ? (
+        // not enough memory (or damaged end of memory)
+        mSL_StM_Err = 0107; mSL_StM_ErrLoc = mSL_StM_FreePt;
+    ) : (
         add = mSL_StM_FreePt + 2;
         type = 0|min(mSL_StM_Key_max, max(mSL_StM_Key_min, type));
         size = mSL_StM_Top - mSL_StM_FreePt - 4;
@@ -236,7 +250,7 @@ local (add, size)
         add[-1] = size;
         mSL_StM_FreePt = mSL_StM_Top;
         mSL_StM_FreePt[-2] = size;
-        mSL_StM_FreePt[-1] = type ~ 0x7FFFFFFF;
+        mSL_StM_FreePt[-1] = type ~ mSL_CC_Chksum;
         mSL_StM_FreePt[0] = mSL_StM_High;
         mSL_StM_Dangling = 1;
     );
@@ -252,11 +266,11 @@ local (size, prev, res)
     res = 0;
     mSL_StM_Dangling && (mSL_StM_FreePt == mSL_StM_Top) && (mSL_StM_FreePt[0] == mSL_StM_High) ? (
         size = mSL_StM_FreePt[-2]; prev = mSL_StM_Top - size - 2;
-        (prev[-1] == size) && (mSL_StM_FreePt[-1] == (prev[-2] ~ 0x7FFFFFFF)) && (addr >= prev) && (addr < mSL_StM_Top - 4) ? (
+        (prev[-1] == size) && (mSL_StM_FreePt[-1] == (prev[-2] ~ mSL_CC_Chksum)) && (addr >= prev) && (addr < mSL_StM_Top - 4) ? (
             mSL_StM_FreePt[0] = 0;
             mSL_StM_FreePt = prev + (size = addr - prev) + 2;
             mSL_StM_FreePt[-2] = size;
-            mSL_StM_FreePt[-1] = prev[-2] ~ 0x7FFFFFFF;
+            mSL_StM_FreePt[-1] = prev[-2] ~ mSL_CC_Chksum;
             mSL_StM_FreePt[0] = mSL_StM_High;
             prev[-1] = size;
             res = prev;
@@ -267,32 +281,38 @@ local (size, prev, res)
         mSL_StM_Err = 0106; mSL_StM_ErrLoc = 0;
         sprintf(#dbg_trace5, "_StM_0106: %d  %d [%d  %d] [%d  %d] [%d  %d] ",
                         addr, mSL_StM_Dangling, mSL_StM_FreePt, mSL_StM_Top,
-                        mSL_StM_FreePt[0], mSL_StM_High, mSL_StM_FreePt[-2], mSL_StM_Top - size - 2);
+                        mSL_StM_FreePt[0], mSL_StM_High, mSL_StM_FreePt[-2], mSL_StM_Top - mSL_StM_FreePt[-2] - 2);
     );
     res;
 );
 
 
 function make_array(size)
-global(current_Memory_Mode,mSL_MMd_Static,mSL_StM_Err,mSL_StM_ErrLoc,mSL_StM_FlClear,mSL_StM_Alloc)
+global(current_Memory_Mode,mSL_MMd_Static,mSL_StM_Err,mSL_StM_ErrLoc,mSL_StM_FlClear,#dbg_desc)
 (
     (current_Memory_Mode != mSL_MMd_Static) ? (
+        // refused : returns 0 (and not a random address)
         mSL_StM_Err = 0109;
         mSL_StM_ErrLoc = 2;
+        sprintf(#dbg_desc, "make_array(%d) refused : not in the static mode", size);
+        0;
     ) : (
-        mSL_StM_Alloc(size, 'mkar', mSL_StM_FlClear);
+        mSL_StM_Alloc(size, 'mkar', mSL_StM_FlClear); // 0 when the memory is full
     );
 );
 
 
 function make_array(size, type)
-global(current_Memory_Mode,mSL_MMd_Static,mSL_StM_Err,mSL_StM_ErrLoc,mSL_StM_FlClear,mSL_StM_Alloc)
+global(current_Memory_Mode,mSL_MMd_Static,mSL_StM_Err,mSL_StM_ErrLoc,mSL_StM_FlClear,#dbg_desc)
 (
     (current_Memory_Mode != mSL_MMd_Static) ? (
+        // refused : returns 0 (and not a random address)
         mSL_StM_Err = 0109;
         mSL_StM_ErrLoc = 2;
+        sprintf(#dbg_desc, "make_array(%d) refused : not in the static mode", size);
+        0;
     ) : (
-        mSL_StM_Alloc(size, type, mSL_StM_FlClear);
+        mSL_StM_Alloc(size, type, mSL_StM_FlClear); // 0 when the memory is full
     );
 );
 
@@ -323,27 +343,13 @@ local (ty, s)
 /*
     Clear a "valid" block
 */
-function mSL_bl_clear(bl)
-global(mSL_MKey_min,mSL_MKey_max,mSL_CC_Chksum,memset)
-local (ty, s)
+function mSL_bl_clear(bl,val)
 (
-    ((bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min) && (ty <= mSL_MKey_max)
-            && (s == bl[s]) && (bl[s+1] == (ty ~ mSL_CC_Chksum))) ? (
-        memset(bl, 0, s);
-    ) : (
-        0;
-    );
+    mSL_bl_check(bl) ? memset(bl, val, bl[-1]) : 0;
 );
 
-function mSL_bl_clear(bl,val)
-global(mSL_MKey_min,mSL_MKey_max,mSL_CC_Chksum,memset)
-local (ty, s)
+function mSL_bl_clear(bl)
 (
-    ((bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min) && (ty <= mSL_MKey_max)
-            && (s == bl[s]) && (bl[s+1] == (ty ~ mSL_CC_Chksum))) ? (
-        memset(bl, val, s);
-    ) : (
-        0;
-    );
+    mSL_bl_clear(bl, 0);
 );
 

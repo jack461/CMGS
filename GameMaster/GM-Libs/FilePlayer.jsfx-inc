@@ -14,6 +14,12 @@ FilePlayerVersion = ui_version(1,7,7);
 TRC = 0; // 0xff; // 16; //  0x00000;
 
 tStart = tUnix = time();
+// Evaluate an approximation of time_precise vs time (as in GamePlayer and Diffusion-3)
+tSUnix = time(); tPLoc = time_precise(); timeD = tSUnix - tPLoc;
+tSUnix = time(); tPLoc = time_precise(); timeD += tSUnix - tPLoc;
+tSUnix = time(); tPLoc = time_precise(); timeD += tSUnix - tPLoc;
+tSUnix = time(); tPLoc = time_precise(); timeD += tSUnix - tPLoc;
+timeD = timeD/4;
 spl_prev_count = spl_count = -1;
 FP____memtop = __memtop();
 the_host = mSL_KW_FilePlayer;
@@ -445,6 +451,7 @@ SharedHighMemorySize = 0; // yet unknown
 idx = SharedLowMemory + SharedLowMemorySize;
 mSL_StM_Init(idx); // init static memory
 current_Memory_Mode = mSL_MMd_Static; // starting now, allow use of "make_array"
+TabAddrMin = mSL_StM_FreePt; // min. address recognized for an array (see mSL_Evaluator)
 mSL_Str_Init(#strFirst, #strLast); // allocate strings for strings allocator
 mSL_Str_TInit(#wstrFirst, #wstrLast); // allocate strings for temporary strings
 mSL_Str_PInit(#xstrFirst, #xstrLast); // allocate strings for permanent strings
@@ -467,6 +474,10 @@ uix_jtheme = 1; // use theme "dark" by default
 //====== GRAPHICS-INIT ======
 
 <? include("GM-Libs/mSL_Colors.jsfx-inc"); ?>
+
+// Shared display modules, part 1 (mSL_show_Utilities.jsfx-inc) : here for sysout (log in a text file, key "p")
+<? shw_part = 1; include("GM-Libs/mSL_show_Utilities.jsfx-inc"); ?>
+shw_AppName = "FilePlayer"; // in the names of the log files (sysout)
 
 Player_Mode_Cnt = 3; // Play & Loop
 Player_Color_cnt = 72;
@@ -608,6 +619,7 @@ Flgs_Thrds = (idx += 1);
 Flgs_Evnts = (idx += 1);
 Flgs_Acts = (idx += 1);
 Flgs_Traces = (idx += 1);
+Flgs_GC = (idx += 1); // GC traces (see mSL_Garbage_Collector)
 
 
 KRun_mSL_Thread = 10;
@@ -1297,6 +1309,21 @@ function doMslCompile(fname)
         uuuMslFn = 1; // set flag
     )
 );
+
+/* After a compilation attempt (successful or not) : free the compiler's structures,
+   keep the lock if other files are waiting (several files dropped : they are compiled next),
+   otherwise empty the list and release the lock taken by doMslCompile */
+function doMslCompileDone()
+local (i)
+(
+    mSL_bl_clear(mSL_GC_Protected); // free compiler's structures
+    i = 0; while ((i < uuuMslTSiz) && (uuuMslTabs[i] === 0)) (i += 1;);
+    (i >= uuuMslTSiz) ? (
+        uuuMslTPt = uuuMslFn = 0; // the list is empty
+        atomic_set(mSL_Lock,  max(0, atomic_get(mSL_Lock) - 1));
+    );
+);
+
 
 
 
@@ -2764,7 +2791,7 @@ mSL_load_file_inGFX(fname)
 local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars)
 (
     mSL_load_start = gfxStartTime;
-    mSL_errX = mSL_errC = 0;
+    mSL_errX = mSL_errC = mSL_errM = 0;
     ent = 0; fhd = -1;
     //(mSL_errC === 0) ? (
     //    SchedListEmpty(SchedInactPts) ? (
@@ -2809,7 +2836,7 @@ local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars)
                         SchedCode[ent] = KRun_mSL_Thread; // start running a thread
                         mSL_init_thread(ent); // perform initalization
                         // ADump(mSL_main_cod); // just a trace
-                        mSL_errX = max(mSL_errX, mSL_errC);
+                        mSL_errX = max(mSL_errX, max(mSL_errC, mSL_errM));
                         (mSL_errX === 0) ? (
                             (FlagsTbVals[Flgs_Scripts] & 1) ? (
                                 sprintf(#gfxu, "Load OK - Ent: %d", ent);
@@ -2832,7 +2859,7 @@ local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars)
 
     (mSL_C_fH >= 0) ? (file_close(mSL_C_fH); mSL_C_fH = -1;);
     (fhd >= 0) ? (file_close(fhd); fhd = -1;);
-    mSL_errX = max(mSL_errX, mSL_errC);
+    mSL_errX = max(mSL_errX, max(mSL_errC, mSL_errM));
 
     (mSL_errX === 0) ? (
         (ent > 0) ? SchedInsertTail(SchedLockdPts, ent, SchETypeThrd);
@@ -3485,6 +3512,7 @@ mSL_log(SysLogBox, "*** File Player initialized ***");
 
 @block
 
+gm_time_keep(); // shared gmem time fields, if nobody keeps them (see mSL_clip_lib)
 XATP00_St = time_precise() + gmem[timeDelta];
 tUnix = time();
 
@@ -5957,16 +5985,17 @@ function do_GenericKeyRead()
             mSL_loc_tim = max(2, mSL_loc_tim + 2); // no GC for some time
             // Perform a GC
             mSL_gc_start = time_precise() + timeD;
-            mSL_errX = mSL_errC = 0;
+            mSL_errX = mSL_errC = mSL_errM = 0;
             gc_start();
             gc_release_unused_thread();
             gc_mark_active();
             gc_mark(0); // make sure the last blocks have been checked
             // execute the sweep phase
             gc_sweep();
+            mSL_Str_sweep_strings(0); // clear the strings marks, age the temporary strings
             gc_run_phaz = 3; // This is over
             mSL_gc_end = time_precise() + timeD;
-            mSL_errX = max(mSL_errX, mSL_errC);
+            mSL_errX = max(mSL_errX, max(mSL_errC, mSL_errM));
             ((FlagsTbVals[Flgs_GC] & 1) && mSL_errX) ? (
                 sprintf(#gfxu, "GC Err: %d - Dur %.2f ms", mSL_errX,
                         1000 * (mSL_gc_end - mSL_gc_start));
@@ -5999,6 +6028,7 @@ function do_GenericKeyRead()
                         uuuMslTPt = uuuMslFent = uuuMslFn = 0; // reset indicators
                     ) : (
                         uuuMslFent = mSL_load_file_inGFX(uuuMslFname);
+                        (uuuMslFent === 0) ? doMslCompileDone(); // compilation failed : go on with the other files
                     );
                 );
                 mSL_loc_tim += 2; // again save some time
@@ -6017,11 +6047,10 @@ function do_GenericKeyRead()
                 );
                 mSL_log(SysLogBox, #s);
             );
-            mSL_bl_clear(mSL_GC_Protected); // free compiler's structures
             uuuMslFent = 0;
             uuuMslLastFname = uuuMslFname;
             uuuMslFname = 0;
-            atomic_set(mSL_Lock,  max(0, mSL_Lock - 1));
+            doMslCompileDone(); // free the compiler's structures; release the lock if no other file is waiting
         );
     );
 
@@ -7360,8 +7389,8 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                     (u_ch === '5') ? (box[5] = 5;) :
                     (u_ch === '6') ? (box[5] = 6;) :
                     (u_ch === '7') ? (box[5] = 7;) :
-                    (u_ch === '8') ? (box[5] = 8;) ;
-                    //(u_ch === 'p') ? (sysout(SysLogBox);) :
+                    (u_ch === '8') ? (box[5] = 8;) :
+                    (u_ch === 'p') ? (sysout(box);) ; // log in a text file (see mSL_show_Utilities)
                     Keyed = KeyedT = 0;  // u_ch has not been used
                 );
             );

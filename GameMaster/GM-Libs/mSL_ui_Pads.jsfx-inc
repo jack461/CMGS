@@ -381,11 +381,72 @@ local (pty, pp, cel, v, ii, r)
 /*
    Draw a control pad and interact with it
 */
+// "Soft" look (ui_jstyle) : the color of a cell fills the zone of its text, then fades into the background
+ui_jpad_fade = 40; // max width of the fading, in pixels (it never leaves the cell)
+ui_jpad_selmix = 0.35; // a selected cell is brighter : its color is mixed with white
+
+// Fills the zone of the text "txt" centered in the rectangle (x, y, w, h) (ui coordinates) with color "col",
+// then fades it into the actual background (read in the corner of the rectangle), without leaving the rectangle.
+// The fading is an opaque color gradient (the alpha of gfx_gradrect does not blend with the background).
+function uix_jpad_soft_fill(x, y, w, h, txt, col)
+local (rs, tw, th, cx0, cy0, cx1, cy1, x0, y0, x1, y1, f, fl, fr, ft, fb, cr, cg, cb, br, bg, bb, k, ty, yy)
+(
+    ((txt != 0) && (strlen(txt) > 0)) ? (
+        rs = uix_drawconfig_current[9]; // retina scaling
+        cx0 = floor(x * rs); cy0 = floor(y * rs); cx1 = floor((x + w) * rs); cy1 = floor((y + h) * rs); // the cell, in pixels
+        // the background color, in the corner of the cell
+        gfx_x = cx0 + 1; gfx_y = cy0 + 1;
+        br = bg = bb = 0;
+        gfx_getpixel(br, bg, bb);
+        uix_setgfxfont();
+        tw = th = 0;
+        gfx_measurestr(txt, tw, th);
+        x0 = max(cx0, floor((cx0 + cx1 - tw) / 2 - 2 * rs)); x1 = min(cx1, ceil((cx0 + cx1 + tw) / 2 + 2 * rs));
+        y0 = max(cy0, floor((cy0 + cy1 - th) / 2)); y1 = min(cy1, ceil((cy0 + cy1 + th) / 2));
+        f = ui_jpad_fade * rs;
+        fl = min(f, x0 - cx0); fr = min(f, cx1 - x1); ft = min(f, y0 - cy0); fb = min(f, cy1 - y1);
+        cr = ((col >> 16) & 0xff) / 255; cg = ((col >> 8) & 0xff) / 255; cb = (col & 0xff) / 255;
+        gfx_mode = 0; gfx_a = 1;
+        gfx_r = cr; gfx_g = cg; gfx_b = cb;
+        gfx_rect(x0, y0, x1 - x0, y1 - y0);
+        // sides : from the background (outside) to the color (inside)
+        (fl >= 1) ? gfx_gradrect(x0 - fl, y0, fl, y1 - y0, br, bg, bb, 1, (cr - br) / fl, (cg - bg) / fl, (cb - bb) / fl, 0);
+        (fr >= 1) ? gfx_gradrect(x1, y0, fr, y1 - y0, cr, cg, cb, 1, (br - cr) / fr, (bg - cg) / fr, (bb - cb) / fr, 0);
+        (ft >= 1) ? gfx_gradrect(x0, y0 - ft, x1 - x0, ft, br, bg, bb, 1, 0, 0, 0, 0, (cr - br) / ft, (cg - bg) / ft, (cb - bb) / ft, 0);
+        (fb >= 1) ? gfx_gradrect(x0, y1, x1 - x0, fb, cr, cg, cb, 1, 0, 0, 0, 0, (br - cr) / fb, (bg - cg) / fb, (bb - cb) / fb, 0);
+        // corners, one line at a time : the color weight is the product of the horizontal and vertical weights
+        (ft >= 1) ? (
+            yy = 0; loop(ft,
+                ty = (yy + 0.5) / ft; // 0 outside, 1 near the text
+                (fl >= 1) ? gfx_gradrect(x0 - fl, y0 - ft + yy, fl, 1, br, bg, bb, 1,
+                    ty * (cr - br) / fl, ty * (cg - bg) / fl, ty * (cb - bb) / fl, 0);
+                (fr >= 1) ? gfx_gradrect(x1, y0 - ft + yy, fr, 1, br + ty * (cr - br), bg + ty * (cg - bg), bb + ty * (cb - bb), 1,
+                    -ty * (cr - br) / fr, -ty * (cg - bg) / fr, -ty * (cb - bb) / fr, 0);
+                yy += 1;
+            );
+        );
+        (fb >= 1) ? (
+            yy = 0; loop(fb,
+                ty = 1 - (yy + 0.5) / fb; // 1 near the text, 0 outside
+                (fl >= 1) ? gfx_gradrect(x0 - fl, y1 + yy, fl, 1, br, bg, bb, 1,
+                    ty * (cr - br) / fl, ty * (cg - bg) / fl, ty * (cb - bb) / fl, 0);
+                (fr >= 1) ? gfx_gradrect(x1, y1 + yy, fr, 1, br + ty * (cr - br), bg + ty * (cg - bg), bb + ty * (cb - bb), 1,
+                    -ty * (cr - br) / fr, -ty * (cg - bg) / fr, -ty * (cb - bb) / fr, 0);
+                yy += 1;
+            );
+        );
+    );
+);
+
+// Guard of control_jpad : max lines / columns drawn ; the last anomaly is kept in ui_jpad_bad_*
+ui_jpad_maxdim = 128;
+ui_jpad_bad_pad = ui_jpad_bad_nl = ui_jpad_bad_nc = ui_jpad_bad_cnt = 0;
+
 function control_jpad(pm, fnl, fnc, opt)
 local (ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, iy, rs,
        dc, labs, gloff, isvalid, ctype, cc, cdefs, nums, colors, z1, z2, z3, z4, z5,
        CS, alabs, acolors, selected, fmsin, flevnt, drc, drr, bcl, dcl, i, ms_x, ms_y,
-       xc, yc, rc, xcl, ycl, zcl)
+       xc, yc, rc, xcl, ycl, zcl, sst)
 (
     ty = pm[ui_jpad_typ]; // pad type and flags
     pty = ty & ui_jbtmask; // just the pad type
@@ -402,6 +463,13 @@ local (ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, iy, r
         (fnc > 0) ? (nc = (opt & 1) ? fnc : min(nc, fnc));
         nl = pm[ui_jpad_nli]; nl <= 0 ? nl = 1;
         (fnl > 0) ? (nl = (opt & 1) ? fnl : min(nl, fnl));
+        // Guard : a damaged pad (or a wrong forced size) could ask for millions of cells and freeze the GUI
+        (!((nl <= ui_jpad_maxdim) && (nc <= ui_jpad_maxdim))) ? (
+            ui_jpad_bad_pad = pm; ui_jpad_bad_nl = nl; ui_jpad_bad_nc = nc;
+            ui_jpad_bad_cnt += 1;
+            nl = (nl <= ui_jpad_maxdim) ? nl : ui_jpad_maxdim;
+            nc = (nc <= ui_jpad_maxdim) ? nc : ui_jpad_maxdim;
+        );
         iy = pm[ui_jpad_linc]; ((iy <= 0) || (opt & 2)) ? iy = nc;
         ix = pm[ui_jpad_cinc]; ix <= 0 ? ix = 1;
         // is the mouse in the pad ?
@@ -440,6 +508,11 @@ local (ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, iy, r
             (z3 = ui_click(64)) ? (
                 flevnt |= ui_jpad_ev_cmc; ui_XlocDoNow |= 1;
             );
+            // A single gesture cannot be both a left and a right clic : a stale "left button" state
+            // (e.g. from the clic that chose a menu entry) must not add a left clic to a right clic
+            (z1 && z2) ? (
+                z1 = 0; flevnt &= -1 ~ ui_jpad_ev_lmc;
+            );
             xm = z1 + z2 + z3;
         );
         // Loop to display the individual cells
@@ -465,7 +538,7 @@ local (ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, iy, r
                 );
                 */
                 ui_pcolor(dc);
-                (!(ctype & ui_jpad_ct_nobrd)) ? (  // need the border
+                (!(ctype & ui_jpad_ct_nobrd) && !ui_jstyle) ? (  // need the border (none with the "soft" look)
                     (drc) ? (
                          (drr) ? (
                              i = -1 + (0|min((wi-4)/2, (he-4)/2));
@@ -539,6 +612,31 @@ local (ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, iy, r
                     );
                     cc = ui_pcolor_derived(cc, CS);
                     gfx_set_pcolor(cc, 1);
+                    ui_jstyle ? (
+                        // "soft" look : the color only around the text (as drawn below), brighter if selected
+                        selected ? (
+                            cc = ((0|(((cc >> 16) & 0xff) * (1 - ui_jpad_selmix) + 255 * ui_jpad_selmix)) << 16)
+                               | ((0|(((cc >> 8) & 0xff) * (1 - ui_jpad_selmix) + 255 * ui_jpad_selmix)) << 8)
+                               | (0|((cc & 0xff) * (1 - ui_jpad_selmix) + 255 * ui_jpad_selmix));
+                        );
+                        sst = 0;
+                        ((ctype & ui_jpad_ct_cclear) == 0) ? (
+                            (selected && (alabs != 0) && (alabs[np] != 0)) ? (
+                                sst = alabs[np];
+                            ) :
+                            ((labs != 0) && (labs[np] != 0) && ((ctype & ui_jpad_ct_showval) == 0)) ? (
+                                sst = labs[np];
+                            ) :
+                            (nums != 0) ? (
+                                sst = #uix_jpad_sst;
+                                sprintf(sst, pm[ui_jpad_fmts] != 0 ? pm[ui_jpad_fmts] : "%f", nums[np]);
+                            ) : (
+                                sst = #uix_jpad_sst;
+                                sprintf(sst, "%d", np+pm[ui_jpad_coff]);
+                            );
+                        );
+                        uix_jpad_soft_fill(xpos, ypos + ui_jd_padTopDec, wi - z4, he - z4 - ui_jd_padTopDec, sst, cc);
+                    ) :
                     (drc) ? (
                          (drr) ? (
                              z1 = -1 + (0|min((wi-z5)/2, (he-z5)/2));
@@ -564,7 +662,7 @@ local (ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, iy, r
                     cc2 = ui_pcontrast(cc);
                     // dc = dcl;
                     // should we "mark" the cell ?
-                    selected ? (
+                    (selected && !ui_jstyle) ? ( // ("soft" look : the selection is shown by a brighter color)
                          // selected cell
                          ui_pcolor(ui_jcolor_draw_bg);
                          // ui_pcolor(cc2);

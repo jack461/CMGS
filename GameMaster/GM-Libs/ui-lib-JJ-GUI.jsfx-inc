@@ -16,6 +16,7 @@ ui_lib_JJ_inited = 0;
 ui_lib_JJ_GUI_size = 0;
 uix_jtheme_ctlsiz = 0;
 uix_jtheme = 0;
+ui_jstyle = 0; // 0 : classic look ; 1 : "soft" look (no frames, soft cells, thin sliders, hidden tabs bar) - saved by the host
 uix_jtheme_prev = -1;
 uix_jtheme_menu = 0;
 uix_jtheme_rtc_code = 0; // theme menu return code
@@ -364,7 +365,7 @@ function uix_jmy_theme_menu() local(z)
 );
 
 
-function my_menu_bar(said)
+function my_menu_bar_classic(said)
 local(str, str2, tw, ii, aw, ast)
 (
     (gfx_w != uix_jl_gfx_w) ? (
@@ -423,6 +424,126 @@ local(str, str2, tw, ii, aw, ast)
     ui_pop();
 
     uix_javail_Wheight = ui_height(); // New available height in the window
+);
+
+
+// ===== "Soft" look (ui_jstyle) : the tabs bar is hidden ; it is shown, transparent, over the panes,
+// when the mouse comes near the top of the window, and disappears ui_jbar_delay seconds after the mouse left it.
+// my_menu_bar_soft (called instead of the classic bar, before the panes) handles the visibility and the clics,
+// and gives the bar the priority on the clics ; my_menu_bar_overlay (at the end of @gfx) draws it over the panes.
+ui_jbar_until = 0; // the bar is visible until this time
+ui_jbar_delay = 0.5; // in seconds
+ui_jbar_shown = 0; // the bar is visible
+ui_jbar_was = 0; // it was visible at the previous display
+
+function my_menu_bar_soft(said)
+local(str, tw, ii, aw, h, ww)
+(
+    (gfx_w != uix_jl_gfx_w) ? (
+        uix_jl_gfx_w = gfx_w;
+        ui_lib_JJ_updSiz();
+    );
+    h = ui_jd_menuh;
+    ww = gfx_w / uix_drawconfig_current[9]; // width of the window (ui coordinates) : the bar is at the top of the window
+    // visibility : mouse near the top of the window, or a secondary screen opened (for the "Back" button)
+    (((uix_mouse_y >= 0) && (uix_mouse_y < h) && (uix_mouse_x >= 0) && (uix_mouse_x < ww))
+        || (ui_screen_level() > 0)) ? (
+        ui_jbar_until = time_precise() + ui_jbar_delay;
+    );
+    ui_jbar_shown = (time_precise() < ui_jbar_until);
+    // refresh the screen while the bar is shown, and once more when it disappears
+    (ui_jbar_shown || ui_jbar_was) ? ui_GFXdoNow |= 1;
+    ui_jbar_was = ui_jbar_shown;
+    ui_jbar_shown ? (
+        ui_push();
+            ui_set_rect(0, 0, ww, h); // absolute position : the top of the window
+            uix_jmy_theme_menu(); // right clic on the bar
+            ui_pad(5,2);
+            tw = uix_jsiz_menu_bar_item_width;
+            aw = ui_width();
+            ii = 0;
+            while ((str = said[ii]) != -1) (
+                (aw > tw) ? (
+                    aw -= tw;
+                    (ii == 0) ? ui_split_left(tw) : ui_split_next();
+                    (ui_click() && (str != ui_screen())) ? (
+                        uix_jmbsel = ii; // selected tabulation
+                        ui_screen_switch(str);
+                        ui_GFXdoNow |= 1;
+                        ui_GFXReason = 40;
+                    );
+                );
+                ii += 1;
+            );
+            ui_pop();
+            (ui_screen_level() > 0) ? (
+                ui_split_right(tw);
+                    ui_click() ? (
+                        ui_screen_close();
+                        ui_GFXdoNow |= 1;
+                        ui_GFXReason = 41;
+                    );
+                ui_pop();
+            );
+            // the bar has the priority : the panes drawn below do not see the clics made on it
+            ui_hover() ? uix_click_block();
+        ui_pop();
+    );
+    uix_javail_Wheight = ui_height(); // the panes use the whole height
+);
+
+// Draws the "soft" tabs bar over the panes (to call at the end of @gfx, at the top level)
+function my_menu_bar_overlay(said)
+local(str, str2, tw, ii, aw, ast, h, acc, bgc, ww)
+(
+    (ui_jstyle && ui_jbar_shown) ? (
+        h = ui_jd_menuh;
+        ww = gfx_w / uix_drawconfig_current[9]; // width of the window (ui coordinates)
+        acc = uix_theme_accent();
+        bgc = (ui_pcontrast(ui_jcolor_text) == uix_pblack) ? 0x202020 : 0xF2F2F2; // dark under a light text, and conversely
+        ui_push();
+            ui_set_rect(0, 0, ww, h); // absolute position : the top of the window, over the panes
+            ui_pcolor(bgc, 0.85);
+            ui_fill();
+            ui_pad(5,2);
+            tw = uix_jsiz_menu_bar_item_width;
+            aw = ui_width();
+            ii = 0;
+            while ((str = said[ii]) != -1) (
+                (aw > tw) ? (
+                    aw -= tw;
+                    (ii == 0) ? ui_split_left(tw) : ui_split_next();
+                    str2 = str;
+                    ((altTabsNames != 0) && ((ast = altTabsNames[ii]) != 0) && (strlen(ast) != 0)) ? (
+                        str2 = ast;
+                    );
+                    ui_align(0.5, 0.5);
+                    (str == ui_screen()) ? (
+                        // current tab : soft fill in the accent color of the theme
+                        uix_jpad_soft_fill(ui_left(), ui_top(), ui_width(), ui_height(), str2, acc);
+                        ui_pcolor(ui_pcontrast(acc));
+                    ) : (
+                        ui_pcolor(ui_hover() ? acc : ui_jcolor_text);
+                    );
+                    ui_text(str2);
+                );
+                ii += 1;
+            );
+            ui_pop();
+            (ui_screen_level() > 0) ? (
+                ui_split_right(tw);
+                    ui_align(0.5, 0.5);
+                    ui_pcolor(ui_hover() ? acc : ui_jcolor_text);
+                    ui_text("Back");
+                ui_pop();
+            );
+        ui_pop();
+    );
+);
+
+function my_menu_bar(said)
+(
+    ui_jstyle ? my_menu_bar_soft(said) : my_menu_bar_classic(said);
 );
 
 

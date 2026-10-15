@@ -88,31 +88,32 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Return from a func
                 m = mSL_TOS[0]; // returned value
                 mSL_TOS = mSL_baseTOS; // set new tos
-                mSL_CodePtr = mSL_baseAddStack[4];
-                mSL_baseCode = mSL_baseAddStack[3];
-                mSL_baseTOS = mSL_baseAddStack[2];
-                mSL_baseLocals = mSL_baseAddStack[1];
-                mSL_baseAddStack = mSL_baseAddStack[0];
-                // Do we have to restore context symbol tables ?
-                (mSL_baseAddStack[5] != 0) ? mSL_baseAVars = mSL_baseAddStack[5];
+                bl = mSL_baseAddStack; // frame of the func we leave : [5..7] are the tables of its caller
+                mSL_CodePtr = bl[4];
+                mSL_baseCode = bl[3];
+                mSL_baseTOS = bl[2];
+                mSL_baseLocals = bl[1];
+                mSL_baseAddStack = bl[0];
+                // Do we have to restore context symbol tables ? (saved by the call, op. 20, in the frame we leave)
+                (bl[5] != 0) ? mSL_baseAVars = bl[5];
                 while (mSL_baseAVars[mSL_baseAVars[-1]-2] === mSL_Fwrd_Link)  (
-                    mSL_baseAddStack[5] = mSL_baseAVars = mSL_baseAVars[mSL_baseAVars[-1]-1];
+                    bl[5] = mSL_baseAVars = mSL_baseAVars[mSL_baseAVars[-1]-1];
                     0 ? (
                     sprintf(#sfc, "Ret.A-Forwarding to %d", mSL_baseAVars);
                     mSL_log(SysLogBox, #sfc);
                     );
                 );
-                (mSL_baseAddStack[6] != 0) ? mSL_baseOVars = mSL_baseAddStack[6];
+                (bl[6] != 0) ? mSL_baseOVars = bl[6];
                 while (mSL_baseOVars[mSL_baseOVars[-1]-2] === mSL_Fwrd_Link)  (
-                    mSL_baseAddStack[6] = mSL_baseOVars = mSL_baseOVars[mSL_baseOVars[-1]-1];
+                    bl[6] = mSL_baseOVars = mSL_baseOVars[mSL_baseOVars[-1]-1];
                     0 ? (
                     sprintf(#sfc, "Ret.O-Forwarding to %d", mSL_baseOVars);
                     mSL_log(SysLogBox, #sfc);
                     );
                 );
-                (mSL_baseAddStack[7] != 0) ? mSL_basePVars = mSL_baseAddStack[7];
+                (bl[7] != 0) ? mSL_basePVars = bl[7];
                 while (mSL_basePVars[mSL_basePVars[-1]-2] === mSL_Fwrd_Link)  (
-                    mSL_baseAddStack[7] = mSL_basePVars = mSL_basePVars[mSL_basePVars[-1]-1];
+                    bl[7] = mSL_basePVars = mSL_basePVars[mSL_basePVars[-1]-1];
                     0 ? (
                     sprintf(#sfc, "Ret.P-Forwarding to %d", mSL_basePVars);
                     mSL_log(SysLogBox, #sfc);
@@ -379,7 +380,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                                     // mSL_baseLocals[2] = mSL_baseTOS;
                                     mSL_baseLocals[2] = mSL_baseTOS;
                                     mSL_TOS += 2; // add the two actual parameters of the func
-                                    1 ? (
+                                    0 ? (
                                     sprintf(#sfc, "VFun. TR: %d @ %d/%d => %d @ %d", par, mSL_TOS - par,mSL_baseTOS, mSL_baseLocals[1], mSL_baseLocals[2]);
                                     mSL_log(SysLogBox, #sfc);
                                     );
@@ -452,11 +453,12 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                             (fn[mSL_CC_OwnTab] != 0) ? (
                                 mSL_baseOVars = fn[mSL_CC_OwnTab];
                                 p = mSL_active_Thread[mSL_THR_LDict];
-                                q = 2 * mSL_baseOVars % (p[-1]/2); // get the entry.
+                                k = p[-1] >> 1; // number of (key, value) pairs in the dictionary
+                                q = 2 * (mSL_baseOVars % k); // get the entry : always an even index (a key)
                                 (p[q] != mSL_baseOVars) ? (
-                                    // search the entry in the table
-                                    r = 0;
-                                    while (r === 0) (
+                                    // search the entry in the table : at most k probes
+                                    r = 0; s = k;
+                                    while ((r === 0) && (s > 0)) (
                                         (p[q] === mSL_baseOVars) ? (
                                             r = q + 1;
                                         ) :
@@ -468,17 +470,18 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                                             //sprintf(#dbg_trace6, "Duplicating mSL_baseOVars.");
                                         ) :
                                         (
-                                            // try a new location
-                                            q = (q + 7*2) % p[-1];
+                                            // try a new location (7 and the pairs count are prime to each other)
+                                            q = (q + 7*2) % (2 * k);
                                         );
+                                        s -= 1;
                                     );
                                     (r === 0) ? (
-                                        mSL_errX=1677; // unable to create semi-local thread table
+                                        mSL_errX=1677; // unable to create semi-local thread table (dictionary full)
                                     );
                                 ) : (
                                     r = q + 1;
                                 );
-                                mSL_baseOVars = p[r];
+                                (r > 0) ? mSL_baseOVars = p[r];
                             );
                             while (mSL_baseOVars[mSL_baseOVars[-1]-2] === mSL_Fwrd_Link) (
                                 mSL_baseOVars = fn[mSL_CC_OwnTab] = mSL_baseOVars[mSL_baseOVars[-1]-1];
@@ -596,7 +599,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 m = mSL_TOS[0]; mSL_TOS -= m;
                 // p = mSL_malloc(m, mSL_MT_Data);
                 p = mSL_Dyn_Alloc(m, mSL_MT_Data, mSL_StM_FlClear);
-                p ? memcpy(p, mSL_TOS, m);
+                p ? memcpy(p, mSL_TOS, m) : (mSL_errX = (mSL_errM ? mSL_errM : 1033)); // memory error stops the thread
                 mSL_TOS[0] = p;
                 //===25===//
 
@@ -860,7 +863,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 mSL_TOS -= 1;
                 m[0] /= mSL_TOS[0];
                 mSL_TOS[0] = m[0];
-                //===51===/
+                //===51===//
 
 
             ););):((xop<54)?((xop<53)?(
@@ -917,7 +920,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===56===//
                 // is string
                 m = mSL_TOS[0];
-                mSL_TOS[0] = (m >= mSL_Str_First) && (m <= mSL_Str_Last) && (mSL_Str_Use[m - mSL_Str_First] == 1);
+                mSL_TOS[0] = mSL_isString(m); // any allocated string (was: only "dispensable" ones)
                 //===56===//
 
 
@@ -1410,11 +1413,11 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                             rpeat = 0;
                         );
                 ) :
-                ((mSL_errX === 1032) || (mSL_errX === 1033)) ? (
+                ((mSL_errX === 0) && ((mSL_errM === 1032) || (mSL_errM === 1033))) ? (
                     (mSL_Dyn_Tr & 2) ? (
-                        sprintf(#sfc, "[[Error %04d - Starting a GC]]", mSL_errX); mSL_log(SysLogBox, #sfc);
+                        sprintf(#sfc, "[[Error %04d - Starting a GC]]", mSL_errM); mSL_log(SysLogBox, #sfc);
                     );
-                    mSL_errX = 0; // ignore the error once
+                    mSL_errM = 0; // ignore the error once
                     // we need a GC !
                     mSL_TOS += m; // restore stack.
                     // build a restart op as "malloc_retry"
@@ -1436,6 +1439,9 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                     );
 
                     0 ? (sprintf(#sfc, "/%d/: malloc [%d] failed, trying a gc.", q, s); mSL_log(SysLogBox, #sfc););
+                ) :
+                (mSL_errX === 0) ? (
+                    mSL_errX = (mSL_errM ? mSL_errM : 1033); // other memory error : stops the thread
                 );
                 //===100===//
 
@@ -1447,6 +1453,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // mfree(data)
                 // mSL_TOS[0] = mSL_mfree(mSL_TOS[0]);
                 mSL_TOS[0] = mSL_Dyn_Free(mSL_TOS[0]);
+                (mSL_errM != 0) ? mSL_errX = mSL_errM; // memory system error : stops the thread
                 (mfc += 1) > mfcmax ? (
                     // stop thread temporary (as in a yield)
                     mSL_ICount -= rpeat; // deduce rest of count
@@ -1556,7 +1563,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===112===//
                 mSL_TOS -= 2;
                 mSL_TOS[0] = str_getchar(mSL_TOS[0], mSL_TOS[1], mSL_TOS[2]);
-                //===112===///
+                //===112===//
 
 
             );):((xop<114)?(
@@ -1704,8 +1711,13 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 (m === 2) ? (
                     mSL_TOS -= 2;
                     r = mSL_Dyn_Alloc(mSL_TOS[0], mSL_TOS[1], mSL_StM_FlClear);
+                ) :
+                (m === 3) ? (
+                    mSL_TOS -= 3;
+                    r = mSL_Dyn_Alloc(mSL_TOS[0], mSL_TOS[1], mSL_TOS[2]);
                 );
                 mSL_TOS[0] = r;
+                (r === 0) ? (mSL_errX = (mSL_errM ? mSL_errM : 1033)); // still no memory : stops the thread
 
                 q = -1;
                 p = mSL_active_Thread[mSL_THR_SchedEnt];
@@ -1713,7 +1725,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                     q = p[SchedPid]; // return the process ID
                 );
 
-                0 ? (sprintf(#sfc, "/%d/: malloc retried. => %d [%d] / err=%d", q, r, r[-1], mSL_errX); mSL_log(SysLogBox, #sfc););
+                0 ? (sprintf(#sfc, "/%d/: malloc retried. => %d [%d] / err=%d", q, r, r[-1], mSL_errM); mSL_log(SysLogBox, #sfc););
                 //===115===//
 
 
@@ -1892,7 +1904,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Multi-adic "mSL_play_ops"
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_play_ops(p[-1], p);
                 ) : (
@@ -1908,7 +1920,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Multi-adic "mSL_event_ops"
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data bloc, pass it to the func
                     r = mSL_event_ops(p[-1], p);
                 ) : (
@@ -1941,7 +1953,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Multi-adic "mSL_call_ops"
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_call_ops(p[-1], p);
                 ) : (
@@ -1957,7 +1969,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Multi-adic "mSL_players_ops"
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_players_ops(p[-1], p);
                 ) : (
@@ -1973,7 +1985,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Multi-adic "mSL_gui_ops"
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_gui_ops(p[-1], p);
                 ) : (
@@ -1989,7 +2001,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Multi-adic "mSL_133" — to be redefined later
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_133(p[-1], p);
                 ) : (
@@ -2005,13 +2017,13 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Multi-adic "mSL_134" — to be redefined later
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_134(p[-1], p);
                 ) : (
                     mSL_TOS[0] = mSL_134(m, mSL_TOS);
                 );
-                //===134===/
+                //===134===//
 
 
             ););):((xop<136)?(
@@ -2021,7 +2033,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Multi-adic "mSL_135" — to be redefined later
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_135(p[-1], p);
                 ) : (
@@ -2037,7 +2049,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Multi-adic "mSL_136" — to be redefined later
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_136(p[-1], p);
                 ) : (
@@ -2053,7 +2065,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Multi-adic "mSL_137" — to be redefined later
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_137(p[-1], p);
                 ) : (
@@ -2069,7 +2081,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Multi-adic "mSL_138" — to be redefined later
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_138(p[-1], p);
                 ) : (
@@ -2085,7 +2097,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Multi-adic "mSL_139" — to be redefined later
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_139(p[-1], p);
                 ) : (
@@ -2101,7 +2113,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 // Multi-adic "mSL_140" — to be redefined later
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_140(p[-1], p);
                 ) : (
@@ -2116,7 +2128,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===141===//
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_141(p[-1], p);
                 ) : (
@@ -2131,7 +2143,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===142===//
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_142(p[-1], p);
                 ) : (
@@ -2146,7 +2158,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===143===//
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_143(p[-1], p);
                 ) : (
@@ -2161,7 +2173,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===144===//
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_144(p[-1], p);
                 ) : (
@@ -2176,7 +2188,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===145===//
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_145(p[-1], p);
                 ) : (
@@ -2191,7 +2203,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===146===//
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_146(p[-1], p);
                 ) : (
@@ -2206,7 +2218,7 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                 //===147===//
                 m = mSL_TOS[0];
                 mSL_TOS -= m;
-                ((m === 1) && ((p = mSL_TOS[1]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
+                ((m === 1) && ((p = mSL_TOS[0]) > TabAddrMin) && (p < TabAddrMax) && (p[-2] === 'data')) ? (
                     // parameter is a data, pass it to the func
                     mSL_TOS[0] = mSL_147(p[-1], p);
                 ) : (

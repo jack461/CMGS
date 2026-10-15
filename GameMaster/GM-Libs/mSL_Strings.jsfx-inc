@@ -2,6 +2,12 @@
     A dynamic string allocator
 
     needs the "mSL_StM_Memory.jsfx-inc" library.
+
+    mSL_Str_Init, mSL_Str_TInit and mSL_Str_PInit all add their strings to the SAME pool :
+    "temporary", "in use" and "permanent" are states of a string, not separate pools.
+    No string can be obtained before mSL_Str_MkStructs() (the functions return 0).
+    gc_mark sets mSL_Str_Flg_marked on the strings it meets; mSL_Str_sweep_strings
+    (in mSL_Garbage_Collector) clears these marks after each GC.
 */
 
 @init
@@ -48,6 +54,7 @@ mSL_Str_StInST = 0;
 mSL_Str_StInTU = 0;
 mSL_Str_StInLO = 0;
 mSL_Str_StACycl = 0;
+mSL_Str_LOrep = 0; // value of mSL_Str_StInLO at the last report (see mSL_Str_sweep_strings)
 // Declare some new strings
 function mSL_Str_Provide(first, last)
 local (res)
@@ -108,10 +115,12 @@ global(mSL_Str_Entry, mSL_Str_Item, mSL_Str_Uptr, mSL_Str_Stack, mSL_Str_Last, m
 local (itm, ent, i, k)
 (
     mSL_Str_Entry = mSL_Str_Item = i = 0;
-    // First, look up in the stack
-    while ((mSL_Str_Item === 0) && (mSL_Str_Uptr >= 0))  (
+    // Not before mSL_Str_MkStructs : leave mSL_Str_Item at 0, and the passes below are skipped
+    (mSL_Str_Use === 0) ? i = mSL_Str_Range;
+    // First, look up in the stack (ignore a GC mark : don't lose the string)
+    while ((mSL_Str_Item === 0) && (mSL_Str_Uptr >= 0) && (mSL_Str_Use !== 0))  (
         (((itm = mSL_Str_Stack[mSL_Str_Uptr]) >= mSL_Str_First) && (itm <= mSL_Str_Last)
-        && (mSL_Str_Use[ent = itm - mSL_Str_First] === mSL_Str_Flg_inStack)) ? (
+        && ((mSL_Str_Use[ent = itm - mSL_Str_First] & 0x7F) === mSL_Str_Flg_inStack)) ? (
             // use this entry
             mSL_Str_Entry = ent; mSL_Str_Item = itm;
             mSL_Str_CUsed += 1; mSL_Str_CFree -= 1; mSL_Str_StInST += 1;
@@ -140,18 +149,13 @@ local (itm, ent, i, k)
         (mSL_Str_Aptr >= mSL_Str_Range) ? (mSL_Str_Aptr = 0; mSL_Str_StACycl += 1;);
         i += 0.333;
     );
-    (mSL_Str_Item === 0) ? (
-        // Last chance allocate a low number string
+    ((mSL_Str_Item === 0) && (mSL_Str_Use !== 0)) ? (
+        // Last chance allocate a low number string - it may still be in use : reported by mSL_Str_sweep_strings
         (mSL_Str_TempC >= mSL_Str_TempL) ? (mSL_Str_TempC = mSL_Str_TempF) : (mSL_Str_TempC += 1);
         mSL_Str_Item = mSL_Str_TempC;
         mSL_Str_Entry = mSL_Str_Range; mSL_Str_StInLO += 1;
     );
     mSL_Str_Item;
-);
-
-function mSL_Str_GCPRinit(size)
-(
-    0;
 );
 
 function mSL_Str_TInit(first, last)
@@ -212,8 +216,8 @@ global(mSL_Str_First, mSL_Str_Last, mSL_Str_Count, mSL_Str_Use, mSL_Str_Stack, m
     mSL_Str_StFree)
 local (n, k)
 (
-    ((str >= mSL_Str_First) && (str <= mSL_Str_Last)) ? (
-        k = mSL_Str_Use[n = str - mSL_Str_First];
+    ((mSL_Str_Use !== 0) && (str >= mSL_Str_First) && (str <= mSL_Str_Last)) ? (
+        k = mSL_Str_Use[n = str - mSL_Str_First] & 0x7F; // ignore a GC mark
         ((k === mSL_Str_Flg_inUse) || (k === mSL_Str_Flg_dispensable)) ? (
             // return to the stack
             mSL_Str_Use[n] = mSL_Str_Flg_inStack;
@@ -232,12 +236,12 @@ local (n, k)
 function mSL_isString(str)
 global(mSL_Str_First, mSL_Str_Last, mSL_Str_Use)
 (
-    (str >= mSL_Str_First) && (str <= mSL_Str_Last) && ((mSL_Str_Use[str - mSL_Str_First] & 0xf) !== 0);
+    (mSL_Str_Use !== 0) && (str >= mSL_Str_First) && (str <= mSL_Str_Last) && ((mSL_Str_Use[str - mSL_Str_First] & 0xf) !== 0);
 );
 
 
 function mSL_Str_RAlloc(val)
-global (mSL_Str_Item, mSL_Str_Use, mSL_Str_Entry, mSL_Str_Flg_permanent, mSL_Str_Item, mSL_Str_StPerm)
+global (mSL_Str_Item, mSL_Str_Use, mSL_Str_Entry, mSL_Str_Flg_permanent, mSL_Str_StPerm)
 (
     mSL_Str_Int_Get1();
     (mSL_Str_Item != 0) ? (

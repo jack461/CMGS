@@ -1,0 +1,347 @@
+/*
+    mSL_ui_audio.jsfx-inc
+    Display of audio waveforms, following the ui-lib conventions
+    (c)Jean-Jacques Girardot
+    Drawing method taken from SmoothMultiLimiter (one min/max line for each column of pixels).
+
+    Requires : ui-lib.jsfx-inc, mSL_ui_LibJJ.jsfx-inc (ui_pcolor).
+
+    ui_audio_init()
+        To call once in @init, while "make_array" allocates static memory (after mSL_StM_Init).
+        Creates the work tables (energies and channels selection) and the default colors.
+        Without it, ui_audio_wave works, but shows the first "maxch" channels instead of the loudest ones,
+        and uses the default colors.
+
+    ui_audio_wave(h, nch, bufs, S, A, B, flags, maxch)
+        Draws "nch" audio channels in a band of height "h" at the top of the current rectangle (ui_split_top),
+        then gives back the rest of the rectangle (ui_pop), as a "show" module does.
+            h       height of the display ; <= 0 : all the remaining height
+            nch     number of channels
+            bufs    address of a table of buffers addresses : bufs[0] ... bufs[nch-1]
+                    (in Interstys, for a line "line" : line + its_Lin_BF1ST)
+            S       size of each buffer, in samples (one sample per memory word)
+            A, B    first displayed sample, and first sample not displayed : 0 and S for the whole buffer
+            flags   ui_aud_Sep (1)   channels shown separately, one under the other (else superposed)
+                    ui_aud_Back (2)  fills the background in black (else the theme background is kept)
+                    ui_aud_Axis (4)  draws the zero line of each channel
+            maxch   max number of channels shown (<= 0 : all) ; if nch > maxch, the "maxch" channels
+                    with the highest energy (sum of the squares of the samples between A and B) are shown
+        Returns the number of the sample under the mouse, or -1.
+
+    Settings (global variables)
+        ui_aud_gain         vertical gain (1 : full scale is [-1, 1])
+        ui_aud_maxreads     max number of samples read for each column of pixels (speed vs precision)
+        ui_aud_colors       table of 16 packed colors (0xRRGGBB) - channel c uses ui_aud_colors[c % 16]
+        ui_aud_alpha        transparency of the superposed channels
+        ui_aud_shown        after a call : number of channels shown ; ui_aud_sel[0 .. ui_aud_shown-1] : their numbers
+
+    Markers (for example the position of a writing head)
+        ui_audio_mark(pos)  before ui_audio_wave : adds a vertical marker at sample "pos" (up to 32 markers)
+        ui_audio_mark(pos, col)  same, in color "col" (packed 0xRRGGBB)
+        ui_audio_mark(pos, col, lab)  same, with a small number "lab" (> 0) at the top of the marker
+        ui_aud_markcol      default color of the markers (green)
+        ui_aud_labsize      font size of the markers numbers
+        The markers are drawn over the waveforms, then forgotten : declare them again before each call.
+
+    Bands (for example a region of the buffer)
+        ui_audio_band(a, b, col, alpha)  before ui_audio_wave : shades the samples [a, b) behind the waveforms
+        (up to 4 bands ; forgotten after each call, as the markers)
+
+    Zoom
+        ui_audio_zoom(fa, fb, ra, rb, zoom)  computes the displayed range [ui_aud_za, ui_aud_zb) :
+            zoom = 1 : the full range [fa, fb) ; zoom = 100 : the region [ra, rb) ;
+            in between, the width changes in a logarithmic way, and the range always contains the region.
+        Then : ui_audio_wave(h, nch, bufs, S, ui_aud_za, ui_aud_zb, flags, maxch)
+
+    Colors of a subset of channels
+        ui_aud_chan0        number of the first channel drawn (its color is ui_aud_colors[ui_aud_chan0 % 16]) ;
+                            set it before ui_audio_wave when bufs starts at a channel other than 0 (reset after each call)
+
+    (markers, bands : need ui_audio_init)
+*/
+
+@init
+
+ui_aud_Sep = 1;
+ui_aud_Back = 2;
+ui_aud_Axis = 4;
+ui_aud_gain = 1;
+ui_aud_maxreads = 32;
+ui_aud_alpha = 0.8;
+ui_aud_maxch = 128; // size of the work tables
+ui_aud_energy = ui_aud_sel = ui_aud_colors = 0;
+ui_aud_shown = 0;
+ui_aud_marks = ui_aud_markcols = 0; ui_aud_nmarks = 0; ui_aud_maxmarks = 32;
+ui_aud_markcol = 0x20FF20;
+ui_aud_marklabs = 0; ui_aud_labsize = 10;
+ui_aud_bands = 0; ui_aud_nbands = 0; ui_aud_maxbands = 4;
+ui_aud_za = ui_aud_zb = 0;
+ui_aud_chan0 = 0;
+
+
+// Default color of channel "c" (packed 0xRRGGBB)
+function ui_audio_defcolor(c)
+(
+    c = c % 16;
+    (c === 0) ? 0x4080C0 : // blue
+    (c === 1) ? 0xDAA840 : // yellow
+    (c === 2) ? 0x22B022 : // green
+    (c === 3) ? 0xE04030 : // red
+    (c === 4) ? 0x30C8D0 : // cyan
+    (c === 5) ? 0xD050C0 : // magenta
+    (c === 6) ? 0xF08020 : // orange
+    (c === 7) ? 0x9070E0 : // violet
+    (c === 8) ? 0xA0D040 : // lime
+    (c === 9) ? 0xE07090 : // pink
+    (c === 10) ? 0x60A0F0 : // light blue
+    (c === 11) ? 0xC0A070 : // sand
+    (c === 12) ? 0x40C090 : // sea green
+    (c === 13) ? 0xF0D060 : // light yellow
+    (c === 14) ? 0xB0B0B0 : // grey
+    0xF0F0F0; // white
+);
+
+function ui_audio_init()
+local (i)
+(
+    ui_aud_energy = make_array(ui_aud_maxch);
+    ui_aud_sel = make_array(ui_aud_maxch);
+    ui_aud_colors = make_array(16);
+    i = 0; loop(16, ui_aud_colors[i] = ui_audio_defcolor(i); i += 1;);
+    ui_aud_marks = make_array(ui_aud_maxmarks);
+    ui_aud_markcols = make_array(ui_aud_maxmarks);
+    ui_aud_marklabs = make_array(ui_aud_maxmarks);
+    ui_aud_nmarks = 0;
+    ui_aud_bands = make_array(4 * ui_aud_maxbands); // a, b, color, alpha
+    ui_aud_nbands = 0;
+);
+
+// Adds a vertical marker at sample "pos", in color "col", numbered "lab" (if > 0), for the next ui_audio_wave
+function ui_audio_mark(pos, col, lab)
+(
+    (ui_aud_marks && (ui_aud_nmarks < ui_aud_maxmarks)) ? (
+        ui_aud_marks[ui_aud_nmarks] = pos;
+        ui_aud_markcols[ui_aud_nmarks] = col;
+        ui_aud_marklabs[ui_aud_nmarks] = lab;
+        ui_aud_nmarks += 1;
+    );
+);
+
+function ui_audio_mark(pos, col)
+(
+    ui_audio_mark(pos, col, 0);
+);
+
+function ui_audio_mark(pos)
+(
+    ui_audio_mark(pos, ui_aud_markcol, 0);
+);
+
+// Shades the samples [a, b) in color "col" (transparency "alpha"), behind the waveforms of the next ui_audio_wave
+function ui_audio_band(a, b, col, alpha)
+local (q)
+(
+    (ui_aud_bands && (ui_aud_nbands < ui_aud_maxbands) && (b > a)) ? (
+        q = ui_aud_bands + 4 * ui_aud_nbands;
+        q[0] = a; q[1] = b; q[2] = col; q[3] = alpha;
+        ui_aud_nbands += 1;
+    );
+);
+
+// Displayed range for a zoom in [1, 100] : from the full range [fa, fb) to the region [ra, rb)
+function ui_audio_zoom(fa, fb, ra, rb, zoom)
+local (lf, lr, wz, f)
+(
+    ra = max(fa, min(fb, ra)); rb = max(ra, min(fb, rb));
+    lf = fb - fa; lr = rb - ra;
+    ((lr <= 0) || (lr >= lf)) ? (
+        ui_aud_za = fa; ui_aud_zb = fb;
+    ) : (
+        zoom = max(1, min(100, zoom));
+        wz = lf * pow(lr / lf, (zoom - 1) / 99); // displayed width
+        f = (lf - wz) / (lf - lr); // 0 at zoom 1, 1 at zoom 100
+        ui_aud_za = fa + (ra - fa) * f;
+        ui_aud_zb = ui_aud_za + wz;
+    );
+);
+
+function ui_audio_color(c)
+(
+    ui_aud_colors ? ui_aud_colors[c % 16] : ui_audio_defcolor(c);
+);
+
+
+// Chooses the channels to show : the "cnt" channels with the highest energy between A and B
+// (or the first ones, without work tables). Result in ui_aud_sel[0 .. ui_aud_shown-1], in channels order.
+function ui_audio_select(nch, bufs, ia, ib, cnt)
+local (c, k, j, buf, e, v, step, best, bi)
+(
+    cnt = max(0, min(cnt, nch));
+    ui_aud_shown = 0;
+    (ui_aud_energy == 0) ? (
+        // no work tables : the first channels
+        ui_aud_shown = cnt;
+    ) :
+    (cnt >= nch) ? (
+        c = 0; loop(nch, ui_aud_sel[c] = c; c += 1;);
+        ui_aud_shown = nch;
+    ) : (
+        // energy of each channel, estimated on at most about 2048 samples
+        step = max(1, floor((ib - ia) / 2048));
+        c = 0; loop(nch,
+            e = 0;
+            ((buf = bufs[c]) > 0) ? (
+                j = ia; while (j < ib) ( v = buf[j]; e += v * v; j += step; );
+            ) : (
+                e = -1; // no buffer
+            );
+            ui_aud_energy[c] = e;
+            c += 1;
+        );
+        // the "cnt" highest energies (cnt is small : simple selection)
+        k = 0; loop(cnt,
+            best = -2; bi = -1;
+            c = 0; loop(nch,
+                (ui_aud_energy[c] > best) ? ( best = ui_aud_energy[c]; bi = c; );
+                c += 1;
+            );
+            (bi >= 0) ? ( ui_aud_sel[k] = bi; ui_aud_energy[bi] = -3; k += 1; );
+        );
+        ui_aud_shown = k;
+        // back to channels order (stable display)
+        c = 1; while (c < ui_aud_shown) (
+            v = ui_aud_sel[c]; j = c - 1;
+            while ((j >= 0) && (ui_aud_sel[j] > v)) ( ui_aud_sel[j+1] = ui_aud_sel[j]; j -= 1; );
+            ui_aud_sel[j+1] = v;
+            c += 1;
+        );
+    );
+    ui_aud_shown;
+);
+
+
+// Draws the samples [ia, ib) of buffer "buf" in the band [top, top+hgt) (pixels), from x0 on "w" pixels
+function ui_audio_trace(buf, ia, ib, x0, w, top, hgt)
+local (span, yc, amp, i, lo, hi, step, mn, mx, j, v, y1, y2, ymin, ymax, x)
+(
+    span = ib - ia;
+    yc = top + hgt * 0.5;
+    amp = hgt * 0.5 * ui_aud_gain;
+    ymin = top; ymax = top + hgt - 1;
+    (span <= w) ? (
+        // zoom : fewer samples than pixels - a line through the samples
+        j = ia; i = 0;
+        loop(span,
+            x = x0 + (j - ia + 0.5) * w / span;
+            v = max(ymin, min(ymax, yc - buf[j] * amp));
+            (j === ia) ? ( gfx_x = x; gfx_y = v; ) : gfx_lineto(x, v);
+            j += 1;
+        );
+        (span === 1) ? gfx_line(x0, v, x0 + w - 1, v);
+    ) : (
+        // one min/max line for each column of pixels
+        i = 0;
+        while (i < w) (
+            lo = ia + floor(i * span / w);
+            hi = max(lo + 1, ia + floor((i + 1) * span / w));
+            step = max(1, ceil((hi - lo) / ui_aud_maxreads));
+            mn = mx = buf[lo];
+            j = lo + step;
+            while (j < hi) (
+                v = buf[j];
+                (v < mn) ? (mn = v) : ((v > mx) ? (mx = v));
+                j += step;
+            );
+            y1 = max(ymin, min(ymax, yc - mx * amp));
+            y2 = max(ymin, min(ymax, yc - mn * amp));
+            gfx_line(x0 + i, y1, x0 + i, y2);
+            i += 1;
+        );
+    );
+);
+
+
+function ui_audio_wave(h, nch, bufs, sz, ia, ib, flags, maxch)
+local (res, x0, y0, w, hh, lh, k, c, buf, top, cnt, xm, xb)
+(
+    res = -1;
+    nch = max(0, min(ui_aud_maxch, 0|nch));
+    ia = max(0, min(sz - 1, 0|ia));
+    ib = max(ia + 1, min(sz, 0|ib));
+    (h <= 0) ? h = ui_height();
+    ((sz > 0) && (ui_height() > 4) && (bufs > 0)) ? (
+        ui_split_top(min(h, ui_height()));
+            x0 = ui_left_retina(); y0 = ui_top_retina();
+            w = ui_width_retina(); hh = ui_height_retina();
+            (flags & ui_aud_Back) ? (
+                ui_push();
+                    ui_color(0, 0, 0);
+                    ui_fill();
+                ui_pop();
+            );
+            // bands (regions), behind the waveforms
+            (ui_aud_nbands > 0) ? (
+                ui_push();
+                    k = 0;
+                    loop(ui_aud_nbands,
+                        c = ui_aud_bands + 4 * k;
+                        xm = x0 + max(0, min(w, (c[0] - ia) * w / (ib - ia)));
+                        xb = x0 + max(0, min(w, (c[1] - ia) * w / (ib - ia)));
+                        (xb > xm) ? (
+                            ui_pcolor(c[2], c[3]);
+                            gfx_rect(xm, y0, max(1, xb - xm), hh);
+                        );
+                        k += 1;
+                    );
+                ui_pop();
+            );
+            cnt = (maxch > 0) ? min(maxch, nch) : nch;
+            ui_audio_select(nch, bufs, ia, ib, cnt);
+            (ui_aud_shown > 0) ? (
+                lh = (flags & ui_aud_Sep) ? hh / ui_aud_shown : hh; // height of a channel
+                ui_push();
+                    k = 0;
+                    loop(ui_aud_shown,
+                        c = ui_aud_sel ? ui_aud_sel[k] : k;
+                        top = (flags & ui_aud_Sep) ? y0 + floor(k * lh) : y0;
+                        (flags & ui_aud_Axis) ? (
+                            ui_pcolor(0x808080, 0.5);
+                            gfx_line(x0, top + lh * 0.5, x0 + w - 1, top + lh * 0.5);
+                        );
+                        ((buf = bufs[c]) > 0) ? (
+                            ui_pcolor(ui_audio_color(c + ui_aud_chan0), (flags & ui_aud_Sep) ? 1 : ui_aud_alpha);
+                            ui_audio_trace(buf, ia, ib, x0, w, top, max(1, floor(lh)));
+                        );
+                        k += 1;
+                    );
+                ui_pop();
+            );
+            // markers, over the waveforms
+            (ui_aud_nmarks > 0) ? (
+                ui_push();
+                    k = 0;
+                    loop(ui_aud_nmarks,
+                        ((ui_aud_marks[k] >= ia) && (ui_aud_marks[k] < ib)) ? (
+                            ui_pcolor(ui_aud_markcols[k], 1);
+                            xm = x0 + floor((ui_aud_marks[k] - ia) * w / (ib - ia));
+                            gfx_line(xm, y0, xm, y0 + hh - 1);
+                            (ui_aud_marklabs[k] > 0) ? (
+                                ui_fontsize(ui_aud_labsize);
+                                uix_setgfxfont();
+                                gfx_x = xm + 2; gfx_y = y0 + 1;
+                                gfx_drawnumber(ui_aud_marklabs[k], 0);
+                            );
+                        );
+                        k += 1;
+                    );
+                ui_pop();
+            );
+            ui_hover() ? (
+                res = ia + floor(max(0, min(0.9999, ui_mouse_xratio())) * (ib - ia));
+            );
+        ui_pop();
+    );
+    ui_aud_nmarks = ui_aud_nbands = 0; // markers and bands are declared again before each call
+    ui_aud_chan0 = 0;
+    res;
+);

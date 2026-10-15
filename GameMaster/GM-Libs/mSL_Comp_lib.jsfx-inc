@@ -1465,7 +1465,7 @@ local(pt)
 
 
 function mSL_cleanStructures()
-local (pt, cnt)
+local ()
 (
     // Reset all entries before a compilation
     memset(mSL_memCleanStart, 0, mSL_memCleanSize);
@@ -2493,7 +2493,7 @@ local (res, p, q)
 // -1 = error
 function
 mSL_checkCList(xp, fl)
-local (res, p, state, ty, va, vb, elc, prv, nxt, erf)
+local (res, p, state, ty, va, elc, prv, nxt, erf)
 (
     (mSL_CP_Flags & 16) ? (
         sprintf(#sfc, "Enter checkCList %d %d", xp, fl);
@@ -3690,7 +3690,7 @@ local (ptr, ty, nxt)
 
 function
 mSL_reduceBrackets(theExp)
-local (flg, ty, PBExp, lex, ty, xp, xty, r, x, y, z, opt, prev, xprev, xnext, idt, newc)
+local (flg, ty, PBExp, xp, xty, r, x, y, z, opt, prev, xprev, xnext, idt, newc)
 (
     AA_step = 1; //TRACE
     flg = 1;
@@ -4150,7 +4150,7 @@ local (ptr, nxp, flg, ty, valu, upos, q, qty, argc, ent, prev, pty, next, nnext,
                                 (qty === mSL_tyMBNot) ? (
                                     // is "next" a constant ?
                                     (pty === mSL_tyNum) ? (
-                                        mSL_pushPseudo(mSL_tyNum,  - mSL_valu[next] - 1, mSL_upos[next]);
+                                        mSL_pushPseudo(mSL_tyNum, 0xFFFFFFFF ~ mSL_valu[next], mSL_upos[next]); // same as the evaluator (op. 92)
                                     ) : (
                                         v = mSL_K_pBNot; // ~ exp [bit not]
                                     );
@@ -5215,7 +5215,7 @@ function mSL_checkXLimits()
 //    Provide some memory for the interpreter to run
 
 function mSL_make_evaluator(mem, size)
-local (s, r, u)
+local (s)
 (
     mSL_errX = 0;
     size = 0|size;
@@ -5364,7 +5364,7 @@ function mSL_CP_Free_Structs()
 
 function
 mSL_compile(fHandle, fname, srcstr, cpflgs)
-local (flg, lex, endgen, fptr, fp, fn, fent, sz, loc_baseAVars, loc_baseOVars, loc_basePVars, p)
+local (flg, lex, endgen, fptr, fn, sz, loc_baseAVars, loc_baseOVars, p)
 (
     (mSL_C_fH >= 0) ? (file_close(mSL_C_fH); mSL_C_fH = -1;);
     //AA_tr = 0;
@@ -5626,8 +5626,13 @@ local (flg, lex, endgen, fptr, fp, fn, fent, sz, loc_baseAVars, loc_baseOVars, l
         );
         sz = mSL_pCStrSet;
         loc_cstStrings = mSL_Dyn_Alloc(sz, mSL_KODE_Strings, mSL_StM_FlClear);
-        mSL_GC_BProtect(loc_cstStrings, mSL_GC_Protected);
-        memcpy(loc_cstStrings, mSL_StringSet, mSL_pCStrSet);
+        (loc_cstStrings === 0) ? (
+            mSL_errC = 1278; // can't allocate the constant strings (would be copied to mem[0])
+            mSL_malloc_failed |= 1;
+        ) : (
+            mSL_GC_BProtect(loc_cstStrings, mSL_GC_Protected);
+            memcpy(loc_cstStrings, mSL_StringSet, mSL_pCStrSet);
+        );
 
         (mSL_errC === 0) ? (
             mSL_clean_vtabs(loc_baseAVars, loc_baseOVars);
@@ -5713,7 +5718,7 @@ local (bl, stak, ldic)
     ldic = mSL_Dyn_Alloc(mSL_baseLDic, mSL_THR_KeyLDic, mSL_StM_FlClear); // create local dictionnary
     ((bl === 0) || (stak === 0) || (ldic === 0)) ? (
         // allocation failed
-        sprintf(#dbg_trace6, "make_thread failed : %d[%d], %d[%d], %d[%d]", bl, mSL_THR_Z, stak, mSL_baseStkMaxstak, ldic, mSL_baseLDic);
+        sprintf(#dbg_trace6, "make_thread failed : %d[%d], %d[%d], %d[%d]", bl, mSL_THR_Z, stak, mSL_baseStkMax, ldic, mSL_baseLDic);
         bl ? mSL_Dyn_Free(bl);
         stak ? mSL_Dyn_Free(stak);
         ldic ? mSL_Dyn_Free(ldic);
