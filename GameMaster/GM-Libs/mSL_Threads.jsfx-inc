@@ -36,7 +36,8 @@ local (ent, k)
 function msg_recycle(msg, ind)
 local(res)
 (
-    ((SchETypeMess === mSL_Mbl_check(msg)) && (!SchedIsInList(SchedRcyclPts, msg))) ? (
+    // a message in no list (not in a queue, not already recycled)
+    ((SchETypeMess === mSL_Mbl_check(msg)) && (msg[SchedThList] === 0)) ? (
         res = SchedListSize(SchedRcyclPts);
         mSL_bl_clear(msg);
         SchedInsertTail(SchedRcyclPts, msg, SchETypeBlock);
@@ -44,6 +45,152 @@ local(res)
     );
 );
 
+
+// Next message in the queue of the process "ent", or 0. The expired messages (date of
+// expiration passed, see event_build_msg) are recycled on the way.
+function event_get_next(ent)
+local (msg, now)
+(
+    now = time_precise() + timeD;
+    msg = SchedDetachHead(ent + SchedHQB);
+    while (msg && (SchevDateExp[msg] > 0) && (SchevDateExp[msg] < now)) (
+        (FlagsTbVals[Flgs_Evnts] & 2) ? (
+            sprintf(#uuu, "  --> expired message %d dropped", msg); mSL_log(SysLogBox, #uuu);
+        );
+        msg_recycle(msg, 4);
+        msg = SchedDetachHead(ent + SchedHQB);
+    );
+    msg;
+);
+
+
+
+/*
+    Events management operations, common to all the plug-ins
+    mSL: event(cmdIdt, parameters...) ; each plug-in's mSL_event_ops calls this function
+*/
+function mSL_event_std(argc, argv)
+local (res, kw, id, ent, k, p1, p2, p3)
+(
+    res = 0;
+    ent = mSL_active_Thread[mSL_THR_SchedEnt]; // the scheduler entry
+
+    (FlagsTbVals[Flgs_Evnts] & 1) ? (
+        sprintf(#s, "  - mSL_event_ops  for %d/%d   argc=%d ", ent, (ent - SchedFirstEnt)/SchedEntSiz, argc);
+        mSL_log(SysLogBox, #s);
+    );
+    (argc > 0) ? (
+        kw = argv[0];
+        (FlagsTbVals[Flgs_Evnts] & 1) ? (
+            sprintf(#s, "  - mSL_event_ops  %s / %s ", mSL_edit_value(#, argv[0]), mSL_edit_value(#, argv[1]));
+            mSL_log(SysLogBox, #s);
+        );
+        (kw === mSL_KW_check) ? (
+            res = (SchedListNonEmpty(ent + SchedHQB));
+        ) :
+        ((kw === mSL_KW_wait) || (kw === mSL_KW_getnext)) ? (
+            // Do we already have a (non expired) message ?
+            ((res = event_get_next(ent)) != 0) ? (
+                // return it
+                (FlagsTbVals[Flgs_Evnts] & 1) ? (
+                sprintf(#s, "  --> SchedDetachHead  %d", res); mSL_log(SysLogBox, #s);
+                );
+            ) :
+            (SchedDly[ent] < 0) ? (
+                // a time-out has been notified
+                SchedDly[ent] = 0;
+                res = -1;
+                (FlagsTbVals[Flgs_Evnts] & 1) ? (
+                sprintf(#s, "  --> SchedDly[ent] < 0"); mSL_log(SysLogBox, #s);
+                );
+
+            ) : (
+                // lets wait for one event ; first, a wait delay
+                k = (argc > 1) ? argv[1] : evnt_ttw;
+                k = (k <= 0) ? evnt_ttw : max(1, min(evnt_ttw * 4, k));
+                SchedDly[ent] = time_precise() + timeD + k;
+                SchedmSLEvWait = mSL_RC_WEvent;
+            );
+        ) :
+        (kw === mSL_KW_find) ? (
+            p1 = p2 = p3 = 0;
+            (argc === 2) ? (
+                p1 = argv[1]; p2 = 0; p3 = 2;
+            ) :
+            (argc === 3) ? (
+                p1 = argv[1]; p2 = argv[2]; p3 = 2;
+            ) :
+            (argc >= 3) ? (
+                p1 = argv[1]; p2 = argv[2]; p3 = argv[2];
+            );
+            res = event_check_recipient(p1, p2, p3);
+        ) :
+        (kw === mSL_KW_ready) ? (
+            (argc >= 2) ? (
+                res = event_ready_pid(argv[1]);
+            );
+        ) :
+        (kw === mSL_KW_build) ? (
+            (argc >= 14) ? (
+                res = event_build_msg(argv[1], argv[2], argv[3], argv[4], argv[5],
+                    argv[6], argv[7], argv[8], argv[9], argv[10], argv[11], argv[12], argv[13])
+            );
+        ) :
+        (kw === mSL_KW_notify) ? (
+            (argc >= 14) ? (
+                res = event_Notify(argv[1], argv[2], argv[3], argv[4], argv[5],
+                    argv[6], argv[7], argv[8], argv[9], argv[10], argv[11], argv[12], argv[13])
+            );
+        ) :
+        (kw === mSL_KW_send) ? (
+            (argc >= 2) ? (
+                res = event_send_msg(argv[1]);
+            );
+        ) :
+        (kw === mSL_KW_recycle) ? (
+            (argc >= 2) ? (
+                msg_recycle(argv[1], 3);
+            );
+            0 ? (
+                sprintf(#s, "  - mSL_event_ops  recycle list size: %d", SchedListSize(SchedRcyclPts));
+                mSL_log(SysLogBox, #s);
+            );
+            res = SchedListSize(SchedRcyclPts);
+        ) :
+        (kw === mSL_KW_count) ? (
+            (argc === 2) ? (
+                id = argv[1];
+            ) : (
+                id = 0;
+            );
+            p1 = res = 0; p2 = ent + SchedHQB;
+            p3 = SchedPrvEnt[p2[SchedOtherEnd]]; // start at tail
+            while ((p3 != p2) && (p3 >= SchedFirstEnt) && (p1 <= SchedNEmax)) (
+                ((id === 0) || (id === p3[SchevEvntName])) ? res += 1;
+                p1 += 1;
+                p3 = SchedPrvEnt[p3];
+            );
+        ) :
+        (kw === mSL_KW_clearall) ? (
+            // remove all pending messages
+            while (SchedListNonEmpty(ent + SchedHQB)) (
+                msg_recycle(SchedDetachHead(ent + SchedHQB), 5);
+            );
+        ) :
+        (kw === mSL_KW_unchain) ? (
+            // only a message (before : any address given by the script)
+            ((argc === 2) && (SchETypeMess === mSL_Mbl_check(k = argv[1]))) ? (
+                p1 = k[SchedThList];
+                SchedUnchainEnt(p1, k, 2);
+            );
+        );
+    );
+    (FlagsTbVals[Flgs_Evnts] & 1) ? (
+        sprintf(#s, "  - mSL_event_ops `%s return: %s", mSL_edit_value(#, kw), mSL_edit_value(#, res));
+        mSL_log(SysLogBox, #s);
+    );
+    res;
+);
 
 // Return an available thread, create a new one if necessary
 function getNewThread()
@@ -261,7 +408,7 @@ local (in, ent)
     in = 0; loop (SchedNEmax,
         ent = SchedFirstEnt + in * SchedEntSiz;
         (SchedCode[ent] === KRun_mSL_Thread) ? (
-            SchedUnchainEnt(ent[SchedThList], ent, SchETypeThrd);
+            SchedUnchainEnt(ent[SchedThList], ent, SchETypeThrd | 2); // no error if in no list
             freeSchedThread(ent);
         );
         in += 1;
@@ -359,17 +506,20 @@ local (res, k, kw, c, ent, p1, p2, p3)
                 && (ent = SchedFirstEnt + (k & SchedNMask) * SchedEntSiz)
                 && (k === ent[SchedPid])
             ) ? (
-                // this is a correct reference
-                // ent is supposed to be in SchedSuspPts !
-                SchedUnchainEnt(SchedSuspPts, ent, SchETypeThrd);
-                SchedStatus[ent] |= SchThrUsed;  // now in use
-                // introduce in the active list
-                SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
-                (FlagsTbVals[Flgs_Thrds] & 4) ? ( // trace flags
-                    sprintf(#ms, "** RUN ** [%g:%g] => %d/%d", ent, SchedThrdPt[ent], (floor(k/SchedNEmax)), (k & SchedNMask));
-                    mSL_log(SysLogBox, #ms);
+                // this is a correct reference ; the process must be in SchedSuspPts (created by "new", not yet run)
+                (ent[SchedThList] === SchedSuspPts) ? (
+                    SchedUnchainEnt(SchedSuspPts, ent, SchETypeThrd);
+                    SchedStatus[ent] |= SchThrUsed;  // now in use
+                    // introduce in the active list
+                    SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
+                    (FlagsTbVals[Flgs_Thrds] & 4) ? ( // trace flags
+                        sprintf(#ms, "** RUN ** [%g:%g] => %d/%d", ent, SchedThrdPt[ent], (floor(k/SchedNEmax)), (k & SchedNMask));
+                        mSL_log(SysLogBox, #ms);
+                    );
+                    res = k; // done
+                ) : (
+                    res = -2422; // not a suspended process (already running ?) : nothing done
                 );
-                res = k; // done
             );
         ) :
         (kw === mSL_KW_idt) ? (

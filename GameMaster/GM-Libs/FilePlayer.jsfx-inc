@@ -184,6 +184,7 @@ local (item)
 function mSL_define_extensions()
 (
     mSL_define_opcode("GM_Log", 133); // define 133 as "GM_Log"
+    mSL_define_opcode("print", 133); // define "print" as a synonym of "GM_Log"
     mSL_define_opcode("prod", 134); // define 134 as "prod"
     mSL_define_opcode("GM_Addr", 135); // etc.
 );
@@ -249,6 +250,7 @@ mSL_inactv = 0; // inactive threads
 mSL_maxact = 0; // maximum active threads
 currentClip = -1;
 currSmpl = 0;
+syncPrevSmpl = -1; syncState = 0; // sample counter from the GamePlayer : 0 unknown, 1 received, 2 lost
 FP_Flg1 = 0; // flags initiaux
 FP_Flg2 = 0; // flags dynamiques
 FP_Flg = 0; // flags courants
@@ -1302,11 +1304,17 @@ function doMslCompile(fname)
 (
     // Do not accept empty strings
     (strlen(fname) != 0) ? (
-        0 ? (sprintf(#s, "::About to doMslCompile: \"%s\"", fname); mSL_log(SysLogBox, #s););
-        atomic_set(mSL_Lock, max(1,atomic_get(mSL_Lock)));
-        uuuMslTabs[uuuMslTPt] = fname; uuuMslTPt = (uuuMslTPt + 1) % uuuMslTSiz;
-        atomic_add(mSL_loc_tim, mSL_loc_tadd);
-        uuuMslFn = 1; // set flag
+        (uuuMslTabs[uuuMslTPt] !== 0) ? (
+            // the list is full : refuse the file, rather than replacing a file still waiting
+            sprintf(#gfxu, "ERR: 2407    too many files to compile, \"%s\" ignored.", fname);
+            mSL_log(SysLogBox, #gfxu);
+        ) : (
+            0 ? (sprintf(#s, "::About to doMslCompile: \"%s\"", fname); mSL_log(SysLogBox, #s););
+            atomic_set(mSL_Lock, max(1,atomic_get(mSL_Lock)));
+            uuuMslTabs[uuuMslTPt] = fname; uuuMslTPt = (uuuMslTPt + 1) % uuuMslTSiz;
+            atomic_add(mSL_loc_tim, mSL_loc_tadd);
+            uuuMslFn = 1; // set flag
+        );
     )
 );
 
@@ -2928,6 +2936,12 @@ local(res, kw)
         mSL_log(SysLogBox, #s);
     );
     res = Undef;
+    // call(`errLock [, v]) : after an error in a process, lock all the processes (1) or stop only this one (0)
+    ((argc >= 1) && (argv[0] === mSL_KW_errLock)) ? (
+        res = mSL_ErrLockAll;
+        (argc >= 2) ? ( mSL_ErrLockAll = (argv[1] != 0); );
+    );
+    res;
 );
 
 
@@ -2966,9 +2980,8 @@ local ()
     Events management operations
 */
 function mSL_event_ops(argc, argv)
-local (res, kw, ent, k, p1, p2, p3)
 (
-    res = 0;
+    mSL_event_std(argc, argv); // see mSL_Threads
 );
 
 
@@ -3021,17 +3034,20 @@ local (res, k, kw, ent)
                 && (ent = SchedFirstEnt + (k & SchedNMask) * SchedEntSiz)
                 && (k === ent[SchedPid])
             ) ? (
-                // this is a correct reference
-                // ent is supposed to be in SchedSuspPts !
-                SchedUnchainEnt(SchedSuspPts, ent, SchETypeThrd);
-                SchedStatus[ent] |= SchThrUsed;  // now in use
-                // introduce in the active list
-                SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
-                (FlagsTbVals[Flgs_Thrds] & 4) ? ( // trace flags
-                    sprintf(#ms, "** RUN ** [%g:%g] => %d/%d", ent, SchedThrdPt[ent], (floor(k/SchedNEmax)), (k & SchedNMask));
-                    mSL_log(SysLogBox, #ms);
+                // this is a correct reference ; the process must be in SchedSuspPts (created by "new", not yet run)
+                (ent[SchedThList] === SchedSuspPts) ? (
+                    SchedUnchainEnt(SchedSuspPts, ent, SchETypeThrd);
+                    SchedStatus[ent] |= SchThrUsed;  // now in use
+                    // introduce in the active list
+                    SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
+                    (FlagsTbVals[Flgs_Thrds] & 4) ? ( // trace flags
+                        sprintf(#ms, "** RUN ** [%g:%g] => %d/%d", ent, SchedThrdPt[ent], (floor(k/SchedNEmax)), (k & SchedNMask));
+                        mSL_log(SysLogBox, #ms);
+                    );
+                    res = k; // done
+                ) : (
+                    res = -2422; // not a suspended process (already running ?) : nothing done
                 );
-                res = k; // done
             );
         ) :
         (kw === mSL_KW_idt) ? (
@@ -3513,6 +3529,19 @@ mSL_log(SysLogBox, "*** File Player initialized ***");
 @block
 
 gm_time_keep(); // shared gmem time fields, if nobody keeps them (see mSL_clip_lib)
+
+// Sample counter received from the GamePlayer (channels 1-2) : it must advance at each block.
+// Without it, the sample dated events (smplNewEV) would never happen : say it in the system log.
+(currSmpl == syncPrevSmpl) ? (
+    (syncState != 2) ? (
+        syncState = 2;
+        mSL_log(SysLogBox, "FilePlayer : no sample counter from the GamePlayer (channels 1-2), sample dated events stopped");
+    );
+) : (
+    (syncState == 2) ? mSL_log(SysLogBox, "FilePlayer : sample counter from the GamePlayer received again");
+    syncState = 1;
+);
+syncPrevSmpl = currSmpl;
 XATP00_St = time_precise() + gmem[timeDelta];
 tUnix = time();
 
@@ -4255,7 +4284,7 @@ ActivePlaying ? (
 
 
 // First get the actual current sample number
-currSmpl = (floor(spl0 * T_fact)) + (floor(spl1 * T_fact)) * 16777216;
+currSmpl = floor(spl0 * T_fact + 0.5) + floor(spl1 * T_fact + 0.5) * 16777216; // rounded : robust to a tiny gain error
 spl0 = spl1 = 0;
 
 
@@ -7483,7 +7512,8 @@ function mSL_Dbg_Memory_Updt(membox)
     );
 );
 
-<? include("GM-Libs/mSL_Dbg_Memory.jsfx-inc"); ?>
+// no_init removes the leading @init of the module (otherwise, the rest of @gfx would be in @init)
+<? no_init = 1; include("GM-Libs/mSL_Dbg_Memory.jsfx-inc"); ?>
 
 
 (gfxMn !== lastMn) ? (

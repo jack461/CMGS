@@ -1010,11 +1010,17 @@ function doMslCompile(fname)
 (
     // Do not accept empty strings
     (strlen(fname) != 0) ? (
-        0 ? (sprintf(#s, "::About to do mSL Compile: \"%s\" -> %d", fname, uuuMslTPt); mSL_log(SysLogBox, #s););
-        atomic_set(mSL_Lock, max(1,atomic_get(mSL_Lock)));
-        uuuMslTabs[uuuMslTPt] = fname; uuuMslTPt = (uuuMslTPt + 1) % uuuMslTSiz;
-        atomic_add(mSL_loc_tim,mSL_loc_tadd);
-        uuuMslFn += 1; // set flag
+        (uuuMslTabs[uuuMslTPt] !== 0) ? (
+            // the list is full : refuse the file, rather than replacing a file still waiting
+            sprintf(#gfxu, "ERR: 2407    too many files to compile, \"%s\" ignored.", fname);
+            mSL_log(SysLogBox, #gfxu);
+        ) : (
+            0 ? (sprintf(#s, "::About to do mSL Compile: \"%s\" -> %d", fname, uuuMslTPt); mSL_log(SysLogBox, #s););
+            atomic_set(mSL_Lock, max(1,atomic_get(mSL_Lock)));
+            uuuMslTabs[uuuMslTPt] = fname; uuuMslTPt = (uuuMslTPt + 1) % uuuMslTSiz;
+            atomic_add(mSL_loc_tim,mSL_loc_tadd);
+            uuuMslFn += 1; // set flag
+        );
     )
 );
 
@@ -2316,6 +2322,12 @@ local(res, kw)
         mSL_log(SysLogBox, #s);
     );
     res = Undef;
+    // call(`errLock [, v]) : after an error in a process, lock all the processes (1) or stop only this one (0)
+    ((argc >= 1) && (argv[0] === mSL_KW_errLock)) ? (
+        res = mSL_ErrLockAll;
+        (argc >= 2) ? ( mSL_ErrLockAll = (argv[1] != 0); );
+    );
+    res;
 );
 
 
@@ -2356,9 +2368,8 @@ local ()
     Events management operations
 */
 function mSL_event_ops(argc, argv)
-local (res, kw, ent, k, p1, p2, p3)
 (
-    res = 0;
+    mSL_event_std(argc, argv); // see mSL_Threads
 );
 
 

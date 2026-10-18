@@ -143,14 +143,17 @@ SchedListIdt = 2; // the identification of the list
 SchedOtherEnd = 3; // pointer to the "other end" of the list
 SchedTailEnt = 5; // last entry in the HQB.
 // Other references
-SchedFirstEnt = -1;
-SchedLastEnt = -1;
+SchedFirstEnt = -1; // first process entry
+SchedLastEnt = -1; // last process entry (not the end of the scheduler area)
+SchedBlocksLimit = -1; // end of the area of the 8 words blocks
 SchedPnumb = 32; //  1st process number allocated for users threads
 SchedCurrPId = 0; // current process id
 Schedrestart1 = 0; // restart a locked process
 SchedLockAll = 0; // lock all processes
+mSL_ErrLockAll = 1; // after an error in a process : lock all the processes (1), or stop only this one (0) - call(`errLock, v)
 SchedNoRecycle = 1; // do not try to recycle unused threads
 SchedmSLEvWait = 0; // flag: event to wait for...
+Sched_EvChkNext = 0; // next date of the check of the processes waiting for a message (see Scheduler)
 
 // Flags use in SchedStatus
 SchThreadmSL = 1; // this is an mSL Thread (flag)
@@ -478,7 +481,8 @@ local (i, ent, mm, idx)
     i = idx + 1;
     while (i < SchedLstCnt) ( SchedInitHQB(SchedLPtrs[i], 'undf'); i += 1; );
     SchedFirstEnt = mm;
-    SchedLastEnt = SchBlcksEnd - 8;
+    SchedLastEnt = mm + (SchedNEmax - 1) * SchedEntSiz; // the last process entry
+    SchedBlocksLimit = SchBlcksEnd - 8; // the blocks are allocated after the process entries, up to this limit
     // Create tasks - All tasks are contiguous in memory and use SchedEntSiz (24) words
     i = 0; loop(SchedNEmax,  // 8192 -- was 4096
         ent = mm;
@@ -516,7 +520,7 @@ local (bl, lblk, sz)
         ) : (
             // create a new block
             sz = SchedLElSizes[k];
-            (SchBlcksStart + sz < SchedLastEnt) ? (
+            (SchBlcksStart + sz < SchedBlocksLimit) ? (
                 bl = SchBlcksStart;
                 SchBlcksStart += sz;
             );
@@ -542,7 +546,7 @@ local (bl, k, lblk, sz)
         ) : (
             // create a new block
             sz = SchedLElSizes[k];
-            (SchBlcksStart + sz < SchedLastEnt) ? (
+            (SchBlcksStart + sz < SchedBlocksLimit) ? (
                 bl = SchBlcksStart;
                 SchBlcksStart += sz;
             );
@@ -778,33 +782,27 @@ local (ent)
 );
 
 /*
-    Add a "delayed" task
-*/
-function SchedAddDefered(Edate, Edelay, code, p1, p2, p3, p4, p5, p6)
-local (ent)
-(
-    ((ent = SchedDetachHead(SchedFreePts)) != 0) ? (
-        SchedStatus[ent] |= SchThrUsed;  // now in use
-        SchedCode[ent] = code;
-        SchedPar1[ent] = p1;
-        SchedPar2[ent] = p2;
-        SchedPar3[ent] = p3;
-        SchedPar4[ent] = p4;
-        SchedPar5[ent] = p5;
-        SchedPar6[ent] = p4;
-        Schedule(Edate, Edelay, 1, ent, 0, 0, 0, 0, 0);
-    );
-    ent;
-);
-
-/*
     Get next event, or
     "0" if none is ready
 */
 function Scheduler()
-local (evt, act, xent, siz)
+local (evt, act, xent, siz, now)
 (
     Sched_TimeNow = time_precise() + gmem[timeDelta] - Sched_TStart;
+    // Once per second : wake up the processes waiting for a message (event(`wait, delay)) whose delay
+    // has expired ; event(`wait) then returns -1. (SchedDly is here an absolute date : time_precise() + timeD)
+    ((now = time_precise() + timeD) >= Sched_EvChkNext) ? (
+        Sched_EvChkNext = now + 1;
+        xent = SchedFirstEnt;
+        while (xent <= SchedLastEnt) (
+            ((xent[SchedThList] === SchedEvntPts) && (xent[SchedDly] < now)) ? (
+                SchedUnchainEnt(SchedEvntPts, xent, 0);
+                xent[SchedDly] = -1;
+                SchedInsertTail(SchedActivPts, xent, 0);
+            );
+            xent += SchedEntSiz;
+        );
+    );
     SchedControl ? (
         act = SchedControl; SchedControl = 0;
         xent = SchedDlydPts[SchedNxtEnt];

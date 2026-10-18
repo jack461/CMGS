@@ -1,0 +1,49 @@
+print("Ex-0006. Ecritures interdites : chaque processus doit s'arreter sur une erreur.");
+
+/*
+  Chaque fonction ci-dessous est executee dans un processus separe, et commet une faute.
+  Le processus doit s'arreter sur l'erreur annoncee, sans atteindre "reached += 1",
+  et sans perturber le processus principal.
+*/
+
+// Seul le processus fautif doit s'arreter (par defaut, une erreur verrouille tous les processus)
+var lock = call(`errLock, 0);
+
+var t = malloc(10);
+var x = 1000;
+var u = 0;
+var reached = 0;
+
+function e1() ( t[10] = 1; reached += 1; );     // 1629 : index au-dela du bloc
+function e2() ( t[-1] = 1; reached += 1; );     // 1629 : index negatif
+function e3() ( x[0] = 1; reached += 1; );      // 1630 : la base n'est pas un bloc
+function e4() ( u[3] = 1; reached += 1; );      // 1630 : tableau non defini (0)
+function e5() ( poke(0, 5); reached += 1; );    // 1631 : adresse incorrecte pour poke
+
+function vb(n; b) ( b[1000] = 1; );
+function e6() ( vb(1, 2, 3); reached += 1; );   // 1629 : hors de la partie utilisee de la pile
+
+function deep(n) ( (n <= 0) ? 0 : 1 + deep(n - 1); );
+function e7() ( deep(1000); reached += 1; );    // 1619 : debordement de la pile
+
+thread(`run, thread(`new, e1));
+thread(`run, thread(`new, e2));
+thread(`run, thread(`new, e3));
+thread(`run, thread(`new, e4));
+thread(`run, thread(`new, e5));
+thread(`run, thread(`new, e6));
+thread(`run, thread(`new, e7));
+wait(2);
+
+print(sprintf(0, "Ex-0006. processus arrives au bout : %d sur 7", reached));
+mfree(t);
+call(`errLock, lock);
+
+// Expected "Ex-0006. processus arrives au bout : 0 sur 7"
+// Expected error 1629
+// Expected error 1629
+// Expected error 1629
+// Expected error 1630
+// Expected error 1630
+// Expected error 1631
+// Expected error 1619

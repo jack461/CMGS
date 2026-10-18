@@ -333,6 +333,7 @@ mSL_K_EventOps = 129;
 mSL_K_CallOps = 130;
 mSL_K_PlayerOps = 131;
 mSL_K_GuiOps = 132;
+mSL_K_Poke = 147; // poke(addr, value) / poke(addr, index, value) : see mSL_147
 
 
 //----------------------
@@ -1431,6 +1432,7 @@ mSL_define_primitives()
     mSL_defGlobal("call", 0, mSL_tyPrimF, mSL_tyPrimFun | (0xff << 12) | mSL_K_CallOps);
     mSL_defGlobal("player", 0, mSL_tyPrimF, mSL_tyPrimFun | (0xff << 12) | mSL_K_PlayerOps);
     mSL_defGlobal("gui", 0, mSL_tyPrimF, mSL_tyPrimFun | (0xff << 12) | mSL_K_GuiOps);
+    mSL_defGlobal("poke", 0, mSL_tyPrimF, mSL_tyPrimFun | (0xff << 12) | mSL_K_Poke);
 );
 
 
@@ -5913,7 +5915,7 @@ function mSL_load_thread(thrd)
 //   Populate a mSL thread structure after a compilation
 
 function mSL_init_thread(ent)
-local (w, xcode, bcode, thrd, stk, ldic, lccnt, prcnt, ssiz, lsiz, p, r, bl)
+local (w, xcode, bcode, thrd, stk, ldic, lccnt, prcnt, ssiz, lsiz, p, r, bl, k, n)
 (
     (mSL_errX === 0) ? (
         ((ent < SchedFirstEnt) || (ent > SchedLastEnt)) ? (
@@ -5963,9 +5965,11 @@ local (w, xcode, bcode, thrd, stk, ldic, lccnt, prcnt, ssiz, lsiz, p, r, bl)
     (mSL_errX === 0) ? (
         //(thrd[mSL_THR_baseOVars] === 0) ? (
             (w = xcode[mSL_CC_OwnTab]) ? (
-                // Create a copy of the local variables tab
-                r = 0; p = 2 * (w / (lsiz%2));
-                while (r === 0) (
+                // Create (or find) the thread copy of the own variables table, in the thread dictionary :
+                // k (key, value) pairs, same hashing as the evaluator (op. 20), at most k probes
+                // (was "2 * (w / (lsiz%2))" : a division by zero, lsiz being even, and an unbounded loop)
+                k = lsiz >> 1; p = 2 * (w % k); r = 0; n = k;
+                while ((r === 0) && (n > 0)) (
                     (ldic[p] === w) ? (
                         r = p + 1;
                     ) :
@@ -5973,16 +5977,17 @@ local (w, xcode, bcode, thrd, stk, ldic, lccnt, prcnt, ssiz, lsiz, p, r, bl)
                         r = p + 1;
                         ldic[p] = w;
                         ldic[r] = mSL_bl_Dup(w);
-                        // sprintf(#dbg_trace6, "Th:Duplicating mSL_baseOVars.");
                     ) :
                     (
-                        p = (p + 7*2) % ldic[-1];
+                        p = (p + 7*2) % (2 * k); // 7 and the pairs count are prime to each other
                     );
+                    n -= 1;
                 );
                 (r === 0) ? (
-                    mSL_errX=1423; // unable to update semi-local thread table
+                    mSL_errX=1423; // unable to update semi-local thread table (dictionary full)
+                ) : (
+                    thrd[mSL_THR_baseOVars] = ldic[r];
                 );
-                thrd[mSL_THR_baseOVars] = ldic[r];
             ) : (
                 mSL_errX = 2420; // no defined own table
             );
@@ -6199,7 +6204,21 @@ function mSL_163(c,v) (c); function mSL_162(c,v) (c); function mSL_161(c,v) (c);
 function mSL_159(c,v) (c); function mSL_158(c,v) (c); function mSL_157(c,v) (c); function mSL_156(c,v) (c);
 function mSL_155(c,v) (c); function mSL_154(c,v) (c); function mSL_153(c,v) (c); function mSL_152(c,v) (c);
 function mSL_151(c,v) (c); function mSL_150(c,v) (c); function mSL_149(c,v) (c); function mSL_148(c,v) (c);
-function mSL_147(c,v) (c); function mSL_146(c,v) (c); function mSL_145(c,v) (c); function mSL_144(c,v) (c);
+
+// poke(addr, value) or poke(addr, index, value) : write "value" at addr (+ index), WITHOUT any check
+// of a block. For a base which is not a block ("tab[i] = v" requires a block) ; to be used knowingly.
+// The target must be a memory address (> 0). Returns the value written.
+function mSL_147(argc, argv)
+local (a)
+(
+    a = (argc === 3) ? argv[0] + argv[1] : argv[0];
+    (((argc === 2) || (argc === 3)) && (a >= 1)) ? (
+        a[0] = argv[argc - 1];
+    ) : (
+        mSL_errX = 1631; // poke : wrong arguments or address
+        0;
+    );
+); function mSL_146(c,v) (c); function mSL_145(c,v) (c); function mSL_144(c,v) (c);
 function mSL_143(c,v) (c); function mSL_142(c,v) (c); function mSL_141(c,v) (c); function mSL_140(c,v) (c);
 function mSL_139(c,v) (c); function mSL_138(c,v) (c); function mSL_137(c,v) (c); function mSL_136(c,v) (c);
 function mSL_135(c,v) (c); function mSL_134(c,v) (c); function mSL_133(c,v) (c); function mSL_132(c,v) (c);

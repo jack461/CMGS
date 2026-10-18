@@ -4,6 +4,7 @@
 
 evnt_ttl = 3600; // default time to live : 1 hour
 evnt_ttw = 3600; // default time to wait : 1 hour
+thrd_Max_ttl = evnt_ttl; // default time to live of a message (s) ; a given "ttl" is limited to twice this value
 
 
 
@@ -35,21 +36,18 @@ local (dst, n, k)
         k = SchedFirstEnt + n * SchedEntSiz; // its address
         ((SchedPid[k] === destId) && (SchedStatus[k] != 0)) ? dst = k;
     ) :
-    ((destid === 0) && (destName !== 0)) ? (
-        (k = SchedHead(SchedEvntPts)) ? (
-            // we look first for an active process of name "destName" in the waiting list SchedEvntPts
-            n = 0;
-            while ((dst === 0) && (n < SchedNEmax) && (k != 0) && (k != SchedEvntPts[SchedOtherEnd])) (
-                (SchedThrName[k] === destName) ? dst = k;
-                n += 0; k = SchedNxtEnt[k];
-            );
-        ) : (
-            // else we look for a process of this name
-            k = SchedFirstEnt;
-            while ((dst === 0) && (k <= SchedLastEnt)) (
-                ((SchedThrName[k] === destName) && (SchedStatus[k] != 0)) ? dst = k;
-                k += SchedEntSiz;
-            );
+    ((destId === 0) && (destName !== 0)) ? (
+        // we look first for a process of name "destName" waiting for a message (list SchedEvntPts)...
+        k = SchedHead(SchedEvntPts); n = 0;
+        while ((dst === 0) && (k != 0) && (k != SchedEvntPts[SchedOtherEnd]) && (n < SchedNEmax)) (
+            (SchedThrName[k] === destName) ? dst = k;
+            n += 1; k = SchedNxtEnt[k];
+        );
+        // ... else for any process of this name (before : not searched as soon as a process was waiting)
+        k = SchedFirstEnt;
+        while ((dst === 0) && (k <= SchedLastEnt)) (
+            ((SchedThrName[k] === destName) && (SchedStatus[k] != 0)) ? dst = k;
+            k += SchedEntSiz;
         );
     ); // pas d'autre cas à étudier pour l'instant
     (dst && flg) ? (
@@ -140,17 +138,19 @@ local (s, k, n, dst)
     msg;
 );
 
-// Send an event
+// Send an event : returns 0 (sent), -3 (message invalid), -4 (recipient not found)
 function event_send_msg(msg)
-local (dst, dstId, n, k, res)
+local (dst, destId, n, k, s, res)
 (
+    res = -3; // message invalid
     ((msg != 0) && (SchETypeMess === mSL_Mbl_check(msg)) && ((s = msg[-1]) >= 16)) ? (
+        res = -4; // can't find recipient
         destId = SchevDstNum[msg];
         (destId > 0) ? (
             // Must be a valid process id, and an active one
             n = 0|(destId - SchedNEmax*(0|(destId/SchedNEmax))); // number of the SCB
             k = SchedFirstEnt + n * SchedEntSiz;
-            ((SchedPid[k] === destId) && (SchedStatus[k] != 0)) ? (
+            ((k <= SchedLastEnt) && (SchedPid[k] === destId) && (SchedStatus[k] != 0)) ? (
                 (SchevDateSent[msg] > 0) ? (
                     // first, delay the event
                     0 ? (sprintf(#s, "  --> send_dly_msg  --> %d to %d", msg, destId); mSL_log(SysLogBox, #s););
@@ -167,14 +167,11 @@ local (dst, dstId, n, k, res)
                         dst ? SchedInsertTail(SchedActivPts, dst, SchETypeThrd);
                     );
                 );
-                0; // message sent
-            ) : (
-                -4; // can't find recipient
+                res = 0; // message sent
             );
         );
-    ) : (
-        -3; // message invalid
     );
+    res;
 );
 
 

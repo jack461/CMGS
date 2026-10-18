@@ -1,0 +1,69 @@
+print("Ex-0007. Processus et messages.");
+
+/*
+  event(`notify, msg, srcIdt, srcName, dstIdt, dstName, event, delay, ttl, flags, code, seq, par1, par2)
+  Dans le message recu : msg[2] = nom de l'evenement, msg[13] = seq, msg[14] = par1.
+*/
+
+var mainid = thread(`idt);
+var msg, total = 0, cnt = 0, t0, dt;
+
+// 1. Un autre processus envoie trois messages au processus principal
+function worker()
+(
+    wait(0.5);
+    event(`notify, 0, 0, 0, mainid, 0, `hello, 0, 10, 0, 0, 1, 11, 0);
+    event(`notify, 0, 0, 0, mainid, 0, `hello, 0, 10, 0, 0, 2, 22, 0);
+    event(`notify, 0, 0, 0, mainid, 0, `hello, 0, 10, 0, 0, 3, 33, 0);
+);
+thread(`run, thread(`new, worker));
+loop(3,
+    msg = event(`wait, 5);
+    (msg > 0) ? (
+        (msg[2] === `hello) ? ( total += msg[14]; cnt += 1; );
+        event(`recycle, msg);
+    );
+);
+print(sprintf(0, "Ex-0007. %d messages recus, somme %d", cnt, total));
+
+// 2. Message differe d'une seconde, envoye a soi-meme
+t0 = ptime();
+event(`notify, 0, 0, 0, mainid, 0, `later, 1, 10, 0, 0, 0, 0, 0);
+msg = event(`wait, 5);
+dt = ptime() - t0;
+print(sprintf(0, "Ex-0007. message differe : %s", ((msg > 0) && (msg[2] === `later) && (dt >= 0.9)) ? "OK" : "ERREUR"));
+(msg > 0) ? event(`recycle, msg);
+
+// 3. Attente sans message : fin du delai, resultat -1
+msg = event(`wait, 1);
+print(sprintf(0, "Ex-0007. attente sans message : %d", msg));
+
+// 4. Message expire (duree de vie 1 s) : il est compte, mais n'est pas delivre
+event(`notify, 0, 0, 0, mainid, 0, `old, 0, 1, 0, 0, 0, 0, 0);
+wait(3);
+print(sprintf(0, "Ex-0007. messages en attente : %d", event(`count)));
+msg = event(`wait, 1);
+print(sprintf(0, "Ex-0007. message expire : %d", msg));
+
+// 5. Message adresse par le nom du processus
+thread(`name, `ExSept);
+event(`notify, 0, 0, 0, 0, `ExSept, `byname, 0, 10, 0, 0, 0, 7, 0);
+msg = event(`wait, 2);
+print(sprintf(0, "Ex-0007. message par nom : %d", (msg > 0) ? msg[14] : -1));
+(msg > 0) ? event(`recycle, msg);
+
+// 6. Suppression des messages en attente
+event(`notify, 0, 0, 0, mainid, 0, `a, 0, 10, 0, 0, 0, 0, 0);
+event(`notify, 0, 0, 0, mainid, 0, `b, 0, 10, 0, 0, 0, 0, 0);
+print(sprintf(0, "Ex-0007. avant clearall : %d", event(`count)));
+event(`clearall);
+print(sprintf(0, "Ex-0007. apres clearall : %d", event(`count)));
+
+// Expected "Ex-0007. 3 messages recus, somme 66"
+// Expected "Ex-0007. message differe : OK"
+// Expected "Ex-0007. attente sans message : -1"
+// Expected "Ex-0007. messages en attente : 1"
+// Expected "Ex-0007. message expire : -1"
+// Expected "Ex-0007. message par nom : 7"
+// Expected "Ex-0007. avant clearall : 2"
+// Expected "Ex-0007. apres clearall : 0"

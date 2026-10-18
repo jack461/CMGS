@@ -42,7 +42,8 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
     mfc = 0; // malloc/free/xxx count "coastful" operations
 
     //// Inner equivalent loop
-    while ((rpeat > 0) && (mSL_errX === 0)) (
+    // the stack top must stay below the stack end markers (a 64 words margin) : checked before each instruction
+    while ((rpeat > 0) && (mSL_errX === 0) && (mSL_TOS < mSL_baseHighStack)) (
         rpeat -= 1;
         xop = (XopPar = mSL_NxtOp) & 0xff;
         mSL_PCode = mSL_CodePtr;
@@ -332,14 +333,38 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
 
 
                 //===19===//
-                // Index address
+                // Index address (the target of a write : tab[i] = v, tab[i] += v...)
+                // In memory, the base must be a block (static or dynamic) and the index in [0, size-1],
+                // or an address in the stack of the thread (arguments of a variadic function) ;
+                // for another base, use poke(). A negative base is an address in gmem (not checked).
                 p = mSL_TOS[0];
                 mSL_TOS -= 1;
                 m = mSL_TOS[0];
-                (m >= 0) ? (
-                    mSL_TOS[0] = m + p;
-                ) : (
+                (m > 0) ? (
+                    (((s = m[-1]) >= 0) && ((ty = m[-2]) >= mSL_MKey_min) && (ty <= mSL_MKey_max)
+                        && (s == m[s]) && (m[s+1] == (ty ~ mSL_CC_Chksum))) ? (
+                        ((p >= 0) && (p < s)) ? (
+                            mSL_TOS[0] = m + p;
+                        ) : (
+                            mSL_errX = 1629; // index out of the block
+                        );
+                    ) :
+                    // ... or in the stack of the thread (e.g. "b[i] = v" in "function fun(a;b)", whose
+                    // arguments are in the stack) : the address must stay between the stack start and its top
+                    ((mSL_current_thread > 0) && ((r = mSL_current_thread[mSL_THR_basePhStack]) > 0) && (m >= r) && (m < mSL_TOS)) ? (
+                        (((q = m + p) >= r) && (q < mSL_TOS)) ? (
+                            mSL_TOS[0] = q;
+                        ) : (
+                            mSL_errX = 1629; // index out of the stack part
+                        );
+                    ) : (
+                        mSL_errX = 1630; // indexed write in something which is not a block
+                    );
+                ) :
+                (m < 0) ? (
                     mSL_TOS[0] = m - p;
+                ) : (
+                    mSL_errX = 1630; // indexed write on 0 (an undefined array)
                 );
                 //===19===//
 
@@ -388,6 +413,11 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                                     mSL_baseLocals = mSL_baseTOS - 1;
                                 );
                                 mSL_TOS += fn[mSL_CC_LocCnt]; // plus the number of locals
+                                // stack overflow ? (the locals and the frame must stay below the stack end markers)
+                                (mSL_TOS + mSL_STK_DSiz >= mSL_baseHighStack) ? (
+                                    mSL_errX = 1619; // stack overflow : the thread stops
+                                    mSL_TOS = mSL_baseHighStack - mSL_STK_DSiz - 1; // the frame is written inside the stack
+                                );
                                 memcpy(mSL_TOS, mSL_wa2, mSL_STK_DSiz); // restore saved information
                             ) : (
                                 // Classical func call, using the stack...
@@ -403,6 +433,11 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
                                     );
                                 );
                                 mSL_TOS += fn[mSL_CC_LocCnt];
+                                // stack overflow ? (the locals and the frame must stay below the stack end markers)
+                                (mSL_TOS + mSL_STK_DSiz >= mSL_baseHighStack) ? (
+                                    mSL_errX = 1619; // stack overflow : the thread stops
+                                    mSL_TOS = mSL_baseHighStack - mSL_STK_DSiz - 1; // the frame is written inside the stack
+                                );
                                 // Create the "new" baseStack
                                 mSL_TOS[0] = mSL_baseAddStack;
                                 mSL_TOS[1] = mSL_baseLocals;
@@ -2262,6 +2297,9 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
         );
     );
     //// End of Inner Loop
+    ((mSL_errX === 0) && (mSL_TOS >= mSL_baseHighStack)) ? (
+        mSL_errX = 1619; // stack overflow (an expression too deep)
+    );
 
 
     // Check the various cases
@@ -2271,11 +2309,14 @@ local (rpeat, xop, XopPar, k, m, par, argc, p, bl, ty, fn, r, s, q, mfc)
         rpeat = 0;
         mSL_CodeStop = mSL_RC_XErr; // error "stop" flag
 
-        SchedLockAll = 1; // debug mode, temporary lock all processes
-        atomic_add(mSL_Lock,1); // lock every one
-
-
-        sprintf(#sfc, "[[Error %04d - Stopping processes]]", mSL_errX);
+        mSL_ErrLockAll ? (
+            SchedLockAll = 1; // debug mode, temporary lock all processes
+            atomic_add(mSL_Lock,1); // lock every one
+            sprintf(#sfc, "[[Error %04d - Stopping processes]]", mSL_errX);
+        ) : (
+            // only this process stops (see call(`errLock, 0))
+            sprintf(#sfc, "[[Error %04d - Stopping this process]]", mSL_errX);
+        );
         mSL_log(SysLogBox, #sfc);
         flagShowMemory = 1;
     );
