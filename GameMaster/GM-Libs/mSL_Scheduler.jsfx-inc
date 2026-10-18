@@ -160,13 +160,15 @@ Sched_EvChkNext = 0; // next date of the check of the processes waiting for a me
     memory, strings, mSL evaluator, play state), when a plug-in uses them from both sections (GamePlayer).
     mSL_Tok : 0 free, 1 held by @block, 2 held by @gfx (or @serialize, in the same thread as @gfx).
     @block has the priority : when it can't get the token, it notes its request (mSL_TokWant, with its
-    date) and skips its shared part until the next block ; @gfx doesn't take the token while a recent
-    request of @block is pending. The owner may take the token again (nested uses) : mSL_TokDepth.
+    date) and skips its shared part until the next block ; when @block missed the token twice in a row
+    (mSL_TokMissRun), @gfx doesn't take it while this request is recent : @block waits two blocks at most.
+    The owner may take the token again (nested uses) : mSL_TokDepth.
 */
 mSL_Tok = 0;
 mSL_TokDepth = 0;
 mSL_TokWant = 0; // date of the pending request of @block, or 0
 mSL_TokMiss = 0; // number of blocks which could not get the token (statistics)
+mSL_TokMissRun = 0; // number of consecutive blocks which could not get the token
 
 // Take the token for "who" (1 : @block, 2 : @gfx) ; returns 1 if it is held, 0 otherwise. Never waits.
 function mSL_tok_take(who)
@@ -174,15 +176,15 @@ function mSL_tok_take(who)
     (atomic_get(mSL_Tok) === who) ? (
         mSL_TokDepth += 1; 1;
     ) :
-    ((who === 2) && (mSL_TokWant > 0) && (time_precise() - mSL_TokWant < 0.05)) ? (
-        0; // a recent request of @block is pending : let @block take it first
+    ((who === 2) && (mSL_TokMissRun >= 2) && (time_precise() - mSL_TokWant < 0.05)) ? (
+        0; // @block missed the token twice in a row : let it take it first
     ) :
     (atomic_setifequal(mSL_Tok, 0, who) === 0) ? (
         mSL_TokDepth = 1;
-        (who === 1) ? mSL_TokWant = 0;
+        (who === 1) ? ( mSL_TokWant = 0; mSL_TokMissRun = 0; );
         1;
     ) : (
-        (who === 1) ? ( (mSL_TokWant === 0) ? mSL_TokWant = time_precise(); mSL_TokMiss += 1; );
+        (who === 1) ? ( (mSL_TokWant === 0) ? mSL_TokWant = time_precise(); mSL_TokMiss += 1; mSL_TokMissRun += 1; );
         0;
     );
 );
