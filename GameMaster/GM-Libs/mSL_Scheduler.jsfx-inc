@@ -155,6 +155,58 @@ SchedNoRecycle = 1; // do not try to recycle unused threads
 SchedmSLEvWait = 0; // flag: event to wait for...
 Sched_EvChkNext = 0; // next date of the check of the processes waiting for a message (see Scheduler)
 
+/*
+    The token : exclusive access to the structures shared by @block and @gfx (scheduler lists, dynamic
+    memory, strings, mSL evaluator, play state), when a plug-in uses them from both sections (GamePlayer).
+    mSL_Tok : 0 free, 1 held by @block, 2 held by @gfx (or @serialize, in the same thread as @gfx).
+    @block has the priority : when it can't get the token, it notes its request (mSL_TokWant, with its
+    date) and skips its shared part until the next block ; @gfx doesn't take the token while a recent
+    request of @block is pending. The owner may take the token again (nested uses) : mSL_TokDepth.
+*/
+mSL_Tok = 0;
+mSL_TokDepth = 0;
+mSL_TokWant = 0; // date of the pending request of @block, or 0
+mSL_TokMiss = 0; // number of blocks which could not get the token (statistics)
+
+// Take the token for "who" (1 : @block, 2 : @gfx) ; returns 1 if it is held, 0 otherwise. Never waits.
+function mSL_tok_take(who)
+(
+    (atomic_get(mSL_Tok) === who) ? (
+        mSL_TokDepth += 1; 1;
+    ) :
+    ((who === 2) && (mSL_TokWant > 0) && (time_precise() - mSL_TokWant < 0.05)) ? (
+        0; // a recent request of @block is pending : let @block take it first
+    ) :
+    (atomic_setifequal(mSL_Tok, 0, who) === 0) ? (
+        mSL_TokDepth = 1;
+        (who === 1) ? mSL_TokWant = 0;
+        1;
+    ) : (
+        (who === 1) ? ( (mSL_TokWant === 0) ? mSL_TokWant = time_precise(); mSL_TokMiss += 1; );
+        0;
+    );
+);
+
+// Release the token held by "who" (after the last nested take)
+function mSL_tok_give(who)
+(
+    (atomic_get(mSL_Tok) === who) ? (
+        ((mSL_TokDepth -= 1) <= 0) ? (
+            mSL_TokDepth = 0;
+            atomic_set(mSL_Tok, 0);
+        );
+    );
+);
+
+// @gfx : wait (at most maxdur seconds) for the token ; returns 1 if it is held
+function mSL_tok_wait(who, maxdur)
+local (lim, ok)
+(
+    lim = time_precise() + maxdur;
+    while (((ok = mSL_tok_take(who)) === 0) && (time_precise() < lim)) ( 0; );
+    ok;
+);
+
 // Flags use in SchedStatus
 SchThreadmSL = 1; // this is an mSL Thread (flag)
 SchThrUsed = 0x8; // the thread is in use
@@ -317,7 +369,7 @@ local (ent, tail, w)
     // flg: 2 to avoid error
 */
 function SchedUnchainEnt(lblk, ent, flg)
-local (z, n, p)
+local (z, n, p, nxt, prv)
 (
     ((ent != 0)
     && (((flg & 1) === 0) || (((flg & 1) === 1) && (ent >= SchedFirstEnt) && (ent <= SchedLastEnt)))
@@ -430,7 +482,7 @@ local (num, msg)
 */
 
 function SchedSetup()
-local (i, ent, mm, idx)
+local (i, ent, mm, idx, ListCell008, ListCell016, ListCell01k, ListCell024, ListCell02k, ListCell032, ListCell040, ListCell064, ListCell080, ListCell088, ListCell128, ListCell512, ListFrHTQB, PlLogAlt1, PlLogAlt2, SchedMem, SchedNxtBlPts)
 (
     // Sched_TStart = time_precise() + gmem[timeDelta];
     Sched_TStart = 0;  // Scheduler start time this session

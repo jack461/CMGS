@@ -4286,7 +4286,7 @@ function HPConfInit()
 
 /* Manually build a default HP Conf table, for a single stereo pair */
 function HPConfDefBuild()
-local (idx)
+local (idx, AHPmax)
 (
     memset(HPATab, 0, HPASize);
     memset(HPPTab, 0, HPPSize);
@@ -4343,7 +4343,7 @@ local (idx)
 );
 
 function HPConfBuild()
-local(ptc, ptin, val, state, ucnt)
+local(ptc, ptin, val, state, ucnt, AHPmax)
 (
     ptc = ptin = 0;
     state = 0;
@@ -6160,7 +6160,7 @@ local(i, bst, num, w, e, pcf, r)
 // Returns a pointer to an entry acceptable for configuration "xcf"
 function
 checkHPconfig(xcf, hpuse, winfo)
-local(ty, hb, ent, cnt, cf, i, j, c, k, kent, lerr, nch, pq, pt, rtc1, rtc2, bst)
+local(ty, hb, ent, cnt, cf, i, j, c, k, kent, lerr, nch, pq, pt, rtc1, rtc2, bst, kbase, klsize, kpos, ksize)
 (
     lerr = 0; // "local" error
     ent = cf = 0;
@@ -6445,7 +6445,7 @@ checkPartial(part, flgs, id)
 function
 doPlayClip(xpart, xsel, xflgs, xtype, xaux)
 local(Xkmd, z, v1, v2, v3, part, bladd, klc, khc, newpart, primeX, k, p, pc, ic, clmin, clmax,
-    str, strsiz, pts, ch, isl, it, dec, als, lge, c1, c2, ii, ik, ix, iy, iz, v, v3, v4, clcck, GvErrP6)
+    str, strsiz, pts, ch, isl, it, dec, als, lge, c1, c2, ii, ik, ix, iy, iz, v, v3, v4, clcck, GvErrP6, i, w)
 (
     GvErr = 0;
     GvErrP1 = GvErrP2 = GvErrP3 = GvErrP4 = GvErrP5 = GvErrP6 = -1;
@@ -12013,7 +12013,7 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
 function
 Simple_Action(src)
 local (zz, xp, mr, ccnt, ent, s1, mpt, w1, pindx, err, p, flgs, auxKmd, auxRes,
-    par1, par2, par3, par4, par5, par6, par7, par8, xp4, entc)
+    par1, par2, par3, par4, par5, par6, par7, par8, xp4, entc, act, b, ii, jj, k, pos, ssiz, u, v, v1)
 (
     flgs = FlagsTbVals[Flgs_Acts]; // trace flags
     auxKmd = ccnt = xp = err = 0;
@@ -14604,7 +14604,7 @@ local (pfid, ref, value, force, addr, res, flg, kod, size, s, ip, k, k2, pt, kid
 */
 function
 mSL_call_ops(argc, argv)
-local(res, kw, Un)
+local(res, kw, Un, i, j, k, loc, pq, v)
 (
     // Decode the parameters - could be integers or keywords
     0 ? (
@@ -15822,6 +15822,38 @@ AGMXXX += 1;
 */
 
 
+function StudioPadClick(num)
+local (u, w)
+(
+    u = padStCells[num];
+    (u & ui_jpad_ct_selec) ? (
+        (u & ui_jpad_ct_round) ? (
+            // stop playing the pad
+            padStCells[num] = u ~ ui_jpad_ct_round;
+            w = cmdPadBase + num + padStOffset | FLdoForcePlay | FLdoForceLock;
+            doPlayer(-1, KmdUnlock, w); // unlock the player
+        ) : (
+            // start playing & lock
+            padStCells[num] = u | ui_jpad_ct_round;
+            Kbtp = cmdPadBase + num + padStOffset | FLdoForcePlay | FLdoForceLock;
+        );
+    ) : (
+        // standard play
+        Kbtp = cmdPadBase + num + padStOffset | FLdoForcePlay;
+    );
+    BKnumLastM = lastTime; BKnumUnchkd  = 16; // ?
+);
+
+
+/*
+    ==== Shared structures ====
+    The scheduler lists, the dynamic memory, the strings, mSL and the play state are shared with @gfx
+    (user interface, GC, compilation, dropped files) : this part of @block runs only when it holds the
+    token (mSL_tok_take, see mSL_Scheduler) ; otherwise it is skipped until the next block (the MIDI
+    queues, the timers and the scheduler keep their events).
+*/
+mSL_tok_take(1) ? (
+
 // Check first words of memory, to detect eventual bugs
 ((!GMW()) && (XDcount > 0)) ? (
     sprintf(#s2, "Game Master Damaged! %s %s %s %s %s %s %s %s", mSL_edit_value(#, 0[0]), mSL_edit_value(#, 0[1]),
@@ -16218,27 +16250,6 @@ blockCntr += 1; // block counter
     atomic_set(mSL_Lock,  max(0, mSL_Lock - 1));
 );
 
-function StudioPadClick(num)
-local (u, w)
-(
-    u = padStCells[num];
-    (u & ui_jpad_ct_selec) ? (
-        (u & ui_jpad_ct_round) ? (
-            // stop playing the pad
-            padStCells[num] = u ~ ui_jpad_ct_round;
-            w = cmdPadBase + num + padStOffset | FLdoForcePlay | FLdoForceLock;
-            doPlayer(-1, KmdUnlock, w); // unlock the player
-        ) : (
-            // start playing & lock
-            padStCells[num] = u | ui_jpad_ct_round;
-            Kbtp = cmdPadBase + num + padStOffset | FLdoForcePlay | FLdoForceLock;
-        );
-    ) : (
-        // standard play
-        Kbtp = cmdPadBase + num + padStOffset | FLdoForcePlay;
-    );
-    BKnumLastM = lastTime; BKnumUnchkd  = 16; // ?
-);
 
 
 //====== MIDI RECV ======
@@ -18085,6 +18096,9 @@ while (SchedActive &&
 
 lmaxd = max(lmaxd, time_precise() + timeD - lstrt);
 
+mSL_tok_give(1);
+); // mSL_tok_take(1) : end of the shared part of @block
+
 // ADump(blStatCPUMax);
 (blockCntr > blockMaxCntr) ? blockMaxCntr = blockCntr;
 gmem[timeSubsec] = blockCntr; // current subTime, in [0 .. p]
@@ -18298,6 +18312,8 @@ T0 += 1;
 
 
 @serialize
+// with the token, as @gfx (same thread) : strings and aliases are rebuilt on load
+mSL_tok_wait(2, 0.1);
 //
 //===== PRESETS ======
 //
@@ -18636,6 +18652,9 @@ loadMode ? (
 
 AGMXXX += 1;
 
+mSL_tok_give(2); // end of @serialize
+
+
 
 
 
@@ -18930,9 +18949,9 @@ function doneDroppedFile() (
     dpa = dpi = efs = afs = 0; dropped_x = dropped_y = -1;
 );
 
-// Drop File
+// Drop File (with the token : temporary strings, compile list ; otherwise, the files wait for the next frame)
 GMTrack = get_host_placement();
-efi = 1; idx = 0;
+efi = mSL_tok_wait(2, 0.02); idx = 0;
 #audio = "";
 while (efi) (
   (efi = gfx_getdropfile(idx, #s)) ? (
@@ -19002,6 +19021,7 @@ while (efi) (
     (efs != 0) ? gfx_getdropfile(-1);
   );
 );
+mSL_tok_give(2);
 
 flagRunClipsCheck ? (
     ((flagRunClipsCheck -= 1) <= 0) ? (
@@ -19145,7 +19165,8 @@ mSL_loc_tim = max(mSL_loc_tim - 1, 0);
 
 
 //============ GC RUN ============
-(atomic_get(mSL_Lock) && (mSL_loc_tim <= 0))? (
+// (with the token : @block doesn't use the shared structures during the GC or the compilation)
+(atomic_get(mSL_Lock) && (mSL_loc_tim <= 0) && mSL_tok_wait(2, 0.02))? (
     // we may have a GC to run
     (gc_run_phaz != 0) ? (
         (gc_run_phaz === 1) ? (
@@ -19201,6 +19222,7 @@ mSL_loc_tim = max(mSL_loc_tim - 1, 0);
             mSL_loc_tim += 2; // again save some time
         );
     );
+    mSL_tok_give(2);
 );
 
 
@@ -27710,6 +27732,8 @@ must_do_gfx() ? (
         (currScreen === uix_jG_menuscr[ii]) ? tbFound = ii;
         ii += 1;
     );
+    // with the token : the modules use the shared structures (tasks, threads, strings, blocks)
+    mSL_tok_wait(2, 0.03);
     (tbFound >= 0) ? (
         genericTabSet(tbFound);
     ) :
@@ -27721,6 +27745,7 @@ must_do_gfx() ? (
         control_system();
         do_GenericTabEnd();
     );
+    mSL_tok_give(2);
     my_menu_bar_overlay(uix_jG_menuscr); // "soft" look : the tabs bar over the panes (see ui-lib-JJ-GUI)
 
 

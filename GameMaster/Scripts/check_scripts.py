@@ -5,7 +5,9 @@
 The log is a "syslog-<Plugin>-<date>.txt" file. Given a directory, the most recent syslog-*.txt
 in it is used; with no argument, the most recent one in ~/Music/REAPER-Projects/*/.
 
-Each script line  // Expected "text"  announces a line of the output which must contain "text".
+Each script line  // Expected "text"  (or  // Expect "text") announces a line of the output which
+must contain "text" ; the text may not end inside a word or a number ("s vaut 55" does not
+accept "s vaut 557", nor "s vaut 55.2").
 In "text", sprintf formats stand for values which may change from one run to another, e.g.
 "Ex-0004. fib = %d" :
   %d %i   an integer                       %x %X   a hexadecimal number
@@ -40,8 +42,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = HERE  # the test scripts are next to this file
 PROJECTS = os.path.expanduser('~/Music/REAPER-Projects')
 USING = re.compile(r'^(?:::-> Using "(.*)"\s*$|\*\s+(?:Compile|Script):\s+(.*?\.(?:mSL|txt))\s)')
-EXPECTED = re.compile(r'//\s*Expected\s*"([^"]*)"')
-EXPECTED_ERR = re.compile(r'//\s*Expected\s+error\s+(\d+)')
+SEPARATOR = '_' * 17
+EXPECTED = re.compile(r'//\s*Expect(?:ed)?\s*"([^"]*)"')
+EXPECTED_ERR = re.compile(r'//\s*Expect(?:ed)?\s+error\s+(\d+)')
 ERROR_LINE = re.compile(r'^(?:ERR:\s*(\d+)|\*\*\* ERR:.*?Error:\s*(-?\d+))')
 
 
@@ -76,7 +79,8 @@ def pattern(e):
     for m in FORMAT.finditer(e):
         r += re.escape(e[pos:m.start()]) + conversion(m)
         pos = m.end()
-    return re.compile(r + re.escape(e[pos:]))
+    # the text may not end inside a word or a number
+    return re.compile(r + re.escape(e[pos:]) + r'(?!\w)(?!\.\d)')
 
 
 def newest_log(d):
@@ -107,6 +111,12 @@ def main():
         sys.exit('No syslog-*.txt found.')
     print('Log :', log)
     lines = open(log, encoding='utf-8', errors='replace').read().splitlines()
+    # a full log (a ring) exported from its start : the newest lines come first, up to the separator ;
+    # put them back in chronological order
+    sep = next((i for i, l in enumerate(lines) if l.strip() == SEPARATOR), None)
+    if sep is not None and any(l.strip() for l in lines[sep + 1:]):
+        lines = lines[sep + 1:] + lines[:sep + 1]
+        print('(full log : lines put back in chronological order ; the oldest lines are lost)')
 
     # the output of each run script : from its last "Using" line to the end of the log
     runs, first = {}, None
