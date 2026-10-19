@@ -1,18 +1,18 @@
-desc:SmoothMultiLimiter (by Geraint Luff, mods. JJG 2021)
-// version 1.15
-
+desc:SmoothMultiLimiter (by Geraint Luff, mods. JJG 2021-2026)
+// version 1.18
+<? maxattack = 200; ?>
 slider1:-3<-40,0.0,0.1>-limit (dB)
-slider2:10<0.1,120,0.1>-anticipation (ms)
+slider2:10<0.1,<? printf("%d", maxattack); ?>,0.1>-anticipation (ms)
 slider3:100<1,1000,0.1>-release (ms)
 slider4:0<0,100,1>-distortion (%)
 slider5:0<-12,24,0.1>-pre-gain (dB)
-slider6:2<2,64,1>-Channel count
+slider6:4<1,8,1>-Displayed channels
 slider7:1<0.1,10,0.01>-Zoom
 slider8:0<-12,24,0.1>-Volume out (dB)
 
 
 options:no_meter
-options:maxmem=16777216
+options:maxmem=33554432
 
 import GM-Libs/mSL_StM_Memory.jsfx-inc
 import GM-Libs/mSL_string_list_2000X.jsfx-inc
@@ -30,29 +30,48 @@ ext_noinit = 1;
 gfx_ext_retina = 1;
 
 slc = 8; // slider count
-actchn = 2;
-buffcnt = 64 ; // max number of channels we want to handle
-epspik = 0.000006;
+actchn = max(1, min(num_ch, 128)); // processed channels = channels of the track
+buffcnt = 128 ; // max number of channels we want to handle
+ndmax = 8; // max number of channels displayed
+ndisp = 4; // actual number of channels displayed
+maxattack = <? printf("%d", maxattack); ?>; // max anticipation (ms), set at the top of the file
+hugeval = 10000000000; // initial value of the min/max of a display bucket
+nrgmin = 0.0000000001; // channels below this energy (-100 dB) are not displayed
+epsnrg = 1/(2*srate); // energy of each channel, smoothed over ~2 s (display order)
 zoom = 1;
 overcorrect_factor = 1.002; // about 0.02dB
 adjust_limit = -0.06; // adjust limiter
 xvol = 1.0;
 sclpeak = 0;
-p0 = p1 = p2 = p3 = buffcnt;
 
 // Manage memory
 freemem = 16; // keep some words for security
 xspl = freemem; freemem += buffcnt;
-xpik = freemem; freemem += buffcnt + 2; xpik[buffcnt] = -0.1;
+xnrg = freemem; freemem += buffcnt + 2;
+curmin = freemem; freemem += buffcnt; // min of the current display bucket
+curmax = freemem; freemem += buffcnt; // max of the current display bucket
+tops = freemem; freemem += ndmax; // displayed channels, loudest first
+// half cosine table : hctab[k] = 0.5 + 0.5*cos(k*$pi/HCN), k = 0..HCN (+ 1 guard)
+HCN = 8192;
+hctab = freemem; freemem += HCN + 2;
+bn = 0;
+loop (HCN + 1,
+    hctab[bn] = 0.5 + 0.5*cos(bn*$pi/HCN); bn += 1;
+);
+hctab[HCN + 1] = hctab[HCN];
 // pointers to buffers
-buffers = freemem; freemem += buffcnt; // up to 64 channel buffers
+buffers = freemem; freemem += buffcnt; // up to 128 channel buffers
 
+// Delay lines : just what the max anticipation needs
+// (the display uses the reduced history below)
+bufferlength = ceil(srate*(maxattack + 50)/1000);
 
-// Guess a number of seconds we could buffer
-MaxSeconds = (floor(10 *(__memtop() - freemem - buffcnt - 2)/((buffcnt + 1) * srate)))/10;
-ActualSeconds = min(MaxSeconds, 8); // make sure all is ok...
-bufferlength = ceil(srate*ActualSeconds);
+// Display history : HN buckets of hstep samples, keeping min/max of each channel
+HN = 2048;
+HistSec = 6; // seconds displayed
+hstep = max(1, ceil(srate*HistSec/HN));
 
+databeg = freemem;
 // buffer for peaks
 bufferpeak = freemem; freemem += bufferlength;
 // allocate buffers
@@ -60,6 +79,19 @@ bn = 0;
 loop (buffcnt,
     buffers[bn] = freemem; freemem += bufferlength; bn += 1;
 );
+histmin = freemem; freemem += buffcnt*HN; // channel c : histmin[c*HN + bucket]
+histmax = freemem; freemem += buffcnt*HN;
+histpk = freemem; freemem += HN; // max of the peak envelope
+memset(databeg, 0, freemem - databeg);
+
+memset(xnrg, 0, buffcnt); xnrg[buffcnt] = -0.1; // sentinel for ordchnls
+bn = 0;
+loop (buffcnt,
+    curmin[bn] = hugeval; curmax[bn] = -hugeval; bn += 1;
+);
+hpos = 0; // next bucket to write (= the oldest one)
+hcnt = 0; // samples in the current bucket
+curpk = 0;
 
 
 // Static memory management
@@ -77,27 +109,6 @@ gfxInit();
 ui_lib_JJ_GUI_init(1);
 
 
-
-
-function tanh(x) (
-  x >= 20 ? (
-    1;
-  ) : x <= -20 ? (
-    -1;
-  ) : (
-    (exp(2*x) - 1)/(exp(2*x) + 1);
-  );
-);
-function atanh(x) (
-  x >= 1 ? (
-    20;
-  ) ? (x <= -1) ? (
-    -20;
-  ) : (
-    log((1 + x)/(1 - x))*0.5;
-  );
-);
-
 writepos = 10;
 delaysamples = 10;
 attacksamples = 10;
@@ -108,35 +119,21 @@ releasestartvalue = 1;
 releaseindex = srate;
 
 function update() (
-  attacksamples = ceil(slider2*srate/1000);
+  attacksamples = min(ceil(slider2*srate/1000), bufferlength - 2);
   releasesamples = ceil(slider3*srate/1000);
   delaysamples = ceil(attacksamples);
+  attstep = HCN/attacksamples; // steps in hctab for one sample
+  relstep = HCN/releasesamples;
   limit = pow(10, (slider1 + adjust_limit)/20);
   pregain_factor = pow(10, slider5/20);
   zoom = slider7;
-  actchn = slider6;
+  ndisp = max(1, min(ndmax, floor(slider6 + 0.5)));
   xvol = pow(10, slider8/20);
   sclpeak = slider4/100;
 );
-// Starts at 0, goes to 1
-function attackwindow(ratio) (
-  0.5 - 0.5*cos(ratio*$pi);
-);
-function releasewindow(ratio) (
-  0.5 + 0.5*cos(ratio*$pi);
-);
-
+// Soft clipper : dist(x) = B*x/(A*abs(x) + 1), computed for each sample in @sample
 A = 0;
 B = 1;
-function dist(x) (
-  B*x/(A*abs(x) + 1);
-);
-function distortion_for_peak(peak, limit) (
-  A = (1 - pow(limit/oldpeak, sclpeak))/limit;
-);
-function scaling_for_peak(peak, limit) (
-  pow(limit/peak, 1 - sclpeak);
-);
 
 
 MemFree = __memtop() - freemem;
@@ -148,6 +145,9 @@ update();
 
 @block
 
+// all the channels of the track are delayed and limited together
+actchn = max(1, min(num_ch, buffcnt));
+
 pdc_bot_ch = 0;
 pdc_top_ch = actchn;
 pdc_delay = delaysamples - 1;
@@ -158,8 +158,8 @@ pdc_delay = delaysamples - 1;
 truepeak = is = 0;
 loop (actchn,
     xspl[is] = v = spl(is) * pregain_factor;
+    xnrg[is] += epsnrg * (v*v - xnrg[is]);
     v = abs(v);
-    xpik[is] = max(v, (1-epspik) * xpik[is]);
     truepeak = max(truepeak, v);
     is += 1;
 );
@@ -167,10 +167,11 @@ loop (actchn,
 
 releasepeak = limit;
 releaseindex < releasesamples ? (
+  // 0.5 + 0.5*cos(x*$pi), read in hctab with linear interpolation
+  hp = releaseindex*relstep; hk = hp|0;
   releasepeak = limit + (releasestartvalue - limit) *
-      ///   releasewindow(releaseindex/releasesamples); // function releasewindow(ratio) ( 0.5 + 0.5*cos(ratio*$pi); );
-      ///
-      (0.5 + 0.5 * cos( (releaseindex/releasesamples) * $pi)); ///
+      /// (0.5 + 0.5 * cos( (releaseindex/releasesamples) * $pi));
+      (hctab[hk] + (hp - hk)*(hctab[hk+1] - hctab[hk]));
   releaseindex += 1;
 );
 peak = max(releasepeak, truepeak);
@@ -199,9 +200,9 @@ peak < limit ? (
   bestindex = delaysamples - 1;
   beststartpeak = limit;
   while (i < attacksamples && !foundintersection) (
-    ///  window = attackwindow(1 - i/attacksamples); // function attackwindow(ratio) ( 0.5 - 0.5*cos(ratio*$pi); );
-    ///
-    window = 0.5 - 0.5 * cos( (1 - i/attacksamples) * $pi );
+    /// window = 0.5 - 0.5 * cos( (1 - i/attacksamples) * $pi );
+    hp = HCN - i*attstep; hk = hp|0;
+    window = 1 - (hctab[hk] + (hp - hk)*(hctab[hk+1] - hctab[hk]));
 
     readpos = writepos - i;
     readpos < 0 ? readpos += bufferlength;
@@ -230,9 +231,8 @@ peak < limit ? (
   foundintersection ? (
     i = 0;
     while (i < intersectionindex) (
-      ///  window = attackwindow(1 - i/attacksamples);
-      ///
-      window = 0.5 - 0.5 * cos( (1 - i/attacksamples) * $pi );
+      hp = HCN - i*attstep; hk = hp|0;
+      window = 1 - (hctab[hk] + (hp - hk)*(hctab[hk+1] - hctab[hk]));
 
       readpos = writepos - i;
       readpos < 0 ? readpos += bufferlength;
@@ -242,16 +242,16 @@ peak < limit ? (
     );
   ) : (
     i = 0;
+    invbest = 1/bestindex;
     while (i < bestindex) (
-      ///  window = attackwindow(1 - i/attacksamples);
-      ///
-      window = 0.5 - 0.5 * cos( (1 - i/attacksamples) * $pi );
+      hp = HCN - i*attstep; hk = hp|0;
+      window = 1 - (hctab[hk] + (hp - hk)*(hctab[hk+1] - hctab[hk]));
 
       readpos = writepos - i;
       readpos < 0 ? readpos += bufferlength;
       newpeak = beststartpeak + (peak - beststartpeak)*window;
 
-      faderatio = (1 - i/bestindex);
+      faderatio = 1 - i*invbest;
       fadewindow = 1 - (1 - faderatio)*(1 - faderatio);
       bufferpeak[readpos] += (newpeak - bufferpeak[readpos])*fadewindow;
       i += 1;
@@ -277,46 +277,83 @@ readpos = writepos - delaysamples;
 readpos < 0 ? readpos += bufferlength;
 // reduction = limit/bufferpeak[readpos];
 
-oldpeak = bufferpeak[readpos];
-///
-B = scaling_for_peak(oldpeak, limit);
-/// B = pow(limit/oldpeak, 1 - sclpeak); ///
-///
-A = distortion_for_peak(oldpeak, limit);
-/// A = (1 - pow(limit/oldpeak, sclpeak))/limit; ///
+// never below limit : the buffer may hold zeros (start)
+// or values computed for a lower limit (slider change)
+oldpeak = max(bufferpeak[readpos], limit);
+oldpeak > limit ? (
+  // The gain reduction limit/oldpeak is split : (1-sclpeak) as a linear gain B,
+  // sclpeak by the soft clipper, so that dist(oldpeak) == limit.
+  B = pow(limit/oldpeak, 1 - sclpeak);
+  A = B/limit - 1/oldpeak; // B must be computed first
+) : (
+  B = 1; A = 0;
+);
 
 is = 0;
 loop (actchn,
     ptb = buffers[is];
-    ///  spl(is) = xvol * dist( ptb[readpos] ); // function dist(x) ( B*x/(A*abs(x) + 1); );
-    ///
+    // soft clipper, dist(u) = B*u/(A*abs(u) + 1)
     u = ptb[readpos]; spl(is) = xvol * (B*u/(A*abs(u) + 1));
+    // display history (input, aligned with the output)
+    curmin[is] = min(curmin[is], u);
+    curmax[is] = max(curmax[is], u);
     is += 1;
+);
+curpk = max(curpk, oldpeak);
+
+(hcnt += 1) >= hstep ? (
+  // close the bucket, for all channels (stale values for inactive ones)
+  is = 0; ih = hpos;
+  loop (buffcnt,
+      histmin[ih] = curmin[is]; histmax[ih] = curmax[is];
+      curmin[is] = hugeval; curmax[is] = -hugeval;
+      ih += HN; is += 1;
+  );
+  histpk[hpos] = curpk; curpk = 0;
+  hpos += 1; hpos >= HN ? hpos = 0;
+  hcnt = 0;
 );
 
 
-@gfx 620 460
+@gfx 620 480
 
 
-function ordchnls() local(ip, v)
+// Sort the n loudest channels into tops[] (unused slots stay = buffcnt)
+// silent channels (energy <= nrgmin) are ignored
+function ordchnls(n) local(ip, j, v)
 (
-    p0 = p1 = p2 = p3 = 64;
+    j = 0;
+    loop(n, tops[j] = buffcnt; j += 1;);
     ip = 0;
     loop(actchn,
-        v = xpik[ip];
-        (v > xpik[p0]) ? (p3 = p2; p2 = p1; p1 = p0; p0 = ip;) :
-        (v > xpik[p1]) ? (p3 = p2; p2 = p1; p1 = ip;) :
-        (v > xpik[p2]) ? (p3 = p2; p2 = ip;) :
-        (v > xpik[p3]) ? (p3 = ip;) ;
+        v = xnrg[ip];
+        (v > nrgmin && v > xnrg[tops[n-1]]) ? (
+            j = n - 1;
+            while (j > 0 && v > xnrg[tops[j-1]]) (
+                tops[j] = tops[j-1]; j -= 1;
+            );
+            tops[j] = ip;
+        );
         ip += 1;
     );
+);
+
+function chn_color(k) (
+  k == 0 ? ui_color(64, 128, 192) :      // blue
+  k == 1 ? ui_color(218, 168, 64) :      // yellow
+  k == 2 ? ui_color(0x22, 0x8B, 0x22) :  // green
+  k == 3 ? ui_color(0xE0, 0x40, 0x30) :  // red
+  k == 4 ? ui_color(0x9A, 0x60, 0xD0) :  // purple
+  k == 5 ? ui_color(0x30, 0xC0, 0xC0) :  // cyan
+  k == 6 ? ui_color(0xF0, 0x80, 0x20) :  // orange
+           ui_color(0xE0, 0x70, 0xB0);   // pink
 );
 
 function value_to_y(v) (
   ui_top() + max(0, min(1, 0.5*(1 - v)))*ui_height();
 );
 
-function draw_response() local(i, x, y, ref) (
+function draw_response() local(i, x, y, ref, u) (
   ui_retina(1);
   control_background_passive();
   ui_push(0.2);
@@ -331,9 +368,7 @@ function draw_response() local(i, x, y, ref) (
   i = 0;
   while (i < ui_width()) (
     x = 2*i/(ui_width() - 1) - 1;
-    ///
-    y = value_to_y( dist( x*ref )/ref );
-    /// u = x*ref; y = value_to_y( (B*u/(A*abs(u) + 1))/ref );
+    u = x*ref; y = value_to_y( (B*u/(A*abs(u) + 1))/ref ); // dist(u)/ref
 
     i == 0 ? (
       gfx_x = ui_left() + i;
@@ -346,39 +381,32 @@ function draw_response() local(i, x, y, ref) (
   control_finish_passive();
 );
 
-function draw_buffer(buffer, startpos, multiplier)
-local(width, i, i2, N, lowindex, highindex, low, high, readpos, v, x, y1, y2)
+// Draw the history (oldest bucket on the left) : one min/max line for each column of pixels
+function draw_hist(bmin, bmax, multiplier)
+local(width, i, r, r2, b, sp, low, high, x)
 (
-  i = 0;
-  N = ceil(bufferlength*0.75);
   width = ui_width();
-  while (i < ui_width()) (
-    lowindex = floor(i/width*N);
-    highindex = ceil((i + 1)/width*N);
-
-    i2 = lowindex;
-    step = ceil((highindex - lowindex)/10);
-    readpos = (startpos + lowindex - N);
-    readpos < 0 ? readpos += bufferlength;
-    low = high = buffer[readpos];
-    while (i2 < highindex) (
-      readpos = (startpos + i2 - N);
-      readpos < 0 ? readpos += bufferlength;
-      low = min(low, buffer[readpos]);
-      high = max(high, buffer[readpos]);
-      i2 += step;
+  sp = hpos; // snapshot, @sample moves it
+  i = 0;
+  while (i < width) (
+    r = floor(i*HN/width);
+    r2 = max(r + 1, floor((i + 1)*HN/width));
+    b = (sp + r) % HN;
+    low = bmin[b]; high = bmax[b];
+    r += 1;
+    while (r < r2) (
+      b = (sp + r) % HN;
+      low = min(low, bmin[b]);
+      high = max(high, bmax[b]);
+      r += 1;
     );
-
     x = ui_left() + i;
-    y1 = value_to_y(low*multiplier);
-    y2 = value_to_y(high*multiplier);
-
-    gfx_line(x, y1, x, y2);
+    gfx_line(x, value_to_y(low*multiplier), x, value_to_y(high*multiplier));
     i += 1;
   );
 );
 
-function draw_peaks(scale) local(startpos, y)
+function draw_peaks(scale) local(y, k, n, f, df, ch)
 (
   ui_retina(1);
 
@@ -391,56 +419,44 @@ function draw_peaks(scale) local(startpos, y)
   y = ui_top() + 0.5*(1 + limit*scale)*ui_height();
   gfx_line(ui_left(), y, ui_right() - 1, y);
 
-  ordchnls();
+  n = min(ndisp, actchn);
+  ordchnls(n);
 
-  startpos = writepos;
-  ui_color(64, 128, 192);  // blue
-  draw_buffer(buffers[p0], startpos, scale*1.02);
-  ui_color(218, 168, 64);  // yellow
-  draw_buffer(buffers[p1], startpos, scale*0.75);
-  (actchn > 2) ? (
-    ui_color(0x22, 0x8B, 0x22); // light green
-    draw_buffer(buffers[p2], startpos, scale*0.53);
-  );
-  (actchn > 3) ? (
-    ui_color(0xE0, 0x40, 0x30); // light red
-    draw_buffer(buffers[p3], startpos, scale*0.30);
+  // loudest first, each drawn a bit smaller (1.02 ... 0.30) so that they stay visible
+  df = (n > 1) ? 0.72/(n - 1) : 0;
+  f = 1.02; k = 0;
+  loop(n,
+    ch = tops[k];
+    ch < buffcnt ? (
+      chn_color(k);
+      draw_hist(histmin + ch*HN, histmax + ch*HN, scale*f);
+    );
+    f -= df; k += 1;
   );
   ui_color(255, 255, 255);
-  draw_buffer(bufferpeak, startpos, scale);
-  draw_buffer(bufferpeak, startpos, -scale);
+  draw_hist(histpk, histpk, scale);
+  draw_hist(histpk, histpk, -scale);
+
+  // legend : numbers of the displayed channels
+  gfx_x = ui_left() + 6; gfx_y = ui_top() + 4;
+  k = 0;
+  loop(n,
+    ch = tops[k];
+    ch < buffcnt ? (
+      chn_color(k);
+      gfx_drawnumber(ch + 1, 0);
+      gfx_x += gfx_texth; // spacing : one character height
+    );
+    k += 1;
+  );
 
   control_finish_passive();
 );
 
 control_start("main", "tron");
 
-/*
-function labelled_dial(value, low, high, bias, label, formatvalue, format, default)
-(
-  ui_push();
-    ui_align(0.6, 0.5);
-    ui_push_width(40);
-      value = control_dial_left(value, low, high, bias);
-    ui_pop();
-    ui_push_leftof(50);
-      ui_align(1, 0.5);
-      ui_text(label);
-    ui_pop();
-    ui_push_rightof(50);
-      ui_align(0, 0.5);
-      value = control_hidden_textnumber(value, formatvalue, format);
-    ui_pop();
-    ui_click() && ui_clickcount() == 2 ? (
-      value = default;
-    );
-  ui_pop();
-  value;
-);
-*/
-
 ui_screen() == "main" ? (
-  control_navbar("Multichannel Smooth Limiter  ---  v1.15", -1, -1);
+  control_navbar("Multichannel Smooth Limiter  ---  v1.18", -1, -1);
   flg = gfx_w > 320;
   // ui_split_left(max(ui_width()*0.4, 200));
   flg ? (
@@ -462,7 +478,7 @@ ui_screen() == "main" ? (
       r = slider_ctl("volume %.1fdB", slider8, -12, 24, 0, 0, 0.1);
       r ? (slider8 = uix_jsl_val; uix_interacted = 1;);
     ui_split_next();
-      r = slider_ctl("attack: %0.1fms", slider2, 0.1, 200, 4, 10, 0.1);
+      r = slider_ctl("attack: %0.1fms", slider2, 0.1, maxattack, 4, 10, 0.1);
       r ? (slider2 = uix_jsl_val; uix_interacted = 1;);
     ui_split_next();
       r = slider_ctl("release: %ims", slider3, 1, 1000, 4, 100, 1);
@@ -474,7 +490,7 @@ ui_screen() == "main" ? (
       r = slider_ctl("zoom: %0.2f", slider7, 0.1, 10, 5, 1, 0.01);
       r ? (slider7 = uix_jsl_val; uix_interacted = 1;);
     ui_split_next();
-      r = slider_ctl("channels: %i", slider6, 2, 64, 0, 2, 1);
+      r = slider_ctl("display: %i ch.", slider6, 1, ndmax, 0, 4, 1);
       r ? (slider6 = uix_jsl_val; uix_interacted = 1;);
     ui_pop();
   flg ? (
