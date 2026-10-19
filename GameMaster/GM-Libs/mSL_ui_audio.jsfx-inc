@@ -71,9 +71,10 @@ ui_aud_alpha = 0.8;
 ui_aud_maxch = 128; // size of the work tables
 ui_aud_energy = ui_aud_sel = ui_aud_colors = 0;
 ui_aud_shown = 0;
-ui_aud_marks = ui_aud_markcols = 0; ui_aud_nmarks = 0; ui_aud_maxmarks = 32;
+ui_aud_marks = ui_aud_markcols = 0; ui_aud_nmarks = 0; ui_aud_maxmarks = 64;
 ui_aud_markcol = 0x20FF20;
 ui_aud_marklabs = 0; ui_aud_labsize = 10;
+ui_aud_markw = 0; // width of the markers (pixels), 0 : automatic (2 with the light themes, see uix_theme_thickline, else 1)
 ui_aud_bands = 0; ui_aud_nbands = 0; ui_aud_maxbands = 4;
 ui_aud_za = ui_aud_zb = 0;
 ui_aud_chan0 = 0;
@@ -116,7 +117,7 @@ local (i)
     ui_aud_nbands = 0;
 );
 
-// Adds a vertical marker at sample "pos", in color "col", numbered "lab" (if > 0), for the next ui_audio_wave
+// Adds a vertical marker at sample "pos", in color "col", numbered "lab" (> 0 : at the top, < 0 : -lab at the bottom), for the next ui_audio_wave
 function ui_audio_mark(pos, col, lab)
 (
     (ui_aud_marks && (ui_aud_nmarks < ui_aud_maxmarks)) ? (
@@ -262,7 +263,7 @@ local (span, yc, amp, i, lo, hi, step, mn, mx, j, v, y1, y2, ymin, ymax, x)
 
 
 function ui_audio_wave(h, nch, bufs, sz, ia, ib, flags, maxch)
-local (res, x0, y0, w, hh, lh, k, c, buf, top, cnt, xm, xb)
+local (res, x0, y0, w, hh, lh, k, c, buf, top, cnt, xm, xb, lw)
 (
     res = -1;
     nch = max(0, min(ui_aud_maxch, 0|nch));
@@ -319,17 +320,20 @@ local (res, x0, y0, w, hh, lh, k, c, buf, top, cnt, xm, xb)
             // markers, over the waveforms
             (ui_aud_nmarks > 0) ? (
                 ui_push();
+                    lw = ((ui_aud_markw > 0) ? ui_aud_markw : (uix_theme_thickline() ? 2 : 1)) * max(1, floor(uix_drawconfig_current[9]));
                     k = 0;
                     loop(ui_aud_nmarks,
                         ((ui_aud_marks[k] >= ia) && (ui_aud_marks[k] < ib)) ? (
                             ui_pcolor(ui_aud_markcols[k], 1);
                             xm = x0 + floor((ui_aud_marks[k] - ia) * w / (ib - ia));
-                            gfx_line(xm, y0, xm, y0 + hh - 1);
-                            (ui_aud_marklabs[k] > 0) ? (
+                            gfx_rect(xm - (lw >> 1), y0, lw, hh);
+                            (ui_aud_marklabs[k] != 0) ? (
                                 ui_fontsize(ui_aud_labsize);
                                 uix_setgfxfont();
-                                gfx_x = xm + 2; gfx_y = y0 + 1;
-                                gfx_drawnumber(ui_aud_marklabs[k], 0);
+                                gfx_x = xm + 2;
+                                // > 0 : at the top (readers), < 0 : at the bottom (writers)
+                                gfx_y = (ui_aud_marklabs[k] > 0) ? y0 + 1 : y0 + hh - 1 - gfx_texth;
+                                gfx_drawnumber(abs(ui_aud_marklabs[k]), 0);
                             );
                         );
                         k += 1;

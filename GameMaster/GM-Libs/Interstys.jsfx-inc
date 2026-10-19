@@ -220,7 +220,7 @@ its_RdrFlg_solo = 0x0100; // si lecteur solo
 its_RdrFlg_Mod = 0x1000; // si lecteur modifié interactivement
 // Modes
 its_RdrMode_Read = 0;
-its_RdrMode_Folwr = 1;
+its_RdrMode_Delay = 1;
 // Etats
 its_RdrStat_UnDef = 0;
 its_RdrStat_Created = 1;
@@ -265,14 +265,14 @@ its_Wrt_Status = idx; idx += 1; //  Etat du writer
 its_Wrt_InAction = idx; idx += 1; //  internal action
 its_Wrt_Flgs = idx; idx += 1; //  Flags du writer
 its_Wrt_Mode = idx; idx += 1; //  Mode de fonctionnement du writer
-its_Wrt_Intern = idx; idx += 1; //  Etat interne du writer
+its_Wrt_Bf1stChan = idx; idx += 1; // premier canal écrit dans la ligne [0 ... ChNbr-1] (mot "Intern", inutilisé, en 0 dans les anciens blocs)
 its_Wrt_LineNb = idx; idx += 1; // numéro du buffer -1/ [0 ... N-1]
 its_Wrt_Lcbl = idx; idx += 1; // pointeur sur le bloc de controle du (des) buffer(s)
 // 10
 its_Wrt_ChNbr = idx; idx += 1; // nombre de canaux dans le lcbl
 its_Wrt_SmplCnt = idx; idx += 1; //  Taille de la zone utile
 its_Wrt_Start = idx; idx += 1; //  pointeur vers le premier mot du tampon
-its_Wrt_Relpos = idx; idx += 1; //  Position [0 ... 100] de la tête d'écriture
+its_Wrt_BfChanUsed = idx; idx += 1; // nombre de canaux écrits, 0 : tous, à partir du premier (mot "Relpos", inutilisé)
 its_Wrt_Last = idx; idx += 1; //  pointeur vers le dernier mot du tampon
 its_Wrt_Cell = idx; idx += 1; // numéro du (premier) mot écrit par le writer
 its_Wrt_Abspos = idx; idx += 1; //  Position [0 ... size - 1] de la tête d'écriture
@@ -868,9 +868,12 @@ EffectsStructG = idx; idx += LinesBlockSize;
 EffectsStructH = idx; idx += LinesBlockSize;
 EffectsStructI = idx; idx += LinesBlockSize;
 EffectsStructJ = idx; idx += LinesBlockSize;
+// the display blocks of the modules above (number of the object shown, display options) : saved in the 'disp' block
+DispStructsSize = idx - ReadersStructA;
 
 // Parameters
 paramCount = 32;
+paramNMax = paramCount - 1; // (GP_Parameters, included before, computed it with paramCount = 0 at the first @init)
 paramEntSize = 20;
 paramValues = idx; idx += paramCount;
 paramStatus = idx; idx += paramCount;
@@ -879,7 +882,6 @@ paramPrevValues = idx; idx += paramCount;
 
 // Parameters declaration
 idx = 1;
-p_playSpeed = idx; idx += 1;
 p_playVol = idx; idx += 1; // player volume
 p_playSpeed = idx; idx += 1; // player speed
 p_lineSize = idx; idx += 1; // line size [0 .. 3600 s.]
@@ -890,6 +892,9 @@ p_play_S_Len = idx; idx += 1; // region length
 p_play_S_Pos = idx; idx += 1; // region position
 p_play_XFade = idx; idx += 1; // xfade time
 p_play_Zoom = idx; idx += 1; // zoom of the waveform of a reader (a display property, kept in RDBL[9])
+p_rdOffset = idx; idx += 1; // offset of a reader in delay mode [0 .. line size] (s.)
+p_wrGain = idx; idx += 1; // record gain of a writer (dB)
+p_wrOvrdb = idx; idx += 1; // overdub of a writer (%)
 
 // Global variables
 blockDesc = 0;  // description of the current block
@@ -990,11 +995,27 @@ ui_audio_init();
 its_LinWaveH = 120; // height of the waveform of a line
 its_LinWaveMax = 4; // max channels shown (the loudest ones)
 // Colors of the markers and of the region in the waveforms
+// (set by its_wave_colors before each waveform : darker hues with the light themes, see uix_theme_thickline)
 its_WaveColWrt = 0x20FF20; // writing head : green
 its_WaveColRdr = 0xFFE020; // reading head : yellow
 its_WaveColAux = 0xFF8C20; // auxiliary reading head (during a cross fade) : orange
 its_WaveColReg = 0x4080FF; // loop region (shaded)
 its_WaveColRegLim = 0x909090; // limits of the cross fades around the region
+function its_wave_colors()
+(
+    uix_theme_thickline() ? (
+        // light background
+        its_WaveColWrt = 0x008C00; // dark green
+        its_WaveColRdr = 0xA87800; // ochre
+        its_WaveColAux = 0xD04800; // dark orange
+        its_WaveColRegLim = 0x505050;
+    ) : (
+        its_WaveColWrt = 0x20FF20;
+        its_WaveColRdr = 0xFFE020;
+        its_WaveColAux = 0xFF8C20;
+        its_WaveColRegLim = 0x909090;
+    );
+);
 
 // Some global variables
 
@@ -2214,11 +2235,13 @@ menu_128_0_Ids = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "nums-128-0", 128, menu_128_0_Ids_N);
 
-menu_128_1_Ids_N = make_array(128);
-<? i=0; loop(128, printf("menu_128_1_Ids_N[%d] = \"%d\";", i, i+1); i +=1;); ?>
+// counts 1 ... 128 (channels of a line, channels used), in 4 sub-menus of 32 (the ">" headers are not counted in the results)
+menu_128_Grp = 32; // counts per sub-menu : the header of group g is item g * (menu_128_Grp + 1)
+menu_128_1_Ids_N = make_array(128 + 4);
+<? i=0; j=0; loop(128, (i % 32) == 0 ? (printf("menu_128_1_Ids_N[%d] = \">%d-%d\";", j, i+1, i+32); j += 1;); printf("menu_128_1_Ids_N[%d] = \"%s%d\";", j, ((i % 32) == 31) ? "<" : "", i+1); i += 1; j += 1;); ?>
 menu_128_1_Ids = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-            "nums-128-1", 128, menu_128_1_Ids_N);
+            "nums-128-1", 128 + 4, menu_128_1_Ids_N);
 
 menu_256_0_Ids_N = make_array(256);
 <? i=0; loop(256, printf("menu_256_0_Ids_N[%d] = \"%d\";", i, i); i +=1;); ?>
@@ -2247,7 +2270,7 @@ menu_Cells_Ids = make_jmenu(
             "cells-types", 9, menu_Cells_Ids_N);
 
 
-XCells = 256 + 16+ 3;
+XCells = 15 + 8 + 256; // ">Type", None, 12 types, "", 8 headers ">Number", 256 numbers
 menu_XCells_Ids_N = make_array(XCells);
 menu_XCells_Ids_D = make_array(16);
 idx = 0;
@@ -2279,19 +2302,10 @@ menu_XCells_Ids_N[idx] = "&1 Writer"; idx += 1;
 menu_XCells_Ids_D[idx] = "Effect";
 menu_XCells_Ids_N[idx] = "<&1 Effect"; idx += 1;
 menu_XCells_Ids_N[idx] = ""; idx += 1;
-menu_XCells_Ids_N[idx] = ">Number 0..63"; idx += 1;
-menu_XCells_Ids_Nums = idx - 4; // First cell number in the menu
-<? i=0; loop(63, printf("menu_XCells_Ids_N[%d] = \"&X %d\";", i+16, i); i +=1;); ?>
-menu_XCells_Ids_N[idx+63] = "<&X 63 ------";
-menu_XCells_Ids_N[idx+64] = ">Number 64..127"; idx += 1;
-<? i=64; loop(63, printf("menu_XCells_Ids_N[%d] = \"&X %d\";", i+16+1, i); i +=1;); ?>
-menu_XCells_Ids_N[idx+127] = "<&X 127 ------";
-menu_XCells_Ids_N[idx+128] = ">Number 128..191"; idx += 1;
-<? i=128; loop(63, printf("menu_XCells_Ids_N[%d] = \"&X %d\";", i+16+2, i); i +=1;); ?>
-menu_XCells_Ids_N[idx+191] = "<&X 191 ------";
-menu_XCells_Ids_N[idx+192] = ">Number 192..255"; idx += 1;
-<? i=192; loop(63, printf("menu_XCells_Ids_N[%d] = \"&X %d\";", i+16+3, i); i +=1;); ?>
-menu_XCells_Ids_N[idx+255] = "<&X 255 ------";
+// the numbers 0 ... 255 in 8 sub-menus of 32 (tick class "X" : the type and the number are both ticked)
+menu_XCells_Ids_Nums = idx - 3; // = count of types : in the results (x = xx - 2), the numbers come after them
+menu_XCells_Ids_Hdr0 = idx; // item of the first ">Number" header ; the header of group g is item Hdr0 + g * 33
+<? i=0; j=15; loop(256, (i % 32) == 0 ? (printf("menu_XCells_Ids_N[%d] = \">Number %d..%d\";", j, i, i+31); j += 1;); printf("menu_XCells_Ids_N[%d] = \"%s&X %d\";", j, ((i % 32) == 31) ? "<" : "", i); i += 1; j += 1;); ?>
 
 menu_XCells_Ids = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
@@ -2599,17 +2613,18 @@ ii = 0; loop(pad_Rdr_Siz,
             ii+=1;
 );
 
-// Menu 1 for READERS : their names
-menu_Rdr_Ids_N = make_array(RD_CNT + 1);
-<? i=0; loop(RD_CNT, printf("menu_Rdr_Ids_N[%d] = \"Reader %d\";", i, i+1); i +=1;); ?>
+// Menu 1 for READERS : their names, in sub-menus of 32 readers (the ">" headers are not counted in the results)
+<? rd_grp = 32; rd_mnc = RD_CNT + (0|((RD_CNT + rd_grp - 1) / rd_grp)); ?>menu_Rdr_Ids_N = make_array(<? printf("%d", rd_mnc); ?>);
+<? i=0; j=0; loop(RD_CNT, (i % rd_grp) == 0 ? (printf("menu_Rdr_Ids_N[%d] = \">Readers %d-%d\";", j, i+1, min(i+rd_grp, RD_CNT)); j += 1;); printf("menu_Rdr_Ids_N[%d] = \"%sReader %d\";", j, (((i % rd_grp) == rd_grp-1) || (i == RD_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); ?>
 menu_Rdr_Ids = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-            "reader-num", RD_CNT, menu_Rdr_Ids_N);
+            "reader-num", <? printf("%d", rd_mnc); ?>, menu_Rdr_Ids_N);
+menu_Rdr_Grp = <? printf("%d", rd_grp); ?>; // readers per sub-menu : the header of group g is item g * (menu_Rdr_Grp + 1)
 
 // Menu 2 for READERS : the types
 menu_Rdr_Type_N = make_array(2);
 menu_Rdr_Type_N[0] = "Reader";
-menu_Rdr_Type_N[1] = "Follower";
+menu_Rdr_Type_N[1] = "Delay";
 menu_Rdr_Type = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "reader-type", 2, menu_Rdr_Type_N);
@@ -2714,21 +2729,52 @@ local (wcb)
 );
 
 
-// Menu 1 for Writer : their names
-menu_Wrt_Ids_N = make_array(WR_CNT + 1);
-<? i=0; loop(WR_CNT, printf("menu_Wrt_Ids_N[%d] = \"Writer %d\";", i, i+1); i +=1;); ?>
+// Menu 1 for Writer : their names, in sub-menus of 32 writers (the ">" headers are not counted in the results)
+<? wr_grp = 32; wr_mnc = WR_CNT + (0|((WR_CNT + wr_grp - 1) / wr_grp)); ?>menu_Wrt_Ids_N = make_array(<? printf("%d", wr_mnc); ?>);
+<? i=0; j=0; loop(WR_CNT, (i % wr_grp) == 0 ? (printf("menu_Wrt_Ids_N[%d] = \">Writers %d-%d\";", j, i+1, min(i+wr_grp, WR_CNT)); j += 1;); printf("menu_Wrt_Ids_N[%d] = \"%sWriter %d\";", j, (((i % wr_grp) == wr_grp-1) || (i == WR_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); ?>
 menu_Wrt_Ids = make_jmenu(
     ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-            "writer-num", WR_CNT, menu_Wrt_Ids_N);
+            "writer-num", <? printf("%d", wr_mnc); ?>, menu_Wrt_Ids_N);
 
 
 // Menu 2 for Writer : their names for selection
-menu_Wrt_SIds_N = make_array(WR_CNT + 1);
+//    "None", a separator (an empty item, not counted), then the writers in sub-menus of 32 writers
+menu_Wrt_SIds_N = make_array(<? printf("%d", wr_mnc + 2); ?>);
 menu_Wrt_SIds_N[0] = "None";
-<? i=1; loop(WR_CNT, printf("menu_Wrt_SIds_N[%d] = \"Writer %d\";", i, i); i +=1;); ?>
+menu_Wrt_SIds_N[1] = "";
+<? i=0; j=2; loop(WR_CNT, (i % wr_grp) == 0 ? (printf("menu_Wrt_SIds_N[%d] = \">Writers %d-%d\";", j, i+1, min(i+wr_grp, WR_CNT)); j += 1;); printf("menu_Wrt_SIds_N[%d] = \"%sWriter %d\";", j, (((i % wr_grp) == wr_grp-1) || (i == WR_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); ?>
 menu_Wrt_SIds = make_jmenu(
     ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-            "writer-Snum", WR_CNT, menu_Wrt_SIds_N);
+            "writer-Snum", <? printf("%d", wr_mnc + 2); ?>, menu_Wrt_SIds_N);
+menu_Wrt_Grp = <? printf("%d", wr_grp); ?>; // writers per sub-menu : the header of group g is item g * (menu_Wrt_Grp + 1) in menu_Wrt_Ids, 2 + ... in menu_Wrt_SIds
+
+// Menu 3 for Writer : the status
+menu_Wrt_Status_N = make_array(5);
+menu_Wrt_Status_N[0] = "Undefined";
+menu_Wrt_Status_N[1] = "Created";
+menu_Wrt_Status_N[2] = "Ready";
+menu_Wrt_Status_N[3] = "Paused";
+menu_Wrt_Status_N[4] = "Writing";
+menu_Wrt_Status = make_jmenu(
+    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "writer-status", 5, menu_Wrt_Status_N);
+
+// Menu 4 for Writer : the actions (entry n is the action its_WrtAct_... n)
+menu_Wrt_Action_N = make_array(11);
+menu_Wrt_Action_N[0] = "None";
+menu_Wrt_Action_N[1] = "Copy";
+menu_Wrt_Action_N[2] = "Paste";
+menu_Wrt_Action_N[3] = "Clear";
+menu_Wrt_Action_N[4] = "Rewind";
+menu_Wrt_Action_N[5] = "Reset";
+menu_Wrt_Action_N[6] = "Create";
+menu_Wrt_Action_N[7] = "Activate";
+menu_Wrt_Action_N[8] = "Show";
+menu_Wrt_Action_N[9] = "---";
+menu_Wrt_Action_N[10] = "Delete";
+menu_Wrt_Action = make_jmenu(
+    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "writer-actions", 11, menu_Wrt_Action_N);
 
 // Pad for the writer
 pad_Wrt_NL = 2;
@@ -2894,14 +2940,14 @@ local (lcbl, buff, bsz, i, j, R, lng)
 
 // delete buffer "lnum" from Lines_Set
 function Ln_Delete(lnum)
-local (lcbl, i, j, cb, lbcl)
+local (lcbl, i, j, cb)
 (
     ((lnum >= 0) && (lnum <= LN_CNT)) ? (
-        (((lbcl = Lines_Set[lnum]) > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) ? (
+        (((lcbl = Lines_Set[lnum]) > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) ? ( // (was "lbcl =" : nothing was freed)
             // Check that the line is not used in any reader/writer
             i = 0; loop(RD_CNT+1,
                 cb = Readers_set[i];
-                (lcbl === cb[its_Rdr_Lcbl]) ? (
+                ((cb !== 0) && (lcbl === cb[its_Rdr_Lcbl])) ? (
                     // stop reader
                 cb[its_Rdr_Tmp4] = 210;
                 cb[its_Rdr_Tmp5] = cb[its_Rdr_Status];
@@ -2916,9 +2962,11 @@ local (lcbl, i, j, cb, lbcl)
             );
             i = 0; loop(WR_CNT+1,
                 cb = Writers_set[i];
-                (lcbl === cb[its_Wrt_Lcbl]) ? (
-                    // stop reader
-                    cb[its_Wrt_Status] = its_RdrStat_Created;
+                ((cb !== 0) && (lcbl === cb[its_Wrt_Lcbl])) ? (
+                    // stop writer
+                    cb[its_Wrt_Flgs] &= -1 ~ (its_WrtFlg_init | 2);
+                    cb[its_Wrt_Buff_1] = 0;
+                    cb[its_Wrt_Status] = its_WrtStat_Created;
                     cb[its_Wrt_Check] = 0;
                     cb[its_Wrt_Lcbl] = 0;
                     cb[its_Wrt_LineNb] = -1;
@@ -2988,21 +3036,24 @@ ii = 0; loop(pad_Lin_Siz,
             ii+=1;
 );
 
-// Menu 1 for LINES : their names
-menu_Lin_Ids_N = make_array(LN_CNT + 1);
-<? i=0; loop(LN_CNT, printf("menu_Lin_Ids_N[%d] = \"Line %d\";", i, i+1); i +=1;); ?>
+// Menu 1 for LINES : their names, in sub-menus of 32 lines (the ">" headers are not counted in the results)
+<? ln_grp = 32; ln_mnc = LN_CNT + (0|((LN_CNT + ln_grp - 1) / ln_grp)); ?>menu_Lin_Ids_N = make_array(<? printf("%d", ln_mnc); ?>);
+<? i=0; j=0; loop(LN_CNT, (i % ln_grp) == 0 ? (printf("menu_Lin_Ids_N[%d] = \">Lines %d-%d\";", j, i+1, min(i+ln_grp, LN_CNT)); j += 1;); printf("menu_Lin_Ids_N[%d] = \"%sLine %d\";", j, (((i % ln_grp) == ln_grp-1) || (i == LN_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); ?>
 menu_Lin_Ids = make_jmenu(
     ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-            "line-num", LN_CNT, menu_Lin_Ids_N);
+            "line-num", <? printf("%d", ln_mnc); ?>, menu_Lin_Ids_N);
+menu_Lin_Grp = <? printf("%d", ln_grp); ?>; // lines per sub-menu : the header of group g is item g * (menu_Lin_Grp + 1)
 
 
 // Menu 2 for LINES : their names for selection
-menu_Lin_SIds_N = make_array(LN_CNT + 1);
+//    "None", a separator (an empty item, not counted), then the lines in sub-menus of menu_Lin_Grp lines
+menu_Lin_SIds_N = make_array(<? printf("%d", ln_mnc + 2); ?>);
 menu_Lin_SIds_N[0] = "None";
-<? i=1; loop(LN_CNT, printf("menu_Lin_SIds_N[%d] = \"Line %d\";", i, i); i +=1;); ?>
+menu_Lin_SIds_N[1] = "";
+<? i=0; j=2; loop(LN_CNT, (i % ln_grp) == 0 ? (printf("menu_Lin_SIds_N[%d] = \">Lines %d-%d\";", j, i+1, min(i+ln_grp, LN_CNT)); j += 1;); printf("menu_Lin_SIds_N[%d] = \"%sLine %d\";", j, (((i % ln_grp) == ln_grp-1) || (i == LN_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); ?>
 menu_Lin_SIds = make_jmenu(
     ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-            "line-names", LN_CNT+1, menu_Lin_SIds_N);
+            "line-names", <? printf("%d", ln_mnc + 2); ?>, menu_Lin_SIds_N);
 
 // Menu 3 for LINES : the status
 menu_Lin_Status_N = make_array(2);
@@ -3250,6 +3301,177 @@ local(reader, lcbl, err, w)
 );
 
 
+/*
+    the reader number "rdrn" [0 ... RD_CNT-1], in delay mode, follows the writer number "wrnb" [1 ... WR_CNT]
+    "wrnb == 0" to remove the writer (and its line) from the reader
+    used by the slider "slRdWref" and by the reader pad
+*/
+function Rd_Set_Writer(rdrn, wrnb)
+local(reader, wcbl, lcbl, err)
+(
+    err = 0;
+    ((rdrn < 0) || (rdrn >= RD_CNT)) ? (
+        err = 2601; // erreur : bad reader number
+    ) :
+    ((wrnb < 0) || (wrnb > WR_CNT)) ? ( // in [0 ... WR_CNT]
+        err = 2602; // erreur : bad writer number
+    ) :
+    (((reader = Readers_set[rdrn]) <= BASE_MEMORY) || (reader[-2] !== KW_read)
+        || (reader[its_Rdr_Mode] !== its_RdrMode_Delay)) ? (
+        err = 2603; // erreur : reader undefined, or not in delay mode
+    ) :
+    (wrnb === 0) ? (
+        // Remove reference
+        reader[its_Rdr_WrSrc] = -1;
+        reader[its_Rdr_WrBPtr] = 0;
+        reader[its_Rdr_LineNb] = -1; reader[its_Rdr_Lcbl] = 0; // no more line either
+        reader[its_Rdr_Status] = its_RdrStat_Created;
+    ) : (
+        reader[its_Rdr_Tmp1] = 200 + wrnb;
+        reader[its_Rdr_Tmp2] = ts();
+        wcbl = Writers_set[wrnb - 1];
+        ((wcbl > BASE_MEMORY)
+            && (wcbl[-2] === KW_writ)
+            && ((lcbl = wcbl[its_Wrt_Lcbl]) > BASE_MEMORY)
+            && (lcbl[-2] === KW_lcbl)) ?
+        (
+            // Valid writer with a line
+            reader[its_Rdr_WrBPtr] = wcbl;
+            reader[its_Rdr_Lcbl] = lcbl;
+            reader[its_Rdr_LineNb] = wcbl[its_Wrt_LineNb]; // a line number [0 ... N-1], not the line block
+            reader[its_Rdr_SmplCnt] = lcbl[its_Lin_SmplCnt];
+            reader[its_Rdr_BfChanUsed] = reader[its_Rdr_ChNbr] = lcbl[its_Lin_ChCnt];
+            reader[its_Rdr_Bf1stChan] = 0;
+            reader[its_Rdr_Start] = lcbl[its_Lin_Start];
+            reader[its_Rdr_Last] = lcbl[its_Lin_Last];
+            reader[its_Rdr_Abspos] = lcbl[its_Lin_Start];
+            reader[its_Rdr_Flgs] |= its_RdrFlg_init;
+            reader[its_Rdr_Speed] = 1;
+            reader[its_Rdr_AbsInc] = 1;
+            (reader[its_Rdr_Status] === its_RdrStat_Reading) ? (
+                reader[its_Rdr_Tmp4] = 130;
+                reader[its_Rdr_Tmp5] = reader[its_Rdr_Status];
+                reader[its_Rdr_Tmp6] = ts();
+            );
+            reader[its_Rdr_Status] = max(its_RdrStat_Ready, reader[its_Rdr_Status]);
+            reader[its_Rdr_Tmp1] = 400 + wrnb;
+            reader[its_Rdr_Tmp2] = ts();
+            (reader[its_Rdr_WrSrc] === wrnb - 1) ? (
+                reader[its_Rdr_Tmp4] = 133;
+                reader[its_Rdr_Tmp5] = reader[its_Rdr_Status];
+                reader[its_Rdr_Tmp6] = ts();
+            );
+            reader[its_Rdr_WrSrc] = wrnb - 1;
+            // a reader without output cell is silent : give it its default one
+            (reader[its_Rdr_RCell] === 0) ? reader[its_Rdr_RCell] = rdrn + OUT_P;
+            updateRdCellIdent(reader);
+        ) : (
+            // writer indéfini, ou sans ligne
+            reader[its_Rdr_WrSrc] = -1;
+            reader[its_Rdr_WrBPtr] = 0;
+            (reader[its_Rdr_Status] === its_RdrStat_Reading) ? (
+                reader[its_Rdr_Tmp4] = 140;
+                reader[its_Rdr_Tmp5] = reader[its_Rdr_Status];
+                reader[its_Rdr_Tmp6] = ts();
+            );
+            reader[its_Rdr_Status] = its_RdrStat_Created;
+            reader[its_Rdr_Tmp1] = 300 + wrnb;
+            reader[its_Rdr_Tmp2] = ts();
+            err = 2604; // erreur : writer undefined, or without a line
+        );
+    );
+    ((err === 0) || (err === 2604)) ? (
+        reader[its_Rdr_Check] = 0;
+    );
+    err;
+);
+
+
+/*
+    set the offset (in samples) of the reader block "reader" in delay mode, bounded to [1 ... line size]
+    while the reader plays, the change is done by a short cross fade (its_RdrDlyXFade) from the previous offset,
+    kept in its_Rdr_AbsAuxpos (in delay mode, an offset, not a position)
+    used by the slider "slRdOffs" and by the reader pad
+*/
+its_RdrDlyXFade = 0.010; // duration of the cross fade (s)
+function Rd_Set_Offset(reader, nsmp)
+local (f)
+(
+    nsmp = max(1, min(reader[its_Rdr_SmplCnt], floor(0.5 + nsmp)));
+    (nsmp !== reader[its_Rdr_WOffsetSmp]) ? (
+        (reader[its_Rdr_Status] === its_RdrStat_Reading) ? (
+            // the fields are set before the new offset, so that the audio never sees the new offset without the fade
+            reader[its_Rdr_AbsAuxpos] = reader[its_Rdr_WOffsetSmp]; // previous offset
+            reader[its_Rdr_XFadeIdxPos] = 0;
+            reader[its_Rdr_XFadeIncr] = SINUS_TABLE_SIZE / (f = max(3, floor(its_RdrDlyXFade * srate)));
+            reader[its_Rdr_XFadeCnt] = f; // start counting
+        );
+        reader[its_Rdr_WOffsetSmp] = nsmp;
+    );
+    reader[its_Rdr_WOffset] = reader[its_Rdr_WOffsetSmp] / srate; // exact, not rounded to the ms
+);
+
+
+/*
+    set the mode "md" (its_RdrMode_...) of the reader number "rdrn" [0 ... RD_CNT-1], and prepare it for this mode :
+    - reader mode : its fields are set from its line by Rd_Set_Line (step, limits, region...) ; without line, "Created"
+    - delay mode : it follows again its previous writer (Rd_Set_Writer) ; without writer, "Created"
+    (changing only its_Rdr_Mode left a reader made in delay mode with a null step in reader mode : no sound, no move)
+    used by the slider "slRdMode" and by the reader pad
+*/
+function Rd_Set_Mode(rdrn, md)
+local (reader, err, w)
+(
+    err = 0;
+    ((rdrn < 0) || (rdrn >= RD_CNT)) ? (
+        err = 2605; // erreur : bad reader number
+    ) :
+    (((reader = Readers_set[rdrn]) <= BASE_MEMORY) || (reader[-2] !== KW_read)
+        || ((md !== its_RdrMode_Read) && (md !== its_RdrMode_Delay))) ? (
+        err = 2606; // erreur : reader undefined, or unknown mode
+    ) :
+    (md !== reader[its_Rdr_Mode]) ? (
+        reader[its_Rdr_XFadeCnt] = 0; // no cross fade from the other mode
+        reader[its_Rdr_Mode] = md;
+        (md === its_RdrMode_Read) ? (
+            reader[its_Rdr_WrBPtr] = 0; // no more a follower (its_Rdr_WrSrc is kept, to follow it again in delay mode)
+            (reader[its_Rdr_LineNb] >= 0) ? (
+                err = Rd_Set_Line(rdrn, reader[its_Rdr_LineNb] + 1);
+            ) : (
+                reader[its_Rdr_Status] = its_RdrStat_Created;
+                reader[its_Rdr_Check] = 0;
+            );
+        ) : (
+            w = reader[its_Rdr_WrSrc] + 1; // 0 : no writer
+            err = Rd_Set_Writer(rdrn, max(0, min(WR_CNT, w)));
+            (err === 2604) ? (err = Rd_Set_Writer(rdrn, 0)); // the writer has gone : "Writer: None"
+        );
+    );
+    err;
+);
+
+
+/*
+    the readers in delay mode that follow the writer block "wcbl" :
+    "detach == 1" : they no longer follow it (the block will be freed), else they check it again (its line may have changed)
+*/
+function Wr_Followers(wcbl, detach)
+local (i, r)
+(
+    i = 0; loop(RD_CNT,
+        (((r = Readers_set[i]) > BASE_MEMORY) && (r[-2] === KW_read) && (r[its_Rdr_WrBPtr] === wcbl)) ? (
+            detach ? (
+                Rd_Set_Writer(i, 0);
+                (r === Currreader) ? (slRdWrefPrv = slRdWref = 0; slRStatusPrv = slRStatus = r[its_Rdr_Status]);
+            ) : (
+                r[its_Rdr_Check] = 0;
+            );
+        );
+        i += 1;
+    );
+);
+
+
 function Rd_Set_Status(rdrn, nstat)
 local (reader, md, rdst)
 (
@@ -3303,7 +3525,7 @@ local (reader, md, rdst)
                 ns = its_RdrStat_Ready;
             );
         ) :
-        (md === its_RdrMode_Folwr) ? (
+        (md === its_RdrMode_Delay) ? (
             wcbl = reader[its_Rdr_WrBPtr];
             (wcbl === 0) ? (
                 ns = its_RdrStat_Created;
@@ -3370,7 +3592,8 @@ local (ty, sp, mdr)
         reader[its_Rdr_XFadeIncr] = SINUS_TABLE_SIZE / reader[its_Rdr_XFadeCnt];
         reader[its_Rdr_XFadeIdxPos] = 0;
     ) :
-    (mdr === its_RdrMode_Folwr) ? (
+    (mdr === its_RdrMode_Delay) ? (
+        reader[its_Rdr_XFadeCnt] = 0; // no pending cross fade (they may come from the reader mode)
         reader[its_Rdr_Status] = its_RdrStat_Reading;
     );
 );
@@ -3403,6 +3626,8 @@ local (reader, err)
                 reader = Rd_Create(rdrn);
                 ((reader !== 0) && (Readers_set[RD_CNT] !== 0)) ? (
                     memcpy(Readers_set[rdrn], Readers_set[RD_CNT], its_Rdr_BlkSize);
+                    reader[its_Rdr_Number] = rdrn; // the copy keeps the number of its source
+                    reader[its_Rdr_Check] = 0;
                 );
             );
         ) : (
@@ -3423,6 +3648,7 @@ local (reader, err)
         (Readers_set[RD_CNT] !== 0) ? (
             // Paste from reserve
             memcpy(Readers_set[rdrn], Readers_set[RD_CNT], its_Rdr_BlkSize);
+            reader[its_Rdr_Number] = rdrn; // the copy keeps the number of its source
             reader[its_Rdr_Check] = 0;
         );
     ) :
@@ -3454,7 +3680,8 @@ local (reader, err)
         dbg_show_1(reader, 1011);
     ) :
     (act === its_RdrAct_Delete) ? (
-        Rd_Delete(slReader);
+        Rd_Delete(rdrn); // (was slReader : the reader of the sliders, not the one asked)
+        (rdrn === slReader) ? (Currreader = 0); // no pointer to the freed block
     ) :
     (
         err = 127;
@@ -3465,7 +3692,8 @@ local (reader, err)
 
 
 /*
-    associate line "bufn" to writer "wrtn"
+    associate line "bufn" [0 ... LN_CNT-1] to writer "wrtn"
+    "bufn == -1" to remove the line from the writer
 */
 function Wr_Set_Line(wrtn, bufn)
 local(writer, lcbl)
@@ -3475,6 +3703,16 @@ local(writer, lcbl)
     ) :
     (((writer = Writers_set[wrtn]) <= BASE_MEMORY) || (writer[-2] !== KW_writ)) ? (
         0x114; // erreur
+    ) :
+    (bufn === -1) ? (
+        // remove the line : the writer stops
+        writer[its_Wrt_Flgs] &= -1 ~ (its_WrtFlg_init | 2);
+        writer[its_Wrt_LineNb] = -1;
+        writer[its_Wrt_Lcbl] = writer[its_Wrt_Buff_1] = 0;
+        writer[its_Wrt_Status] = its_WrtStat_Created;
+        writer[its_Wrt_Check] = -1;
+        Wr_Followers(writer, 0); // they will find that the writer has no line
+        0;
     ) :
     ((bufn < 0) || (bufn >= LN_CNT)) ? (
         0x115; // erreur
@@ -3491,8 +3729,37 @@ local(writer, lcbl)
         writer[its_Wrt_Last] = lcbl[its_Lin_Last];
         writer[its_Wrt_Abspos] = lcbl[its_Lin_Start];
         writer[its_Wrt_Flgs] |= its_WrtFlg_init;
-        reader[its_Wrt_Check] = -1;
+        writer[its_Wrt_Check] = -1;
+        // default source cell : spl_in(wrtn)
+        (writer[its_Wrt_Cell] === 0) ? (writer[its_Wrt_Cell] = 1 + wrtn);
+        writer[its_Wrt_Status] = max(writer[its_Wrt_Status], its_WrtStat_Ready);
+        Wr_Followers(writer, 0); // the delay readers take the new line
         0;
+    );
+);
+
+/*
+    set the status "st" of writer "wrtn" ; returns the actual status (-1 : no writer)
+    without a line or a source cell, the writer stays "Created"
+    used by the slider "slWrStatus" and by the writer pad
+*/
+function Wr_Set_Status(wrtn, st)
+local(writer, lcbl)
+(
+    ((wrtn < 0) || (wrtn >= WR_CNT) || ((writer = Writers_set[wrtn]) <= BASE_MEMORY) || (writer[-2] !== KW_writ)) ? (
+        -1;
+    ) : (
+        (((lcbl = writer[its_Wrt_Lcbl]) <= BASE_MEMORY) || (lcbl[-2] !== KW_lcbl) || (writer[its_Wrt_Cell] === 0)) ? (
+            st = its_WrtStat_Created;
+        ) : (
+            st = max(its_WrtStat_Ready, min(its_WrtStat_Writing, st));
+        );
+        (st === its_WrtStat_Writing) ? (
+            writer[its_Wrt_Flgs] |= 2;
+        ) : (
+            writer[its_Wrt_Flgs] &= 0xFFFD;
+        );
+        writer[its_Wrt_Status] = st;
     );
 );
 
@@ -3568,15 +3835,23 @@ local(i, f, j, sum)
   sum;
 );
 
-// Execute action "act" on write "wnum"
+// Execute action "act" (its_WrtAct_...) on writer "wnum" ; returns the writer block (0 : none)
+// used by the slider "slWrtAct" and by the writer pad
 function Wr_Action(act, wnum, pars)
-local (cb)
+local (cb, lcbl, cpy)
 (
-    cb =  0;
+    cb = Writers_set[wnum];
+    cpy = 0;
+    ((cb === 0) && (act === its_WrtAct_Paste)) ? (
+        // the writer must first be created
+        cpy = 1;
+        act = its_WrtAct_Create;
+    );
     (act === its_WrtAct_Create) ? (
         // Create the writer
         (Writers_set[wnum] !== 0) ? (
             // ty to delete it
+            Wr_Followers(Writers_set[wnum], 1); // the delay readers no longer follow the freed block
             mSL_Dyn_Free(Writers_set[wnum]);
             Writers_set[wnum] = 0;
         );
@@ -3587,6 +3862,65 @@ local (cb)
             cb[its_Wrt_Status] = its_WrtStat_Created;
             cb[its_Wrt_InAction] = 520;
             cb[its_Wrt_Number] = wnum;
+            str_mess = "Create writer configuration";
+            (cpy && (Writers_set[WR_CNT] !== 0)) ? (
+                memcpy(cb, Writers_set[WR_CNT], its_Wrt_BlkSize);
+                cb[its_Wrt_Number] = wnum;
+                cb[its_Wrt_Check] = -1;
+                Wr_Set_Status(wnum, its_WrtStat_Ready); // a pasted writer does not write (Created if no line)
+                str_mess = "Create/Paste writer configuration";
+            );
+        );
+    ) :
+    ((cb > BASE_MEMORY) && (cb[-2] === KW_writ)) ? (
+        (act === its_WrtAct_Copy) ? (
+            // Copy to reserve
+            (Writers_set[WR_CNT] === 0) ? (
+                // create an area for the copy
+                Wr_Make(WR_CNT);
+            );
+            memcpy(Writers_set[WR_CNT], cb, its_Wrt_BlkSize);
+            str_mess = "Copy writer configuration";
+        ) :
+        (act === its_WrtAct_Paste) ? (
+            (Writers_set[WR_CNT] !== 0) ? (
+                // paste from reserve
+                memcpy(cb, Writers_set[WR_CNT], its_Wrt_BlkSize);
+                cb[its_Wrt_Number] = wnum;
+                cb[its_Wrt_Check] = -1;
+                Wr_Set_Status(wnum, its_WrtStat_Ready); // a pasted writer does not write (Created if no line)
+                Wr_Followers(cb, 0); // the line may have changed
+                str_mess = "Paste writer configuration";
+            );
+        ) :
+        (act === its_WrtAct_Clear) ? (
+            Wr_Clear(wnum); // (the slider gave the block address, not the number)
+            Wr_Followers(cb, 0); // no more line : they will stop
+            str_mess = "Clear writer configuration";
+        ) :
+        (act === its_WrtAct_Rewind) ? (
+            cb[its_Wrt_Abspos] = cb[its_Wrt_Start];
+            str_mess = "Rewind writer";
+        ) :
+        (act === its_WrtAct_Show) ? (
+            dbg_show_2(cb, 60);
+        ) :
+        (act === its_WrtAct_Activate) ? (
+            ((cb[its_Wrt_Status] === its_WrtStat_Created)
+                && ((lcbl = cb[its_Wrt_Lcbl]) > BASE_MEMORY)
+                && (lcbl[-2] === KW_lcbl)) ?
+            (
+                // associate the line with the writer (and set it ready)
+                Wr_Set_Line(wnum, cb[its_Wrt_LineNb]);
+                str_mess = "Activate writer";
+            );
+        ) :
+        (act === its_WrtAct_Delete) ? (
+            Wr_Followers(cb, 1); // the delay readers no longer follow the freed block
+            Wr_Delete(wnum);
+            cb = 0;
+            (wnum === slWriter) ? (Currwriter = 0); // no pointer to the freed block
+            str_mess = "Delete writer";
         );
     );
     cb;
@@ -4343,7 +4677,7 @@ local (bfr, flg, ds, slRdModePrev)
     ((Currreader > 0) && (Currreader[its_Rdr_Status] >= its_RdrStat_Reading)) ? (L__107 += 1; zz = 1;);
     (Currreader === 0) ? (
         slRStatusPrv = slRStatus = its_RdrStat_UnDef;
-        // slRdModePrv = slRdMode = 0; // allow follower mode
+        // slRdModePrv = slRdMode = 0; // allow delay mode
         slRdSrcLNbPrv = slRdSrcLNb = -1;
         slRDlSizePrv = slRDlSize = 0;
         slRdLnChCntPrv = slRdLnChCnt = 0;
@@ -4370,7 +4704,7 @@ local (bfr, flg, ds, slRdModePrev)
             slider_show(slRdSrcLNb,gui_show_sliders);
             slider_show(slRdWref,0);
         ) :
-        (slRdMode === its_RdrMode_Folwr) ? (
+        (slRdMode === its_RdrMode_Delay) ? (
             slider_show(slRdSrcLNb,0);
             slider_show(slRdWref,gui_show_sliders);
         );
@@ -4423,8 +4757,8 @@ local (bfr, flg, ds, slRdModePrev)
             );
             slRPosPrv = slRPos = max(0,min(100, 100 * (Currreader[its_Rdr_Abspos] - Currreader[its_Rdr_Start])/max(1, Currreader[its_Rdr_Last] - Currreader[its_Rdr_Start]))) ;
         ) :
-        (slRdMode === its_RdrMode_Folwr) ? (
-            // Follower mode
+        (slRdMode === its_RdrMode_Delay) ? (
+            // Delay mode
             slider_show(slRdSrcLNb,0);
             slider_show(slRDlSize,0);
             slider_show(slRSpeed,0);
@@ -4478,6 +4812,8 @@ local (bfr, flg, W_pos)
 
     (Currwriter === 0) ? (
         slWrStatusPrv = slWrStatus = 0;
+        slWDlLinePrv = slWDlLine = 0;
+        slWritCellPrv = slWritCell = 0;
         slWDlSizePrv = slWDlSize = 0;
         slWrtActPrv = slWrtAct = 0;
         slWrPosPrv = slWrPos = 0;
@@ -4974,7 +5310,7 @@ local (i, cbl)
 );
 
 function update_sliders()
-local (bfr, flg, tmp, act, tmdisp, i, Prevreader, PrevLine, slRdWrefPrev, Preveffect, Prevwriter, smplcpy, smplmerge, L__112)
+local (bfr, flg, tmp, act, tmdisp, i, Prevreader, PrevLine, Preveffect, Prevwriter, smplcpy, smplmerge, L__112)
 (
     L__105 += 1;
     act = 0;
@@ -4988,7 +5324,7 @@ local (bfr, flg, tmp, act, tmdisp, i, Prevreader, PrevLine, slRdWrefPrev, Prevef
 
 
     L__112 = ((Currreader !== 0)
-                && (Currreader[its_Rdr_Mode] === its_RdrMode_Folwr)
+                && (Currreader[its_Rdr_Mode] === its_RdrMode_Delay)
                 && (Currreader[its_Rdr_Status] >= its_RdrStat_Reading));
 
     //-------------------------------------------------
@@ -5152,7 +5488,9 @@ sprintf(#A021, "st = %d prvst = %d", slRStatus, slRStatusPrv);
 
     (slRdMode != slRdModePrv) ? (
         (Currreader !== 0) ? (
-            Currreader[its_Rdr_Mode] = slRdMode;
+            Rd_Set_Mode(slReader, slRdMode);
+            slRStatusPrv = slRStatus = Currreader[its_Rdr_Status];
+            slRdWrefPrv = slRdWref = 1 + Currreader[its_Rdr_WrSrc];
         );
         slRdModePrv = slRdMode;
         rdupdt = 1;
@@ -5231,81 +5569,29 @@ sprintf(#A018, "rdr: %d, wref : %d, wrefP : %d  [%d]", slReader, slRdWref, slRdW
             (slRdWref !== 0) ? (
                 // Create the reader and set it ready
                 Currreader = Rd_Create(slReader);
-                Currreader[its_Rdr_Mode] = its_RdrMode_Folwr;
+                Currreader[its_Rdr_Mode] = its_RdrMode_Delay;
                 Currreader[its_Rdr_Tmp1] = 100 + slRdWref;
                 Currreader[its_Rdr_Tmp2] = ts();
             );
         );
-        ((Currreader !== 0) && (Currreader[its_Rdr_Mode] === its_RdrMode_Folwr)) ? (
-            (slRdWref === 0)? (
-                // Remove reference
-                Currreader[its_Rdr_WrSrc] = -1;
-                Currreader[its_Rdr_WrBPtr] = 0;
-                slRStatus = Currreader[its_Rdr_Status] = its_RdrStat_Created;
+        ((Currreader !== 0) && (Currreader[its_Rdr_Mode] === its_RdrMode_Delay)) ? (
+            (Rd_Set_Writer(slReader, slRdWref) === 0) ? (
+                slRStatusPrv = slRStatus = Currreader[its_Rdr_Status];
             ) : (
-                Currreader[its_Rdr_Tmp1] = 200 + slRdWref;
-                Currreader[its_Rdr_Tmp2] = ts();
-                wcbl = Writers_set[slRdWref - 1];
-                ((wcbl > BASE_MEMORY)
-                    && (wcbl[-2] === KW_writ)
-                    && ((lcbl = wcbl[its_Wrt_Lcbl]) > BASE_MEMORY)
-                    && (lcbl[-2] === KW_lcbl)) ?
-                (
-                    // Valid writer with a line
-                    Currreader[its_Rdr_WrBPtr] = wcbl;
-                    Currreader[its_Rdr_Lcbl] = lcbl;
-                    Currreader[its_Rdr_LineNb] = wcbl[its_Wrt_Lcbl];
-                    Currreader[its_Rdr_SmplCnt] = lcbl[its_Lin_SmplCnt];
-                    Currreader[its_Rdr_BfChanUsed] = Currreader[its_Rdr_ChNbr] = lcbl[its_Lin_ChCnt];
-                    Currreader[its_Rdr_Bf1stChan] = 0;
-                    Currreader[its_Rdr_Start] = lcbl[its_Lin_Start];
-                    Currreader[its_Rdr_Last] = lcbl[its_Lin_Last];
-                    Currreader[its_Rdr_Abspos] = lcbl[its_Lin_Start];
-                    Currreader[its_Rdr_Flgs] |= its_RdrFlg_init;
-                    Currreader[its_Rdr_Speed] = 1;
-                    Currreader[its_Rdr_AbsInc] = 1;
-
-    (Currreader[its_Rdr_Status] === its_RdrStat_Reading) ? (
-            Currreader[its_Rdr_Tmp4] = 130;
-            Currreader[its_Rdr_Tmp5] = Currreader[its_Rdr_Status];
-            Currreader[its_Rdr_Tmp6] = ts();
-    );
-                    slRStatusPrv = slRStatus = Currreader[its_Rdr_Status] = max(its_RdrStat_Ready, Currreader[its_Rdr_Status]);
-
-                    Currreader[its_Rdr_Tmp1] = 400 + slRdWref;
-                    Currreader[its_Rdr_Tmp2] = ts();
-    (Currreader[its_Rdr_WrSrc] === slRdWref - 1) ? (
-            Currreader[its_Rdr_Tmp4] = 133;
-            Currreader[its_Rdr_Tmp5] = Currreader[its_Rdr_Status];
-            Currreader[its_Rdr_Tmp6] = ts();
-    );
-                    Currreader[its_Rdr_WrSrc] = slRdWref - 1;
-                ) : (
-                    // writer indéfini
-                    Currreader[its_Rdr_WrSrc] = -1;
-                    Currreader[its_Rdr_WrBPtr] = 0;
-    (Currreader[its_Rdr_Status] === its_RdrStat_Reading) ? (
-            Currreader[its_Rdr_Tmp4] = 140;
-            Currreader[its_Rdr_Tmp5] = Currreader[its_Rdr_Status];
-            Currreader[its_Rdr_Tmp6] = ts();
-    );
-                    slRStatusPrv = slRStatus = Currreader[its_Rdr_Status] = its_RdrStat_Created;
-                    Currreader[its_Rdr_Tmp1] = 300 + slRdWref;
-                    Currreader[its_Rdr_Tmp2] = ts();
-                    slRdWref = 0;
-                );
+                // writer indéfini
+                slRStatus = Currreader[its_Rdr_Status];
+                slRdWref = 0;
             );
-            Currreader[its_Rdr_Check] = 0;
         );
-        slRdWrefPrev = slRdWref;
+        slRdWrefPrv = slRdWref; // the global one (it was a local "slRdWrefPrev" : the change was handled again at each call)
         dbg_show_2(Currreader, 40);
         rdupdt = 1;
     );
 
     (slRdOffs != slRdOffsPrv) ? (
         (Currreader !== 0) ? (
-            Currreader[its_Rdr_WOffsetSmp] = tmp = max(1, min(Currreader[its_Rdr_SmplCnt], floor(0.5 + slRdOffs * srate)));
-            Currreader[its_Rdr_WOffset] = slRdOffs = floor(0.5 + 1000*tmp/srate)/1000;
+            Rd_Set_Offset(Currreader, slRdOffs * srate);
+            slRdOffs = floor(0.5 + 1000*Currreader[its_Rdr_WOffsetSmp]/srate)/1000;
         );
         slRdOffsPrv = slRdOffs;
         rdupdt = 1;
@@ -5532,24 +5818,8 @@ sprintf(#A012,"Wr.set-line %d {%d  %d} st=%d", slWriter, Currwriter[its_Wrt_Line
     );
 
     (slWrStatus != slWrStatusPrv) ? (
-        str_mess = "Writer status changed 1";
         (Currwriter !== 0) ? (
-            str_mess = "Writer status changed 2";
-            ((Currwriter[its_Wrt_Lcbl] < BASE_MEMORY) || (Currwriter[its_Wrt_Cell] === 0)) ? (
-                slWrStatus = its_WrtStat_Created;
-                str_mess = "Writer status changed 3";
-            ) : (
-                slWrStatus = max(its_WrtStat_Ready, slWrStatus);
-                str_mess = "Writer status changed 4";
-            );
-            (slWrStatus === its_WrtStat_Writing) ? (
-                str_mess = "Writer status changed 5";
-                Currwriter[its_Wrt_Flgs] |= 2;
-            ) : (
-                // str_mess = "Writer status changed 6";
-                Currwriter[its_Wrt_Flgs] &= 0xFFFD;
-            ) ;
-            Currwriter[its_Wrt_Status] = slWrStatus;
+            slWrStatus = Wr_Set_Status(slWriter, slWrStatus);
             dbg_show_2(Currwriter,50);
         ) : (
             slWrStatus = its_WrtStat_UnDef;
@@ -5597,80 +5867,12 @@ sprintf(#A012,"Wr.set-line %d {%d  %d} st=%d", slWriter, Currwriter[its_Wrt_Line
     );
 
     (slWrtAct !== 0) ? (
-        (Currwriter !== 0) ? (
-            (slWrtAct === its_WrtAct_Copy) ? (
-                // Copy to reserve
-                (Writers_set[WR_CNT] === 0) ? (
-                    // create an area for the copy
-                    Wr_Make(WR_CNT);
-                );
-                memcpy(Writers_set[WR_CNT], Writers_set[slWriter], its_Wrt_BlkSize);
-                str_mess = "Copy writer configuration";
-            ) :
-            (slWrtAct === its_WrtAct_Paste) ? (
-                (Writers_set[WR_CNT] !== 0) ? (
-                    // paste from reserve
-                    memcpy(Writers_set[slWriter], Writers_set[WR_CNT], its_Wrt_BlkSize);
-                    Currwriter[its_Wrt_Number] = slWriter;
-                    Currwriter[its_Wrt_Check] = -1;
-                    str_mess = "Paste writer configuration";
-                );
-            ) :
-            (slWrtAct === its_WrtAct_Clear) ? (
-                // clear
-                Wr_Clear(Writers_set[slWriter]);
-                Currwriter[its_Wrt_Number] = slWriter;
-                str_mess = "Clear writer configuration";
-            ) :
-            (slWrtAct === its_WrtAct_Rewind) ? (
-                // rewind
-                slWrPosPrv = slWrPos = 0;
-                Currwriter[its_Wrt_Abspos] = Currwriter[its_Wrt_Start];
-                str_mess = "Rewind writer";
-            ) :
-            (slWrtAct === its_WrtAct_Show) ? (
-                dbg_show_2(Currwriter,60);
-            ) :
-            (slWrtAct === its_WrtAct_Activate) ? (
-                ((Currwriter[its_Wrt_Status] === its_WrtStat_Created)
-                    && ((cb = Currwriter[its_Wrt_Lcbl]) > BASE_MEMORY)
-                    && (cb[-2] === KW_lcbl)) ?
-                (
-                    // associate the line with the writer
-                    zzz_wr_b_err = Wr_Set_Line(slWriter, slWDlLine - 1); // sets flags, etc.
-                    bfr = Currwriter[its_Wrt_Lcbl];
-                    // slWDlSizePrv = slWDlSize = floor(1000 * bfr[its_Lin_SmplCnt]/srate) / 1000;
-                    slWDlSizePrv = slWDlSize = bfr[its_Lin_SmplCntSec];
-                    (Currwriter[its_Wrt_Cell] === 0) ?  (
-                        Currwriter[its_Wrt_Cell] = 1 + slWriter;
-                    );
-                    Currwriter[its_Wrt_Status] = its_WrtStat_Ready;
-                    str_mess = "Activate writer";
-                );
-            ) :
-            (slWrtAct === its_WrtAct_Delete) ? (
-                Wr_Delete(slWriter);
-                Currwriter = 0;
-                slWDlLinePrv = slWDlLine = 0; // no line selected after a delete
-                str_mess = "Delete writer";
-            );
-        ) : (
-            (slWrtAct === its_WrtAct_Paste) ? (
-                // Il faut d'abord créer le writer
-                act = 1;
-                slWrtAct = its_WrtAct_Create;
-            );
-            (slWrtAct === its_WrtAct_Create) ? (
-                str_mess = "Create writer configuration";
-                // do create the writer
-                Currwriter = Wr_Action(its_WrtAct_Create, slWriter, 0);
-                ((act === 1) && (Currwriter !== 0)) ? (
-                    memcpy(Writers_set[slWriter], Writers_set[WR_CNT], its_Wrt_BlkSize);
-                    Currwriter[its_Wrt_Check] = -1;
-                    str_mess = "Create/Paste writer configuration";
-                );
-            );
+        // "Create" only creates a missing writer here
+        ((Currwriter === 0) || (slWrtAct !== its_WrtAct_Create)) ? (
+            Currwriter = Wr_Action(slWrtAct, slWriter, 0);
         );
+        (slWrtAct === its_WrtAct_Rewind) ? (slWrPosPrv = slWrPos = 0);
+        (Currwriter === 0) ? (slWDlLinePrv = slWDlLine = 0); // no line selected after a delete
         slWrtActPrv = slWrtAct = 0;
         wrupdt = 1;
     );
@@ -5684,8 +5886,11 @@ sprintf(#A012,"Wr.set-line %d {%d  %d} st=%d", slWriter, Currwriter[its_Wrt_Line
     );
 
     (slWrInGainPrv !== slWrInGain) ? (
-        Currwriter[its_Wrt_InGaindB] = slWrInGainPrv = slWrInGain;
-        Currwriter[its_Wrt_InGain] = (slWrInGain <= -120) ? 0 : 10^(slWrInGain/20);
+        (Currwriter !== 0) ? ( // (no writer : was written at the address 0)
+            Currwriter[its_Wrt_InGaindB] = slWrInGain;
+            Currwriter[its_Wrt_InGain] = (slWrInGain <= -120) ? 0 : 10^(slWrInGain/20);
+        );
+        slWrInGainPrv = slWrInGain;
     );
 
 
@@ -5768,6 +5973,10 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_play_S_Len, "Loop Length",  "LoopRLen",  i_UB|i_SP, "%.5f s", "Loop Length: %.5f s",   0.00001,   3600,    0,  0.00001, 6);
     parDcl(p_play_XFade, "Cross Fade", "CrssFade", i_UB|i_SP, "%.2f ms", "Cross Fade : %.2f ms", 0.01, 20000, 10, 0.01, 6);
     parDcl(p_play_Zoom, "Zoom", "WaveZoom", i_UB|i_SP, "%.0f", "Zoom : %.0f", 1, 100, 1, 1, 0);
+    // strong exponential curve (slope 8) and 10 µs step : very fine choice of the small offsets
+    parDcl(p_rdOffset, "Delay Offset", "RdOffset", i_UB|i_SP, "%.5f s", "Delay Offset: %.5f s", 0, 3600, 1, 0.00001, 8);
+    parDcl(p_wrGain, "Record Gain",  "WrGain",  i_UB|i_SP, "%.1f dB", "Record Gain: %.1f dB",   -120,   20,    0,  0.1, -3);
+    parDcl(p_wrOvrdb, "Overdub",  "WrOvrdb",  i_UB|i_SP, "%.1f %%", "Overdub: %.1f %%",   0,   100,    0,  0.1, 0);
 );
 
 
@@ -5887,7 +6096,7 @@ local (FFrRate, FlCC, Fhandle, Fformat, FFSize, cbfsiz, bread, ptbuf, bcnt, addb
     Execute a read - the reader is defined and in status "reading"
 */
 function exec_reader(reader, nbr)
-local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc, loc_aux, SP, A, A_aux, playing, l_valid, lax_valid)
+local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc, loc_aux, SP, A, A_aux, playing, l_valid, lax_valid, wps)
 (
     its_RdrErrXe = (reader[its_Rdr_Check] !== BLOCK_CHECK);
     (its_RdrErrXe) ? (
@@ -5923,7 +6132,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                 its_RdrErrXe = 0;
             );
         ) :
-        (reader[its_Rdr_Mode] === its_RdrMode_Folwr) ? (
+        (reader[its_Rdr_Mode] === its_RdrMode_Delay) ? (
             L__104 += 100;
             (((wcbl = reader[its_Rdr_WrBPtr]) <= BASE_MEMORY) || (wcbl[-2] !== KW_writ)) ? (
                 its_RdrErrXe = 150; // writer referenced is not a block
@@ -5932,6 +6141,10 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                 its_RdrErrXe = 154; // line is not a block
             ) : (
                 reader[its_Rdr_Lcbl] = lcbl;
+                reader[its_Rdr_LineNb] = wcbl[its_Wrt_LineNb]; // the line of the writer may have changed
+                reader[its_Rdr_ChNbr] = lcbl[its_Lin_ChCnt];
+                reader[its_Rdr_Bf1stChan] = 0;
+                reader[its_Rdr_BfChanUsed] = (reader[its_Rdr_BfChanUsed] > 0) ? min(reader[its_Rdr_BfChanUsed], lcbl[its_Lin_ChCnt]) : lcbl[its_Lin_ChCnt];
                 ((reader[its_Rdr_Start] != lcbl[its_Lin_Start])
                     || (reader[its_Rdr_Last] != lcbl[its_Lin_Last])) ? (
                     reader[its_Rdr_Start] = lcbl[its_Lin_Start];
@@ -5939,7 +6152,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                     reader[its_Rdr_SmplCnt] = lcbl[its_Lin_SmplCnt];
                 );
                 reader[its_Rdr_WOffsetSmp] = max(1, min(reader[its_Rdr_WOffsetSmp], reader[its_Rdr_SmplCnt]));
-                reader[its_Rdr_WOffset] = floor(0.5 + 1000*reader[its_Rdr_WOffsetSmp]/srate)/1000;
+                reader[its_Rdr_WOffset] = reader[its_Rdr_WOffsetSmp]/srate; // exact, not rounded to the ms
                 rdupdt = 1;
                 reader[its_Rdr_Check] = BLOCK_CHECK;
                 its_RdrErrXe = 0;
@@ -6163,20 +6376,50 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
             );
         ) :
 
-        (mdr === its_RdrMode_Folwr) ? (
-            // we are in mode follower
+        (mdr === its_RdrMode_Delay) ? (
+            // we are in delay mode
             s = 0; d = its_Lin_BF1ST + reader[its_Rdr_Bf1stChan];
             wcbl = reader[its_Rdr_WrBPtr]; // point to the writer block
-            k = loc = wcbl[its_Wrt_Abspos] - reader[its_Rdr_WOffsetSmp];
+            wps = wcbl[its_Wrt_Abspos];
+            k = loc = wps - reader[its_Rdr_WOffsetSmp];
             (loc < reader[its_Rdr_Start]) ? (loc += reader[its_Rdr_SmplCnt]);
-            (wcbl[its_Wrt_Status] === its_WrtStat_Writing) ? (
-                loop(lcn,
-                    ((bfr = lcbl[s + d]) !== (val = 0)) ? (
-                        val = vol * loc[bfr];
-                    );
-                    smpl_tab[reader[its_Rdr_RCell] + s] += val;
-                    s += 1;
+            reader[its_Rdr_Abspos] = loc; // the read position, for the display (waveform marker, "Pos")
+            (reader[its_Rdr_XFadeCnt] > 0) ? (
+                // offset changed : cross fade from the previous offset (its_Rdr_AbsAuxpos), see Rd_Set_Offset
+                w = reader[its_Rdr_AbsAuxpos];
+                ((w < 1) || (w > reader[its_Rdr_SmplCnt])) ? (
+                    reader[its_Rdr_XFadeCnt] = 0; // not an offset : no cross fade
+                ) : (
+                    loc_aux = wps - w;
+                    (loc_aux < reader[its_Rdr_Start]) ? (loc_aux += reader[its_Rdr_SmplCnt]);
                 );
+            );
+            // mute / solo (playing) : no output, but the read position and the cross fade go on
+            (playing && (wcbl[its_Wrt_Status] === its_WrtStat_Writing)) ? (
+                (reader[its_Rdr_XFadeCnt] > 0) ? (
+                    SP = floor(reader[its_Rdr_XFadeIdxPos]);
+                    A = vol * sinus_table[SP]; // sin(x) : new offset
+                    A_aux = vol * sinus_table[SINUS_TABLE_SIZE - SP]; // cos(x) : previous offset
+                    loop(lcn,
+                        ((bfr = lcbl[s + d]) !== (val = 0)) ? (
+                            val = A * loc[bfr] + A_aux * loc_aux[bfr];
+                        );
+                        smpl_tab[reader[its_Rdr_RCell] + s] += val;
+                        s += 1;
+                    );
+                ) : (
+                    loop(lcn,
+                        ((bfr = lcbl[s + d]) !== (val = 0)) ? (
+                            val = vol * loc[bfr];
+                        );
+                        smpl_tab[reader[its_Rdr_RCell] + s] += val;
+                        s += 1;
+                    );
+                );
+            );
+            (reader[its_Rdr_XFadeCnt] > 0) ? (
+                reader[its_Rdr_XFadeIdxPos] += reader[its_Rdr_XFadeIncr];
+                reader[its_Rdr_XFadeCnt] -= 1;
             );
         );
 
@@ -6217,7 +6460,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
 );
 
 function exec_writer(writer, nbr)
-local (lcbl, k, s, x, bp, val, vol)
+local (lcbl, k, s, x, bp, val, vol, f, n)
 (
     its_WrtErrXe = (writer[its_Wrt_Check] !== BLOCK_CHECK);
     (its_WrtErrXe) ? (
@@ -6258,20 +6501,24 @@ local (lcbl, k, s, x, bp, val, vol)
         vol = writer[its_Wrt_InGain];
         // Sample read
         lcbl = writer[its_Wrt_Lcbl];
-        s = 0; loop(writer[its_Wrt_ChNbr],
+        // the cells [Cell ... Cell+n-1] go to the channels [f ... f+n-1] of the line
+        f = max(0, min(writer[its_Wrt_ChNbr] - 1, writer[its_Wrt_Bf1stChan])); // first channel
+        n = writer[its_Wrt_ChNbr] - f;
+        (writer[its_Wrt_BfChanUsed] > 0) ? (n = min(n, writer[its_Wrt_BfChanUsed])); // 0 : all
+        s = 0; loop(n,
             // Allows null pointers as output buffers
-            ((bp = lcbl[its_Lin_BF1ST + s]) !== 0) ? (
+            ((bp = lcbl[its_Lin_BF1ST + f + s]) !== 0) ? (
                 val = smpl_tab[writer[its_Wrt_Cell] + s];
                 (x > 0) ? (
                     val = 0.01 * (x * k[bp] + (100 - x) * val);
                 );
-                k[lcbl[its_Lin_BF1ST + s]] = val = vol * val;
+                k[bp] = val = vol * val;
                 // when at start/end of buffer, duplicate samples in guard area
                 (k < writer[its_Wrt_Start] + BF_LIM) ? (
-                    k[lcbl[its_Lin_BF1ST + s] + writer[its_Wrt_SmplCnt]] = val;
+                    k[bp + writer[its_Wrt_SmplCnt]] = val;
                 ) :
                 (k > writer[its_Wrt_Last] - BF_LIM) ? (
-                    k[lcbl[its_Lin_BF1ST + s] - writer[its_Wrt_SmplCnt]] = val;
+                    k[bp - writer[its_Wrt_SmplCnt]] = val;
                 );
             );
             s += 1;
@@ -6440,10 +6687,11 @@ local (ln, renew, nlcbl, olcbl, nrcbl, nwcbl, alt, i)
                 olcbl = Lines_Set[alt];
                 ((olcbl != 0) && (olcbl[its_Lin_ChCnt] === nlcbl[its_Lin_ChCnt])
                     && (olcbl[its_Lin_SmplCnt] === nlcbl[its_Lin_SmplCnt])
-                    && (nlcbl[its_Lin_Tmp1] === 0)) ? (
+                    && (olcbl[its_Lin_Tmp1] === 0)) ? ( // the old line is not yet used (was nlcbl)
                     renew = alt;
                     olcbl[its_Lin_Tmp1] = 2000 + ln;
                 );
+                alt += 1; // (was missing : the loop ran up to the JSFX limit)
             );
 
             (renew < 0) ? (
@@ -7105,6 +7353,23 @@ loadMode ? (
                 lderr = 140; // studio block too large
             );
         ) :
+        (savtmp[0] === 'disp') ? (
+            // display blocks of the modules (absent from the older presets : the modules then show the objects 1)
+            si = min(savtmp[1], DispStructsSize); // another size (other version) : read up to the smallest one
+            ldtotal += load_mem(0, ReadersStructA, si);
+            loop(2 * (savtmp[1] - si), file_var(0, zzz_dskip)); // each value is saved in 2 words (see save_mem)
+            // the numbers of the objects shown must stay in their sets
+            si = 0; loop(8,
+                sp = ReadersStructA + si * ReadersBlockSize; sp[0] = max(0, min(RD_CNT - 1, 0|sp[0]));
+                sp = LinesStructA + si * LinesBlockSize; sp[0] = max(0, min(LN_CNT - 1, 0|sp[0]));
+                sp = WriterStructA + si * WriterBlockSize; sp[0] = max(0, min(WR_CNT - 1, 0|sp[0]));
+                si += 1;
+            );
+            si = 0; loop(10,
+                sp = EffectsStructA + si * LinesBlockSize; sp[0] = max(0, min(FX_CNT - 1, 0|sp[0]));
+                si += 1;
+            );
+        ) :
         (savtmp[0] === 'tnam') ? (
             ldtnam = savtmp[1]; // alternate tabs names (see "Rename tab...")
             si = 0; loop(savtmp[1],
@@ -7153,6 +7418,10 @@ loadMode ? (
     svtotal += save_mem(0, savtmp, TMPSIZ);
     svtotal += save_mem(0, serialBlock, 128);
     svtotal += save_mem(0, dcbBlocksAll, dcbBSize);
+    // Save the display blocks of the modules (reader, line, writer, effect shown in "Reader A", ...)
+    savtmp[0] = 'disp'; savtmp[1] = DispStructsSize; savtmp[2] = savtmp[3] = 0;
+    svtotal += save_mem(0, savtmp, TMPSIZ);
+    svtotal += save_mem(0, ReadersStructA, DispStructsSize);
 
     // siz4 = 0;
     // Save all objects, except lines set pointers and contents
@@ -8188,20 +8457,22 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
 function its_wave_marks(lcbl, rdrsel)
 local (i, x, m, p, lab)
 (
+    its_wave_colors();
     i = 0; loop(WR_CNT,
         (((x = Writers_set[i]) != 0) && (x[its_Wrt_Lcbl] == lcbl) && (x[its_Wrt_Status] == its_WrtStat_Writing)) ? (
-            ui_audio_mark(x[its_Wrt_Abspos], its_WaveColWrt);
+            ui_audio_mark(x[its_Wrt_Abspos], its_WaveColWrt, -(i + 1)); // numbered at the bottom (several writers may write the line)
         );
         i += 1;
     );
     i = 0; loop(RD_CNT,
         (((rdrsel < 0) || (rdrsel == i)) && ((x = Readers_set[i]) != 0) && (x[its_Rdr_Lcbl] == lcbl)
-            && (x[its_Rdr_Status] == its_RdrStat_Reading)) ? (
+            && ((x[its_Rdr_Status] == its_RdrStat_Reading) || (x[its_Rdr_Status] == its_RdrStat_Paused))) ? ( // paused : its position too
             lab = (rdrsel < 0) ? i + 1 : 0;
-            m = 0; loop(max(1, min(its_RdrMaxMulti, x[its_Rdr_MultiCnt])),
+            // delay mode : a single read position (its multi and x-fade positions are not used)
+            m = 0; loop((x[its_Rdr_Mode] === its_RdrMode_Delay) ? 1 : max(1, min(its_RdrMaxMulti, x[its_Rdr_MultiCnt])),
                 // (very) negative positions are used for fade in / fade out : no marker
                 ((p = x[its_Rdr_Abspos + m]) >= 0) ? ui_audio_mark(p, its_WaveColRdr, lab);
-                (x[its_Rdr_XFadeCnt + m] > 0) ? (
+                ((x[its_Rdr_XFadeCnt + m] > 0) && (x[its_Rdr_Mode] !== its_RdrMode_Delay) && (x[its_Rdr_Status] == its_RdrStat_Reading)) ? (
                     ((p = x[its_Rdr_AbsAuxpos + m]) >= 0) ? ui_audio_mark(p, its_WaveColAux, lab);
                 );
                 m += 1;
@@ -8217,6 +8488,7 @@ local (i, x, m, p, lab)
 function its_wave_reader(lcbl, rcbl, rdr, zoom)
 local (fa, fb, ra, rb, nch, ch0)
 (
+    its_wave_colors();
     fa = lcbl[its_Lin_Start]; fb = lcbl[its_Lin_Last];
     ra = rcbl[its_Rdr_RegSOut]; rb = rcbl[its_Rdr_RegEOut];
     // only when the region is smaller than the line (for the whole line, RegSOut = Start and RegEOut = Last)
@@ -8249,12 +8521,14 @@ local (fa, fb, ra, rb, nch, ch0)
 */
 function show_Reader_Pad(RDBL, blockId)
 local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi, i, xx, w, k, r, jmc,
-        rp, zi, zz, zzch, zzent, zzmcl, zzmmd, p1, p2, newlnb, rerr, spd, d1, clen, mvl)
+        rp, zi, zz, zzch, zzent, zzmcl, zzmmd, p1, p2, newlnb, rerr, spd, d1, clen, mvl, rgh, rsc)
 (
-    h1 = uix_jpadHeight(pad_Rdr_NL); // height
     h2 = (RDBL[5] > 0) ? ui_jd_slidh * RDBL[5] + 6 : 0;
     // waveform, between the pad and the sliders, if the reader has a line
     rcbl = Readers_set[RDBL[0]];
+    // delay mode : only the first 2 lines of the pad (no transport line)
+    // (no reader yet : the mode chosen in cell 1, RDBL[1])
+    h1 = uix_jpadHeight(((((rcbl > BASE_MEMORY) && (rcbl[-2] === KW_read)) ? rcbl[its_Rdr_Mode] : RDBL[1]) === its_RdrMode_Delay) ? 2 : pad_Rdr_NL); // height
     h3 = ((rcbl > BASE_MEMORY) && (rcbl[-2] === KW_read) && ((lcbl = rcbl[its_Rdr_Lcbl]) > BASE_MEMORY)
         && (lcbl[-2] === KW_lcbl) && (RDBL[8] >= its_RdrWaveMin)) ? RDBL[8] : 0;
     uix_jneed = h1+h2+h3+ui_jd_ctgr;
@@ -8310,7 +8584,8 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                 CL1 = Color_Cornflower_Blue;
                 (rok) ? (
                     dfCol = Col_InfoA ;
-                    RDBL[5] = (h3 > 0) ? 9 : 8; // + "Zoom" slider when the waveform is shown
+                    RDBL[5] = (rcbl[its_Rdr_Mode] === its_RdrMode_Delay) ? 2 : // delay mode : volume and offset only
+                        (h3 > 0) ? 9 : 8; // + "Zoom" slider when the waveform is shown
                     i = 0; loop(pad_Rdr_Siz,
                         pad_Rdr_Colrs[i] = dfCol;
                         strcpy(pad_Rdr_Labs[i],"");
@@ -8318,14 +8593,18 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                     strcpy(pad_Rdr_Labs[1],menu_Rdr_Type_N[rcbl[its_Rdr_Mode]]);
                     pad_Rdr_Colrs[1] = dfCol;
                     strcpy(pad_Rdr_Labs[2],menu_Rdr_Status_N[rcbl[its_Rdr_Status]]);
-                    pad_Rdr_Colrs[2] = dfCol;
+                    // status : Ready (blue), Paused (orange), Reading (green), else the default color
+                    k = rcbl[its_Rdr_Status];
+                    pad_Rdr_Colrs[2] = (k === its_RdrStat_Ready) ? Color_Light_Steel_Blue :
+                        (k === its_RdrStat_Paused) ? Color_Dark_Orange :
+                        (k === its_RdrStat_Reading) ? Color_Limegreen : dfCol;
                     (rcbl[its_Rdr_LineNb] >= 0) ? (
                         sprintf(pad_Rdr_Labs[3], "Line %d", rcbl[its_Rdr_LineNb]+1);
                         sprintf(pad_Rdr_Labs[4], "Size %.3f s", floor(1000*rcbl[its_Rdr_SmplCnt]/srate)/1000);
                         sprintf(pad_Rdr_Labs[5], "Channels %d", rcbl[its_Rdr_ChNbr]);
                         sprintf(pad_Rdr_Labs[6], "First %d", rcbl[its_Rdr_Bf1stChan]);
                         sprintf(pad_Rdr_Labs[7], "Used %d", rcbl[its_Rdr_BfChanUsed]);
-                        sprintf(pad_Rdr_Labs[11], "Pos %.2f %%", max(0,min(100, 100 * (rcbl[its_Rdr_Abspos] - rcbl[its_Rdr_Start])/max(1, rcbl[its_Rdr_Last] - rcbl[its_Rdr_Start]))));
+                        sprintf(pad_Rdr_Labs[11], "Pos %.3f s", max(0, min(rcbl[its_Rdr_Last], rcbl[its_Rdr_Abspos]) - rcbl[its_Rdr_Start]) / srate); // (as in the writer pad)
                         sprintf(pad_Rdr_Labs[12], "Speed %.3f", rcbl[its_Rdr_Speed]);
                         // setCellIdent(rcbl[its_Rdr_RCell], pad_Rdr_Labs+10, pad_Rdr_Labs+11);
                         pad_Rdr_Colrs[3] = pad_Rdr_Colrs[4] = pad_Rdr_Colrs[5] =
@@ -8357,6 +8636,15 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                     pad_Rdr_Colrs[10] = CP3;
                     pad_Rdr_Colrs[11] = pad_Rdr_Colrs[12] = CL1;
                     pad_Rdr_Colrs[13] = pad_Rdr_Colrs[14] = pad_Rdr_Colrs[15] = CP1;
+                    // Delay mode : the writer to follow (right clic : menu)
+                    (rcbl[its_Rdr_Mode] === its_RdrMode_Delay) ? (
+                        (rcbl[its_Rdr_WrSrc] >= 0) ? (
+                            sprintf(pad_Rdr_Labs[13], "Writer %d", rcbl[its_Rdr_WrSrc]+1);
+                            pad_Rdr_Colrs[13] = Color_Heliotrope;
+                        ) : (
+                            strcpy(pad_Rdr_Labs[13], "Writer: None");
+                        );
+                    );
 
                     k = RDBL[6];
                     (k === 0) ? (
@@ -8391,6 +8679,11 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                     strcpy(pad_Rdr_Labs[1],menu_Rdr_Type_N[RDBL[1]]);
                     strcpy(pad_Rdr_Labs[2],menu_Rdr_Status_N[0]);
                     strcpy(pad_Rdr_Labs[3],"Line: None");
+                    // delay mode : the writer to follow can be chosen at once (right clic : menu ; this creates the reader)
+                    (RDBL[1] === its_RdrMode_Delay) ? (
+                        strcpy(pad_Rdr_Labs[13], "Writer: None");
+                        pad_Rdr_Colrs[13] = CP1;
+                    );
                     rerr = RDBL[2];
                 );
                 sprintf(pad_Rdr_Labs[0],"Reader %d", rdr+1);
@@ -8415,7 +8708,14 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                 strcpy(pad_Rdr_Labs[23],">>>");
 
 
-                zz = control_jpad(pad_Reader);
+                zz = control_jpad(pad_Reader, (((rok) ? rcbl[its_Rdr_Mode] : RDBL[1]) === its_RdrMode_Delay) ? 2 : -1, -1, 0); // delay mode : 2 lines
+                // muted by another reader in solo : a small red circle in the "Mute" cell
+                (rok && (its_RdrSolos !== 0) && !(rcbl[its_Rdr_StFlgs] & its_RdrFlg_solo)) ? (
+                    ui_jpad_cell_pos(8);
+                    rsc = uix_drawconfig_current[9]; // retina scaling
+                    gfx_set(0.9, 0.1, 0.1, 1);
+                    gfx_circle(rsc * (ui_jpad_cx + ui_jpad_lst_wi - 11), rsc * (ui_jpad_cy + 9), rsc * 4, 1);
+                );
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 34;
                     zzch = pad_Reader[ui_jpad_lkey];
@@ -8431,6 +8731,9 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                         (zzmcl === 0) ? (
                             k = rdr+1;
                             ui_menu_tick(menu_Rdr_Ids, k, 1);
+                            // also tick the header of the sub-menu that holds the current reader
+                            rgh = menu_Rdr_Ids[ui_jmenu_items + (0|(rdr / menu_Rdr_Grp)) * (menu_Rdr_Grp + 1)];
+                            str_setchar(rgh, 1, '!');
                             xx = control_jmenu(menu_Rdr_Ids);
                             sprintf(#itm, "Menu 0 -> %d", xx);
                             mSL_log(SysLogBox, #itm);
@@ -8438,6 +8741,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                                 RDBL[0] = xx - 1; // select a new reader
                             );
                             ui_menu_tick(menu_Rdr_Ids, k, 0);
+                            str_setchar(rgh, 1, ui_jmenu_chSP);
                         ) :
                         (zzmcl === 1) ? (
                             k = 1 + (rok ? ( rcbl[its_Rdr_Mode] ) : ( RDBL[1] ));
@@ -8447,7 +8751,15 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                             mSL_log(SysLogBox, #itm);
                             (xx != 0) ? (
                                 (rok) ? (
-                                    rcbl[its_Rdr_Mode] = xx - 1; // change mode
+                                    r = Rd_Set_Mode(rdr, xx - 1); // change mode, and prepare the reader for it
+                                    sprintf(#itm, "Menu 1 : %d -> %d -> %d", rdr, xx, r);
+                                    mSL_log(SysLogBox, #itm);
+                                    // keep the JSFX sliders in sync when this reader is the current one
+                                    (rdr === slReader) ? (
+                                        slRdModePrv = slRdMode = rcbl[its_Rdr_Mode];
+                                        slRStatusPrv = slRStatus = rcbl[its_Rdr_Status];
+                                        slRdWrefPrv = slRdWref = 1 + rcbl[its_Rdr_WrSrc];
+                                    );
                                 ) : (
                                     RDBL[1] = xx - 1; // "pre mode"
                                 );
@@ -8471,6 +8783,11 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                             k = (rok) ? rcbl[its_Rdr_LineNb]+2 : 1;
                             ui_menu_tick(menu_Lin_SIds, -1, 0);
                             ui_menu_tick(menu_Lin_SIds, k, 1);
+                            // also tick the header of the sub-menu that holds the current line (reset below by the tick -1)
+                            (k > 1) ? (
+                                rgh = menu_Lin_SIds[ui_jmenu_items + 2 + (0|((k - 2) / menu_Lin_Grp)) * (menu_Lin_Grp + 1)];
+                                str_setchar(rgh, 1, '!');
+                            );
                             xx = control_jmenu(menu_Lin_SIds); // select a line
                             (xx != 0) ? (
                                 x = Rd_Set_Line(rdr, xx - 1); // 0 for "none"
@@ -8496,6 +8813,11 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                                 k = rcbl[its_Rdr_BfChanUsed];
                                 ui_menu_tick(menu_128_1_Ids, -1, 0);
                                 ui_menu_tick(menu_128_1_Ids, k, 1);
+                                // also tick the header of the sub-menu that holds the current count (reset below by the tick -1)
+                                (k >= 1) ? (
+                                    rgh = menu_128_1_Ids[ui_jmenu_items + (0|((k - 1) / menu_128_Grp)) * (menu_128_Grp + 1)];
+                                    str_setchar(rgh, 1, '!');
+                                );
                                 xx = control_jmenu(menu_128_1_Ids); // select a count
                                 (xx != 0) ? (
                                     rcbl[its_Rdr_BfChanUsed] = xx;
@@ -8512,6 +8834,9 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                                 ) : (
                                     ui_menu_tick(menu_XCells_Ids, (k >> 8) + 2, 1);
                                     ui_menu_tick(menu_XCells_Ids, (k & 0xFF) + menu_XCells_Ids_Nums + 2, 1);
+                                    // also tick the header of the sub-menu that holds the number (reset below by the tick -1)
+                                    rgh = menu_XCells_Ids[ui_jmenu_items + menu_XCells_Ids_Hdr0 + ((k & 0xFF) >> 5) * 33];
+                                    str_setchar(rgh, 1, '!');
                                 );
                                 xx = control_jmenu(menu_XCells_Ids); // select a count
                                 (xx != 0) ? (
@@ -8524,7 +8849,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                                         (x < menu_XCells_Ids_Nums) ? (
                                             rcbl[its_Rdr_RCellT] = x;
                                         ) : (
-                                            rcbl[its_Rdr_RCellN] = (x - menu_XCells_Ids_Nums) % 0xFF;
+                                            rcbl[its_Rdr_RCellN] = (x - menu_XCells_Ids_Nums) & 0xFF; // (% 0xFF : 255 gave 0)
                                         );
                                         rcbl[its_Rdr_RCell] = rcbl[its_Rdr_RCellT] * 256 + rcbl[its_Rdr_RCellN] + 1;
                                     );
@@ -8563,6 +8888,40 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                                     RDBL[4] = xx - 1;
                                 );
                                 ui_menu_tick(menu_Rdr_Speed, -1, 0);
+                            );
+                        ) :
+                        (zzmcl === 13) ? (
+                            // Delay mode : choose the writer to follow (no reader yet : RDBL[1] is the mode chosen in cell 1)
+                            (((rok) ? rcbl[its_Rdr_Mode] : RDBL[1]) === its_RdrMode_Delay) ? (
+                                k = (rok) ? rcbl[its_Rdr_WrSrc] + 2 : 1; // 1 for "None"
+                                ui_menu_tick(menu_Wrt_SIds, -1, 0);
+                                ui_menu_tick(menu_Wrt_SIds, k, 1);
+                                // also tick the header of the sub-menu that holds the current writer (reset below by the tick -1)
+                                (k > 1) ? (
+                                    rgh = menu_Wrt_SIds[ui_jmenu_items + 2 + (0|((k - 2) / menu_Wrt_Grp)) * (menu_Wrt_Grp + 1)];
+                                    str_setchar(rgh, 1, '!');
+                                );
+                                xx = control_jmenu(menu_Wrt_SIds); // select a writer
+                                ((!rok) && (xx > 1)) ? (
+                                    // a writer is chosen : create the reader, in delay mode
+                                    rcbl = Rd_Create(rdr);
+                                    rok = (rcbl > BASE_MEMORY) && (rcbl[-2] === KW_read);
+                                    (rok) ? (rcbl[its_Rdr_Mode] = its_RdrMode_Delay);
+                                );
+                                ((xx != 0) && (rok)) ? (
+                                    r = Rd_Set_Writer(rdr, xx - 1); // 0 for "none"
+                                    sprintf(#itm, "Menu 13 : %d -> %d -> %d", rdr, xx, r);
+                                    mSL_log(SysLogBox, #itm);
+                                    // keep the JSFX sliders in sync when this reader is the current one (it may have just been created)
+                                    (rdr === slReader) ? (
+                                        Currreader = rcbl;
+                                        slRdModePrv = slRdMode = rcbl[its_Rdr_Mode];
+                                        slRdWrefPrv = slRdWref = 1 + rcbl[its_Rdr_WrSrc];
+                                        slRStatusPrv = slRStatus = rcbl[its_Rdr_Status];
+                                    );
+                                    rdupdt = 1;
+                                );
+                                ui_menu_tick(menu_Wrt_SIds, -1, 0);
                             );
                         ) :
                         (zzmcl === 14) ? (
@@ -8630,7 +8989,18 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                     //==============================================
                     (zz & ui_jpad_ev_lmc) ? (  // left mouse clic
                         k = (jmc & cmdCap) ? 4 : (jmc & altCap) ? 16 : 1;
-                        (zzmcl === 8) ? (
+                        // (the reader must exist : rcbl is 0 otherwise)
+                        ((zzmcl === 2) && rok) ? (
+                            // status : Paused -> Reading ; Ready or Reading -> Paused
+                            w = rcbl[its_Rdr_Status];
+                            ((w === its_RdrStat_Ready) || (w === its_RdrStat_Paused) || (w === its_RdrStat_Reading)) ? (
+                                r = Rd_Set_Status(rdr, (w === its_RdrStat_Paused) ? its_RdrStat_Reading : its_RdrStat_Paused);
+                                sprintf(#itm, "Clic 2 : %d -> %d -> %d (%d)", rdr, w, rcbl[its_Rdr_Status], r);
+                                mSL_log(SysLogBox, #itm);
+                                (rdr === slReader) ? (slRStatusPrv = slRStatus = rcbl[its_Rdr_Status]);
+                            );
+                        );
+                        ((zzmcl === 8) && rok) ? (
                             // mute on/off
                             (rcbl[its_Rdr_StFlgs] & its_RdrFlg_mute) ? (
                                 rcbl[its_Rdr_StFlgs] &= -1 ~ its_RdrFlg_mute;
@@ -8638,15 +9008,15 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                                 rcbl[its_Rdr_StFlgs] |= its_RdrFlg_mute;
                             );
                         );
-                        (zzmcl === 9) ? (
-                            // mute on/off
+                        ((zzmcl === 9) && rok) ? (
+                            // solo on/off
                             (rcbl[its_Rdr_StFlgs] & its_RdrFlg_solo) ? (
                                 rcbl[its_Rdr_StFlgs] &= -1 ~ its_RdrFlg_solo;
                             ) : (
                                 rcbl[its_Rdr_StFlgs] |= its_RdrFlg_solo;
                             );
                         ) :
-                        (zzmcl === 14) ? (
+                        ((zzmcl === 14) && rok) ? (
                             rcbl[its_Rdr_Check] = 0; //this will check for errors in reading
                         );
                         (jmc & shfCap) ? (
@@ -8793,214 +9163,231 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                         rdupdt = 1;
                     );
 
-                    // Play speed
-                    k = RDBL[4];
-                    (k === 0) ? (
-                        parSetPP(p_playSpeed, pp_Max, 4);
-                        parSetPP(p_playSpeed, pp_Min, -4);
-                        parSetPP(p_playSpeed, pp_Slope, 0);
-                    ) :
-                    (k === 1) ? (
-                        parSetPP(p_playSpeed, pp_Max, 4);
-                        parSetPP(p_playSpeed, pp_Min, 0);
-                        parSetPP(p_playSpeed, pp_Slope, 3);
-                    ) :
-                    (k === 2) ? (
-                        parSetPP(p_playSpeed, pp_Max, 1);
-                        parSetPP(p_playSpeed, pp_Min, 0);
-                        parSetPP(p_playSpeed, pp_Slope, 5);
-                    ) :
-                    (k === 3) ? (
-                        parSetPP(p_playSpeed, pp_Max, 0);
-                        parSetPP(p_playSpeed, pp_Min, -1);
-                        parSetPP(p_playSpeed, pp_Slope, -5);
-                    ) :
-                    (k === 4) ? (
-                        parSetPP(p_playSpeed, pp_Max, 0);
-                        parSetPP(p_playSpeed, pp_Min, -4);
-                        parSetPP(p_playSpeed, pp_Slope, -3);
-                    ) :
-                    (k === 5) ? (
-                        parSetPP(p_playSpeed, pp_Max, 1);
-                        parSetPP(p_playSpeed, pp_Min, -1);
-                        parSetPP(p_playSpeed, pp_Slope, 0);
-                    );
-                    paramValues[p_playSpeed] = zi = rcbl[its_Rdr_Speed];
-                    r = parCtl(p_playSpeed);
-                    (r != 0) ? (
-                        sprintf(#itm, "Speed -> %d %.3f", r, parV(p_playSpeed));
-                        mSL_log(SysLogBox, #itm);
-                        (r === 8) ? (
-                            // right clic to reset
-                            Rd_Set_Speed(rdr, 1, 1);
-                            RDBL[4] = 0;
-                        ) : (
-                            (paramValues[p_playSpeed] !== zi) ? (
-                                Rd_Set_Speed(rdr, paramValues[p_playSpeed], 0);
-                            );
+                    (rcbl[its_Rdr_Mode] === its_RdrMode_Delay) ? (
+                        // Delay mode : the reader follows its writer at the same speed, only its offset (seconds) can be changed
+                        parSetPP(p_rdOffset, pp_Max, max(0.001, clen));
+                        paramValues[p_rdOffset] = rcbl[its_Rdr_WOffset];
+                        r = parCtl(p_rdOffset);
+                        (r != 0) ? (
+                            sprintf(#itm, "Offset -> %d %.3f", r, parV(p_rdOffset));
+                            mSL_log(SysLogBox, #itm);
+                            zi = (r === 8) ? 0 : parV(p_rdOffset); // right clic : minimal offset
+                            Rd_Set_Offset(rcbl, zi * srate); // with a short cross fade if the reader plays
+                            // keep the JSFX slider in sync when this reader is the current one
+                            (rcbl === Currreader) ? (slRdOffsPrv = slRdOffs = rcbl[its_Rdr_WOffset];);
+                            rdupdt = 1;
                         );
-                        rdupdt = 1;
-                    );
-
-
-                    // Play position
-                    paramValues[p_playPos] = smp2sec(max(rcbl[its_Rdr_Start], min(rcbl[its_Rdr_Last], rcbl[its_Rdr_Abspos])) - rcbl[its_Rdr_Start]);
-                    k = RDBL[6];
-                    (k === 0) ? (
-                        parSetPP(p_playPos, pp_Min, 0);
-                        parSetPP(p_playPos, pp_Max, clen);
-                        parSetPP(p_playPos, pp_Step, 0.001);
-                    ) :
-                    (k === 1) ? (
-                        parSetPP(p_playPos, pp_Min, max(0, rp - 10));
-                        parSetPP(p_playPos, pp_Max, min(clen, rp + 10));
-                        parSetPP(p_playPos, pp_Step, 0.00001);
-                    ) :
-                    (k === 2) ? (
-                        parSetPP(p_playPos, pp_Min, max(0, rp - 1));
-                        parSetPP(p_playPos, pp_Max, min(clen, rp + 1));
-                        parSetPP(p_playPos, pp_Step, 0.000001);
                     ) : (
-                        parSetPP(p_playPos, pp_Min, 0);
-                        parSetPP(p_playPos, pp_Max, clen);
-                        parSetPP(p_playPos, pp_Step, 0.001);
-                    );
-                    r = parCtl(p_playPos);
-                    (r != 0) ? (
-                        sprintf(#itm, "Position -> %d %.3f", r, parV(p_playPos));
-                        mSL_log(SysLogBox, #itm);
-                        rcbl[its_Rdr_NxtPosSec] = parV(p_playPos); // Relative, in seconds
-                        /*
-                        (r === 8) ? (
-                            // right clic to reset
-                            Rd_Set_Speed(rdr, 1, 1);
-                        ) : (
-                            (paramValues[p_playPos] !== zi) ? (
-                                Rd_Set_Speed(rdr, paramValues[p_playPos], 0);
+                        // Reader mode
+                        // Play speed
+                        k = RDBL[4];
+                        (k === 0) ? (
+                            parSetPP(p_playSpeed, pp_Max, 4);
+                            parSetPP(p_playSpeed, pp_Min, -4);
+                            parSetPP(p_playSpeed, pp_Slope, 0);
+                        ) :
+                        (k === 1) ? (
+                            parSetPP(p_playSpeed, pp_Max, 4);
+                            parSetPP(p_playSpeed, pp_Min, 0);
+                            parSetPP(p_playSpeed, pp_Slope, 3);
+                        ) :
+                        (k === 2) ? (
+                            parSetPP(p_playSpeed, pp_Max, 1);
+                            parSetPP(p_playSpeed, pp_Min, 0);
+                            parSetPP(p_playSpeed, pp_Slope, 5);
+                        ) :
+                        (k === 3) ? (
+                            parSetPP(p_playSpeed, pp_Max, 0);
+                            parSetPP(p_playSpeed, pp_Min, -1);
+                            parSetPP(p_playSpeed, pp_Slope, -5);
+                        ) :
+                        (k === 4) ? (
+                            parSetPP(p_playSpeed, pp_Max, 0);
+                            parSetPP(p_playSpeed, pp_Min, -4);
+                            parSetPP(p_playSpeed, pp_Slope, -3);
+                        ) :
+                        (k === 5) ? (
+                            parSetPP(p_playSpeed, pp_Max, 1);
+                            parSetPP(p_playSpeed, pp_Min, -1);
+                            parSetPP(p_playSpeed, pp_Slope, 0);
+                        );
+                        paramValues[p_playSpeed] = zi = rcbl[its_Rdr_Speed];
+                        r = parCtl(p_playSpeed);
+                        (r != 0) ? (
+                            sprintf(#itm, "Speed -> %d %.3f", r, parV(p_playSpeed));
+                            mSL_log(SysLogBox, #itm);
+                            (r === 8) ? (
+                                // right clic to reset
+                                Rd_Set_Speed(rdr, 1, 1);
+                                RDBL[4] = 0;
+                            ) : (
+                                (paramValues[p_playSpeed] !== zi) ? (
+                                    Rd_Set_Speed(rdr, paramValues[p_playSpeed], 0);
+                                );
                             );
+                            rdupdt = 1;
                         );
-                        */
-                        rdupdt = 1;
-                    );
 
-                    // Play low limit (seconds)
-                    k = RDBL[6];
-                    (k === 0) ? (
-                        parSetPP(p_play_S_Low, pp_Min, 0);
+
+                        // Play position
+                        paramValues[p_playPos] = smp2sec(max(rcbl[its_Rdr_Start], min(rcbl[its_Rdr_Last], rcbl[its_Rdr_Abspos])) - rcbl[its_Rdr_Start]);
+                        k = RDBL[6];
+                        (k === 0) ? (
+                            parSetPP(p_playPos, pp_Min, 0);
+                            parSetPP(p_playPos, pp_Max, clen);
+                            parSetPP(p_playPos, pp_Step, 0.001);
+                        ) :
+                        (k === 1) ? (
+                            parSetPP(p_playPos, pp_Min, max(0, rp - 10));
+                            parSetPP(p_playPos, pp_Max, min(clen, rp + 10));
+                            parSetPP(p_playPos, pp_Step, 0.00001);
+                        ) :
+                        (k === 2) ? (
+                            parSetPP(p_playPos, pp_Min, max(0, rp - 1));
+                            parSetPP(p_playPos, pp_Max, min(clen, rp + 1));
+                            parSetPP(p_playPos, pp_Step, 0.000001);
+                        ) : (
+                            parSetPP(p_playPos, pp_Min, 0);
+                            parSetPP(p_playPos, pp_Max, clen);
+                            parSetPP(p_playPos, pp_Step, 0.001);
+                        );
+                        r = parCtl(p_playPos);
+                        (r != 0) ? (
+                            sprintf(#itm, "Position -> %d %.3f", r, parV(p_playPos));
+                            mSL_log(SysLogBox, #itm);
+                            rcbl[its_Rdr_NxtPosSec] = parV(p_playPos); // Relative, in seconds
+                            /*
+                            (r === 8) ? (
+                                // right clic to reset
+                                Rd_Set_Speed(rdr, 1, 1);
+                            ) : (
+                                (paramValues[p_playPos] !== zi) ? (
+                                    Rd_Set_Speed(rdr, paramValues[p_playPos], 0);
+                                );
+                            );
+                            */
+                            rdupdt = 1;
+                        );
+
+                        // Play low limit (seconds)
+                        k = RDBL[6];
+                        (k === 0) ? (
+                            parSetPP(p_play_S_Low, pp_Min, 0);
+                            parSetPP(p_play_S_Low, pp_Max, clen);
+                            parSetPP(p_play_S_Low, pp_Step, 0.001);
+                        ) :
+                        (k === 1) ? (
+                            parSetPP(p_play_S_Low, pp_Min, max(0, rp - 10));
+                            parSetPP(p_play_S_Low, pp_Max, min(clen, rp + 10));
+                            parSetPP(p_play_S_Low, pp_Step, 0.00001);
+                        ) :
+                        (k === 2) ? (
+                            parSetPP(p_play_S_Low, pp_Min, max(0, rp - 1));
+                            parSetPP(p_play_S_Low, pp_Max, min(clen, rp + 1));
+                            parSetPP(p_play_S_Low, pp_Step, 0.000001);
+                        );
+                        paramValues[p_play_S_Low] = rcbl[its_Rdr_LowPosSec] ;
                         parSetPP(p_play_S_Low, pp_Max, clen);
-                        parSetPP(p_play_S_Low, pp_Step, 0.001);
-                    ) :
-                    (k === 1) ? (
-                        parSetPP(p_play_S_Low, pp_Min, max(0, rp - 10));
-                        parSetPP(p_play_S_Low, pp_Max, min(clen, rp + 10));
-                        parSetPP(p_play_S_Low, pp_Step, 0.00001);
-                    ) :
-                    (k === 2) ? (
-                        parSetPP(p_play_S_Low, pp_Min, max(0, rp - 1));
-                        parSetPP(p_play_S_Low, pp_Max, min(clen, rp + 1));
-                        parSetPP(p_play_S_Low, pp_Step, 0.000001);
-                    );
-                    paramValues[p_play_S_Low] = rcbl[its_Rdr_LowPosSec] ;
-                    parSetPP(p_play_S_Low, pp_Max, clen);
-                    r = parCtl(p_play_S_Low);
-                    (r != 0) ? (
-                        zi = parV(p_play_S_Low);
-                        (zi > rcbl[its_Rdr_HighPosSec]) ? (
-                            rcbl[its_Rdr_LowPosSec] = rcbl[its_Rdr_HighPosSec];
-                            rcbl[its_Rdr_HighPosSec] = zi;
-                        ) : (
-                            rcbl[its_Rdr_LowPosSec] = zi;
+                        r = parCtl(p_play_S_Low);
+                        (r != 0) ? (
+                            zi = parV(p_play_S_Low);
+                            (zi > rcbl[its_Rdr_HighPosSec]) ? (
+                                rcbl[its_Rdr_LowPosSec] = rcbl[its_Rdr_HighPosSec];
+                                rcbl[its_Rdr_HighPosSec] = zi;
+                            ) : (
+                                rcbl[its_Rdr_LowPosSec] = zi;
+                            );
+                            rdupdt = 1;
                         );
-                        rdupdt = 1;
-                    );
 
-                    // Play high limit (seconds)
-                    k = RDBL[6];
-                    (k === 0) ? (
-                        parSetPP(p_play_S_High, pp_Min, 0);
+                        // Play high limit (seconds)
+                        k = RDBL[6];
+                        (k === 0) ? (
+                            parSetPP(p_play_S_High, pp_Min, 0);
+                            parSetPP(p_play_S_High, pp_Max, clen);
+                            parSetPP(p_play_S_High, pp_Step, 0.001);
+                        ) :
+                        (k === 1) ? (
+                            parSetPP(p_play_S_High, pp_Min, max(0, rp - 10));
+                            parSetPP(p_play_S_High, pp_Max, min(clen, rp + 10));
+                            parSetPP(p_play_S_High, pp_Step, 0.00001);
+                        ) :
+                        (k === 2) ? (
+                            parSetPP(p_play_S_High, pp_Min, max(0, rp - 1));
+                            parSetPP(p_play_S_High, pp_Max, min(clen, rp + 1));
+                            parSetPP(p_play_S_High, pp_Step, 0.000001);
+                        );
+                        paramValues[p_play_S_High] = rcbl[its_Rdr_HighPosSec];
                         parSetPP(p_play_S_High, pp_Max, clen);
-                        parSetPP(p_play_S_High, pp_Step, 0.001);
-                    ) :
-                    (k === 1) ? (
-                        parSetPP(p_play_S_High, pp_Min, max(0, rp - 10));
-                        parSetPP(p_play_S_High, pp_Max, min(clen, rp + 10));
-                        parSetPP(p_play_S_High, pp_Step, 0.00001);
-                    ) :
-                    (k === 2) ? (
-                        parSetPP(p_play_S_High, pp_Min, max(0, rp - 1));
-                        parSetPP(p_play_S_High, pp_Max, min(clen, rp + 1));
-                        parSetPP(p_play_S_High, pp_Step, 0.000001);
-                    );
-                    paramValues[p_play_S_High] = rcbl[its_Rdr_HighPosSec];
-                    parSetPP(p_play_S_High, pp_Max, clen);
-                    r = parCtl(p_play_S_High);
-                    (r != 0) ? (
-                        zi = parV(p_play_S_High);
-                        (zi < rcbl[its_Rdr_LowPosSec]) ? (
-                            rcbl[its_Rdr_HighPosSec] = rcbl[its_Rdr_LowPosSec];
-                            rcbl[its_Rdr_LowPosSec] = zi;
-                        ) : (
-                            rcbl[its_Rdr_HighPosSec] = zi;
+                        r = parCtl(p_play_S_High);
+                        (r != 0) ? (
+                            zi = parV(p_play_S_High);
+                            (zi < rcbl[its_Rdr_LowPosSec]) ? (
+                                rcbl[its_Rdr_HighPosSec] = rcbl[its_Rdr_LowPosSec];
+                                rcbl[its_Rdr_LowPosSec] = zi;
+                            ) : (
+                                rcbl[its_Rdr_HighPosSec] = zi;
+                            );
+                            rdupdt = 1;
                         );
-                        rdupdt = 1;
-                    );
 
-                    // Region position (seconds)
-                    k = RDBL[6];
-                    (k === 0) ? (
-                        parSetPP(p_play_S_Pos, pp_Min, 0);
+                        // Region position (seconds)
+                        k = RDBL[6];
+                        (k === 0) ? (
+                            parSetPP(p_play_S_Pos, pp_Min, 0);
+                            parSetPP(p_play_S_Pos, pp_Max, clen);
+                            parSetPP(p_play_S_Pos, pp_Step, 0.001);
+                        ) :
+                        (k === 1) ? (
+                            parSetPP(p_play_S_Pos, pp_Min, max(0, rp - 10));
+                            parSetPP(p_play_S_Pos, pp_Max, min(clen, rp + 10));
+                            parSetPP(p_play_S_Pos, pp_Step, 0.00001);
+                        ) :
+                        (k === 2) ? (
+                            parSetPP(p_play_S_Pos, pp_Min, max(0, rp - 1));
+                            parSetPP(p_play_S_Pos, pp_Max, min(clen, rp + 1));
+                            parSetPP(p_play_S_Pos, pp_Step, 0.000001);
+                        );
+                        paramValues[p_play_S_Pos] = rcbl[its_Rdr_RegPosSec];
                         parSetPP(p_play_S_Pos, pp_Max, clen);
-                        parSetPP(p_play_S_Pos, pp_Step, 0.001);
-                    ) :
-                    (k === 1) ? (
-                        parSetPP(p_play_S_Pos, pp_Min, max(0, rp - 10));
-                        parSetPP(p_play_S_Pos, pp_Max, min(clen, rp + 10));
-                        parSetPP(p_play_S_Pos, pp_Step, 0.00001);
-                    ) :
-                    (k === 2) ? (
-                        parSetPP(p_play_S_Pos, pp_Min, max(0, rp - 1));
-                        parSetPP(p_play_S_Pos, pp_Max, min(clen, rp + 1));
-                        parSetPP(p_play_S_Pos, pp_Step, 0.000001);
-                    );
-                    paramValues[p_play_S_Pos] = rcbl[its_Rdr_RegPosSec];
-                    parSetPP(p_play_S_Pos, pp_Max, clen);
-                    r = parCtl(p_play_S_Pos);
-                    (r != 0) ? (
-                        rcbl[its_Rdr_RegPosSec] = parV(p_play_S_Pos);
-                        rdupdt = 1;
+                        r = parCtl(p_play_S_Pos);
+                        (r != 0) ? (
+                            rcbl[its_Rdr_RegPosSec] = parV(p_play_S_Pos);
+                            rdupdt = 1;
+                        );
+
+                        // region size (seconds)
+                        // Play speed
+                        k = RDBL[6];
+                        (k === 0) ? (
+                            parSetPP(p_play_S_Len, pp_Max, clen);
+                            parSetPP(p_play_S_Len, pp_Step, 0.00001);
+                        ) :
+                        (k === 1) ? (
+                            parSetPP(p_play_S_Len, pp_Max, 10);
+                            parSetPP(p_play_S_Len, pp_Step, 0.00001);
+                        ) :
+                        (k === 2) ? (
+                            parSetPP(p_play_S_Len, pp_Max, 1);
+                            parSetPP(p_play_S_Len, pp_Step, 0.000001);
+                        );
+                        paramValues[p_play_S_Len] = rcbl[its_Rdr_RegSizeSec];
+                        r = parCtl(p_play_S_Len);
+                        (r != 0) ? (
+                            rcbl[its_Rdr_RegSizeSec] = parV(p_play_S_Len);
+                            rdupdt = 1;
+                        );
+
+                        // cross fade time (ms)
+                        paramValues[p_play_XFade] = rcbl[its_Rdr_XFade_mSec];
+                        r = parCtl(p_play_XFade);
+                        (r != 0) ? (
+                            rcbl[its_Rdr_XFade_mSec] = parV(p_play_XFade);
+                            rdupdt = 1;
+                        );
                     );
 
-                    // region size (seconds)
-                    // Play speed
-                    k = RDBL[6];
-                    (k === 0) ? (
-                        parSetPP(p_play_S_Len, pp_Max, clen);
-                        parSetPP(p_play_S_Len, pp_Step, 0.00001);
-                    ) :
-                    (k === 1) ? (
-                        parSetPP(p_play_S_Len, pp_Max, 10);
-                        parSetPP(p_play_S_Len, pp_Step, 0.00001);
-                    ) :
-                    (k === 2) ? (
-                        parSetPP(p_play_S_Len, pp_Max, 1);
-                        parSetPP(p_play_S_Len, pp_Step, 0.000001);
-                    );
-                    paramValues[p_play_S_Len] = rcbl[its_Rdr_RegSizeSec];
-                    r = parCtl(p_play_S_Len);
-                    (r != 0) ? (
-                        rcbl[its_Rdr_RegSizeSec] = parV(p_play_S_Len);
-                        rdupdt = 1;
-                    );
-
-                    // cross fade time (ms)
-                    paramValues[p_play_XFade] = rcbl[its_Rdr_XFade_mSec];
-                    r = parCtl(p_play_XFade);
-                    (r != 0) ? (
-                        rcbl[its_Rdr_XFade_mSec] = parV(p_play_XFade);
-                        rdupdt = 1;
-                    );
-
-                    // zoom of the waveform (a display property : RDBL[9])
+                    // zoom of the waveform (a display property : RDBL[9]), not in delay mode
                     (RDBL[5] > 8) ? (
                         paramValues[p_play_Zoom] = RDBL[9];
                         r = parCtl(p_play_Zoom);
@@ -9030,7 +9417,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
 */
 function show_Line_Pad(LDBL, blockId)
 local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, dfCol, zzch, zzent, zzmcl,
-        zzmmd, p1, p2, nlnr)
+        zzmmd, p1, p2, nlnr, lgh)
 (
     h1 = uix_jpadHeight(pad_Lin_NL); // height
     h2 = ui_jd_slidh * 1 + 4;
@@ -9122,6 +9509,9 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
                         (zzmcl === 0) ? (
                             k = lnr+1;
                             ui_menu_tick(menu_Lin_Ids, k, 1);
+                            // also tick the header of the sub-menu that holds the current line (reset below by the tick -1)
+                            lgh = menu_Lin_Ids[ui_jmenu_items + (0|(lnr / menu_Lin_Grp)) * (menu_Lin_Grp + 1)];
+                            str_setchar(lgh, 1, '!');
                             xx = control_jmenu(menu_Lin_Ids);
                             sprintf(#itm, "Menu 0 -> %d", xx);
                             mSL_log(SysLogBox, #itm);
@@ -9149,6 +9539,11 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
                             (lcbl === 0) ? (
                                 k = max(1,LDBL[2]);
                                 ui_menu_tick(menu_128_1_Ids, k, 1);
+                                // also tick the header of the sub-menu that holds the current count (reset below by the tick -1)
+                                (k >= 1) ? (
+                                    lgh = menu_128_1_Ids[ui_jmenu_items + (0|((k - 1) / menu_128_Grp)) * (menu_128_Grp + 1)];
+                                    str_setchar(lgh, 1, '!');
+                                );
                                 xx = control_jmenu(menu_128_1_Ids);
                                 sprintf(#itm, "Menu 4 -> %d", xx);
                                 mSL_log(SysLogBox, #itm);
@@ -9293,16 +9688,26 @@ local (h2)
 
 /*
     WDBL[0] : number of writer to display
+    The pad (2 lines of 8 cells), the waveform of the line of the writer (if any), the sliders (record gain, overdub)
+    Cells : 0 writer number, 2 status, 3 line, 4 size, 5 channels, 6 first channel written, 7 channels used,
+            10 source cell, 11 write position (s), 15 actions (right clic : menus)
 */
 function show_Writer_Pad(WDBL, blockID)
-local (h1, h2, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, CL1, dfCol, i, zz, zzch,
-        zzent, zzmcl, zzmmd)
+local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, CL1, dfCol, i, k, r, w, x, xx, zi, zz, zzch,
+        zzent, zzmcl, zzmmd, wgh, f, n)
 (
     h1 = uix_jpadHeight(pad_Wrt_NL); // height
-    h2 = (WDBL[5] > 0) ? ui_jd_slidh * WDBL[5] + 6 : 0;
-    uix_jneed = uix_jmini = h1+h2+ui_jd_ctgr;
+    wrt = WDBL[0]; // number of writer to be displayed
+    wcbl = Writers_set[wrt];
+    wok = (wcbl > BASE_MEMORY) && (wcbl[-2] === KW_writ);
+    lcbl = wok ? wcbl[its_Wrt_Lcbl] : 0;
+    lok = wok && (lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl);
+    h2 = wok ? ui_jd_slidh * 2 + 6 : 0; // sliders : record gain, overdub
+    h3 = lok ? its_LinWaveH : 0; // waveform of the line, between the pad and the sliders
+    uix_jneed = h1+h2+h3+ui_jd_ctgr;
+    uix_jmini = h1+h2+ui_jd_ctgr;
     (ui_height() >= uix_jmini) ? (
-        ui_split_top(uix_jneed);
+        ui_split_top(min(uix_jneed, ui_height()));
         ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
             zzmi = ui_hover();
             jmc = ui_jmouse_cap;
@@ -9317,37 +9722,251 @@ local (h1, h2, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, CL1, dfCol, i, z
             control_group(blockDispNames[blockDispInverts[blockId]]);
             ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
 
-            wrt = WDBL[0]; // number of writer to be displayed
             ui_split_top(h1);
                 ui_pad(1,2,2,2);
                 mSL_setStrArray(pad_Wrt_Labs, pad_Wrt_Siz);
-                wcbl = Writers_set[wrt];
-                wok = (wcbl > BASE_MEMORY) && (wcbl[-2] === KW_writ);
                 CL1 = Color_Cornflower_Blue;
-                (wok) ? (
-                    dfCol = Col_InfoA ;
-                    i = 0; loop(pad_Wrt_Siz,
-                        pad_Wrt_Colrs[i] = dfCol;
-                        strcpy(pad_Wrt_Labs[i],"");
-                        i += 1;);
-                ) : (
-                    dfCol = Col_Inactive ;
-                    WDBL[5] = 0;
-                    i = 0; loop(pad_Wrt_Siz,
-                        pad_Wrt_Colrs[i] = dfCol;
-                        strcpy(pad_Wrt_Labs[i],"");
-                        i += 1;);
-                );
+                dfCol = wok ? Col_InfoA : Col_Inactive;
+                i = 0; loop(pad_Wrt_Siz,
+                    pad_Wrt_Colrs[i] = dfCol;
+                    strcpy(pad_Wrt_Labs[i],"");
+                    i += 1;);
                 sprintf(pad_Wrt_Labs[0],"Writer %d", wrt+1);
-                zz = control_jpad(pad_Writer, WDBL[3], -1, 1);
+                (wok) ? (
+                    strcpy(pad_Wrt_Labs[2],menu_Wrt_Status_N[wcbl[its_Wrt_Status]]);
+                    // status : Ready (blue), Paused (orange), Writing (green), else the default color (as for the readers)
+                    k = wcbl[its_Wrt_Status];
+                    pad_Wrt_Colrs[2] = (k === its_WrtStat_Ready) ? Color_Light_Steel_Blue :
+                        (k === its_WrtStat_Paused) ? Color_Dark_Orange :
+                        (k === its_WrtStat_Writing) ? Color_Limegreen : dfCol;
+                    (lok) ? (
+                        // the channels written, as in exec_writer
+                        f = max(0, min(wcbl[its_Wrt_ChNbr] - 1, wcbl[its_Wrt_Bf1stChan]));
+                        n = wcbl[its_Wrt_ChNbr] - f;
+                        (wcbl[its_Wrt_BfChanUsed] > 0) ? (n = min(n, wcbl[its_Wrt_BfChanUsed]));
+                        sprintf(pad_Wrt_Labs[3], "Line %d", wcbl[its_Wrt_LineNb]+1);
+                        sprintf(pad_Wrt_Labs[4], "Size %.3f s", floor(1000*wcbl[its_Wrt_SmplCnt]/srate)/1000);
+                        sprintf(pad_Wrt_Labs[5], "Channels %d", wcbl[its_Wrt_ChNbr]);
+                        sprintf(pad_Wrt_Labs[6], "First %d", f);
+                        sprintf(pad_Wrt_Labs[7], "Used %d", n);
+                        sprintf(pad_Wrt_Labs[11], "Pos %.3f s", (wcbl[its_Wrt_Abspos] - wcbl[its_Wrt_Start]) / srate);
+                        pad_Wrt_Colrs[3] = pad_Wrt_Colrs[4] = pad_Wrt_Colrs[5] =
+                        pad_Wrt_Colrs[6] = pad_Wrt_Colrs[7] = Color_Heliotrope;
+                        pad_Wrt_Colrs[11] = CL1;
+                    ) : (
+                        strcpy(pad_Wrt_Labs[3],"Line: None");
+                    );
+                    k = wcbl[its_Wrt_Cell] - 1;
+                    (k < 0) ? (
+                        strcpy(pad_Wrt_Labs[10],"none");
+                    ) : (
+                        sprintf(pad_Wrt_Labs[10],"%s(%d)", menu_XCells_Ids_D[menu_XCells_Ids_Names + (k >> 8)], k & 0xFF);
+                    );
+                    pad_Wrt_Colrs[10] = CP3;
+                ) : (
+                    strcpy(pad_Wrt_Labs[2],menu_Wrt_Status_N[0]);
+                    strcpy(pad_Wrt_Labs[3],"Line: None");
+                );
+                strcpy(pad_Wrt_Labs[15],"Action");
+                pad_Wrt_Colrs[15] = CP1;
+
+                zz = control_jpad(pad_Writer);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 34;
                     zzch = pad_Writer[ui_jpad_lkey];
                     zzent = pad_Writer[ui_jpad_entkey]-1;
                     zzmcl = pad_Writer[ui_jpad_last]-1;
                     zzmmd = pad_Writer[ui_jpad_lmods];
+
+                    (zz & ui_jpad_ev_rmc) ? (  // right mouse clic
+                        (zzmcl === 0) ? (
+                            // the writer to display
+                            k = wrt+1;
+                            ui_menu_tick(menu_Wrt_Ids, k, 1);
+                            // also tick the header of the sub-menu that holds the current writer (reset below by the tick -1)
+                            wgh = menu_Wrt_Ids[ui_jmenu_items + (0|(wrt / menu_Wrt_Grp)) * (menu_Wrt_Grp + 1)];
+                            str_setchar(wgh, 1, '!');
+                            xx = control_jmenu(menu_Wrt_Ids);
+                            (xx != 0) ? (
+                                WDBL[0] = xx - 1; // select a new writer to display
+                            );
+                            ui_menu_tick(menu_Wrt_Ids, -1, 0);
+                        ) :
+                        (zzmcl === 2) ? (
+                            (wok) ? (
+                                k = wcbl[its_Wrt_Status]+1;
+                                ui_menu_tick(menu_Wrt_Status, -1, 0);
+                                ui_menu_tick(menu_Wrt_Status, k, 1);
+                                xx = control_jmenu(menu_Wrt_Status);
+                                (xx != 0) ? (
+                                    r = Wr_Set_Status(wrt, xx - 1);
+                                    sprintf(#itm, "Wr. Menu 2 : %d -> %d -> %d", wrt, xx, r);
+                                    mSL_log(SysLogBox, #itm);
+                                );
+                                ui_menu_tick(menu_Wrt_Status, -1, 0);
+                            );
+                        ) :
+                        (zzmcl === 3) ? (
+                            // the line written (the writer is created if needed)
+                            k = (wok) ? wcbl[its_Wrt_LineNb]+2 : 1;
+                            ui_menu_tick(menu_Lin_SIds, -1, 0);
+                            ui_menu_tick(menu_Lin_SIds, k, 1);
+                            // also tick the header of the sub-menu that holds the current line (reset below by the tick -1)
+                            (k > 1) ? (
+                                wgh = menu_Lin_SIds[ui_jmenu_items + 2 + (0|((k - 2) / menu_Lin_Grp)) * (menu_Lin_Grp + 1)];
+                                str_setchar(wgh, 1, '!');
+                            );
+                            xx = control_jmenu(menu_Lin_SIds); // select a line
+                            (xx != 0) ? (
+                                (xx === 1) ? (
+                                    r = (wok) ? Wr_Set_Line(wrt, -1) : 0; // "None"
+                                ) : (
+                                    (!wok) ? (wcbl = Wr_Action(its_WrtAct_Create, wrt, 0));
+                                    r = Wr_Set_Line(wrt, xx - 2);
+                                );
+                                sprintf(#itm, "Wr. Menu 3 : %d -> %d -> %d", wrt, xx, r);
+                                mSL_log(SysLogBox, #itm);
+                            );
+                            ui_menu_tick(menu_Lin_SIds, -1, 0);
+                        ) :
+                        (zzmcl === 6) ? (
+                            (lok) ? (
+                                k = f + 1;
+                                ui_menu_tick(menu_128_0_Ids, -1, 0);
+                                ui_menu_tick(menu_128_0_Ids, k, 1);
+                                xx = control_jmenu(menu_128_0_Ids); // select a number
+                                (xx != 0) ? (
+                                    wcbl[its_Wrt_Bf1stChan] = xx - 1;
+                                );
+                                ui_menu_tick(menu_128_0_Ids, -1, 0);
+                            );
+                        ) :
+                        (zzmcl === 7) ? (
+                            (lok) ? (
+                                k = n;
+                                ui_menu_tick(menu_128_1_Ids, -1, 0);
+                                ui_menu_tick(menu_128_1_Ids, k, 1);
+                                // also tick the header of the sub-menu that holds the current count (reset below by the tick -1)
+                                (k >= 1) ? (
+                                    wgh = menu_128_1_Ids[ui_jmenu_items + (0|((k - 1) / menu_128_Grp)) * (menu_128_Grp + 1)];
+                                    str_setchar(wgh, 1, '!');
+                                );
+                                xx = control_jmenu(menu_128_1_Ids); // select a count
+                                (xx != 0) ? (
+                                    wcbl[its_Wrt_BfChanUsed] = xx;
+                                );
+                                ui_menu_tick(menu_128_1_Ids, -1, 0);
+                            );
+                        ) :
+                        (zzmcl === 10) ? (
+                            // the source cell : smpl_tab index = 1 + type * 256 + number (as the output cell of a reader)
+                            (wok) ? (
+                                k = wcbl[its_Wrt_Cell] - 1;
+                                ui_menu_tick(menu_XCells_Ids, -1, 0);
+                                (k < 0) ? (
+                                    ui_menu_tick(menu_XCells_Ids, 1, 1);
+                                ) : (
+                                    ui_menu_tick(menu_XCells_Ids, (k >> 8) + 2, 1);
+                                    ui_menu_tick(menu_XCells_Ids, (k & 0xFF) + menu_XCells_Ids_Nums + 2, 1);
+                                    // also tick the header of the sub-menu that holds the number (reset below by the tick -1)
+                                    wgh = menu_XCells_Ids[ui_jmenu_items + menu_XCells_Ids_Hdr0 + ((k & 0xFF) >> 5) * 33];
+                                    str_setchar(wgh, 1, '!');
+                                );
+                                xx = control_jmenu(menu_XCells_Ids); // select a type or a number
+                                (xx != 0) ? (
+                                    x = xx - 2;
+                                    sprintf(#itm, "Wr. Menu 10 : %d -> %d -> %d", wrt, xx, x);
+                                    mSL_log(SysLogBox, #itm);
+                                    (x < 0) ? (
+                                        wcbl[its_Wrt_Cell] = 0;
+                                    ) : (
+                                        k = max(0, k);
+                                        (x < menu_XCells_Ids_Nums) ? (
+                                            k = x * 256 + (k & 0xFF); // new type
+                                        ) : (
+                                            k = (k >> 8) * 256 + ((x - menu_XCells_Ids_Nums) & 0xFF); // new number
+                                        );
+                                        wcbl[its_Wrt_Cell] = k + 1;
+                                    );
+                                    Wr_Set_Status(wrt, wcbl[its_Wrt_Status]); // no source cell : "Created"
+                                );
+                                ui_menu_tick(menu_XCells_Ids, -1, 0);
+                            );
+                        ) :
+                        (zzmcl === 15) ? (
+                            xx = control_jmenu(menu_Wrt_Action);
+                            (xx > 1) ? (
+                                wcbl = Wr_Action(xx - 1, wrt, 0);
+                                sprintf(#itm, "Wr. Menu 15 : %d -> %d -> %d", wrt, xx, wcbl);
+                                mSL_log(SysLogBox, #itm);
+                            );
+                        );
+                        // keep the JSFX sliders in sync when this writer is the current one
+                        (wrt === slWriter) ? (
+                            Currwriter = Writers_set[slWriter];
+                            display_Writer();
+                        );
+                    );
+
+                    (zz & ui_jpad_ev_lmc) ? (  // left mouse clic
+                        ((zzmcl === 2) && wok) ? (
+                            // status : Paused -> Writing ; Ready or Writing -> Paused
+                            w = wcbl[its_Wrt_Status];
+                            ((w === its_WrtStat_Ready) || (w === its_WrtStat_Paused) || (w === its_WrtStat_Writing)) ? (
+                                r = Wr_Set_Status(wrt, (w === its_WrtStat_Paused) ? its_WrtStat_Writing : its_WrtStat_Paused);
+                                sprintf(#itm, "Wr. Clic 2 : %d -> %d -> %d", wrt, w, r);
+                                mSL_log(SysLogBox, #itm);
+                                (wrt === slWriter) ? (slWrStatusPrv = slWrStatus = wcbl[its_Wrt_Status]);
+                            );
+                        );
+                    );
                 );
             ui_pop();
+
+            // the pad may have changed the writer
+            wcbl = Writers_set[wrt];
+            wok = (wcbl > BASE_MEMORY) && (wcbl[-2] === KW_writ);
+            lcbl = wok ? wcbl[its_Wrt_Lcbl] : 0;
+            lok = wok && (lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl);
+
+            // Waveform of the line (all its channels), with the heads of the writers and readers of the line
+            (lok && (h3 > 0)) ? (
+                w = min(h3, ui_height() - h2); // the sliders keep their place
+                (w >= its_RdrWaveMin) ? (
+                    ui_split_top(w);
+                        ui_pad(1,2,1,2);
+                        its_wave_marks(lcbl, -1);
+                        ui_audio_wave(w, lcbl[its_Lin_ChCnt], lcbl + its_Lin_BF1ST, lcbl[its_Lin_ActBSize],
+                            lcbl[its_Lin_Start], lcbl[its_Lin_Last], ui_aud_Sep | ui_aud_Axis, its_LinWaveMax);
+                    ui_pop();
+                );
+            );
+
+            // Sliders
+            (wok && (h2 > 0)) ? (
+                ui_split_top(h2);
+                    ui_pad(1,3,1,0);
+
+                    // Record gain
+                    paramValues[p_wrGain] = zi = wcbl[its_Wrt_InGaindB];
+                    r = parCtl(p_wrGain);
+                    (r != 0) ? (
+                        zi = (r === 8) ? 0 : parV(p_wrGain); // right clic : 0 dB
+                        wcbl[its_Wrt_InGaindB] = zi;
+                        wcbl[its_Wrt_InGain] = (zi <= -120) ? 0 : 10^(zi/20);
+                        (wcbl === Currwriter) ? (slWrInGainPrv = slWrInGain = zi);
+                    );
+
+                    // Overdub
+                    paramValues[p_wrOvrdb] = wcbl[its_Wrt_Ovrdb];
+                    r = parCtl(p_wrOvrdb);
+                    (r != 0) ? (
+                        zi = (r === 8) ? 0 : max(0, min(100, parV(p_wrOvrdb))); // right clic : no overdub
+                        wcbl[its_Wrt_Ovrdb] = zi;
+                        (wcbl === Currwriter) ? (slWrOvrdbPrv = slWrOvrdb = zi);
+                    );
+                ui_pop();
+            );
 
             do_ModuleKeySave();
         ui_pop();
