@@ -431,7 +431,7 @@ gc_count = 0;
 gfxMaxDur = 0.025; //
 mSL_loc_tadd = 0.1;
 mSL_loc_tim = 4;
-gui_show_sliders = 1;
+gui_show_sliders = 0; // the native JSFX sliders are hidden (key 'S' shows them) : see show_Global_Pad
 gui_show_UI = 1;
 gui_show_syslog = 1;
 gui_show_memory = 1;
@@ -895,6 +895,8 @@ p_play_Zoom = idx; idx += 1; // zoom of the waveform of a reader (a display prop
 p_rdOffset = idx; idx += 1; // offset of a reader in delay mode [0 .. line size] (s.)
 p_wrGain = idx; idx += 1; // record gain of a writer (dB)
 p_wrOvrdb = idx; idx += 1; // overdub of a writer (%)
+p_glInGain = idx; idx += 1; // global input gain (dB) : slider slInGain
+p_glOutVol = idx; idx += 1; // global output volume (dB) : slider slOutVol
 
 // Global variables
 blockDesc = 0;  // description of the current block
@@ -1565,7 +1567,10 @@ mm_limit_a = make_array(2);
 mm_limit_a[0] = 'STRT'; mm_limit_a[1] = 'MEMR';
 
 
-C_memrSize = 100 * 1024 * 1024; // size : X x 1MW
+// size : all the memory left under __memtop() (options:maxmem), but a reserve for the static allocations
+// made after this one (see the memory written in the log at start : "free after the static allocations")
+C_memrReserve = 512 * 1024; // 2026-10-20 : 0.02 MW used after this allocation
+C_memrSize = floor(__memtop() - mSL_StM_FreePt - C_memrReserve);
 C_memrArea = make_array(C_memrSize); // THE DYNAMIC MEMORY !
 
 mm_limit_b = make_array(2);
@@ -2112,7 +2117,7 @@ function mSL_event_ops(argc, argv)
 /*
    These values, sometimes, need some resetting
 */
-function some_reset() local(slLnActnPrv, slTimerPrv)
+function some_reset() local(slLnActnPrv)
 (
     slupdt = 1; // 1 si autres sliders modifiés
     wrupdt = 1; // set to 1 if writer modified
@@ -2155,7 +2160,6 @@ function some_reset() local(slLnActnPrv, slTimerPrv)
     slOutVolPrv = -1;
     slRdrOutPrv = -1;
     slWrOvrdbPrv = -1;
-    slTimerPrv = -1;
     slRdLnChCntPrv = -1;
     slWrLnChCntPrv = -1;
     slWrInGainPrv = -1;
@@ -2793,6 +2797,43 @@ ii = 0; loop(pad_Wrt_Siz,
             pad_Wrt_Labs[ii] = "";
             ii+=1;
 );
+
+// Menus for the globals : the global action (entry n is the action its_GlAct_... n, as the slider slGlAct)
+menu_Glb_Action_N = make_array(8);
+menu_Glb_Action_N[0] = "None";
+menu_Glb_Action_N[1] = "Stop all";
+menu_Glb_Action_N[2] = "Pause all";
+menu_Glb_Action_N[3] = "Restart all";
+menu_Glb_Action_N[4] = "Rewind all";
+menu_Glb_Action_N[5] = "Clear all";
+menu_Glb_Action_N[6] = "---";
+menu_Glb_Action_N[7] = "Delete all structures";
+menu_Glb_Action = make_jmenu(
+    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "global-actions", 8, menu_Glb_Action_N);
+// ... and the track samples (as the slider slSmpl)
+menu_Glb_Smpl_N = make_array(3);
+menu_Glb_Smpl_N[0] = "Merge";
+menu_Glb_Smpl_N[1] = "Ignore";
+menu_Glb_Smpl_N[2] = "Pass";
+menu_Glb_Smpl = make_jmenu(
+    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "global-samples", 3, menu_Glb_Smpl_N);
+
+// Pad for the globals (see show_Global_Pad)
+pad_Glb_NL = 1;
+pad_Glb_NC = 8;
+pad_Glb_Siz = pad_Glb_NL * pad_Glb_NC;
+pad_Global = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    pad_Glb_NL, pad_Glb_NC, pad_Glb_Siz);
+pad_Glb_Labs = pad_Global + pad_Global[ui_jpad_labs]; // addresses of labels
+pad_Glb_Colrs = pad_Global + pad_Global[ui_jpad_clrs]; // addresses of colors
+ii = 0; loop(pad_Glb_Siz,
+            pad_Glb_Colrs[ii] = Col_Inactive;
+            pad_Glb_Labs[ii] = "";
+            ii+=1;
+);
 //==========================================================
 //===== EFFECTS Handling
 // Effects_set[FX_CNT]
@@ -2928,12 +2969,23 @@ local (lcbl, buff, bsz, i, j, R, lng)
             // Replace previous line if any
             (Lines_Set[lnum] > BASE_MEMORY) ? (mSL_Dyn_Free(Lines_Set[lnum]));
             Lines_Set[lnum] = lcbl;
+            Ln_MemErr[lnum] = 0;
             Ln_Clear(lnum);
         ) : (
-            // Can't create all buffers
+            // Can't create all buffers : free those already allocated
+            i = its_Lin_BF1ST; loop(channels,
+                (lcbl[i] > BASE_MEMORY) ? mSL_Dyn_Free(lcbl[i]);
+                i += 1;
+            );
             mSL_Dyn_Free(lcbl);
             lcbl = 0;
         );
+    );
+    (lcbl <= BASE_MEMORY) ? (
+        Ln_MemErr[lnum] = 1; // shown in the pad of the line
+        sprintf(#itm, "Error 2610 : line %d (%.3f s, %d chan., %.2f MW) : not enough memory (free %.2f MW)",
+            lnum+1, size, channels, channels * (lng + BF_LIM * 2) / 1048576, mSL_Dyn_Dispo / 1048576);
+        mSL_log(SysLogBox, #itm);
     );
     lcbl;
 );
@@ -2991,18 +3043,16 @@ local (lcbl, err)
 (
     err = 0;
     ((lnb < 0) || (lnb > LN_CNT)) ? (
-        err = 201;
+        err = 2607; // bad line number
     ) :
     (((lcbl = Lines_Set[lnb]) < BASE_MEMORY) || (lcbl[-2] !== KW_lcbl)) ? (
         (lcbl === 0) ? (
             (act === its_LinAct_Create) ? (
-                sprintf(#itm, "Ln_Action 7 -> %d -- %d %d %d", xx, tmp[0], tmp[1], tmp[2]);
-                mSL_log(SysLogBox, #itm);
                 // can create using tmp
-                Ln_Make(lnb, srate, tmp[1], tmp[2]);
+                (Ln_Make(lnb, srate, tmp[1], tmp[2]) <= BASE_MEMORY) ? err = 2610; // not enough memory
             );
         ) : (
-            err = 203;
+            err = 2608; // the entry of the line is not a valid line
         );
     ) :
     (act === its_LinAct_Clear) ? (
@@ -3012,11 +3062,21 @@ local (lcbl, err)
         Ln_Delete(lnb);
     ) :
     (
-        err = 220; // unknown action
+        err = 2609; // unknown action (or "Create" on an existing line)
+    );
+    (err != 0) ? (
+        // (2610 : already written by Ln_Make)
+        (err != 2610) ? (
+            sprintf(#itm, "Error %04d : line %d, action %d (Lines_Set : %d)", err, lnb+1, act, Lines_Set[lnb]);
+            mSL_log(SysLogBox, #itm);
+        );
     );
     err;
 );
 
+
+// Ln_MemErr[line] : 1 when the last creation of the line failed for lack of memory, error 2610 (see Ln_Make, show_Line_Pad)
+Ln_MemErr = make_array(LN_CNT+1);
 
 // Pad for the Lines
 pad_Lin_NL = 1;
@@ -4022,6 +4082,8 @@ local (i, g, it, fid, ttl, gl0, gl1, gl2, gl3, othFirst, tmp, bln, blu, itdsp, M
     blockDispNames[blockScheduler] = "Scheduler"; // see mSL_show_Utilities
     blockProcessesMgr = (itdsp += 1);
     blockDispNames[blockProcessesMgr] = "Processes Manager"; // see mSL_show_Utilities
+    blockGlobal = (itdsp += 1);
+    blockDispNames[blockGlobal] = "Globals"; // see show_Global_Pad
 
     blockUsrFirst = itdsp+1;
     // Add users modules
@@ -5115,7 +5177,6 @@ function mod_sliders(flag)
     slider_show(slInGain,flag);
     slider_show(slOutVol,flag);
     slider_show(slStlatency,flag);
-    slider_show(slTimer,flag);
 );
 
 
@@ -5900,18 +5961,14 @@ sprintf(#A012,"Wr.set-line %d {%d  %d} st=%d", slWriter, Currwriter[its_Wrt_Line
 
     //---------------------------------------------------
     //-----  GLOBALS SETTINGS
-    (slSmpl != slSmplPrv) ? (
+    ((slSmpl != slSmplPrv) || (slInGain != slInGainPrv)) ? (
         pgmode = slSmplPrv = slSmpl;
+        slInGainPrv = slInGain;
         slider_show(slInGain,(slSmpl === 0)&&gui_show_sliders);
         slider_show(slOutVol,((slSmpl === 0)||(slSmpl === 1))&&gui_show_sliders);
         (slSmpl === 1) ? (vol_inp = 0;) :
         (slSmpl === 2) ? (vol_inp = 1;) :
         (vol_inp = (slInGain <= -120) ? 0 : 10^(slInGain/20);)
-    );
-
-    (slInGain != slInGainPrv) ? (
-        slInGainPrv = slInGain;
-        vol_inp = (slInGain <= -120) ? 0 : 10^(slInGain/20);
     );
 
     (slOutVol != slOutVolPrv) ? (
@@ -5977,6 +6034,8 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_rdOffset, "Delay Offset", "RdOffset", i_UB|i_SP, "%.5f s", "Delay Offset: %.5f s", 0, 3600, 1, 0.00001, 8);
     parDcl(p_wrGain, "Record Gain",  "WrGain",  i_UB|i_SP, "%.1f dB", "Record Gain: %.1f dB",   -120,   20,    0,  0.1, -3);
     parDcl(p_wrOvrdb, "Overdub",  "WrOvrdb",  i_UB|i_SP, "%.1f %%", "Overdub: %.1f %%",   0,   100,    0,  0.1, 0);
+    parDcl(p_glInGain, "Input Gain",  "GlInGain",  i_UB|i_SP, "%.1f dB", "Input Gain: %.1f dB",   -120,   20,    0,  0.1, -3);
+    parDcl(p_glOutVol, "Output Volume",  "GlOutVol",  i_UB|i_SP, "%.1f dB", "Output Volume: %.1f dB",   -120,   20,    0,  0.1, -3);
 );
 
 
@@ -6797,8 +6856,10 @@ function build_savarea()
 
 function load_loadarea()
 (
-    pgmode = lodarea[10];
-    vol_inp = lodarea[12];
+    // after a preset load, always back to "Merge" (the saved mode lodarea[10] is ignored) ;
+    // update_sliders() then sets pgmode and vol_inp, and shows the gain sliders
+    slSmpl = 0; slSmplPrv = -1;
+    sliderchange(slSmpl);
     vol_out = lodarea[12];
 );
 
@@ -7277,6 +7338,12 @@ Free_Memory = __memtop() - mSL_StM_FreePt;
 str_mess = "Interstys started";
 
 mSL_log(SysLogBox, "*** Interstys started ***");
+sprintf(#itm, "Memory : dynamic %.2f MW, free after the static allocations %.2f MW (top %.2f MW)",
+    C_memrSize / 1048576, Free_Memory / 1048576, __memtop() / 1048576);
+mSL_log(SysLogBox, #itm);
+
+// the native JSFX sliders are hidden at start (key 'S' shows them)
+(!gui_show_sliders) ? mod_sliders(0);
 
 @slider
 
@@ -7639,7 +7706,6 @@ ctime = time();
     mcp_indic = max(0, mcp_indic-1);
     speedchanged = max(0, speedchanged-1);
 
-    slTimer = ctime % 60;
     // slupdt = 1;
 );
 
@@ -7649,8 +7715,7 @@ gfxStrtT = time_precise() + timeD;
 
 // The tab commands : the keys left by the modules of the tab (see mSL_ui_LibJJ, Keyboard)
 // (none in Interstys)
-function
-do_Generic_Commands()
+function do_Generic_Commands()
 (
     AAAA_uix_jmbsel = uix_jmbsel;
 );
@@ -8701,8 +8766,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                             rgh = menu_Rdr_Ids[ui_jmenu_items + (0|(rdr / menu_Rdr_Grp)) * (menu_Rdr_Grp + 1)];
                             str_setchar(rgh, 1, '!');
                             xx = control_jmenu(menu_Rdr_Ids);
-                            sprintf(#itm, "Menu 0 -> %d", xx);
-                            mSL_log(SysLogBox, #itm);
                             (xx != 0) ? (
                                 RDBL[0] = xx - 1; // select a new reader
                             );
@@ -8714,8 +8777,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                             k = 1 + (rok ? ( rcbl[its_Rdr_Mode] ) : ( RDBL[1] ));
                             ui_menu_tick(menu_Rdr_Type, k, 1);
                             xx = control_jmenu(menu_Rdr_Type);
-                            sprintf(#itm, "Menu 2 -> %d", xx);
-                            mSL_log(SysLogBox, #itm);
                             (xx != 0) ? (
                                 (rok) ? (
                                     r = Rd_Set_Mode(rdr, xx - 1); // change mode, and prepare the reader for it
@@ -9451,6 +9512,10 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
                     sprintf(pad_Lin_Labs[2], "Length %.3f s", LDBL[1]);
                     sprintf(pad_Lin_Labs[3], "%d spls.", floor(LDBL[1]*srate));
                     sprintf(pad_Lin_Labs[4], "%d chan.", LDBL[2]);
+                    (Ln_MemErr[lnr]) ? (
+                        strcpy(pad_Lin_Labs[6], "Err 2610 : memory");
+                        pad_Lin_Colrs[6] = Col_Error;
+                    );
                 ) : (
                     // Line existing
                     dfCol = Color_Limegreen;
@@ -9484,8 +9549,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
                             lgh = menu_Lin_Ids[ui_jmenu_items + (0|(lnr / menu_Lin_Grp)) * (menu_Lin_Grp + 1)];
                             str_setchar(lgh, 1, '!');
                             xx = control_jmenu(menu_Lin_Ids);
-                            sprintf(#itm, "Menu 0 -> %d", xx);
-                            mSL_log(SysLogBox, #itm);
                             (xx != 0) ? (
                                 LDBL[0] = xx - 1; // select a new line to display
                             );
@@ -9495,8 +9558,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
                             (lcbl === 0) ? (
                                 ui_menu_tick(menu_Lin_Status, 1, 1);
                                 xx = control_jmenu(menu_Lin_Status);
-                                sprintf(#itm, "Menu 1 -> %d", xx);
-                                mSL_log(SysLogBox, #itm);
                                 (xx != 0) ? (
                                     (xx === 2) ? (
                                         // create the line
@@ -9516,18 +9577,15 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
                                     str_setchar(lgh, 1, '!');
                                 );
                                 xx = control_jmenu(menu_128_1_Ids);
-                                sprintf(#itm, "Menu 4 -> %d", xx);
-                                mSL_log(SysLogBox, #itm);
                                 (xx != 0) ? (
                                     LDBL[2] = xx ; // actual channel count
+                                    Ln_MemErr[lnr] = 0; // new request : no error yet
                                 );
                                 ui_menu_tick(menu_128_1_Ids, -1, 0);
                             );
                         ) :
                         (zzmcl === 7) ? (
                             xx = control_jmenu(menu_Lin_Action);
-                            sprintf(#itm, "Menu 7 -> %d --> %d %d %d", xx, LDBL[0], LDBL[1], LDBL[2]);
-                            mSL_log(SysLogBox, #itm);
                             (xx != 0) ? (
                                 Ln_Action(lnr, xx - 1, LDBL);
                             );
@@ -9552,8 +9610,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
                 paramValues[p_lineSize] = zi = (lcbl === 0) ? LDBL[1] : lcbl[its_Lin_SmplCntSec];
                 r = parCtl(p_lineSize);
                 (r != 0) ? (
-                    sprintf(#itm, "Size -> %d %.3f", r, parV(p_lineSize));
-                    mSL_log(SysLogBox, #itm);
                     (r === 8) ? (
                         // right clic to reset
                         paramValues[p_lineSize] = 1;
@@ -9562,6 +9618,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
                         (lcbl === 0) ? (
                             x = paramValues[p_lineSize];
                             LDBL[1] = (jmc & shfCap) ? floor(0.5 + x) : x; // on peut modifier
+                            Ln_MemErr[lnr] = 0; // new request : no error yet
                         );
                     );
                     wrupdt = 1;
@@ -9779,8 +9836,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                                 xx = control_jmenu(menu_Wrt_Status);
                                 (xx != 0) ? (
                                     r = Wr_Set_Status(wrt, xx - 1);
-                                    sprintf(#itm, "Wr. Menu 1 : %d -> %d -> %d", wrt, xx, r);
-                                    mSL_log(SysLogBox, #itm);
                                 );
                                 ui_menu_tick(menu_Wrt_Status, -1, 0);
                             );
@@ -9803,8 +9858,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                                     (!wok) ? (wcbl = Wr_Action(its_WrtAct_Create, wrt, 0));
                                     r = Wr_Set_Line(wrt, xx - 2);
                                 );
-                                sprintf(#itm, "Wr. Menu 3 : %d -> %d -> %d", wrt, xx, r);
-                                mSL_log(SysLogBox, #itm);
                             );
                             ui_menu_tick(menu_Lin_SIds, -1, 0);
                         ) :
@@ -9854,8 +9907,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                                 xx = control_jmenu(menu_XCells_Ids); // select a type or a number
                                 (xx != 0) ? (
                                     x = xx - 2;
-                                    sprintf(#itm, "Wr. Menu 10 : %d -> %d -> %d", wrt, xx, x);
-                                    mSL_log(SysLogBox, #itm);
                                     (x < 0) ? (
                                         wcbl[its_Wrt_Cell] = 0;
                                     ) : (
@@ -9876,8 +9927,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                             xx = control_jmenu(menu_Wrt_Action);
                             (xx > 1) ? (
                                 wcbl = Wr_Action(xx - 1, wrt, 0);
-                                sprintf(#itm, "Wr. Menu 15 : %d -> %d -> %d", wrt, xx, wcbl);
-                                mSL_log(SysLogBox, #itm);
                             );
                         );
                         // keep the JSFX sliders in sync when this writer is the current one
@@ -9897,8 +9946,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                             w = wcbl[its_Wrt_Status];
                             ((w === its_WrtStat_Ready) || (w === its_WrtStat_Paused) || (w === its_WrtStat_Writing)) ? (
                                 r = Wr_Set_Status(wrt, (w === its_WrtStat_Paused) ? its_WrtStat_Writing : its_WrtStat_Paused);
-                                sprintf(#itm, "Wr. Clic 1 : %d -> %d -> %d", wrt, w, r);
-                                mSL_log(SysLogBox, #itm);
                                 (wrt === slWriter) ? (slWrStatusPrv = slWrStatus = wcbl[its_Wrt_Status]);
                             );
                         );
@@ -9958,6 +10005,130 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
 
 
 flagpr = 1;
+
+/*
+    The globals of Interstys (they replace the last native sliders) : one line of 8 cells
+    0 : "Globals"  1 : channels  2 : track samples (menu)  3..6 : count of lines, readers, writers, effects
+    7 : global action (menu)
+    then the sliders "Input Gain" (in "Merge" mode) and "Output Volume" (in "Merge" and "Ignore" modes).
+    The values stay in the native sliders (slSmpl, slInGain, slOutVol, slGlAct), that update_sliders() handles.
+*/
+function show_Global_Pad(blockId)
+local (h1, h2, uix_jneed, zzmi, jmc, i, k, r, xx, zi, zz, zzmcl, nLn, nRd, nWr, nFx, cbl, shIn, shOut)
+(
+    shIn = (slSmpl === 0);
+    shOut = (slSmpl === 0) || (slSmpl === 1);
+    h1 = uix_jpadHeight(pad_Glb_NL); // height
+    h2 = (shIn + shOut) * (ui_jd_slidh + 3) + 3; // sliders : input gain, output volume
+    uix_jneed = h1+h2+ui_jd_ctgr;
+    (ui_height() >= h1+ui_jd_ctgr) ? (
+        ui_split_top(min(uix_jneed, ui_height()));
+        ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
+            zzmi = ui_hover();
+            jmc = ui_jmouse_cap;
+            keepBlockInfos(blockId);
+            (zzmi) ? (
+                ui_push();
+                    // stack is now 2 levels deep
+                    ui_color(Col_Frame);
+                    ui_border(); // draws in purple
+                ui_pop();
+            );
+            control_group(blockDispNames[blockDispInverts[blockId]]);
+            ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+
+            // the structures in use
+            nLn = nRd = nWr = nFx = 0;
+            i = 0; loop(LN_CNT, cbl = Lines_Set[i]; ((cbl > BASE_MEMORY) && (cbl[-2] === KW_lcbl)) ? nLn += 1; i += 1;);
+            i = 0; loop(RD_CNT, cbl = Readers_set[i]; ((cbl > BASE_MEMORY) && (cbl[-2] === KW_read)) ? nRd += 1; i += 1;);
+            i = 0; loop(WR_CNT, cbl = Writers_set[i]; ((cbl > BASE_MEMORY) && (cbl[-2] === KW_writ)) ? nWr += 1; i += 1;);
+            i = 0; loop(FX_CNT, cbl = Effects_set[i]; ((cbl > BASE_MEMORY) && (cbl[-2] === KW_effx)) ? nFx += 1; i += 1;);
+
+            ui_split_top(h1);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_Glb_Labs, pad_Glb_Siz);
+                i = 0; loop(pad_Glb_Siz,
+                    pad_Glb_Colrs[i] = Col_InfoA;
+                    strcpy(pad_Glb_Labs[i],"");
+                    i += 1;);
+                strcpy(pad_Glb_Labs[0],"Globals");
+                sprintf(pad_Glb_Labs[1],"Channels %d", chcnt);
+                k = max(0, min(2, slSmpl));
+                strcpy(pad_Glb_Labs[2],menu_Glb_Smpl_N[k]);
+                // track samples : Merge (green), Ignore (orange), Pass (blue)
+                pad_Glb_Colrs[2] = (k === 0) ? Color_Limegreen : (k === 1) ? Color_Dark_Orange : Color_Light_Steel_Blue;
+                sprintf(pad_Glb_Labs[3],"Lines %d", nLn);
+                sprintf(pad_Glb_Labs[4],"Readers %d", nRd);
+                sprintf(pad_Glb_Labs[5],"Writers %d", nWr);
+                sprintf(pad_Glb_Labs[6],"Effects %d", nFx);
+                pad_Glb_Colrs[3] = pad_Glb_Colrs[4] = pad_Glb_Colrs[5] = pad_Glb_Colrs[6] = Color_Heliotrope;
+                strcpy(pad_Glb_Labs[7],"Action");
+                pad_Glb_Colrs[7] = CP1;
+
+                zz = control_jpad(pad_Global);
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4; ui_GFXReason = 35;
+                    zzmcl = pad_Global[ui_jpad_last]-1;
+                    (zz & ui_jpad_ev_rmc) ? (  // right mouse clic
+                        (zzmcl === 2) ? (
+                            ui_menu_tick(menu_Glb_Smpl, -1, 0);
+                            ui_menu_tick(menu_Glb_Smpl, k+1, 1);
+                            xx = control_jmenu(menu_Glb_Smpl);
+                            (xx != 0) ? (
+                                slSmpl = xx - 1; sliderchange(slSmpl);
+                                slupdt = 1; // see update_sliders
+                            );
+                            ui_menu_tick(menu_Glb_Smpl, -1, 0);
+                        ) :
+                        (zzmcl === 7) ? (
+                            xx = control_jmenu(menu_Glb_Action);
+                            (xx > 1) ? (
+                                slGlAct = xx - 1; // performed by update_sliders (its_actions)
+                                slupdt = 1;
+                            );
+                        );
+                    );
+                    (zz & ui_jpad_ev_lmc) ? (  // left mouse clic
+                        (zzmcl === 2) ? (
+                            // track samples : the next mode (shift : the previous one)
+                            slSmpl = (jmc & shfCap) ? (k + 2) % 3 : (k + 1) % 3; sliderchange(slSmpl);
+                            slupdt = 1; // see update_sliders
+                        );
+                    );
+                );
+            ui_pop();
+
+            // Sliders
+            (h2 > 3) ? (
+                ui_split_top(min(h2, ui_height()));
+                    ui_pad(1,3,1,0);
+                    (shIn) ? (
+                        // Global input gain
+                        paramValues[p_glInGain] = slInGain;
+                        r = parCtl(p_glInGain);
+                        (r != 0) ? (
+                            zi = (r === 8) ? 0 : parV(p_glInGain); // right clic : 0 dB
+                            slInGain = zi; sliderchange(slInGain);
+                            slupdt = 1; // see update_sliders
+                        );
+                    );
+                    (shOut) ? (
+                        // Global output volume
+                        paramValues[p_glOutVol] = slOutVol;
+                        r = parCtl(p_glOutVol);
+                        (r != 0) ? (
+                            zi = (r === 8) ? 0 : parV(p_glOutVol); // right clic : 0 dB
+                            slOutVol = zi; sliderchange(slOutVol);
+                            slupdt = 1;
+                        );
+                    );
+                ui_pop();
+            );
+
+        ui_pop();
+    );
+);
+
 function show_UserModule(module)
 local(umid, chk, i, statn, recomp, modInst, modSrc, ucod, uent, err, ut, user_top, ul, user_left, uw, user_width, uh, user_height, rptb, ptbl, prvstk, ptstk, anc, typanc, cbxrpt, cbxref, typtb, crptb, addb, rcnt, adds, flgm, reh, w3)
 (
@@ -10683,6 +10854,9 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in)
                 ) :
                 (igb === blockProcessesMgr) ? (
                     show_ProcessesMgr(blockDispNames[blockDispInverts[blockProcessesMgr]], blockProcessesMgr);
+                ) :
+                (igb === blockGlobal) ? (
+                    show_Global_Pad(blockGlobal);
                 ) :
                 ((igb >= blockUsrFirst) && (igb <= blockUsrLast)) && (blockUsrChecks[blockUsrNum[igb - blockUsrFirst]]) ? (
                     show_UserModule(igb);

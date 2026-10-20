@@ -8,11 +8,6 @@ Pour chaque plugin, les touches testées par le code `@gfx`, par niveau dans l'o
 
 ### GamePlayer
 
-**Branches jamais exécutées** (2)
-
-- `,` testée deux fois dans updClipNumber (GamePlayer.jsfx-inc:7312 et 7333) : la seconde branche n'est jamais exécutée
-- `;` testée deux fois dans updClipNumber (GamePlayer.jsfx-inc:7312 et 7330) : la seconde branche n'est jamais exécutée
-
 **Commandes masquées au-dessus de certains modules (le module, qui passe avant, utilise la même touche : c'est la règle, mais à éviter pour les commandes importantes)** (13)
 
 - `$` : commandes d'onglet (GamePlayer.jsfx-inc:18818), pas au-dessus de : Scripts / Settings
@@ -69,8 +64,8 @@ Pour chaque plugin, les touches testées par le code `@gfx`, par niveau dans l'o
 
 **Commandes masquées au-dessus de certains modules (le module, qui passe avant, utilise la même touche : c'est la règle, mais à éviter pour les commandes importantes)** (9)
 
-- `Shift+Left` : largeur des colonnes (Interstys.jsfx-inc:10723), pas au-dessus de : mémoire (débogueur)
-- `Shift+Right` : largeur des colonnes (Interstys.jsfx-inc:10695), pas au-dessus de : mémoire (débogueur)
+- `Shift+Left` : largeur des colonnes (Interstys.jsfx-inc:10884), pas au-dessus de : mémoire (débogueur)
+- `Shift+Right` : largeur des colonnes (Interstys.jsfx-inc:10856), pas au-dessus de : mémoire (débogueur)
 - `c` : commandes système (mSL_System_Keys.jsfx-inc:28), pas au-dessus de : mémoire (débogueur)
 - `g` : commandes système (mSL_System_Keys.jsfx-inc:24), pas au-dessus de : mémoire (débogueur)
 - `k` : commandes système (mSL_System_Keys.jsfx-inc:25), pas au-dessus de : log système, mémoire (débogueur)
@@ -628,32 +623,32 @@ Ordre : module sous la souris (puis ses pads) → panneau → commandes d'onglet
 
 | Touche | Modif. | Niveau | Module | Action | Source |
 |---|---|---|---|---|---|
-| `d` |  | module | Line (show_Line_Pad) | GM_Dump(lcbl, its_Lin_BlkSize, sprintf(#, "Line %d", lnr+1)) | Interstys.jsfx-inc:9408 |
-| `d` |  | module | Reader (show_Reader_Pad) | GM_Dump(rcbl, its_Rdr_BlkSize, sprintf(#, "Reader %d", rdr+1)) | Interstys.jsfx-inc:8510 |
-| `r` |  | module | Reader (show_Reader_Pad) | // toggle run/pause state | Interstys.jsfx-inc:9070 |
-| `t` |  | module | Reader (show_Reader_Pad) | RDBL[6] = (RDBL[6] + 1) % 3; | Interstys.jsfx-inc:9074 |
-| `d` |  | module | Writer (show_Writer_Pad) | GM_Dump(wcbl, its_Wrt_BlkSize, sprintf(#, "Writer %d", wrt+1)) | Interstys.jsfx-inc:9693 |
-| `Enter` |  | module | log système (show_SysLog) | mSL_log(box, " "); | Interstys.jsfx-inc:8312 |
-| `Space` |  | module | log système (show_SysLog) | mSL_log(box, " "); | Interstys.jsfx-inc:8312 |
-| `1` |  | module | log système (show_SysLog) | box[5] = 1; | Interstys.jsfx-inc:8324 |
-| `2` |  | module | log système (show_SysLog) | box[5] = 2; | Interstys.jsfx-inc:8325 |
-| `3` |  | module | log système (show_SysLog) | box[5] = 3; | Interstys.jsfx-inc:8326 |
-| `4` |  | module | log système (show_SysLog) | box[5] = 4; | Interstys.jsfx-inc:8327 |
-| `5` |  | module | log système (show_SysLog) | box[5] = 5; | Interstys.jsfx-inc:8328 |
-| `6` |  | module | log système (show_SysLog) | box[5] = 6; | Interstys.jsfx-inc:8329 |
-| `7` |  | module | log système (show_SysLog) | box[5] = 7; | Interstys.jsfx-inc:8330 |
-| `8` |  | module | log système (show_SysLog) | box[5] = 8; | Interstys.jsfx-inc:8331 |
-| `j` |  | module | log système (show_SysLog) | box[7] = (box[7]+1) % box[2]; | Interstys.jsfx-inc:8317 |
-| `k` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-1); | Interstys.jsfx-inc:8316 |
-| `l` |  | module | log système (show_SysLog) | box[6] = max(0, box[6]-1); | Interstys.jsfx-inc:8314 |
-| `m` |  | module | log système (show_SysLog) | box[6] = min(20, box[6]+1); | Interstys.jsfx-inc:8313 |
-| `p` |  | module | log système (show_SysLog) | sysout(box);  // log in a text file (see mSL_show_Utilities) | Interstys.jsfx-inc:8332 |
-| `t` |  | module | log système (show_SysLog) | nowTime(); mSL_log(SysLogBox, #nowis); | Interstys.jsfx-inc:8318 |
-| `z` |  | module | log système (show_SysLog) | box[7] = 0; | Interstys.jsfx-inc:8315 |
-| `Up` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-10); | Interstys.jsfx-inc:8320 |
-| `Down` |  | module | log système (show_SysLog) | box[7] = (box[7]+10) % box[2]; | Interstys.jsfx-inc:8321 |
-| `Left` | none | module | log système (show_SysLog) | box[7] = 0; | Interstys.jsfx-inc:8322 |
-| `Right` | none | module | log système (show_SysLog) | box[7] = (box[7]+100) % box[2]; | Interstys.jsfx-inc:8323 |
+| `d` |  | module | Line (show_Line_Pad) | GM_Dump(lcbl, its_Lin_BlkSize, sprintf(#, "Line %d", lnr+1)) | Interstys.jsfx-inc:9449 |
+| `d` |  | module | Reader (show_Reader_Pad) | GM_Dump(rcbl, its_Rdr_BlkSize, sprintf(#, "Reader %d", rdr+1)) | Interstys.jsfx-inc:8551 |
+| `r` |  | module | Reader (show_Reader_Pad) | // toggle run/pause state | Interstys.jsfx-inc:9111 |
+| `t` |  | module | Reader (show_Reader_Pad) | RDBL[6] = (RDBL[6] + 1) % 3; | Interstys.jsfx-inc:9115 |
+| `d` |  | module | Writer (show_Writer_Pad) | GM_Dump(wcbl, its_Wrt_BlkSize, sprintf(#, "Writer %d", wrt+1)) | Interstys.jsfx-inc:9734 |
+| `Enter` |  | module | log système (show_SysLog) | mSL_log(box, " "); | Interstys.jsfx-inc:8353 |
+| `Space` |  | module | log système (show_SysLog) | mSL_log(box, " "); | Interstys.jsfx-inc:8353 |
+| `1` |  | module | log système (show_SysLog) | box[5] = 1; | Interstys.jsfx-inc:8365 |
+| `2` |  | module | log système (show_SysLog) | box[5] = 2; | Interstys.jsfx-inc:8366 |
+| `3` |  | module | log système (show_SysLog) | box[5] = 3; | Interstys.jsfx-inc:8367 |
+| `4` |  | module | log système (show_SysLog) | box[5] = 4; | Interstys.jsfx-inc:8368 |
+| `5` |  | module | log système (show_SysLog) | box[5] = 5; | Interstys.jsfx-inc:8369 |
+| `6` |  | module | log système (show_SysLog) | box[5] = 6; | Interstys.jsfx-inc:8370 |
+| `7` |  | module | log système (show_SysLog) | box[5] = 7; | Interstys.jsfx-inc:8371 |
+| `8` |  | module | log système (show_SysLog) | box[5] = 8; | Interstys.jsfx-inc:8372 |
+| `j` |  | module | log système (show_SysLog) | box[7] = (box[7]+1) % box[2]; | Interstys.jsfx-inc:8358 |
+| `k` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-1); | Interstys.jsfx-inc:8357 |
+| `l` |  | module | log système (show_SysLog) | box[6] = max(0, box[6]-1); | Interstys.jsfx-inc:8355 |
+| `m` |  | module | log système (show_SysLog) | box[6] = min(20, box[6]+1); | Interstys.jsfx-inc:8354 |
+| `p` |  | module | log système (show_SysLog) | sysout(box);  // log in a text file (see mSL_show_Utilities) | Interstys.jsfx-inc:8373 |
+| `t` |  | module | log système (show_SysLog) | nowTime(); mSL_log(SysLogBox, #nowis); | Interstys.jsfx-inc:8359 |
+| `z` |  | module | log système (show_SysLog) | box[7] = 0; | Interstys.jsfx-inc:8356 |
+| `Up` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-10); | Interstys.jsfx-inc:8361 |
+| `Down` |  | module | log système (show_SysLog) | box[7] = (box[7]+10) % box[2]; | Interstys.jsfx-inc:8362 |
+| `Left` | none | module | log système (show_SysLog) | box[7] = 0; | Interstys.jsfx-inc:8363 |
+| `Right` | none | module | log système (show_SysLog) | box[7] = (box[7]+100) % box[2]; | Interstys.jsfx-inc:8364 |
 | `:` |  | module | mémoire (débogueur) (show_Memory) | membox[14] = membox[14] ~ 1; | mSL_Dbg_Memory.jsfx-inc:243 |
 | `:` |  | module | mémoire (débogueur) (show_Memory) | membox[14] = membox[14] ~ 1; | mSL_Dbg_Memory.jsfx-inc:294 |
 | `=` |  | module | mémoire (débogueur) (show_Memory) | // set this location as relative zero | mSL_Dbg_Memory.jsfx-inc:239 |
@@ -679,10 +674,10 @@ Ordre : module sous la souris (puis ses pads) → panneau → commandes d'onglet
 | `Right` | none | module | mémoire (débogueur) (show_Memory) | membox[7] = membox[7] + 1; | mSL_Dbg_Memory.jsfx-inc:224 |
 | `Right` | Shift | module | mémoire (débogueur) (show_Memory) | membox[7] = membox[7] + knb * 32; | mSL_Dbg_Memory.jsfx-inc:230 |
 | `Right` | none | module | mémoire (débogueur) (show_Memory) | membox[7] = membox[7] + 1; | mSL_Dbg_Memory.jsfx-inc:287 |
-| `Left` | Shift | panneau | largeur des colonnes (genericItemsPos) | // try to increase colum size | Interstys.jsfx-inc:10723 |
-| `Right` | Shift | panneau | largeur des colonnes (genericItemsPos) | // try to increase colum size | Interstys.jsfx-inc:10695 |
-| `S` |  | plugin | commandes d'Interstys (do_Plugin_Keys) | (gui_show_sliders = gui_show_sliders ? 0 : 1) ? ( | Interstys.jsfx-inc:7718 |
-| `U` |  | plugin | commandes d'Interstys (do_Plugin_Keys) | gui_show_UI = gui_show_UI ? 0 : 1; | Interstys.jsfx-inc:7715 |
+| `Left` | Shift | panneau | largeur des colonnes (genericItemsPos) | // try to increase colum size | Interstys.jsfx-inc:10884 |
+| `Right` | Shift | panneau | largeur des colonnes (genericItemsPos) | // try to increase colum size | Interstys.jsfx-inc:10856 |
+| `S` |  | plugin | commandes d'Interstys (do_Plugin_Keys) | (gui_show_sliders = gui_show_sliders ? 0 : 1) ? ( | Interstys.jsfx-inc:7759 |
+| `U` |  | plugin | commandes d'Interstys (do_Plugin_Keys) | gui_show_UI = gui_show_UI ? 0 : 1; | Interstys.jsfx-inc:7756 |
 | `Tab` | Shift | plugin | onglet suivant / précédent (GM_Tab_Keys) | ui_jtab_step(uix_jG_menuscr, -1); 1 | ui-lib-JJ-GUI.jsfx-inc:576 |
 | `Tab` |  | plugin | onglet suivant / précédent (GM_Tab_Keys) | (ui_jtab_step(uix_jG_menuscr, 1); 1) : 0; | ui-lib-JJ-GUI.jsfx-inc:577 |
 | `c` |  | système | commandes système (do_System_Keys) | mSL_Dyn_RecycleF = mSL_Dyn_RecycleF ? 0 : 1; | mSL_System_Keys.jsfx-inc:28 |
@@ -706,7 +701,7 @@ Appelés par les modules avec la touche qu'ils ont reçue (hors analyse des conf
 | updtBNumber | FilePlayer.jsfx-inc | `0..9` `%` `z` `+` `=` `:` `/` `;` `.` `,` `?` `$` `n` `p` `b` `Right` `Left` `Down` `Up` `PgDn` `PgUp` `Home` |
 | updtNumber | GamePlayer.jsfx-inc | `0..9` `%` `Home` `+` `=` `:` `/` `;` `.` `,` `?` `_` `n` `p` `b` `Right` `Left` `Down` `Up` `PgDn` `PgUp` |
 | updtBNumber | GamePlayer.jsfx-inc | `0..9` `%` `z` `+` `=` `:` `/` `-` `;` `.` `,` `?` `$` `_` `n` `p` `b` `Right` `Left` `Down` `Up` `PgDn` `PgUp` `Home` |
-| updClipNumber | GamePlayer.jsfx-inc | `0..9` `,` `;` `%` `Home` `+` `=` `:` `/` `-` `.` `?` `_` `n` `p` `b` `Right` `Left` `Down` `Up` `PgDn` `PgUp` |
+| updClipNumber | GamePlayer.jsfx-inc | `0..9` `(` `)` `%` `Home` `+` `=` `:` `/` `-` `;` `,` `.` `?` `_` `n` `p` `b` `Right` `Left` `Down` `Up` `PgDn` `PgUp` |
 | updPlMdNumber | GamePlayer.jsfx-inc | `0..9` `%` `z` `Home` `+` `=` `:` `/` `-` `;` `.` `,` `?` `_` `n` `p` `b` `Right` `Left` `Down` `Up` `PgDn` `PgUp` |
 | updSpMdNumber | GamePlayer.jsfx-inc | `0..9` `%` `z` `Home` `+` `=` `:` `/` `-` `_` `n` `p` `b` `Right` `Left` `,` `;` `?` `.` `Down` `Up` `PgDn` `PgUp` |
 | updGrBkNumber | GamePlayer.jsfx-inc | `0..9` `%` `Home` `+` `=` `:` `/` `-` `_` `Down` `Up` `n` `p` `b` `Right` `Left` |

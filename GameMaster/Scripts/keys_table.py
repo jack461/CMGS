@@ -279,9 +279,12 @@ def extract():
                 if m in done or m.group(2) not in ('===', '=='): continue
                 v, op, lit = m.groups()
                 if lit[0] != "'":
-                    # numbers : not for the menu results (xx), and only the control keys for the general variables
+                    # numbers : not for the menu results (xx), and for the general variables only the control
+                    # keys and the printable characters written in hexadecimal (0x28 for '(', which disturbs
+                    # the syntax coloring)
                     if v == 'xx' or lit_value(lit) == 0: continue
-                    if v in ('k', 'key', 'ch') and lit_value(lit) not in KEY_NAMES: continue
+                    if v in ('k', 'key', 'ch') and lit_value(lit) not in KEY_NAMES and \
+                       not (lit.lower().startswith('0x') and 32 < lit_value(lit) < 127): continue
                 rows.append(dict(base, var=v, key=key_name(lit), val=lit_value(lit),
                                  act=action_of(lines, n, code, m.end())))
     for r in rows:
