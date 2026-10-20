@@ -38,8 +38,10 @@ Pour chaque plugin, les touches testées par le code `@gfx`, par niveau dans l'o
 
 ### ScriptMaster
 
-**Commandes masquées au-dessus de certains modules (le module, qui passe avant, utilise la même touche : c'est la règle, mais à éviter pour les commandes importantes)** (6)
+**Commandes masquées au-dessus de certains modules (le module, qui passe avant, utilise la même touche : c'est la règle, mais à éviter pour les commandes importantes)** (8)
 
+- `Shift+Left` : largeur des colonnes (mSL_Panes.jsfx-inc:730), pas au-dessus de : mémoire (débogueur)
+- `Shift+Right` : largeur des colonnes (mSL_Panes.jsfx-inc:702), pas au-dessus de : mémoire (débogueur)
 - `c` : commandes système (mSL_System_Keys.jsfx-inc:28), pas au-dessus de : mémoire (débogueur)
 - `g` : commandes système (mSL_System_Keys.jsfx-inc:24), pas au-dessus de : mémoire (débogueur)
 - `k` : commandes système (mSL_System_Keys.jsfx-inc:25), pas au-dessus de : log système, mémoire (débogueur)
@@ -64,8 +66,8 @@ Pour chaque plugin, les touches testées par le code `@gfx`, par niveau dans l'o
 
 **Commandes masquées au-dessus de certains modules (le module, qui passe avant, utilise la même touche : c'est la règle, mais à éviter pour les commandes importantes)** (9)
 
-- `Shift+Left` : largeur des colonnes (Interstys.jsfx-inc:10884), pas au-dessus de : mémoire (débogueur)
-- `Shift+Right` : largeur des colonnes (Interstys.jsfx-inc:10856), pas au-dessus de : mémoire (débogueur)
+- `Shift+Left` : largeur des colonnes (Interstys.jsfx-inc:10897), pas au-dessus de : mémoire (débogueur)
+- `Shift+Right` : largeur des colonnes (Interstys.jsfx-inc:10869), pas au-dessus de : mémoire (débogueur)
 - `c` : commandes système (mSL_System_Keys.jsfx-inc:28), pas au-dessus de : mémoire (débogueur)
 - `g` : commandes système (mSL_System_Keys.jsfx-inc:24), pas au-dessus de : mémoire (débogueur)
 - `k` : commandes système (mSL_System_Keys.jsfx-inc:25), pas au-dessus de : log système, mémoire (débogueur)
@@ -83,9 +85,9 @@ Les commandes du plugin (do_Plugin_Keys : Tab, affichages) et les commandes syst
 | `c` | mSL_Dyn_RecycleF = mSL_Dyn_RecycleF ? 0 : 1; | mSL_Dyn_RecycleF = mSL_Dyn_RecycleF ? 0 : 1; | mSL_Dyn_RecycleF = mSL_Dyn_RecycleF ? 0 : 1; | mSL_Dyn_RecycleF = mSL_Dyn_RecycleF ? 0 : 1; |
 | `g` | gc_run(2); | gc_run(2); | gc_run(2); | gc_run(2); |
 | `k` | mSL_kill_all_thread(); | mSL_kill_all_thread(); | mSL_kill_all_thread(); | mSL_kill_all_thread(); |
-| `L` | gui_show_syslog = gui_show_syslog ? 0 : 1;  // sho | gui_show_syslog = gui_show_syslog ? 0 : 1;  // sho |  |  |
+| `L` | gui_show_syslog = gui_show_syslog ? 0 : 1;  // sho |  |  |  |
 | `l` | mm_show_limit = ((mm_show_limit * 10 + 1) % 20) /  | mm_show_limit = ((mm_show_limit * 10 + 1) % 20) /  | mm_show_limit = ((mm_show_limit * 10 + 1) % 20) /  | mm_show_limit = ((mm_show_limit * 10 + 1) % 20) /  |
-| `M` | gui_show_memory = gui_show_memory ? 0 : 1;  // sho | gui_show_memory = gui_show_memory ? 0 : 1;  // sho |  |  |
+| `M` | gui_show_memory = gui_show_memory ? 0 : 1;  // sho |  |  |  |
 | `m` | mem_walk(0); mem_show(); | mem_walk(0); mem_show(); | mem_walk(0); mem_show(); | mem_walk(0); mem_show(); |
 | `n` | mem_walk(8); mem_show(); | mem_walk(8); mem_show(); | mem_walk(8); mem_show(); | mem_walk(8); mem_show(); |
 | `o` | mSL_run_once = mSL_run_once ? 0 : (mSL_run_test =  | mSL_run_once = mSL_run_once ? 0 : (mSL_run_test =  | mSL_run_once = mSL_run_once ? 0 : (mSL_run_test =  | mSL_run_once = mSL_run_once ? 0 : (mSL_run_test =  |
@@ -451,31 +453,31 @@ Ordre : module sous la souris → commandes du plugin (do_Plugin_Keys) → comma
 
 ## ScriptMaster
 
-Ordre : module sous la souris → commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys).
+Ordre : module sous la souris → panneau → commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys).
 
 | Touche | Modif. | Niveau | Module | Action | Source |
 |---|---|---|---|---|---|
-| `Enter` |  | module | log système (show_SysLog) | mSL_log(box, " "); | ScriptMaster.jsfx-inc:2480 |
-| `Space` |  | module | log système (show_SysLog) | mSL_log(box, " "); | ScriptMaster.jsfx-inc:2480 |
-| `1` |  | module | log système (show_SysLog) | box[5] = 1; | ScriptMaster.jsfx-inc:2492 |
-| `2` |  | module | log système (show_SysLog) | box[5] = 2; | ScriptMaster.jsfx-inc:2493 |
-| `3` |  | module | log système (show_SysLog) | box[5] = 3; | ScriptMaster.jsfx-inc:2494 |
-| `4` |  | module | log système (show_SysLog) | box[5] = 4; | ScriptMaster.jsfx-inc:2495 |
-| `5` |  | module | log système (show_SysLog) | box[5] = 5; | ScriptMaster.jsfx-inc:2496 |
-| `6` |  | module | log système (show_SysLog) | box[5] = 6; | ScriptMaster.jsfx-inc:2497 |
-| `7` |  | module | log système (show_SysLog) | box[5] = 7; | ScriptMaster.jsfx-inc:2498 |
-| `8` |  | module | log système (show_SysLog) | box[5] = 8; | ScriptMaster.jsfx-inc:2499 |
-| `j` |  | module | log système (show_SysLog) | box[7] = (box[7]+1) % box[2]; | ScriptMaster.jsfx-inc:2485 |
-| `k` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-1); | ScriptMaster.jsfx-inc:2484 |
-| `l` |  | module | log système (show_SysLog) | box[6] = max(0, box[6]-1); | ScriptMaster.jsfx-inc:2482 |
-| `m` |  | module | log système (show_SysLog) | box[6] = min(20, box[6]+1); | ScriptMaster.jsfx-inc:2481 |
-| `p` |  | module | log système (show_SysLog) | sysout(box);  // log in a text file (see mSL_show_Utilities) | ScriptMaster.jsfx-inc:2500 |
-| `t` |  | module | log système (show_SysLog) | nowTime(); mSL_log(SysLogBox, #nowis); | ScriptMaster.jsfx-inc:2486 |
-| `z` |  | module | log système (show_SysLog) | box[7] = 0; | ScriptMaster.jsfx-inc:2483 |
-| `Up` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-10); | ScriptMaster.jsfx-inc:2488 |
-| `Down` |  | module | log système (show_SysLog) | box[7] = (box[7]+10) % box[2]; | ScriptMaster.jsfx-inc:2489 |
-| `Left` | none | module | log système (show_SysLog) | box[7] = 0; | ScriptMaster.jsfx-inc:2490 |
-| `Right` | none | module | log système (show_SysLog) | box[7] = (box[7]+100) % box[2]; | ScriptMaster.jsfx-inc:2491 |
+| `Enter` |  | module | log système (show_SysLog) | mSL_log(box, " "); | ScriptMaster.jsfx-inc:2593 |
+| `Space` |  | module | log système (show_SysLog) | mSL_log(box, " "); | ScriptMaster.jsfx-inc:2593 |
+| `1` |  | module | log système (show_SysLog) | box[5] = 1; | ScriptMaster.jsfx-inc:2605 |
+| `2` |  | module | log système (show_SysLog) | box[5] = 2; | ScriptMaster.jsfx-inc:2606 |
+| `3` |  | module | log système (show_SysLog) | box[5] = 3; | ScriptMaster.jsfx-inc:2607 |
+| `4` |  | module | log système (show_SysLog) | box[5] = 4; | ScriptMaster.jsfx-inc:2608 |
+| `5` |  | module | log système (show_SysLog) | box[5] = 5; | ScriptMaster.jsfx-inc:2609 |
+| `6` |  | module | log système (show_SysLog) | box[5] = 6; | ScriptMaster.jsfx-inc:2610 |
+| `7` |  | module | log système (show_SysLog) | box[5] = 7; | ScriptMaster.jsfx-inc:2611 |
+| `8` |  | module | log système (show_SysLog) | box[5] = 8; | ScriptMaster.jsfx-inc:2612 |
+| `j` |  | module | log système (show_SysLog) | box[7] = (box[7]+1) % box[2]; | ScriptMaster.jsfx-inc:2598 |
+| `k` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-1); | ScriptMaster.jsfx-inc:2597 |
+| `l` |  | module | log système (show_SysLog) | box[6] = max(0, box[6]-1); | ScriptMaster.jsfx-inc:2595 |
+| `m` |  | module | log système (show_SysLog) | box[6] = min(20, box[6]+1); | ScriptMaster.jsfx-inc:2594 |
+| `p` |  | module | log système (show_SysLog) | sysout(box);  // log in a text file (see mSL_show_Utilities) | ScriptMaster.jsfx-inc:2613 |
+| `t` |  | module | log système (show_SysLog) | nowTime(); mSL_log(SysLogBox, #nowis); | ScriptMaster.jsfx-inc:2599 |
+| `z` |  | module | log système (show_SysLog) | box[7] = 0; | ScriptMaster.jsfx-inc:2596 |
+| `Up` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-10); | ScriptMaster.jsfx-inc:2601 |
+| `Down` |  | module | log système (show_SysLog) | box[7] = (box[7]+10) % box[2]; | ScriptMaster.jsfx-inc:2602 |
+| `Left` | none | module | log système (show_SysLog) | box[7] = 0; | ScriptMaster.jsfx-inc:2603 |
+| `Right` | none | module | log système (show_SysLog) | box[7] = (box[7]+100) % box[2]; | ScriptMaster.jsfx-inc:2604 |
 | `:` |  | module | mémoire (débogueur) (show_Memory) | membox[14] = membox[14] ~ 1; | mSL_Dbg_Memory.jsfx-inc:243 |
 | `:` |  | module | mémoire (débogueur) (show_Memory) | membox[14] = membox[14] ~ 1; | mSL_Dbg_Memory.jsfx-inc:294 |
 | `=` |  | module | mémoire (débogueur) (show_Memory) | // set this location as relative zero | mSL_Dbg_Memory.jsfx-inc:239 |
@@ -501,8 +503,8 @@ Ordre : module sous la souris → commandes du plugin (do_Plugin_Keys) → comma
 | `Right` | none | module | mémoire (débogueur) (show_Memory) | membox[7] = membox[7] + 1; | mSL_Dbg_Memory.jsfx-inc:224 |
 | `Right` | Shift | module | mémoire (débogueur) (show_Memory) | membox[7] = membox[7] + knb * 32; | mSL_Dbg_Memory.jsfx-inc:230 |
 | `Right` | none | module | mémoire (débogueur) (show_Memory) | membox[7] = membox[7] + 1; | mSL_Dbg_Memory.jsfx-inc:287 |
-| `L` |  | plugin | commandes de ScriptMaster (do_Plugin_Keys) | gui_show_syslog = gui_show_syslog ? 0 : 1;  // show / hide the system log | ScriptMaster.jsfx-inc:1927 |
-| `M` |  | plugin | commandes de ScriptMaster (do_Plugin_Keys) | gui_show_memory = gui_show_memory ? 0 : 1;  // show / hide the memory dumps | ScriptMaster.jsfx-inc:1928 |
+| `Left` | Shift | panneau | largeur des colonnes (genericItemsPos) | // try to increase colum size | mSL_Panes.jsfx-inc:730 |
+| `Right` | Shift | panneau | largeur des colonnes (genericItemsPos) | // try to increase colum size | mSL_Panes.jsfx-inc:702 |
 | `Tab` | Shift | plugin | onglet suivant / précédent (GM_Tab_Keys) | ui_jtab_step(uix_jG_menuscr, -1); 1 | ui-lib-JJ-GUI.jsfx-inc:576 |
 | `Tab` |  | plugin | onglet suivant / précédent (GM_Tab_Keys) | (ui_jtab_step(uix_jG_menuscr, 1); 1) : 0; | ui-lib-JJ-GUI.jsfx-inc:577 |
 | `c` |  | système | commandes système (do_System_Keys) | mSL_Dyn_RecycleF = mSL_Dyn_RecycleF ? 0 : 1; | mSL_System_Keys.jsfx-inc:28 |
@@ -623,32 +625,32 @@ Ordre : module sous la souris (puis ses pads) → panneau → commandes d'onglet
 
 | Touche | Modif. | Niveau | Module | Action | Source |
 |---|---|---|---|---|---|
-| `d` |  | module | Line (show_Line_Pad) | GM_Dump(lcbl, its_Lin_BlkSize, sprintf(#, "Line %d", lnr+1)) | Interstys.jsfx-inc:9449 |
-| `d` |  | module | Reader (show_Reader_Pad) | GM_Dump(rcbl, its_Rdr_BlkSize, sprintf(#, "Reader %d", rdr+1)) | Interstys.jsfx-inc:8551 |
-| `r` |  | module | Reader (show_Reader_Pad) | // toggle run/pause state | Interstys.jsfx-inc:9111 |
-| `t` |  | module | Reader (show_Reader_Pad) | RDBL[6] = (RDBL[6] + 1) % 3; | Interstys.jsfx-inc:9115 |
-| `d` |  | module | Writer (show_Writer_Pad) | GM_Dump(wcbl, its_Wrt_BlkSize, sprintf(#, "Writer %d", wrt+1)) | Interstys.jsfx-inc:9734 |
-| `Enter` |  | module | log système (show_SysLog) | mSL_log(box, " "); | Interstys.jsfx-inc:8353 |
-| `Space` |  | module | log système (show_SysLog) | mSL_log(box, " "); | Interstys.jsfx-inc:8353 |
-| `1` |  | module | log système (show_SysLog) | box[5] = 1; | Interstys.jsfx-inc:8365 |
-| `2` |  | module | log système (show_SysLog) | box[5] = 2; | Interstys.jsfx-inc:8366 |
-| `3` |  | module | log système (show_SysLog) | box[5] = 3; | Interstys.jsfx-inc:8367 |
-| `4` |  | module | log système (show_SysLog) | box[5] = 4; | Interstys.jsfx-inc:8368 |
-| `5` |  | module | log système (show_SysLog) | box[5] = 5; | Interstys.jsfx-inc:8369 |
-| `6` |  | module | log système (show_SysLog) | box[5] = 6; | Interstys.jsfx-inc:8370 |
-| `7` |  | module | log système (show_SysLog) | box[5] = 7; | Interstys.jsfx-inc:8371 |
-| `8` |  | module | log système (show_SysLog) | box[5] = 8; | Interstys.jsfx-inc:8372 |
-| `j` |  | module | log système (show_SysLog) | box[7] = (box[7]+1) % box[2]; | Interstys.jsfx-inc:8358 |
-| `k` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-1); | Interstys.jsfx-inc:8357 |
-| `l` |  | module | log système (show_SysLog) | box[6] = max(0, box[6]-1); | Interstys.jsfx-inc:8355 |
-| `m` |  | module | log système (show_SysLog) | box[6] = min(20, box[6]+1); | Interstys.jsfx-inc:8354 |
-| `p` |  | module | log système (show_SysLog) | sysout(box);  // log in a text file (see mSL_show_Utilities) | Interstys.jsfx-inc:8373 |
-| `t` |  | module | log système (show_SysLog) | nowTime(); mSL_log(SysLogBox, #nowis); | Interstys.jsfx-inc:8359 |
-| `z` |  | module | log système (show_SysLog) | box[7] = 0; | Interstys.jsfx-inc:8356 |
-| `Up` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-10); | Interstys.jsfx-inc:8361 |
-| `Down` |  | module | log système (show_SysLog) | box[7] = (box[7]+10) % box[2]; | Interstys.jsfx-inc:8362 |
-| `Left` | none | module | log système (show_SysLog) | box[7] = 0; | Interstys.jsfx-inc:8363 |
-| `Right` | none | module | log système (show_SysLog) | box[7] = (box[7]+100) % box[2]; | Interstys.jsfx-inc:8364 |
+| `d` |  | module | Line (show_Line_Pad) | GM_Dump(lcbl, its_Lin_BlkSize, sprintf(#, "Line %d", lnr+1)) | Interstys.jsfx-inc:9469 |
+| `d` |  | module | Reader (show_Reader_Pad) | GM_Dump(rcbl, its_Rdr_BlkSize, sprintf(#, "Reader %d", rdr+1)) | Interstys.jsfx-inc:8575 |
+| `r` |  | module | Reader (show_Reader_Pad) | // toggle run/pause state | Interstys.jsfx-inc:9131 |
+| `t` |  | module | Reader (show_Reader_Pad) | RDBL[6] = (RDBL[6] + 1) % 3; | Interstys.jsfx-inc:9135 |
+| `d` |  | module | Writer (show_Writer_Pad) | GM_Dump(wcbl, its_Wrt_BlkSize, sprintf(#, "Writer %d", wrt+1)) | Interstys.jsfx-inc:9750 |
+| `Enter` |  | module | log système (show_SysLog) | mSL_log(box, " "); | Interstys.jsfx-inc:8377 |
+| `Space` |  | module | log système (show_SysLog) | mSL_log(box, " "); | Interstys.jsfx-inc:8377 |
+| `1` |  | module | log système (show_SysLog) | box[5] = 1; | Interstys.jsfx-inc:8389 |
+| `2` |  | module | log système (show_SysLog) | box[5] = 2; | Interstys.jsfx-inc:8390 |
+| `3` |  | module | log système (show_SysLog) | box[5] = 3; | Interstys.jsfx-inc:8391 |
+| `4` |  | module | log système (show_SysLog) | box[5] = 4; | Interstys.jsfx-inc:8392 |
+| `5` |  | module | log système (show_SysLog) | box[5] = 5; | Interstys.jsfx-inc:8393 |
+| `6` |  | module | log système (show_SysLog) | box[5] = 6; | Interstys.jsfx-inc:8394 |
+| `7` |  | module | log système (show_SysLog) | box[5] = 7; | Interstys.jsfx-inc:8395 |
+| `8` |  | module | log système (show_SysLog) | box[5] = 8; | Interstys.jsfx-inc:8396 |
+| `j` |  | module | log système (show_SysLog) | box[7] = (box[7]+1) % box[2]; | Interstys.jsfx-inc:8382 |
+| `k` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-1); | Interstys.jsfx-inc:8381 |
+| `l` |  | module | log système (show_SysLog) | box[6] = max(0, box[6]-1); | Interstys.jsfx-inc:8379 |
+| `m` |  | module | log système (show_SysLog) | box[6] = min(20, box[6]+1); | Interstys.jsfx-inc:8378 |
+| `p` |  | module | log système (show_SysLog) | sysout(box);  // log in a text file (see mSL_show_Utilities) | Interstys.jsfx-inc:8397 |
+| `t` |  | module | log système (show_SysLog) | nowTime(); mSL_log(SysLogBox, #nowis); | Interstys.jsfx-inc:8383 |
+| `z` |  | module | log système (show_SysLog) | box[7] = 0; | Interstys.jsfx-inc:8380 |
+| `Up` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-10); | Interstys.jsfx-inc:8385 |
+| `Down` |  | module | log système (show_SysLog) | box[7] = (box[7]+10) % box[2]; | Interstys.jsfx-inc:8386 |
+| `Left` | none | module | log système (show_SysLog) | box[7] = 0; | Interstys.jsfx-inc:8387 |
+| `Right` | none | module | log système (show_SysLog) | box[7] = (box[7]+100) % box[2]; | Interstys.jsfx-inc:8388 |
 | `:` |  | module | mémoire (débogueur) (show_Memory) | membox[14] = membox[14] ~ 1; | mSL_Dbg_Memory.jsfx-inc:243 |
 | `:` |  | module | mémoire (débogueur) (show_Memory) | membox[14] = membox[14] ~ 1; | mSL_Dbg_Memory.jsfx-inc:294 |
 | `=` |  | module | mémoire (débogueur) (show_Memory) | // set this location as relative zero | mSL_Dbg_Memory.jsfx-inc:239 |
@@ -674,10 +676,10 @@ Ordre : module sous la souris (puis ses pads) → panneau → commandes d'onglet
 | `Right` | none | module | mémoire (débogueur) (show_Memory) | membox[7] = membox[7] + 1; | mSL_Dbg_Memory.jsfx-inc:224 |
 | `Right` | Shift | module | mémoire (débogueur) (show_Memory) | membox[7] = membox[7] + knb * 32; | mSL_Dbg_Memory.jsfx-inc:230 |
 | `Right` | none | module | mémoire (débogueur) (show_Memory) | membox[7] = membox[7] + 1; | mSL_Dbg_Memory.jsfx-inc:287 |
-| `Left` | Shift | panneau | largeur des colonnes (genericItemsPos) | // try to increase colum size | Interstys.jsfx-inc:10884 |
-| `Right` | Shift | panneau | largeur des colonnes (genericItemsPos) | // try to increase colum size | Interstys.jsfx-inc:10856 |
-| `S` |  | plugin | commandes d'Interstys (do_Plugin_Keys) | (gui_show_sliders = gui_show_sliders ? 0 : 1) ? ( | Interstys.jsfx-inc:7759 |
-| `U` |  | plugin | commandes d'Interstys (do_Plugin_Keys) | gui_show_UI = gui_show_UI ? 0 : 1; | Interstys.jsfx-inc:7756 |
+| `Left` | Shift | panneau | largeur des colonnes (genericItemsPos) | // try to increase colum size | Interstys.jsfx-inc:10897 |
+| `Right` | Shift | panneau | largeur des colonnes (genericItemsPos) | // try to increase colum size | Interstys.jsfx-inc:10869 |
+| `S` |  | plugin | commandes d'Interstys (do_Plugin_Keys) | (gui_show_sliders = gui_show_sliders ? 0 : 1) ? ( | Interstys.jsfx-inc:7783 |
+| `U` |  | plugin | commandes d'Interstys (do_Plugin_Keys) | gui_show_UI = gui_show_UI ? 0 : 1; | Interstys.jsfx-inc:7780 |
 | `Tab` | Shift | plugin | onglet suivant / précédent (GM_Tab_Keys) | ui_jtab_step(uix_jG_menuscr, -1); 1 | ui-lib-JJ-GUI.jsfx-inc:576 |
 | `Tab` |  | plugin | onglet suivant / précédent (GM_Tab_Keys) | (ui_jtab_step(uix_jG_menuscr, 1); 1) : 0; | ui-lib-JJ-GUI.jsfx-inc:577 |
 | `c` |  | système | commandes système (do_System_Keys) | mSL_Dyn_RecycleF = mSL_Dyn_RecycleF ? 0 : 1; | mSL_System_Keys.jsfx-inc:28 |

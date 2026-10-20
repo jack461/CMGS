@@ -1542,9 +1542,9 @@ lodarea = make_array(SVASIZ); // Load/Save description area
 TMPSIZ = 4;
 savtmp = make_array(TMPSIZ); // Work area for load/save of a memory block
 savcode = '1tr6'; // a save code
-WRKSIZ = 8192; // can convert up to 4 k
-BFFSIZ = WRKSIZ * 2;
-savwrk = make_array(BFFSIZ); // Work area for load/save conversion
+// Saving doubles in @serialize as two singles : save_mem, load_mem, savwrk (shared, mSL_Serialize.jsfx-inc)
+<? include("GM-Libs/mSL_Serialize.jsfx-inc"); ?>
+ser_Init();
 
 
 // Créations des tables d'objets et de cellules
@@ -2408,79 +2408,6 @@ function getCellIdent(num1, num2)
     CellCount[num1] + num2 % ((num1 <= 4) ? 128 : 256);
 );
 
-
-function double_to_double_single(d, hi*, lo*)
-local(signe, log2_approximatif, exposant, facteur_echelle, mantisse_complete, mantisse_entiere, bits_bas, bits_hauts)
-(
-  // Étape 1 : Gestion du cas zéro
-  d === 0 ? (
-    hi = 0;
-    lo = 0;
-  ) : (
-    // Étape 2 : Gestion du signe
-    signe = 1;
-    d < 0 ? (
-      signe = -1;
-      d = -d; // Traiter la valeur absolue
-    );
-
-    // Étape 3 : Calcul de l'exposant avec le log10 natif de JSFX
-    // The number 3.3219... is 1/log10(2)
-    log2_approximatif = log10(d) * 3.3219280948873623478703194294893901758648;
-
-    // Sécurité contre les approximations de floor sur les puissances de 2
-    exposant = floor(log2_approximatif + 10^-12);
-    facteur_echelle = 2 ^ exposant;
-
-    // Ajustement de sécurité
-    facteur_echelle > d ? (
-      exposant -= 1;
-      facteur_echelle = 2 ^ exposant;
-    );
-
-    // Étape 4 : Extraction de la mantisse entière (2^52)
-    mantisse_complete = d / facteur_echelle;
-    mantisse_entiere = floor(mantisse_complete * 4503599627370496);
-
-    // Étape 5 : Découpage avec le Modulo natif (2^29 = 536870912)
-    bits_bas = mantisse_entiere % 536870912;
-    bits_hauts = floor(mantisse_entiere / 536870912);
-
-    // Étape 6 : Reconstruction et application du pointeur de sortie (2^23 = 8388608)
-    hi = (bits_hauts / 8388608) * facteur_echelle * signe;
-    lo = (bits_bas / 4503599627370496) * facteur_echelle * signe;
-  );
-);
-
-
-// Déclaration de la fonction de reconstruction
-function double_single_to_double(hi, lo)
-local(signe_hi, abs_hi, exp_hi, scale_hi, mant_hi)
-(
-  // 1. Sécuriser 'hi' pour s'assurer qu'il s'agit d'un float 32-bit valide.
-  // Un float32 n'a que 24 bits de mantisse (1 implicite + 23 stockés).
-  hi == 0 ? (
-    mant_hi = 0;
-  ) : (
-    signe_hi = hi < 0 ? -1 : 1;
-    abs_hi = abs(hi);
-
-    // Extraire l'exposant de 'hi'
-    exp_hi = floor(log10(abs_hi) * 3.3219280948873623478703194294893901758648 + 10^-12);
-    scale_hi = 2 ^ exp_hi;
-    scale_hi > abs_hi ? (
-      exp_hi -= 1;
-      scale_hi = 2 ^ exp_hi;
-    );
-
-    // Tronquer la mantisse de 'hi' à 24 bits pour éliminer les résidus 64-bit indésirables
-    mant_hi = floor((abs_hi / scale_hi) * 8388608) / 8388608 * scale_hi * signe_hi;
-  );
-
-  // 2. Fusionner la partie haute nettoyée et la partie basse
-  // Le résultat renvoyé par la fonction est un double 64-bit parfait.
-  mant_hi + lo;
-);
 
 /*  Tests for dtds et dstd */
 N1 = $pi;
@@ -6675,47 +6602,7 @@ local (fxcbl, ty, ptsrc, dst, cc, ccnt, i, zp, err_effect)
 
 
 
-//======== Serialize Procedures
-/*
-    savwrk is of size 2*WRKSIZ
-*/
-whi = wlo = 0;
-function save_mem(file, area, size)
-local (ps, pt, sv, sz)
-(
-    ps = sv = 0;
-    while (size > 0) (
-        sz = min(size, WRKSIZ);
-        pt = 0;
-        loop(sz,
-            double_to_double_single(area[ps], whi, wlo);
-            savwrk[pt] = whi; savwrk[pt+1] = wlo;
-            ps += 1; pt += 2;
-        );
-        sv += file_mem(file, savwrk, pt);
-        size -= sz;
-    );
-    sv >> 1;
-);
-
-function load_mem(file, area, size)
-local (pd, pt, sl, rcr)
-(
-    pd = sl = 0;
-    while (size > 0) (
-        sz = min(size, WRKSIZ);
-        sl += (rcr = file_mem(file, savwrk, sz * 2));
-        (rcr === sz * 2) ? (
-            pt = 0;
-            loop (sz,
-                area[pd] = double_single_to_double(savwrk[pt], savwrk[pt+1]);
-                pd += 1; pt += 2;
-            );
-        );
-        size -= sz;
-    );
-    sl >> 1;
-);
+//======== Serialize Procedures : save_mem, load_mem (mSL_Serialize.jsfx-inc)
 
 function check_its_block(cbl)
 (

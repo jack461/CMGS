@@ -41,7 +41,7 @@ READERS = set()
 PLUGINS = ['GamePlayer', 'FilePlayer', 'ScriptMaster', 'Diffusion-3', 'Interstys']
 SHARED = {
     'mSL_Dbg_Memory.jsfx-inc': PLUGINS,
-    'mSL_Panes.jsfx-inc': ['Diffusion-3'],
+    'mSL_Panes.jsfx-inc': ['Diffusion-3', 'ScriptMaster'],
     'mSL_ui_Pads.jsfx-inc': ['GamePlayer'],              # interactive leds : GamePlayer only
     'ScriptMaster_Utilities.jsfx-inc': ['ScriptMaster', 'Interstys'],
     'mSL_System_Keys.jsfx-inc': ['FilePlayer', 'ScriptMaster', 'Diffusion-3', 'Interstys'],
@@ -64,7 +64,7 @@ ORDER = {
                   "raccourcis de l'utilisateur (do_Plugin_Keys) → pad Studio, s'il est affiché (do_StudioPadKeyboard) ; "
                   "pendant l'apprentissage d'un raccourci, la touche va d'abord à celui-ci",
     'FilePlayer': "module sous la souris → commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys)",
-    'ScriptMaster': "module sous la souris → commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys)",
+    'ScriptMaster': "module sous la souris → panneau → commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys)",
     'Diffusion-3': "module sous la souris (écran Live : la boîte sous la souris) → panneau → écran Live (do_live_actions) "
                    "→ commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys)",
     'Interstys': "module sous la souris (puis ses pads) → panneau → commandes d'onglet (do_Generic_Commands) → "

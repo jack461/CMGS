@@ -22,6 +22,7 @@
                                      serialBlock + Pr7_StudRat (dcbTabsCount * 4 : panes widths),
                                      serialBlock + Pr7_StudLive (dcbTabsCount : 1 if the tab uses the "live" display)
             dcbBlocksAll             (optional) where to keep the modules lists, dcbBSize words ; allocated if 0
+        and include mSL_Serialize.jsfx-inc, then call ser_Init() (for pns_Serialize).
             ui_MinSize1Pane...       (optional) panes sizes ; defaults as in Interstys
 
     2 - display, to include in @gfx :
@@ -33,7 +34,8 @@
         Then, in @gfx :
             pns_ShowTabs(ui_screen())   displays the current tab ; returns 0 if the screen is not a tab
 
-    Part 1 provides : pns_Init(), mkModuleMenu(), mSL_GUI_Generic(opr, bNumb, module, kit), keepBlockInfos(bCurrent)
+    Part 1 provides : pns_Init(), mkModuleMenu(), mSL_GUI_Generic(opr, bNumb, module, kit), keepBlockInfos(bCurrent),
+                      pns_Serialize() (to call in @serialize : saves / loads the tabs and panes configuration)
     Part 2 provides : genericItemsPos(bNumb), genericLiveMenu(bNumb), genericLiveTab(), genericTabSet(tbNum), pns_ShowTabs(scr)
 */
 
@@ -555,6 +557,59 @@ local(i)
             i += 1;
         );
     );
+);
+
+
+/*
+    Save / load of the tabs and panes configuration : to call in @serialize ; returns 1 if a configuration was loaded.
+    Format : ['tnm2', tabs count, 0, 0], the tabs names (file_string), ['std2', serialSize, dcbBSize, 0],
+    serialBlock, dcbBlocksAll ; the doubles are saved as two singles (save_mem, load_mem : mSL_Serialize.jsfx-inc).
+*/
+function pns_Serialize()
+local (ok, i, n, p)
+(
+    ok = 0;
+    (file_avail(0) >= 0) ? (
+        // ===LOAD===
+        (file_avail(0) > 0) ? (
+            memset(ser_hdr, 0, 4);
+            load_mem(0, ser_hdr, 4);
+            (ser_hdr[0] === 'tnm2') ? (
+                n = ser_hdr[1];
+                i = 0; loop(n,
+                    (i < dcbTabsCount) ? file_string(0, altTabsNames[i]) : file_string(0, #pns_skip);
+                    i += 1;
+                );
+                memset(ser_hdr, 0, 4);
+                load_mem(0, ser_hdr, 4);
+                ((ser_hdr[0] === 'std2') && (ser_hdr[1] === serialSize) && (ser_hdr[2] === dcbBSize)) ? (
+                    load_mem(0, serialBlock, serialSize);
+                    load_mem(0, dcbBlocksAll, dcbBSize);
+                    ok = 1;
+                );
+            );
+        );
+        mSL_log(SysLogBox, ok ? "Tabs and panes : configuration loaded" : "Tabs and panes : no configuration loaded");
+        ok ? (
+            ui_jstyle = (serialBlock[Pr7_UiStyle] != 0); // look of the GUI
+            uix_jtheme = max(0, min(11, 0|serialBlock[Pr7_UiTheme])); // theme of the GUI
+            // Check panes configurations
+            p = serialBlock + Pr7_StudConf;
+            i = 0; loop(dcbTabsCount, p[i] = max(1, min(4, 0|p[i])); i += 1;);
+            p = serialBlock + Pr7_StudRat;
+            i = 0; loop(dcbTabsCount*4, p[i] = max(180, min(1800, 0|p[i])); i += 1;);
+        );
+    ) : (
+        // ===SAVE===
+        ser_hdr[0] = 'tnm2'; ser_hdr[1] = dcbTabsCount; ser_hdr[2] = ser_hdr[3] = 0;
+        save_mem(0, ser_hdr, 4);
+        i = 0; loop(dcbTabsCount, file_string(0, altTabsNames[i]); i += 1;);
+        ser_hdr[0] = 'std2'; ser_hdr[1] = serialSize; ser_hdr[2] = dcbBSize; ser_hdr[3] = 0;
+        save_mem(0, ser_hdr, 4);
+        save_mem(0, serialBlock, serialSize);
+        save_mem(0, dcbBlocksAll, dcbBSize);
+    );
+    ok;
 );
 
 <? _suppress = 0; ?>

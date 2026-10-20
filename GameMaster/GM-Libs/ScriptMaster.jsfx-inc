@@ -344,6 +344,8 @@ ui_lib_JJ_GUI_init(2);
 // Shared display modules, part 1 (mSL_show_Utilities.jsfx-inc) : here for sysout (log in a text file, key "p")
 <? shw_part = 1; include("GM-Libs/mSL_show_Utilities.jsfx-inc"); ?>
 shw_AppName = "ScriptMaster"; // in the names of the log files (sysout)
+shw_Sched_Init(); // pad of the Scheduler module
+shw_Proc_Init(); // pad of the Processes Manager module
 
 // Structure of a grain
 gStatus = idx = 0;
@@ -1533,6 +1535,71 @@ local (res, k, kw, ent)
 <? include("GM-Libs/mSL_Evaluator.jsfx-inc"); ?>
 
 
+//====== TABS AND PANES (mSL_Panes.jsfx-inc) ======
+uix_jG_menuscr[ii=0] = "Main";
+uix_jG_menuscr[ii+=1] = "Studio A";
+uix_jG_menuscr[ii+=1] = "Studio B";
+uix_jG_menuscr[ii+=1] = "Studio C";
+uix_jG_menuscr[ii+=1] = "Studio D";
+uix_jG_menuscr[ii+=1] = -1;
+dcbTabsCount = ii; // menu bar max -- number of tabs
+uix_jmbsel = 0;
+uix_jG_menuscrSz = dcbTabsCount + 2; // tabs width in the menu bar
+
+// Tabs and panes configuration, saved in @serialize
+serialSize = 128;
+serialBlock = make_array(serialSize);
+Pr7_StudConf = 8;  // size : 8 -- number of panes of each tab
+Pr7_StudRat = Pr7_StudConf + 8;  // size : 8 * 4 -- panes widths
+Pr7_StudLive = Pr7_StudRat + 8 * 4; // size : 8 -- 1 if the tab uses the "live" display
+Pr7_UiStyle = Pr7_StudLive + 8; // ui_jstyle (look of the GUI)
+Pr7_UiTheme = Pr7_UiStyle + 1; // uix_jtheme (theme of the GUI)
+Pr7_Free = Pr7_UiTheme + 1;
+dcbBlocksAll = 0; // allocated by pns_Init()
+
+// Alternate tabs names, edited with "Rename tab..." (right click in the menu bar), saved in @serialize
+altTabsNames = make_array(dcbTabsCount);
+ii = 0; loop(dcbTabsCount, altTabsNames[ii] = mSL_Str_Perm(); ii += 1;);
+uix_jtheme_menu = make_jmenu(
+    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+    "Tabs",
+    "Rename tab..."
+    );
+uix_jtheme_rtc_max = 0;  // no themes in this menu : the entry is returned in uix_jtheme_rtc_code
+
+// Modules of the Script Master, shown in the Studio menu (shift + right clic)
+function pns_Host_Modules(itdsp)
+(
+    blockMainInfos = (itdsp += 1);
+    blockDispNames[blockMainInfos] = "Main Status";
+    blockSysLog = (itdsp += 1);
+    blockDispNames[blockSysLog] = "System Log";
+    blockMemory1 = (itdsp += 1);
+    blockDispNames[blockMemory1] = "Memory 1";
+    blockMemory2 = (itdsp += 1);
+    blockDispNames[blockMemory2] = "Memory 2";
+    blockScheduler = (itdsp += 1);
+    blockDispNames[blockScheduler] = "Scheduler";
+    blockProcessesMgr = (itdsp += 1);
+    blockDispNames[blockProcessesMgr] = "Processes Manager";
+    itdsp;
+);
+
+// Saving doubles in @serialize as two singles (mSL_Serialize.jsfx-inc) : used by pns_Serialize
+<? include("GM-Libs/mSL_Serialize.jsfx-inc"); ?>
+ser_Init();
+<? pns_part = 1; include("GM-Libs/mSL_Panes.jsfx-inc"); ?>
+pns_Init();
+mkModuleMenu();
+memoryBox1[19] = blockMemory1; // for keepBlockInfos
+memoryBox2[19] = blockMemory2;
+
+// Default configuration : "Main" as before (2 panes : status and log, memory)
+serialBlock[Pr7_StudConf] = 2;
+dcbBlocksAll[0] = blockMainInfos; dcbBlocksAll[1] = blockSysLog;
+dcbBlocksAll[dcbWSize] = blockMemory1; dcbBlocksAll[dcbWSize+1] = blockMemory2;
+
+
 TabAddrMax = mSL_StM_FreePt; // max. address recognized for an array
 SharedHighMemory = lastmemory = make_array(2); // last use of the function
 
@@ -1865,6 +1932,11 @@ tfact = srate * 4;
 
 
 
+@serialize
+// The tabs names and the tabs and panes configuration (see pns_Serialize, mSL_Panes.jsfx-inc)
+pns_Serialize();
+
+
 @gfx
 
 
@@ -1906,8 +1978,6 @@ gfxStrtT = time_precise() + timeD;
     );
 );
 
-function keepBlockInfos(b) ( 0; );
-
 function mSL_Dbg_Memory_Updt(membox)
 (
     (membox[14] & 0x100) ? (
@@ -1917,6 +1987,8 @@ function mSL_Dbg_Memory_Updt(membox)
 
 // The memory displayer, in @gfx : it uses keepBlockInfos and mSL_Dbg_Memory_Updt ; no_init removes its leading @init
 <? no_init = 1; include("GM-Libs/mSL_Dbg_Memory.jsfx-inc"); ?>
+// Shared display modules : show_Scheduler_Pad, show_ProcessesMgr (mSL_show_Utilities.jsfx-inc)
+<? shw_part = 2; include("GM-Libs/mSL_show_Utilities.jsfx-inc"); ?>
 // The system commands typed on the keyboard : do_System_Keys() (mSL_System_Keys.jsfx-inc)
 <? include("GM-Libs/mSL_System_Keys.jsfx-inc"); ?>
 
@@ -1924,8 +1996,7 @@ function mSL_Dbg_Memory_Updt(membox)
 // (capitals for the displays, see mSL_ui_LibJJ, Keyboard)
 function do_Plugin_Keys()
 (
-    GM_key_take('L') ? (gui_show_syslog = gui_show_syslog ? 0 : 1;) : // show / hide the system log
-    GM_key_take('M') ? (gui_show_memory = gui_show_memory ? 0 : 1;) : // show / hide the memory dumps
+    // (no L / M : the modules are chosen in the panes, Studio menu)
     GM_Tab_Keys(); // Tab, Shift + Tab : next, previous tabulation (see ui-lib-JJ-GUI)
 );
 
@@ -2318,6 +2389,7 @@ local (uix_jneed, uix_jmini, h1, k, w, siz, u_ch, ent)
 
 
             zzmi = ui_hover();
+            keepBlockInfos(blockMainInfos);
             (zzmi) ? (
                 ui_push();
                     // stack is now 2 levels deep
@@ -2596,6 +2668,50 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
 );
 
 
+//====== TABS AND PANES : HOST FUNCTIONS (see mSL_Panes.jsfx-inc) ======
+function do_GenericTabStart()
+(
+    ui_jmouse_cap |= mouse_cap;
+    ui_Xtime_period = 1; // refresh screen every second
+);
+
+function do_GenericTabEnd()
+(
+    0; // (no tab commands : the commands of the plugin are at the end of the frame, do_Plugin_Keys)
+);
+
+function pns_LiveDisplay()
+(
+    // no "live" display in the Script Master : uncheck "Live display" in the Studio menu (shift + right clic)
+    ui_Xtime_period = 1;
+    ui_text("No live display in the Script Master");
+);
+
+function show_Module(igb)
+(
+    (igb === blockMainInfos) ? (
+        show_local_Infos();
+    ) :
+    (igb === blockSysLog) ? (
+        show_SysLog(blockSysLog, SysLogBox);
+    ) :
+    (igb === blockMemory1) ? (
+        show_Memory(memoryBox1);
+    ) :
+    (igb === blockMemory2) ? (
+        show_Memory(memoryBox2);
+    ) :
+    (igb === blockScheduler) ? (
+        show_Scheduler_Pad("Scheduler", blockScheduler);
+    ) :
+    (igb === blockProcessesMgr) ? (
+        show_ProcessesMgr("Processes Manager", blockProcessesMgr);
+    );
+);
+
+<? pns_part = 2; include("GM-Libs/mSL_Panes.jsfx-inc"); ?>
+
+
 //====== GRAPHIC EXECUTION START ======
 
 must_do_gfx()
@@ -2613,37 +2729,38 @@ must_do_gfx()
         uix_default_fontface = ui_jdefault_fontface;
     );
 
+    (live_tab_active == 0) ? uix_gfx_clear = -1; // live background only for "live" tabs
+    live_tab_active = 0;
+    currScreen = ui_screen();
+    serialBlock[Pr7_UiTheme] = uix_jtheme; // saved with the project ('stud' block)
     update_theme();
     GM_key_frame(); // the key of the frame (see mSL_ui_LibJJ, Keyboard)
-
-    currScreen = ui_screen();
     ui_Xtime_period = 1; // refresh screen every second
 
 
     ui_font();
 
     my_menu_bar(uix_jG_menuscr);
+    // "Rename tab..." from the right click menu
+    (uix_jtheme_rtc_code === 1) ? (
+        uix_jtheme_rtc_code = 0;
+        sprintf(#tnam_title, "New name for tabulation %d...", uix_jmbsel);
+        ui_screen_open("control.prompt");
+        ui_screen_arg(0, altTabsNames[uix_jmbsel]);
+        ui_screen_arg(1, #tnam_title);
+    );
 
 
-    //SCREEN
-    ui_screen() == "Main" ? (
-        show_local_Infos();
-
-        gui_show_syslog ? show_SysLog(0, SysLogBox);
-        gui_show_memory ? (
-            (gfx_w > gfx_colM_width) ? (
-                ui_split_leftratio(0.5);
-                show_Memory(memoryBox1);
-                ui_pop();
-            );
-            show_Memory(memoryBox2);
-        );
+    //SCREENS : the tabs, with panes (see mSL_Panes.jsfx-inc)
+    pns_ShowTabs(currScreen) ? (
+        0;
     ) :
 
     //SCREEN--DEFAULT
     (
         control_system();
     );
+    my_menu_bar_overlay(uix_jG_menuscr); // "soft" look : the tabs bar over the panes (see ui-lib-JJ-GUI)
 
     // the keys left by the modules : the commands of the plugin, then the system commands (see mSL_System_Keys)
     do_Plugin_Keys();
