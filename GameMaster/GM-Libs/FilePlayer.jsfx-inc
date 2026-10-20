@@ -491,7 +491,7 @@ set_pcolors_array(Player_Color_Set[0], Player_Color_cnt+1, U1_1, U4_0, 0.5, -1);
 Player_Color_Set[1] = make_array(Player_Color_cnt+2); // Loop
 set_pcolors_array(Player_Color_Set[1], Player_Color_cnt+1, U1_1, U5_0, 0.5, -1);
 Player_Color_Set[2] = make_array(Player_Color_cnt+2); // Loop
-set_pcolors_array(Player_Color_Set[1], Player_Color_cnt+1, U1_1, U5_0, 0.5, -1);
+set_pcolors_array(Player_Color_Set[2], Player_Color_cnt+1, U1_1, U5_0, 0.5, -1);
 currColor = Player_Color_Set[0];
 currColState = 0;
 currColVar = 0;
@@ -733,27 +733,25 @@ local (pt, ptx, flg, date, tc, rmv)
     tc = cnt = max(1, 0|cnt);
     while (flg && (pt < smplLimit) && (pt >= 0) && (smplEvents[pt] != smplNeutre) ) (
         ((smplEvents[pt+1] === op) && ((par === Undef) || (par === smplEvents[pt+2]))) ? (
-            // last event of the list ?
-            (smplEvents[pt+4] === smplNeutre) ? (
+            date = smplEvents[pt];
+            // last event of the list ? (the entries have smplEvSiz words)
+            (smplEvents[pt+smplEvSiz] === smplNeutre) ? (
                 // we can just clear the event
                 memset(smplEvents + pt, smplNeutre, smplEvSiz);
-                smplXPtr = pt - smplEvSiz;
-                smplNxtE = smplEvents[smplXPtr];
             ) : (
                 ptx = pt;
-                // delete event
+                // delete event : the following (earlier) events move up, the last entry becomes free
                 while (ptx <= smplXPtr) (
-                    memcpy(smplEvents+ptx, smplEvents+ptx+4, smplEvSiz);
+                    memcpy(smplEvents+ptx, smplEvents+ptx+smplEvSiz, smplEvSiz);
                     ptx += smplEvSiz;
                 );
-                smplXPtr = ptx - smplEvSiz;
-                smplNxtE = smplEvents[smplXPtr];
-                pt -= smplEvSiz;
+                pt -= smplEvSiz; // check again this position
             );
+            smplXPtr -= smplEvSiz; // the list has one event less
+            smplNxtE = smplEvents[smplXPtr];
             rmv += 1;
             ((cnt -= 1) <= 0) ? (flg = 0);
             (TRC & 1) ? (
-                date = smplEvents[pt];
                 sprintf(#gfw_mss, "* %s * Removed event %d / %d {%.0f}", #nowtim, op, par, date);
                 mSL_log(SysLogBox, #gfw_mss);
             );
@@ -845,7 +843,7 @@ local (act)
 // Remove a class of actions
 function
 sactRMClass(class)
-local(pt, k)
+local(pt, pq, k)
 (
     pt = 0; pq = 0;
     while ((pt < sactLim) && (pq < sactLim)) (
@@ -1213,8 +1211,8 @@ memoryBox2[5] = "Memory 2";
 // 6
 memoryBox2[17] = 96;
 memoryBox2[18] = 19;
-memoryBox1[19] = 0;
-memoryBox1[20] = 0;
+memoryBox2[19] = 0;
+memoryBox2[20] = 0;
 
 // The debug menu ActionTbSiz
 DebugTbSize = 64;
@@ -1587,7 +1585,7 @@ local(i,j,k,s)
     TM_HP = chTmpCnt1 + chTmpCnt2;
     i = j = 0; k = 1/sqrt(chTmpCnt1);
     loop (chTmpCnt1,
-        TM_HP_Dest[i] = Chans1[j];
+        TM_HP_Dest[i] = Chans1[j % HPCnt1];
         TM_HP_Src[i] = j % chGenCnt;
         TM_Fix_Coef[i] = k;
         TM_Dyn_Coef[i] = 0;
@@ -1595,7 +1593,7 @@ local(i,j,k,s)
     );
     j = 0; k = 1/sqrt(chTmpCnt2);
     loop (chTmpCnt2,
-        TM_HP_Dest[i] = Chans2[j];
+        TM_HP_Dest[i] = Chans2[j % HPCnt2];
         TM_HP_Src[i] = j % chGenCnt;
         TM_Fix_Coef[i] = k;
         TM_Dyn_Coef[i] = 1;
@@ -1603,6 +1601,7 @@ local(i,j,k,s)
     );
     // Build the coef. matrix
     s = TM_HP * chGenCnt;
+    (Mat_Raw > 0) ? mSL_Dyn_Free(Mat_Raw); // the previous matrices
     Mat_Raw = mSL_Dyn_Alloc(s*2, 'TMat', mSL_StM_FlClear);
     Mat_Soft = Mat_Raw + s;
 );
@@ -1634,11 +1633,11 @@ local(i,j,p,q)
     // Reduce channels to Strt/Last
     TM_HP_Dest1 = TM_HP_Dest;
     TM_HP_Dest2 = TM_HP_Dest + TM_Dcp;
-a=    chTmpCnt1 = max(1, min(TM_Dcp, max(HPCnt1, chGenCnt)));
-b=    chTmpCnt2 = max(1, min(TM_Dcp, max(HPCnt2, chGenCnt)));
+    chTmpCnt1 = max(1, min(TM_Dcp, max(HPCnt1, chGenCnt)));
+    chTmpCnt2 = max(1, min(TM_Dcp, max(HPCnt2, chGenCnt)));
     // "Left" set
-c=    p = max(0, 0|TM_Strt1);
-d=    q = min(chTmpCnt1-1, 0|TM_Last1);
+    p = max(0, 0|TM_Strt1);
+    q = min(chTmpCnt1-1, 0|TM_Last1);
     (p <= q) ? (
         loop(i = 0; j = p; (chTmpCnt1 = q-p+1),
             TM_HP_Dest1[i] = Chans1[j % HPCnt1];
@@ -1668,8 +1667,6 @@ d=    q = min(chTmpCnt1-1, 0|TM_Last1);
         );
         TM_HP_Dest2[i] = TM_HP_Dest2[i-1]
     );
-    sprintf(#dbg_trace4, "a=%d b=%d, c=%d d=%d",
-        a,b,c,d);
     // spaceAlgo | 9; //
     //
     spaceAlgo | 10; //
@@ -1956,12 +1953,13 @@ local (Cb, k, stpcnt, pgr)
         stpcnt = MaxGr;
         (flgs & 2) ? ( // Grain mass changed
             GrXpect = max(GrMinXpect, min (gmem [UAdd+RCB_GrXpect] * FP_G_PMass, MaxGr-1));
-            GrXVol = (GrXVolAdj + invsqrt(max(1,GrXpect)) / (GrXVolAdj + 1)); // (N + a)/(N + 1)
+            GrXVol = (GrXVolAdj + invsqrt(max(1,GrXpect))) / (GrXVolAdj + 1); // (a + 1/sqrt(N)) / (a + 1)
             stpcnt = ceil(P_Gp_ct - GrXpect);
         );
         (flgs & 1) ? ( // Grain length changed
             // Evaluate New Grain Mean Length in Tupples
             GrMLen = 0|min(MaxGrSize * currSrate, max(24, (FP_GL_Gmin + FP_GL_Gmax) * FP_GL_GSiz * currSrate / 2000));
+            GrLen = GrMLen; // length of the next grains
             P_Gp_ct = 0; // will force creation of a new grain
         );
         // stop some grains
@@ -2041,7 +2039,7 @@ local (flSpdmod, flGmod, xp, paramInClip)
     (FP_G_PMass != xp) ? (
         FP_G_PMass = xp;
         GrXpect = max(GrMinXpect, min(gmem [UAdd+RCB_GrXpect] * FP_G_PMass, MaxGr-1));
-        GrXVol = (GrXVolAdj + invsqrt(max(1,GrXpect)) / (GrXVolAdj + 1)); // (N + a)/(N + 1)
+        GrXVol = (GrXVolAdj + invsqrt(max(1,GrXpect))) / (GrXVolAdj + 1); // (a + 1/sqrt(N)) / (a + 1)
         flGmod |= 2;
     );
     // Asynchronicity
@@ -2055,7 +2053,7 @@ local (flSpdmod, flGmod, xp, paramInClip)
         FP_G_Direct = xp;
     );
     // Direction 2
-    xp = (FP_F & smUFlagDDir) ? gmem[paramGCopy+p_RDirSwitch];
+    xp = (FP_F & smUFlagDDir) ? gmem[paramGCopy+p_RDirSwitch] : 0; // a global parameter only (not in the clip parameters)
     (FP_P_Direct != xp) ? (
         FP_P_Direct = xp;
         gmem[UAdd+RCB_Speed_Dir_u] = xp ? -1 : 1; // Sens
@@ -2141,6 +2139,9 @@ initDynPars() local (paramInClip)
                                 (FP_G_FO_Shp = gmem[paramInClip+p_Dyn_GrFOSh]; ) ; //
     gmem[UAdd+RCB_SpeedMod2_u] = scale_12TET[max(0, min(96, 48 + FP_GL_GSpd2))];
     gmem[UAdd+RCB_SpeedMod1_u] = FP_GL_GSpd1;
+    // the grains fades shapes of this clip (update_dynpars rebuilds them only when they change)
+    buildShape(GrShpIn, FP_G_FI_Shp);
+    buildShape(GrShpOut, FP_G_FO_Shp);
     // now switch to FP_Flg2 for dynamic modifiers
     FP_F = FP_Flg = FP_Flg2;
     //FP_F = FP_Flg & gmem[dynGlFlags];
@@ -2156,8 +2157,8 @@ initDynPars() local (paramInClip)
 */
 function
 checkRCB()
-local (u, v, k, c, c1, c2, cu1, cu2, cu3, cu4, ix, iy, ch, t1, t2, pp, errk,
-    chk)
+local (u, v, k, c, c1, c2, c3, cu1, cu2, cu3, cu4, ix, iy, ch, t1, t2, pp, errk,
+    chk, w, ptr, v1, v2, u1, u2, clSec)
 (
     errk = 0;
     // Check we have correct clip informations
@@ -2293,7 +2294,7 @@ local (u, v, k, c, c1, c2, cu1, cu2, cu3, cu4, ix, iy, ch, t1, t2, pp, errk,
         chused1 = gmem [UAdd+RCB_Channels_cnt_used1];
         chused2 = gmem [UAdd+RCB_Channels_cnt_used2];
         (PBFlgs & FLdoForceFChs) ? (  // FLdoForceChCnt
-            chused1 = chused1 = CCCC; // Use CCCC as channel count
+            chused1 = chused2 = CCCC; // Use CCCC as channel count
         );
         ((chused1 <= 0) || (hpcnf1 === 0)) ? (
             // No channel specified - use 1st stereo as default
@@ -2466,7 +2467,7 @@ local (u, v, k, c, c1, c2, cu1, cu2, cu3, cu4, ix, iy, ch, t1, t2, pp, errk,
                 gmem [UAdd+RCB_GrXpect] = max(1, 0|((t2 > t1) ? t1 + irand(t2 - t1 + 1 ) : t1));
             );
             GrXpect = max(GrMinXpect, min(gmem [UAdd+RCB_GrXpect] * FP_G_PMass, MaxGr-1));
-            GrXVol = (GrXVolAdj + invsqrt(max(1,GrXpect)) / (GrXVolAdj + 1)); // (N + a)/(N + 1)
+            GrXVol = (GrXVolAdj + invsqrt(max(1,GrXpect))) / (GrXVolAdj + 1); // (a + 1/sqrt(N)) / (a + 1)
             HPIndx = 0; // 1st channel to use
             clMaxDur = clAsk; // asked duration
             clMaxDur = (clMaxDur < 5) ? 5 : (clMaxDur > 600) ? 600 : clMaxDur;
@@ -2534,11 +2535,14 @@ local (val, act)
     val = gmem[paramGCopy+xp]; // paramValues[xp];
 );
 
+// The parameters belong to the Game Master (gmem[paramGCopy...] is its copy) : read only in a File Player
 function parSet(xop, value)
-local (f, pp, pq, pv, fspect)
 (
-    xop = 0|max(0,min(paramNMax,xop)); // minimalistic check
-    pv = gmem[paramGCopy+xop]; // paramValues[xop]; // previous value
+    (parSetErr === 0) ? (
+        parSetErr = 1; // said once
+        mSL_log(SysLogBox, "ERR: 0620    set(`ParamV, ...) : the parameters are read only in a File Player");
+    );
+    gmem[paramGCopy + (0|max(0,min(paramNMax,xop)))]; // the value, unchanged
 );
 
 /*
@@ -2674,7 +2678,7 @@ local (pfid, ref, addr, res, flg, kod, size, s, ip, k, k2, pt, kid, pid)
     Set the value of field ; return previous one
 */
 function mSL_set(argc, argv)
-local (pfid, ref, value, force, addr, res, flg, kod, size, s, ip, k, k2, pt, kid)
+local (pfid, ref, value, force, addr, res, flg, kod, size, s, ip, k, k2, pt, kid, pid)
 (
 
     pfid = argv[0]; ref = argv[1]; value = argv[2]; force = argv[3];
@@ -3470,27 +3474,20 @@ local (pt, Act, Cmd, p0, p1, p2, p3, p4, Err, i, j, addr)
                 //===15===//
                 // Vary some memory value A=p1 from current to "x=p2", in "y=p3" seconds,
                 // by step "z=p4", multiply by "p5" and add "p6"
-                p3 = gmem[Act+3]; p4 = gmem[Act+4]; p5 = gmem[Act+5]; p6 = gmem[Act+6];
-                ((p3 != Undef) && (p3 != USep)) ? (
-                    p3 = max(0.001, min(300, p3));
-                    ((p4 != Undef) && (p4 != USep)) ? (
-                        p4 = max(0.0000001, min(10000, p4));
-                        ((p5 != Undef) && (p5 != USep)) ? (
-                            p5 = max(0.80, min(1.5, p5)); // factor
-                            ((p6 != Undef) && (p6 != USep)) ? (
-                                p6 = max(-0.1, min(1.5, p6)); // addition
-                            ) : (
-                                p6 = 0.0; // default additive fator
-                            );
-                        ) : (
-                            p5 = 1.0; // default multiplicative factor
-                        );
-                    ) : (
-                        p4 = 0.0001; // default step
+                // (the parameters end with USep : nothing is read after it)
+                p3 = gmem[Act+3]; p4 = p5 = p6 = Undef;
+                (p3 != USep) ? (
+                    p4 = gmem[Act+4];
+                    (p4 != USep) ? (
+                        p5 = gmem[Act+5];
+                        (p5 != USep) ? p6 = gmem[Act+6];
                     );
-                ) : (
-                    p3 = 1; // default: 1 second
                 );
+                // each missing parameter gets its default value
+                p3 = ((p3 != Undef) && (p3 != USep)) ? max(0.001, min(300, p3)) : 1; // default: 1 second
+                p4 = ((p4 != Undef) && (p4 != USep)) ? max(0.0000001, min(10000, p4)) : 0.0001; // default step
+                p5 = ((p5 != Undef) && (p5 != USep)) ? max(0.80, min(1.5, p5)) : 1.0; // factor ; default 1
+                p6 = ((p6 != Undef) && (p6 != USep)) ? max(-0.1, min(1.5, p6)) : 0.0; // addition ; default 0
                 // Look for an entry
                 addr = 0;
                 flagAct8 = 16;
@@ -4045,7 +4042,7 @@ tUnix = time();
                 (reapeat === 0) ? (
                     // switching to "stop" in a moment
                     SmpPStart = currSmpl;
-                    SmpFOStrt = 0|(SmpPStart + 4 + irand(min(20, clDur/2 - FOutDur/1000)) * currSrate); // as samples
+                    SmpFOStrt = 0|(SmpPStart + (4 + irand(max(1, min(20, clDur/2 - FOutDur/1000)))) * currSrate); // as samples : in 4 to 24 s
                     smplNewEV(SmpFOStrt, 3, 0, 0); // will start decreasing in a moment
                     (TRC & 2) ? (
                         sprintf(#gfb_mss, "* %s * Stop looping  {%.0f ~ %.0f} in %.3fs", #nowtim,
@@ -4302,6 +4299,13 @@ ActivePlaying ? (
     gmem[UAdd+RCB_KmdAlt] = 0; // clean this one
 
 );// Command2 received
+
+// Delayed actions : evaluated after 2 switches of the 3 lists (here, as the immediate ones, and not in @gfx :
+// they change data used by @sample)
+actlflg ? (
+    evalActions(actlOut);
+    switchActions();
+);
 
 (xxupdf != 0) ? (
     xxint = gmem[paramGCopy+xxupdf]; // value in ms
@@ -5599,118 +5603,6 @@ ActivePlaying ? (
                 gmem[UAdd+RCB_CPStop_tim] = time_precise() + gmem[timeDelta];
             );
 
-            (pflg) ? (
-                (pvol == 0) ? (
-                    TPLG = tuplesZ;
-                ) : (
-                    // do actual interpolation
-                    index = floor(ClRIndex); // in tupples
-                    delta = ClRIndex - index; // decimal part
-                    // Convert to samples
-                    index *= CCCC;
-                    ((delta < 0.0001) || (delta > 0.9999)) ? ( // decimal part small enough ?
-                        // return sample to optimize
-                        (delta > 0.5) ? index += CCCC;
-                        (CCCC === 2) ? (
-                            // stereo case
-                            tuplesA[0] = pvol * UBuffer[index];
-                            tuplesA[1] = pvol * UBuffer[index+1];
-                        ) :
-                        (CCCC === 1) ? (
-                            // mono case
-                            tuplesA[0] = pvol * UBuffer[index];
-                        ) : (
-                            // multi channels case
-                            i = 0;
-                            loop(CCCC,
-                                tuplesA[i] = pvol * UBuffer[index];
-                                i +=1; index += 1;
-                            );
-                        );
-                    ) : (
-                        // We need to interpolate
-                        (CCCC === 2) ? (
-                            // stereo case
-                            xm1 = UBuffer[index-2];
-                            x0 = UBuffer[index];
-                            x1 = UBuffer[index+2];
-                            x2 = UBuffer[index+4];
-                            tuplesA[0] = pvol * (((((3.0 * (x0 - x1) - xm1 + x2) * 0.5)
-                                        * delta + (2.0 * x1 + xm1 - (5.0 * x0 + x2) * 0.5))
-                                            * delta + ((x1 - xm1) * 0.5)) * delta + x0);
-                            index += 1;
-                            xm1 = UBuffer[index-2];
-                            x0 = UBuffer[index];
-                            x1 = UBuffer[index+2];
-                            x2 = UBuffer[index+4];
-                            tuplesA[1] = pvol * (((((3.0 * (x0 - x1) - xm1 + x2) * 0.5)
-                                        * delta + (2.0 * x1 + xm1 - (5.0 * x0 + x2) * 0.5))
-                                            * delta + ((x1 - xm1) * 0.5)) * delta + x0);
-                        ) :
-                        (CCCC === 1) ? (
-                            // mono case
-                            xm1 = UBuffer[index-1];
-                            x0 = UBuffer[index];
-                            x1 = UBuffer[index+1];
-                            x2 = UBuffer[index+2];
-                            tuplesA[0] = pvol * (((((3.0 * (x0 - x1) - xm1 + x2) * 0.5)
-                                        * delta + (2.0 * x1 + xm1 - (5.0 * x0 + x2) * 0.5))
-                                            * delta + ((x1 - xm1) * 0.5)) * delta + x0);
-                        ) :
-                        (
-                            // multi channels case
-                            i = 0;
-                            loop(CCCC,
-                                xm1 = UBuffer[index-CCCC];
-                                x0 = UBuffer[index];
-                                x1 = UBuffer[index+CCCC];
-                                x2 = UBuffer[index+CCCC+CCCC];
-                                tuplesA[i] = pvol * (((((3.0 * (x0 - x1) - xm1 + x2) * 0.5)
-                                            * delta + (2.0 * x1 + xm1 - (5.0 * x0 + x2) * 0.5))
-                                                * delta + ((x1 - xm1) * 0.5)) * delta + x0);
-                                i +=1; index += 1;
-                            );
-                        );
-                    );
-                );
-                // Next index
-                ClRIndex += ClRIndInc;
-                ((ClRIndex < ClLowLimit) || (ClRIndex > ClHighLimit)) ? (
-                    (TRC & 0x200) ? (
-                        sprintf(#gfs_mss, "* %s * Play Stade3 : %.3fs  %.3f   [%.0f]", #nowtim, (currSmpl - SmpPStart)/currSrate, ClRIndex, currSmpl);
-                        mSL_log(SysLogBox, #gfs_mss);
-                    );
-                    (gmem[UAdd+RCB_Cl_Flgs] & pmFlagRepeat) ? (
-                        (ClRIndInc > 0) ? (
-                            ClRIndex = ClLowLimit;
-                        ) : (
-                            ClRIndex = ClHighLimit;
-                        );
-                        evLState = 1; // restart vol increase
-                        pvolInc = 1 / max(10, FInDur * currSrate / 1000); // increment
-                        (RState === 11) ? (RState = 2;);
-                    ) : (
-                        evLState = pvolEv = 0;
-                        pflg = 0;
-                        (TRC & 0x200) ? (
-                            sprintf(#gfs_mss, "* %s * Play Ender2 : %.3fs %.0f", #nowtim, (currSmpl - SmpPStart)/currSrate, currSmpl);
-                            mSL_log(SysLogBox, #gfs_mss);
-                        );
-                    );
-                );
-
-                doStop ? (
-                    VolumeMod0_u = FP_GlobSet = 0;
-                    smUpdateFlag |= smUFlagVol;
-                    ActivePlaying = 1;
-                    (FP_GlobVol == 0) ? Pmode = mdInactive;
-                );
-            ) : (
-                ActivePlaying = 0; currColVar = 1;
-                //sactClear();
-                Pmode = mdInactive;
-                gmem[UAdd+RCB_CPStop_tim] = time_precise() + gmem[timeDelta];
-            );
             //===7===//
 
 
@@ -5740,7 +5632,7 @@ ActivePlaying ? (
                 R_fact = (R_fact_K > R_fact) ? (
                     min(R_fact_K, R_fact + TM_delta_inc);
                 ) : (
-                    max(FP_G_X_PanR_fact_K_Src, R_fact - TM_delta_dec);
+                    max(R_fact_K, R_fact - TM_delta_dec);
                 );
             );
             memset(tuplesM-1, 0, chOutCnt+2);
@@ -6347,8 +6239,8 @@ while (ent = Scheduler()) (
                     (CCCC < 1) ? (
                         FErrc = 0401;
                     );
-                    (CCCC > 64) ? (
-                        FErrc = 0464;
+                    (CCCC > 128) ? (
+                        FErrc = 0464; // more than 128 channels
                     );
                     ((FFrRate < 2400) || (FFrRate > 384000)) ? (
                         FErrc = 0433;
@@ -6380,10 +6272,12 @@ while (ent = Scheduler()) (
                         ) : (
                             // else, clip files
                             AAA_clipped += 1;
-                            CRSize = min(CFSize, (M_avail) - 2 * zCount);
+                            CRSize = CCCC * floor(min(CFSize, (M_avail) - 2 * zCount) / CCCC); // whole tupples
                         );
                     );
-                    ((PMod & 2)  === 2) ? XMdP = 2;
+                    // "slow play" (PMod & 2) : not implemented, the clip is played as a normal play
+                    // (and the long play mode, XMdP = 1, is kept for a long file)
+                    (((PMod & 2) === 2) && (XMdP === 0)) ? XMdP = 2;
                     (TRC & 0x100) ? (
                         sprintf(#u, "Clp %04d [%d] => %d %d %d %d %d", clClip, FErrc, Fhandle, CCCC, FFrRate, CRSize, zCount);
                         mSL_log(SysLogBox, #u);
@@ -6432,9 +6326,8 @@ while (ent = Scheduler()) (
                     // (XMdP === 2) ? GSKReadPhase4 : GSKReadPhase2; // skip to appropriate phase
                     GSKReadPhase2; // skip to appropriate phase
                 ) : (
-                    gmem[clInfStart+clClip] = -FErrc; // file not available, keep error code
+                    gmem[clInfStart+clClip] = -FErrc; // file not available, keep error code (already said above)
                     AAA_failopen += 1;
-                    (sprintf(#gfxu, "::-> Can't open clip %04d \"%s\"  %d / %d", clClip, #fname, FErrc, Fhandle); mSL_log(SysLogBox, #gfxu););
                 );
 
                 gmem[UAdd+cbErC] = AAA_clipped + AAA_failopen;
@@ -6496,7 +6389,7 @@ while (ent = Scheduler()) (
 
                     (KmdKurrent === KmdPlay) ?
                     (
-                        GState = (XMdP === 2) ? GSKReadPhase4 : GSKStartPlay ;
+                        GState = GSKStartPlay; // (GSKReadPhase4, "slow play", is not implemented)
                     ) :
                     (KmdKurrent === KmdLoop) ?
                     (
@@ -6527,6 +6420,7 @@ while (ent = Scheduler()) (
             FLgHandle = Fhandle; Fhandle = -1;
             // We are ready to read a block of data
             RdLngSize = floor(((M_avail) - 2 * zCount - 1) / (96000 * 3)) * 96000; // size for 3 buffers
+            RdLngSize = CCCC * floor(RdLngSize / CCCC); // whole tupples
             UBuffP1 = bAddr + zCount; // we have already read zCount zeroes
             UBuffP2 = UBuffP1 + RdLngSize;
             UBuffP3 = UBuffP2 + RdLngSize;
@@ -6590,13 +6484,13 @@ while (ent = Scheduler()) (
                 ClRIndex = gmem [UAdd+RCB_StartIndex];
                 saveEntry(); // save entry in playlog before starting playing
                 update_dynpars();
-                SmpPStart = max(currSmpl, gmem[UAdd+RCB_SmpPStart]);
-                //((TRC & 4)) ? (
+                SmpPStart = currSmpl; // the play starts now (RCB_SmpPStart, a start date, is not used : the GamePlayer sends 0)
+                (TRC & 4) ? (
                     sprintf(#dbg_trace0, "   ");
                     sprintf(#dbg_trace3, "* %s * Start playing for %.3fs at {%.0f}", #nowtim, clDur, SmpPStart);
                     sprintf(#dbg_trace4, "* CT %.1f Sp %.3f FI %.1f FO %.1f", CTSize, SpdFact, FInDur, FOutDur);
                     sprintf(#dbg_trace5, "* cl %04d cD %.3f xD %.3f FO %.3f", clClip, clDur, xdur, FOutDur/1000);
-                //);
+                );
                 gmem[UAdd+cbStat] = uSBusy;  // playing
                 (TRC & 0x100) ? (
                         sprintf(#gfxu, "* %s * [%d] ActivePlaying 'Long Play' mode", #nowtim, RState);
@@ -6661,7 +6555,7 @@ while (ent = Scheduler()) (
                 ClRIndex = gmem [UAdd+RCB_StartIndex];
                 saveEntry(); // save entry in playlog before starting playing
                 update_dynpars();
-                SmpPStart = max(currSmpl, gmem[UAdd+RCB_SmpPStart]);
+                SmpPStart = currSmpl; // the play starts now (RCB_SmpPStart, a start date, is not used : the GamePlayer sends 0)
                 // We want an event just before the fade out start
                 // xdur = min(clDur, CTSize / SpdFact); // in seconds
                 // SmpFOStrt = 0|(SmpPStart + (clDur - FOutDur/1000) * currSrate); // as sample
@@ -6670,14 +6564,13 @@ while (ent = Scheduler()) (
                 smplNewEV(SmpFOStrt, 3, 0, 0); // run event 3 at that date
                 //ii = max(0, min(96, 48 + gmem[paramGCopy+p_Transpose]));
                 // ClRIndInc = clRSpeed * FAdjRate * scale_12TET[ii];
-                //((TRC & 4)) ? (
+                (TRC & 4) ? (
                     sprintf(#dbg_trace0, "   ");
                     sprintf(#dbg_trace3, "* %s * Start playing for %.3fs at {%.0f}", #nowtim, clDur, SmpPStart);
                     sprintf(#dbg_trace4, "* CT %.1f Sp %.3f FI %.1f FO %.1f", CTSize, SpdFact, FInDur, FOutDur);
                     sprintf(#dbg_trace5, "* cl %04d cD %.3f xD %.3f FO %.3f", clClip, clDur, xdur, FOutDur/1000);
                     sprintf(#dbg_trace6, "* End {%.0f} in %.0f", SmpFOStrt, SmpFOStrt-SmpPStart);
-
-                //);
+                );
                 gmem[UAdd+cbStat] = uSBusy;  // playing
                 0 ? sprintf(#dbg_trace6, "ActivePlaying 'Play' mode");
                 reapeat = 0;
@@ -6732,7 +6625,7 @@ while (ent = Scheduler()) (
                 memset(GCBacts, 0, NumbGr); // reset all active pointers
                 saveEntry(); // save entry in playlog
                 update_dynpars();
-                SmpPStart = max(currSmpl, gmem[UAdd+RCB_SmpPStart]);
+                SmpPStart = currSmpl; // the play starts now (RCB_SmpPStart, a start date, is not used : the GamePlayer sends 0)
                 SmpFOStrt = 0|(SmpPStart + (clDur - FOutDur/1000) * currSrate); // when to start fading out as sample
 
                 // ii = max(0, min(96, 48 + gmem[paramGCopy+p_Transpose]));
@@ -6757,7 +6650,7 @@ while (ent = Scheduler()) (
                 GrLen = GrMLen;
                 smplNewEV(SmpFOStrt, 3, 0, 0); // we should start fading out at that date
                 reapeat = 0;
-                1 ? sprintf(#dbg_trace2, "ActivePlaying 'Loop' mode -- %d  %.3f", GrLen, GrXpect * GrXpectX);
+                (TRC & 4) ? sprintf(#dbg_trace2, "ActivePlaying 'Loop' mode -- %d  %.3f", GrLen, GrXpect * GrXpectX);
                 trcNL2 = 1; status = 8; lpSmplCnt = 0;
                 playHold ? (
                     GState = GSKPlayHold;
@@ -6899,6 +6792,13 @@ while (ent = Scheduler()) (
             gmem[UAdd+cbERR] = FErrc;
             sprintf(#gfs_mss, "* %s * [%d] Error [=> %d", #nowtim, RState, FErrc);
             mSL_log(SysLogBox, #gfs_mss);
+            // (a read error leaves the automaton outside GSStFinal : stop and close here too)
+            ActivePlaying = 0;
+            Pmode = mdInactive;
+            (Fhandle >= 0) ? (
+                file_close(Fhandle);
+                Fhandle = -1;
+            );
             GState = GSStInactive;
             fileReading = 0;
             FErrc = 0;
@@ -6915,12 +6815,7 @@ while (ent = Scheduler()) (
 );
 
 
-actlflg ? (
-    evalActions(actlOut);
-    switchActions();
-    sprintf(#gfs_mss, "* %s * Switch Actions", #nowtim);
-    mSL_log(SysLogBox, #gfs_mss);
-);
+// (the delayed actions are evaluated in @block : they change the data of @sample)
 
 
 

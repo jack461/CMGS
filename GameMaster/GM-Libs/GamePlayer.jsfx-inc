@@ -768,6 +768,7 @@ BanksDefsVersion = 0; // version/identification of the banks file
 HPConfigVersion = 0; // version/identification of the HP configuration file
 ClipConfigVersion = 0; // version/identification of the clips configuration file
 SensorsCfVersion = 0; // version/identification of the sensors configuration file
+ClipSetsVersion = 0; // version/identification of the clip sets file
 
 
 
@@ -1054,12 +1055,12 @@ local(ii, clNum, nc, s)
                 nc = enterClipName(#fname, clNum, newAliases);
                 // update the reference
                 gmem[clClAlias + clNum] = nc;
-                // Force to recheck this clip
-                gmem[clInfStart+clnb] = 0;
-                gmem[clClSizes+clnb] = 0;
-                gmem[clClInfos+clnb] = 0;
-                gmem[clClVolumes+clnb] = clVolumeBias;
-                gmem[clClDurations+clnb] = 0;
+                // Force to recheck this clip (clNum : "clnb" was always 0, the clip 0 was reset) ;
+                // its volume (ClVol of the clips configuration) is kept : the file is the same
+                gmem[clInfStart+clNum] = 0;
+                gmem[clClSizes+clNum] = 0;
+                gmem[clClInfos+clNum] = 0;
+                gmem[clClDurations+clNum] = 0;
                 aliasesCount += 1;
             ) : (
                 sprintf(#s, "Can't find an ident for %04d : %06X", clNum, gmem[clClAlias + clNum]);
@@ -1223,11 +1224,11 @@ local (fH, ip, err, nch, ch, frate, fsize, als, str, pts, lge)
                 (nch < 1) ? (
                     err = -0421; // not supported
                 ) :
-                (nch > 48) ? (
-                    err = -0448; // not supported
+                (nch > 128) ? (
+                    err = -0448; // not supported : more than 128 channels
                 ) :
-                ((frate < 1000) || (frate > 400000)) ? (
-                    err = -0496; // not supported
+                ((frate < 2400) || (frate > 384000)) ? (
+                    err = -0496; // not supported (the limits of the File Player)
                 ) :
                 (
                     fsize = file_avail(fH);
@@ -2231,11 +2232,11 @@ uix_MIDI_menu = make_jmenu(
     "MIDI", "clear all links");
 
 function enterLink(ctl, act, val, ext)
-local (h, xpos)
+local (h, xpos, cnt)
 (
     h = ctl % Links_TSiz;
-    xpos = -1;
-    while ((Links_HTab[h] != 0) && (Links_HTab[h] != ctl))  (
+    xpos = -1; cnt = Links_TSiz; // (at most one visit of each entry)
+    while ((Links_HTab[h] != 0) && (Links_HTab[h] != ctl) && ((cnt -= 1) >= 0))  (
         ((Links_HTab[h] === -1) && (xpos === -1)) ? xpos = h;
         h = (h + 113) % Links_TSiz;
     );
@@ -2253,10 +2254,10 @@ local (h, xpos)
 );
 
 function removeLink(ctl)
-local(h)
+local(h, cnt)
 (
-    h = ctl % Links_TSiz;
-    while ((Links_HTab[h] != 0) && (Links_HTab[h] != ctl))  (
+    h = ctl % Links_TSiz; cnt = Links_TSiz; // (at most one visit of each entry)
+    while ((Links_HTab[h] != 0) && (Links_HTab[h] != ctl) && ((cnt -= 1) >= 0))  (
         h = (h + 113) % Links_TSiz;
     );
     (Links_HTab[h] === ctl) ? (
@@ -2273,11 +2274,11 @@ local(h)
 
 
 function getLinkEntry(ctl)
-local (h, act)
+local (h, act, cnt)
 (
     h = ctl % Links_TSiz;
-    act = -1;
-    while ((act === -1) && (Links_HTab[h] != 0)) (
+    act = -1; cnt = Links_TSiz; // (at most one visit of each entry)
+    while ((act === -1) && (Links_HTab[h] != 0) && ((cnt -= 1) >= 0)) (
         (Links_HTab[h] === ctl) ? (
             act = h;
         );
@@ -2289,7 +2290,7 @@ local (h, act)
 // Find the "next" entry in the link table
 lkpos = 0;
 function findLink(kod)
-local (res, cnt, kod)
+local (res, cnt)
 (
     res = -1;
     kod &= MIDI_LinkOper; // the kod we are looking for
@@ -2778,7 +2779,7 @@ jvarsHSize = jvarsHashTbl[-2];
 mSL_dcl_JSFX_vars();
 
 // Table of Sound Units by Track number
-SUTrASize = 16 + uCnt;
+SUTrASize = 1024; // players by track number (SUTrAddr[track]) : tracks 0 to 1023
 SUTrAddr = make_array(SUTrASize);
 
 // Menus for main sliders controls
@@ -4454,9 +4455,10 @@ local (ptin, cf, ct, val)
         ) : (
             loop (ct,
                 val = HPATab[ptin]; // should be a conf number
-                ((val <= 0) || (val >= HPPSize)) ? (STBerr = 0731;) :
-                (((pt = HPPTab[val]) <= HPATab) || (pt >= HPATab + HPASize)) ? (STBerr = 0732;) :
-                ((pt[-1]!= val)) ? ( STBerr = 0733;);
+                // (0736 to 0738 : 0731 to 0733 are the end errors of Set_Table)
+                ((val <= 0) || (val >= HPPSize)) ? (STBerr = 0736;) :
+                (((pt = HPPTab[val]) <= HPATab) || (pt >= HPATab + HPASize)) ? (STBerr = 0737;) :
+                ((pt[-1]!= val)) ? ( STBerr = 0738;);
                 ptin += 1;
             );
         );
@@ -4516,9 +4518,10 @@ clearClipSets();
 
 function
 closeClipSet()
-local (ps, n, cw)
+local (ps, n, cw, pmax)
 (
     ps = ClSetTab + ClSetTAPtr; // current set
+    pmax = ClSetTab + ClSetDSize + 126; // last place for a sequence (ClSetTab has ClSetDSize + 128 words)
     (((n = ps[0]) >= 0) && (n < ClSetPSize) && (ClSetPtr[n] === -1)) ? (
         ClSetPtr[n] = ps;
         //ps[ClSet_mclu] = 99999; // Min clip limit
@@ -4536,7 +4539,7 @@ local (ps, n, cw)
             ) :
             (sc >= 0) ? (
                 // keep sequence
-                pts[0] = sc * clipsWorkAreaSize + lc; pts += 1;
+                (pts < pmax) ? (pts[0] = sc * clipsWorkAreaSize + lc; pts += 1;) : (err_fbnk = 0759;); // table of the sets full
                 0 ? (sprintf(#s, "   Seq: %d -> %d", sc, lc); mSL_log(SysLogBox, #s););
                 sc = lc = -1;
             );
@@ -4545,7 +4548,7 @@ local (ps, n, cw)
 
         (sc >= 0) ? (
             // keep sequence
-            pts[0] = sc * clipsWorkAreaSize + lc; pts += 1;
+            (pts < pmax) ? (pts[0] = sc * clipsWorkAreaSize + lc; pts += 1;) : (err_fbnk = 0759;); // table of the sets full
             0 ? (sprintf(#s, "   Seq: %d -> %d", sc, lc); mSL_log(SysLogBox, #s););
             sc = lc = -1;
         );
@@ -4916,6 +4919,7 @@ BKPtTab = make_array(BKPtSiz); // Pointers to BKTab
 BKPtMass = make_array(BKPtSiz); // Cumulative masses
 BKCurrGrp = -2;
 BKCurrBnk = -2;
+BKCurrFlg = 0;
 BKCumSum = 0;
 
 BKMxGrpn = 0;
@@ -4985,6 +4989,7 @@ local (cl, v, bn)
             ((v < 0) || (v > mSL_Max_Flgs)) ? err_fbnk = 0353; // invalid Flags value
             curPartial[idx_Pa_PNumb] = 0; // will be updated later
             // keep entry
+            BKCurrGrp = -2; // the selection of BKSelectParts is to recompute
             (BKDESpEnt >= 0) ? (
                 memcpy(BKTab + BKDESpEnt*BKEsize, curPartial, BKEsize); BKDESpEnt = -1;
             ) :
@@ -5013,6 +5018,7 @@ local (b, P0)
     memset(GRPtTab, Undef, GRPtSiz);    // up to GRPtSiz = 2000 groups
     BKMxGrpn = BKMxBnkn = Grp_nb = Bnk_nb = PlM_nb = SpM_nb = 0;
     BKFrst = BKDEcnt = 64; // some partials reserved, no entry defined so far
+    BKCurrGrp = -2; // the selection of BKSelectParts is to recompute
     Part1st = BKTab + BKEsize * BKFrst;
     memset(BKTab, 0, BKEsize); BKTab[idx_Pa_Clps2] = 9999; // Partial 0
     // Reset some variables
@@ -5046,7 +5052,8 @@ local(ii, pt, iTab, cummass, pkm, r)
     pt = 0;
     iTab = BKEsize * BKFrst;
 
-    ((BKCurrGrp != grpn) || (BKCurrBnk != bnkn) || (sflgs != 0)) ? (
+    // the set is kept for a group, a bank and the flags (BKCurrGrp = -2 : to recompute)
+    ((BKCurrGrp != grpn) || (BKCurrBnk != bnkn) || (BKCurrFlg != sflgs)) ? (
         // compute the new set
         cummass = 0; // cumulative mass
         while ((ii < BKDEcnt) && (pt < BKPtSiz)) (
@@ -5069,6 +5076,7 @@ local(ii, pt, iTab, cummass, pkm, r)
         BKPtCnt = pt;
         BKCurrGrp = grpn;
         BKCurrBnk = bnkn;
+        BKCurrFlg = sflgs;
         BKCumSum = cummass;
     );
 
@@ -5098,7 +5106,10 @@ local(klc, khc, set, ps, x)
     khc = xpart[idx_Pa_Clps+1]; // low & high clips numbers
     (klc > khc) ? (x = klc; klc = khc; khc = x;);
 
-    ((klc >= 0) && (ClSetTAPtr < ClSetDSize)) ? (
+    // a free set number (none : the partial keeps its range of clips)
+    set = ClSetAAloc;
+    while ((set > 0) && (ClSetPtr[set] != -1)) (set -= 1; );
+    ((klc >= 0) && (ClSetTAPtr < ClSetDSize) && (ClSetPtr[set] === -1)) ? (
         ps = ClSetTab + ClSetTAPtr; // for now keep info in this area
         memset(ps, -2, ClSet_lCl + 2);
         ClSetTAPtr += ClSet_lCl + 2; // always this size
@@ -5111,11 +5122,8 @@ local(klc, khc, set, ps, x)
         ps[ClSet_Genc] = 0; // number of clip generated;
         //ps[ClSet_mclu] = 99999; // Min clip limit
         memset(clipsWorkArea, -1, clipsWorkAreaSize); // clear work area
-        // Allocate a set number
-        set = ClSetAAloc;
-        while ((set > 0) && (ClSetPtr[set] != -1)) (set -= 1; );
-        ClSetAAloc = set; // as a default, use set "0"
-        (ClSetPtr[set] != -1) ? err_fbnk = 0771;
+        // the set number found above
+        ClSetAAloc = set;
         ClSetPtr[set] = ps;
         // Create the list
         ps[ClSet_lCl] = klc *  clipsWorkAreaSize + khc; // next one is already -1
@@ -6015,8 +6023,10 @@ local (ent)
     !(ent = SchedDetachHead(PlLogFree)) ? (
         ent = SchedDetachHead(PlRecCurrent);
     );
-    SchedInsertTail(PlLogFree, ent, 0);
-    4 - ent[plLEntGRef]; // return an address in gmem
+    (ent != 0) ? (
+        SchedInsertTail(PlLogFree, ent, 0);
+        4 - ent[plLEntGRef]; // return an address in gmem
+    ) : 0; // no entry available
 );
 
 // Keep a mark in the playlog
@@ -6145,7 +6155,7 @@ local(m, i, k)
 
 function
 findHPconf(base, cnt, hpuse, bst)
-local(i, bst, num, w, e, pcf, r)
+local(i, num, w, e, pcf, r)
 (
     bstval = 999; bstnum = base;
     w = irand(cnt); i = 0; // Random start
@@ -6343,8 +6353,9 @@ local(hpc1, hpc2,it, e, h, k, dec, flgs, hpfold, hpcnf1, hpcnf2, hpent1, hpent2,
     hpent1 = checkHPconfig(hpcnf1, 0, 0); // check the entry
     (hpcnf2 === 0) ? hpcnf2 = hpcnf1;
     hpent2 = checkHPconfig(hpcnf2, 0, 0);
-    hpcnf1 = hpent1[-1]; // actual numbers
-    hpcnf2 = hpent2[-1];
+    ((hpent1 <= 0) && (GvErr === 0)) ? GvErr = 0519; // no HP configuration found
+    hpcnf1 = (hpent1 > 0) ? hpent1[-1] : 0; // actual numbers
+    hpcnf2 = (hpent2 > 0) ? hpent2[-1] : hpcnf1;
 
     (GvErr === 0) ? (
         hpc1 = hpent1[0]; dec = 1; // get the entry description
@@ -6408,6 +6419,9 @@ checkPartial(part, flgs, id)
                     mSL_log(SysLogBox, #ws01);
                 );
             );
+        ) : (
+            // (otherwise PMAddr would stay the play mode of the previous play)
+            (GvErr === 0) ? GvErr = 0506; // play mode out of range
         );
         //sprintf(#s, "Play:  Part:%d  Sel:%d  Grp:%d  Bnk:%d  XpM:%d  XsM:%d", part, xsel, XcGrp, XcBnk, XpM, XsM);
         //mSL_log(SysLogBox, #s);
@@ -6650,7 +6664,7 @@ local(Xkmd, z, v1, v2, v3, part, bladd, klc, khc, newpart, primeX, k, p, pc, ic,
                     clRandCB2 = 1;
                 );
             );
-            1 ? (sprintf(#s, "   clip From Range [%d | %d => %d]", klc, khc, clcck); mSL_log(SysLogBox, #s););
+            (TRC & 0x800) ? (sprintf(#s, "   clip From Range [%d | %d => %d]", klc, khc, clcck); mSL_log(SysLogBox, #s););
 
             // clcck is our clip number, or, alas, -1 if none...
             gmem[GPlUnit+RCB_ClipNb] = clcck; // save it for info
@@ -6678,14 +6692,14 @@ local(Xkmd, z, v1, v2, v3, part, bladd, klc, khc, newpart, primeX, k, p, pc, ic,
                 // Compute speed
                 v1 = PMAddr[idx_Pm_Speed1];
                 v2 = PMAddr[idx_Pm_Speed1+1];
-                v3 = PMAddr[idx_Pm_Speed1+2];  // sense - in 0 .. 100
+                v3 = PMAddr[idx_Pm_Speed1+2];  // probability of a reverse play, in 0 .. 1
                 (v1 === Undef) ? v1 = parV(p_Dyn_Rate);
                 (v2 === Undef) ? v2 = parV(p_Dyn_Rate);
                 (v3 === Undef) ? v3 = 0;
                 (v2 < v1) ? (k = v1; v1 = v2; v2 = k;); // should not arrive
                 gmem[GPlUnit+RCB_PmMdSpd1] = v1;
                 gmem[GPlUnit+RCB_PmMdSpd2] = v2;
-                gmem[GPlUnit+RCB_PmMdSpd3] = v3;  // sense - in 0 .. 100
+                gmem[GPlUnit+RCB_PmMdSpd3] = v3;  // probability of a reverse play, in 0 .. 1
                 (v1 < v2) ? (
                     v1 += (v2-v1) * frand(); // choose a speed
                 );
@@ -6765,7 +6779,6 @@ local(Xkmd, z, v1, v2, v3, part, bladd, klc, khc, newpart, primeX, k, p, pc, ic,
             ) : (
                 v1 = PMAddr[idx_Pm_PFdIn1]; v2 = PMAddr[idx_Pm_PFdIn1+1]; // in ms
             );
-            v1 = PMAddr[idx_Pm_PFdIn1]; v2 = PMAddr[idx_Pm_PFdIn1+1]; // in ms
             (v1 === Undef) ? (v1 = parV(p_fadeILpTime)) : (v1 < 0) ? (v1 = - v1 * 10 * gmem[GPlUnit+RCB_PlayTime_sec]);
             (v2 === Undef) ? (v2 = parV(p_fadeILpTime)) : (v2 < 0) ? (v2 = - v2 * 10 * gmem[GPlUnit+RCB_PlayTime_sec]);
             (v2 < v1) ? (k = v1; v1 = v2; v2 = k;);
@@ -6777,7 +6790,6 @@ local(Xkmd, z, v1, v2, v3, part, bladd, klc, khc, newpart, primeX, k, p, pc, ic,
             ) : (
                 v1 = PMAddr[idx_Pm_PFdOut1]; v2 = PMAddr[idx_Pm_PFdOut1+1]; // in ms
             );
-            v1 = PMAddr[idx_Pm_PFdOut1]; v2 = PMAddr[idx_Pm_PFdOut1+1]; // in ms
             (v1 === Undef) ? (v1 = parV(p_fadeOLpTime)) : (v1 < 0) ? (v1 = - v1 * 10 * gmem[GPlUnit+RCB_PlayTime_sec]);
             (v2 === Undef) ? (v2 = parV(p_fadeOLpTime)) : (v2 < 0) ? (v2 = - v2 * 10 * gmem[GPlUnit+RCB_PlayTime_sec]);
             (v2 < v1) ? (k = v1; v1 = v2; v2 = k;);
@@ -6962,9 +6974,9 @@ local(Xkmd, z, v1, v2, v3, part, bladd, klc, khc, newpart, primeX, k, p, pc, ic,
                     GvErrP4, GvErrP5, GvErrP6, Kmnd_Pl, KSource);
             mSL_log(SysLogBox, #s);
         );
-        // Free the unit, if any
+        // Free the unit, if any : ready again (the dummy unit stays dummy)
         GvErrP1 = xpart;
-        gmem[GPlUnit+cbStat] = uSUnused;
+        gmem[GPlUnit+cbStat] = (GPlUnit === UGDummy) ? uSDummy : uSReady;
         gmem[GPlUnit+RCB_Kmd] = KmdNone;
     );
 
@@ -7023,7 +7035,7 @@ local (z, r, ii, newitem)
                 mSL_log(SysLogBox, #sfc);
             );
             // Provide a unique number associated to every clip played
-            gmem[GPlUnit+RCB_GClipSeq] = (GClipSeq += 1);
+            gmem[z+RCB_GClipSeq] = (GClipSeq += 1);
             gmem[z+RCB_Kmd] = KmdPlItem; // send command
             GXUnit = z;
             //URingPut(GXUnit); // enter unit in playing ring
@@ -7058,7 +7070,7 @@ local (r)
     Look for the first entry to play in a record list
 */
 function replayJumpTo(plg, date, direction)
-local (pld, ple, plg, pln, plgtpln, pt, phz, plgt, replayLogActive)
+local (pld, ple, pln, plgtpln, pt, phz, plgt, replayLogActive)
 (
     pt = pld = ple = pln = phz = 0;
     plg === 0 ? plg = PlLogCurrent;
@@ -9133,7 +9145,7 @@ function
 Set_Table(tbl)
 local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback, rd_err, pt, zpt, totsize, tout, pttr,
     Cl_n, Cl_dB, ii, s1, s2, s3, s4, s5, ty, n, ps, cp, cnt, kct, vmin, vmax, pos, stnext, kmax, cvl, LWA, LWAsiz,
-    xp1, xp2, AddT, flgneg, LWpt, ClipSetsVersion, err_pos)
+    xp1, xp2, AddT, flgneg, LWpt, err_pos)
 (
     xp1 = xp2 = cvl = ptr = flgneg = 0;
     LWA = 0; LWAsiz = 32000; // a large work area
@@ -10687,9 +10699,7 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
                     AddT[ClSet_Start] = AddT[ClSet_Lst] = irand(10000); // last entry used, random starting;
                     AddT[ClSet_Genc] = 0; // number of clip generated;
                     pos = ClSet_num; // put set number in 1st position
-                    // We will need a large work area
-                    // (LWA === 0) ? (LWA = mSL_malloc(LWAsiz, 'data'););
-                    (LWA === 0) ? (LWA = mSL_Dyn_Alloc(LWAsiz, 'data', mSL_StM_FlClear););
+                    // (a large work area, LWA, was allocated here : not used)
                     LWpt = 0; // pointer in LWA
                     ptr +=1;
                     // we expect an integer
@@ -10731,6 +10741,7 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
             //—-47-+=//
             // Expect second number of a range
             ((cwd == (0|cwd)) && (cwd >= 0) && (cwd <= 9999)) ? (
+                (cwd < Cl_n) ? (ii = cwd; cwd = Cl_n; Cl_n = ii;); // a range given backwards
                 ii = Cl_n;
                 while (ii <= cwd) (
                     gmem[clClVolumes+ii] = (gmem[clClVolumes+ii] & clVolumeFlgs) + Cl_dB + clVolumeBias; ii+=1;
@@ -10889,13 +10900,13 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
             ((cwd === mSL_KW_PlM) || (cwd === mSL_KW_PMd)) ? ( // expect "PlM" or "PMd"
                 // expect a playmode
                 pos = idx_Pa_PlM;
-                vmin = 0; vmax = PMEcnt;
+                vmin = 0; vmax = PMEcnt - 1; // (valid numbers : 0 .. PMEcnt - 1)
                 st = 42; ptr +=1;
             ) :
             ((cwd === mSL_KW_SpM) || (cwd === mSL_KW_SMd)) ? ( // expect "SpM" or "SMd"
                 // expect a spacemode
                 pos = idx_Pa_SpM;
-                vmin = 0; vmax = SMEcnt;
+                vmin = 0; vmax = SMEcnt - 1; // (valid numbers : 0 .. SMEcnt - 1)
                 st = 42; ptr +=1;
             ) :
             (cwd === mSL_KW_prVol) ? ( // expect "prVol"
@@ -13378,7 +13389,9 @@ local (zz, xp, mr, ccnt, ent, s1, mpt, w1, pindx, err, p, flgs, auxKmd, auxRes,
                 pos[1] > 0 ? (
                     // On choisit une durée de verrouillage
                     padSensInhib[currSens-1] = 1;
-                    Schedule(SchedRelative, pos[1], 2, currSens, 0, 0, 0);
+                    // the release (task 2, releaseSensors) takes a mask of sensors, as in action 348
+                    SchedRemove(SchedDlydPts, 2, uix_bit_set[currSens - 1]); // remove previous
+                    Schedule(SchedRelative, pos[1], 2, uix_bit_set[currSens - 1], 0, 0, 0);
                 );
                 // Autres paramètres - fixés
                 // On joue le clip
@@ -13611,6 +13624,7 @@ local (zz, xp, mr, ccnt, ent, s1, mpt, w1, pindx, err, p, flgs, auxKmd, auxRes,
                     padSensInhib[v1] = 1;
                     v1 += 1;
                 );
+                v = -1; // the mask of all the sensors, for the release
             ) :
             ((par1 >= 1) && (par1 <= padSensSiz)) ? (
                 padSensInhib[par1 - 1] = 1;
@@ -13712,7 +13726,7 @@ local (zz, xp, mr, ccnt, ent, s1, mpt, w1, pindx, err, p, flgs, auxKmd, auxRes,
             // Probablity in [0 1]
             // 335, Probability, ...
             par1 = zz[0]; zz += 1; ccnt -=1;
-            (par1 > frand()) ? (ccnt = 0);
+            (frand() >= par1) ? (ccnt = 0); // the rest is executed with the probability par1
             //—-36—-//
 
         ););):((xp&0x2)?((xp&0x1)?(
@@ -14045,7 +14059,7 @@ local (zz, xp, mr, ccnt, ent, s1, mpt, w1, pindx, err, p, flgs, auxKmd, auxRes,
 
         // Is there a command for the auxiliary external processor ?
         (auxKmd != 0) ? (
-            gmem[cmndKode] = auxKmd & 0xFF; gmem[cmndPar1] = zz[0]; gmem[cmndPar2] = zz[1]; gmem[cmndPar3] = zz[1];
+            gmem[cmndKode] = auxKmd & 0xFF; gmem[cmndPar1] = zz[0]; gmem[cmndPar2] = zz[1]; gmem[cmndPar3] = zz[2];
             ((p = (auxKmd >> 16) & 0xf) > 0) ? ( // number of arguments
                 zz += p; ccnt -= p;
             );
@@ -14227,7 +14241,7 @@ local (kw, ksiz, clip, cllow, clhigh, par, pflgs, do_it, res, rty)
     //sprintf(#ms, "** mSL_play_ops ** => IN: %d/%d", argc, argv);
     //mSL_log(SysLogBox, #ms);
     reSelectPartial = reSelectPlayMode = reSelectHpent = reSelectHpent2 = reSelectDuration = reSelectHpSet =
-    reSelectFadeOut = reSelectFadeIn =
+    reSelectFadeOut = reSelectFadeIn = reSelectPmod =
     reSelectHpSet2 = reSelectRate = reSelectGrFades = reSelectVolume = reSelectSpaceMode = Undef;
     cllow = 0; clhigh = 9999;
     GPlUnit = UGDummy; // just for...
@@ -14283,7 +14297,7 @@ local (kw, ksiz, clip, cllow, clhigh, par, pflgs, do_it, res, rty)
         ) :
         (kw === mSL_KW_hpset_) ? (
             par = argv[1];
-            (do_it = ((argc > 1) && (SharedLowMemory >= 0) && (par <= SharedHighMemory))) ? (
+            (do_it = ((argc > 1) && (par >= SharedLowMemory) && (par <= SharedHighMemory))) ? (
                 (reSelectHpSet === Undef) ?
                 reSelectHpSet = par :
                 reSelectHpSet2 = par;
@@ -14291,7 +14305,7 @@ local (kw, ksiz, clip, cllow, clhigh, par, pflgs, do_it, res, rty)
         ) :
         (kw === mSL_KW_hpset2) ? (
             par = argv[1];
-            (do_it = ((argc > 1) && (SharedLowMemory >= 0) && (par <= SharedHighMemory))) ? (
+            (do_it = ((argc > 1) && (par >= SharedLowMemory) && (par <= SharedHighMemory))) ? (
                 reSelectHpSet2 = par;
             );
         ) :
@@ -14355,6 +14369,10 @@ local (kw, ksiz, clip, cllow, clhigh, par, pflgs, do_it, res, rty)
     ) : (
         sprintf(#ms, "** doPlayClip error **  %s/%d", mSL_edit_value(0, kw), argc);
         mSL_log(SysLogBox, #ms);
+        // nothing played : the selectors already read must not change the next play
+        reSelectPartial = reSelectPlayMode = reSelectHpent = reSelectHpent2 = reSelectDuration = reSelectHpSet =
+        reSelectFadeOut = reSelectFadeIn = reSelectPmod =
+        reSelectHpSet2 = reSelectRate = reSelectGrFades = reSelectVolume = reSelectSpaceMode = Undef;
     );
     rty ? GPlUnit : res;
 );// mSL_play_ops
@@ -14619,7 +14637,7 @@ local (pfid, ref, value, force, addr, res, flg, kod, size, s, ip, k, k2, pt, kid
 */
 function
 mSL_call_ops(argc, argv)
-local(res, kw, Un, i, j, k, loc, pq, v)
+local(res, kw, Un, i, j, k, kb, loc, pq, v)
 (
     // Decode the parameters - could be integers or keywords
     0 ? (
@@ -14660,17 +14678,17 @@ local(res, kw, Un, i, j, k, loc, pq, v)
                 // Send a command to a player
                 Un = argv[1]; // The first parameter should be a player address
                 k = argv[2];
-                ((Un >= UGAddr) && (Un < UGAddrLast) && (((Un - UGAddr) % UCBSize) === 0)) ? (
+                // (and a location to copy the command and parameters : none if the play log is full)
+                ((Un >= UGAddr) && (Un < UGAddrLast) && (((Un - UGAddr) % UCBSize) === 0) && ((loc = getTmpEnt()) > 0)) ? (
                     i=j=0; res = argc; argc -= 3;
-                    // Get a location to copy the command and parameters
-                    loc = getTmpEnt();
                     while ((argc > 0) && (j < 74)) (
                         v = argv[i+3];
                         // is v a block ? if so, copy its values
                         mSL_bl_check(v) ? (
-                            k = 0;
-                            while (j < 74) (
-                                gmem[loc+j] = v[k]; j += 1; k += 1;
+                            // its values (kb : k keeps the command)
+                            kb = 0;
+                            while ((j < 74) && (kb < v[-1])) (
+                                gmem[loc+j] = v[kb]; j += 1; kb += 1;
                             );
                         ) : (
                             gmem[loc+j] = v; j+= 1;
@@ -14754,7 +14772,7 @@ local(res, kw, Un, i, j, k, loc, pq, v)
 */
 function
 mSL_players_ops(argc, argv)
-local(res, kw, Un, p, fdly, i, j, loc, v, k, pq)
+local(res, kw, Un, p, fdly, i, j, loc, v, k, kb, pq)
 (
     res = Undef;
     fdly = 0;
@@ -14762,18 +14780,18 @@ local(res, kw, Un, p, fdly, i, j, loc, v, k, pq)
         Un = argv[0]; // The first parameter should be a player address
         kw = argv[1]; p = 1;
         ((kw === mSL_KW_KmdDly) || (kw === mSL_KW_Dly)) ? (fdly = 1; p = 2;);
-        ((kkw === mSL_KW_KmdImm) || (kw === mSL_KW_Imm)) ? (fdly = 0; p = 2;);
-        ((Un >= UGAddr) && (Un < UGAddrLast) && (((Un - UGAddr) % UCBSize) === 0)) ? (
+        ((kw === mSL_KW_KmdImm) || (kw === mSL_KW_Imm)) ? (fdly = 0; p = 2;);
+        // (and a location to copy the command and parameters : none if the play log is full)
+        ((Un >= UGAddr) && (Un < UGAddrLast) && (((Un - UGAddr) % UCBSize) === 0) && ((loc = getTmpEnt()) > 0)) ? (
             i=j=0; res = argc; argc -= p;
-            // Get a location to copy the command and parameters
-            loc = getTmpEnt();
             while ((argc > 0) && (j < 74)) (
                 v = argv[i+p];
                 // is v a block ? if so, copy its values
                 mSL_bl_check(v) ? (
-                    k = 0;
-                    while (j < 74) (
-                        gmem[loc+j] = v[k]; j += 1; k += 1;
+                    // its values
+                    kb = 0;
+                    while ((j < 74) && (kb < v[-1])) (
+                        gmem[loc+j] = v[kb]; j += 1; kb += 1;
                     );
                 ) : (
                     gmem[loc+j] = v; j+= 1;
@@ -16108,8 +16126,8 @@ mSL_tok_take(1) ? (
     ((pPlayTimeCurrent > playTimeMax-pTEpsilon) && (playFward)) ? (
         playRewind();
     );
-    ((pPlayTimeCurrent - TEpsilon <= 0) && (playModeSpeed < 0)) ? (
-        pPlayTimeCurrent = playTimeMax - TEpsilon;
+    ((pPlayTimeCurrent - pTEpsilon <= 0) && (playModeSpeed < 0)) ? (
+        pPlayTimeCurrent = playTimeMax - pTEpsilon;
         !playRepeatMd ? ( replayMode = replayModePause; );
         playReeval = 1;
     );
@@ -16120,23 +16138,25 @@ mSL_tok_take(1) ? (
 
 timeFlag0 = timeFlag1 = timeFlag2 = timeFlag3 = 0;
 (pTBlockStart >= timeEvent0) ? (
-    timeFlag0 = 1; timeEvent0 = timeEvent0 + 1;
+    timeFlag0 = 1; timeEvent0 = max(pTBlockStart, timeEvent0) + 1; // (late : restart from now)
 );
 (pTBlockStart >= timeEvent1) ? (
-    timeFlag1 = 1; timeEvent1 = timeEvent1 + 1.173;
+    timeFlag1 = 1; timeEvent1 = max(pTBlockStart, timeEvent1) + 1.173; // (late : restart from now)
 );
 (pTBlockStart >= timeEvent2) ? (
-    timeFlag2 = 1; timeEvent2 = timeEvent2 + 1.281;
+    timeFlag2 = 1; timeEvent2 = max(pTBlockStart, timeEvent2) + 1.281; // (late : restart from now)
 );
 (pTBlockStart >= timeEvent3) ? (
-    timeFlag3 = 1; timeEvent3 = timeEvent3 + 1.389;
+    timeFlag3 = 1; timeEvent3 = max(pTBlockStart, timeEvent3) + 1.389; // (late : restart from now)
 );
 
 // Is there a script request ?
 (scRq = gmem[thrdRqst]) ? (
     gmem[thrdRqst] = 0;
-    sprintf(#s, "AS: %s  [%d  %d  %d]", mSL_edit_value(0,scRq), gmem[scptPar1], gmem[scptPar2], gmem[scptPar3]);
-    mSL_log(SysLogBox, #s);
+    (FlagsTbVals[Flgs_Scripts] & 1) ? (
+        sprintf(#s, "AS: %s  [%d  %d  %d]", mSL_edit_value(0,scRq), gmem[scptPar1], gmem[scptPar2], gmem[scptPar3]);
+        mSL_log(SysLogBox, #s);
+    );
     (scRq === 'Done') ? (
         // most usual request : something is done...
         gmem[scptLock] = 0; // "unlock" access to script
@@ -16154,10 +16174,14 @@ timeFlag0 = timeFlag1 = timeFlag2 = timeFlag3 = 0;
             mSL_log(SysLogBox, #D_GM_Project_Path_FX);
         );
         */
-        strcpy(#D_GM_Project_Path, #s); strcat(#D_GM_Project_Path, "/");
+        // as at init (see the paths of the project) : the separator of the system, #DIR_SEP
+        strcpy(#D_GM_Project_Path, #s); strcat(#D_GM_Project_Path, #DIR_SEP);
         mSL_log(SysLogBox, #D_GM_Project_Path);
-        strcpy(#D_GM_Project_Path_FX, #D_GM_Project_Path); strcat(#D_GM_Project_Path_FXplus, "Effects/+");
-        mSL_log(SysLogBox, #D_GM_Project_Path_FXplus);
+        strcpy(#D_GM_Project_Path_FX, #D_GM_Project_Path); strcat(#D_GM_Project_Path_FX, "Effects"); strcat(#D_GM_Project_Path_FX, #DIR_SEP);
+        strcpy(#D_GM_Project_Path_FXplus, #D_GM_Project_Path_FX); strcat(#D_GM_Project_Path_FXplus, "+");
+        strcpy(#D_GM_Project_Path_SCR, #D_GM_Project_Path); strcat(#D_GM_Project_Path_SCR, "Data"); strcat(#D_GM_Project_Path_SCR, #DIR_SEP);
+        strcat(#D_GM_Project_Path_SCR, "Scripts"); strcat(#D_GM_Project_Path_SCR, #DIR_SEP);
+        strcpy(#D_GM_Project_Path_SCRplus, #D_GM_Project_Path_SCR); strcat(#D_GM_Project_Path_SCRplus, "+");
     );
 );
 
@@ -16211,7 +16235,8 @@ timeFlag0 = timeFlag1 = timeFlag2 = timeFlag3 = 0;
                     gmem[upp] = Ua; upp+= 1;
                     gmem[Ua+cbPlIdt] = readerCount; readerCount += 1;
                 );
-                SUTrAddr[gmem[Ua+RCB_My_Track]] = ua;
+                utk = gmem[Ua+RCB_My_Track];
+                ((utk >= 0) && (utk < SUTrASize)) ? SUTrAddr[utk] = Ua; // (a track beyond the table is ignored)
             );
             Ua += UCBSize;
         );
@@ -16586,8 +16611,6 @@ while (ent = Scheduler()) (
     (code === 8) ? (
         // Run entry "0" of tasks
         ksc = 0; // should refer to a compiled code ???
-        sprintf(#u, "Code 8: Ksc: %d - Err: %04d", ksc, mSL_errX);
-        mSL_log(SysLogBox, #u);
         mSL_errX = 0;
         ((mSL_bl_check(ksc, Undef, 9793) === 0) && (ksc[mSL_CC_Key] === mSL_CC_KeyCKod)) ? (
             // try to execute the gizmo
@@ -16599,7 +16622,7 @@ while (ent = Scheduler()) (
             ) : (
                 err_sys_rtm = 9606;
             );
-            (mSL_errX === 0) ? (
+            ((ent != 0) && (mSL_errX === 0)) ? (
                 SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
                 ent = 0;
             ) : (
@@ -16632,12 +16655,14 @@ while (ent = Scheduler()) (
 //======
 //======
 
-//  ??? !!!
-iii=0; mm_cyc_max=0; mm_dur_max = 0;
-loop(mm_cyc_siz,
-    k = mm_cyc_mm[iii]; (k > mm_cyc_max ? mm_cyc_max = k);
-    k = mm_dur_mm[iii]; (k > mm_dur_max ? mm_dur_max = k);
-    iii += 1;
+// maxima of the mSL statistics (ring of the last mm_cyc_siz blocks) : computed once a second
+timeFlag0 ? (
+    iii=0; mm_cyc_max=0; mm_dur_max = 0;
+    loop(mm_cyc_siz,
+        k = mm_cyc_mm[iii]; (k > mm_cyc_max ? mm_cyc_max = k);
+        k = mm_dur_mm[iii]; (k > mm_dur_max ? mm_dur_max = k);
+        iii += 1;
+    );
 );
 mm_cyc_ptr = (mm_cyc_ptr + 1) % mm_cyc_siz;
 mm_cyc_mm[mm_cyc_ptr] = 0; mm_dur_mm[mm_cyc_ptr] = 0;
@@ -17376,7 +17401,7 @@ ib=0; loop(RandomStates,
     bm=gmem[RandomSChSL+ib];
     bv=gmem[RandomSTimr+ib]+bd;
     (bv >= bm) ? (bv = bv % bm; gmem[RandomSFlags+ib]=1; );
-    gmem[RandomSType] != 0 ? gmem[RandomSFlags+ib]=1;
+    gmem[RandomSType+ib] != 0 ? gmem[RandomSFlags+ib]=1; // (the type of this generator)
     gmem[RandomSTimr+ib]=bv;
     ib += 1;
 );
@@ -17567,7 +17592,7 @@ while (SchedActive &&
                 Kpart = -1; // nothing to play
             );
             (Kpart >= 0) ? (
-                KSource = 0331;
+                KSource = ActPar1; // the pad command : the unlock (KmdUnlock, see FilePlayer) compares it with its parameter
                 padStErrors[Kmnd_Pl] = Krtc = doPlayClip(Kpart, Kselect, KpFlags, Kptyp, Kaux); // keep err. return
             );
             // );
@@ -17728,6 +17753,7 @@ while (SchedActive &&
         AAAAAAAA_Task5_1 = ActPar1;
         loop (uCnt,
             Un = UGAddr + UCBSize * uid;
+            msk = 0; // set below if this player is modified
             pid = gmem[Un+cbPlIdt]; // the ID of the pad
             ty = gmem[Un+cbType];
             ((ty === uPlayer) && (xopKmd === 2)) ? ( // unlock, unmute all
@@ -18475,7 +18501,7 @@ loadMode ? (
 
         //Load all saved strings
         sj = 0; loop(K_savedStringsCnt,
-            file_string(handle,savedStrings[sj]);
+            file_string(0,savedStrings[sj]);
             sj += 1;
         );
 
@@ -18523,7 +18549,7 @@ loadMode ? (
         removeAliases();
         // Get aliases
         sj = K_fileAliases; si = 0; sk = 1;
-        while (sk) (
+        while (sk && (sj < K_savedStringsCnt) && (si < K_aclnAliasesCnt)) (
             st = savedStrings[sj];
             ((sk = strlen(st)) != 0) ? (
                 aclnAliases[si] = cs = mSL_Str_Alloc("");
@@ -18650,7 +18676,7 @@ loadMode ? (
     // Install aliases in strings to save
     sj = K_fileAliases; si = 0; loop(K_aclnAliasesCnt,
         st = aclnAliases[si];
-        ((st != 0) && (strlen(st) > 0)) ? (
+        ((st != 0) && (strlen(st) > 0) && (sj < K_savedStringsCnt - 1)) ? ( // (the last saved string : the empty delimiter)
             strcpy(savedStrings[sj], aclnAliases[si]);
             sj += 1;
         );
@@ -21975,7 +22001,7 @@ local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h
                         cn = gmem[Un+RCB_ClipNb];
                         // gmem[Un+cbPadUnitIdt] = pid; // keep associated PAD
                         qmode ? (
-                            sprintf(str,"Clip:%04d", gmem[Un+RCB_ClipNb]);q
+                            sprintf(str,"Clip:%04d", gmem[Un+RCB_ClipNb]);
                         ) : (
                             lmode ? (
                                 sprintf(str,"Track %d", gmem[Un+RCB_My_Track]);
