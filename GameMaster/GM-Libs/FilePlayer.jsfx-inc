@@ -3182,8 +3182,7 @@ local (cq, cx, flu, flk, kuz, zplm)
     ) : (
         kuz = 0; // key has not been used
     );
-
-
+    (flk && kuz) ? GM_key_take(key); // the key has been used (a negative key is not a typed key)
 
     num;
 );
@@ -5996,14 +5995,6 @@ while (efi) (
 );
 
 
-function do_GenericKeyRead()
-(
-    (KeyedT === 0) ? (KeyedT = Keyed; Keyed = 0; );
-    (KeyedT === 0) ? (KeyedT = ui_key(); );
-    (KeyedT > 0) ? AAAA_lastKeyedT = KeyedT;
-    KeyedT;
-);
-
 
 (atomic_get(mSL_Lock) && (mSL_loc_tim <= 0))? (
     // we may have a GC to run
@@ -7206,30 +7197,16 @@ local (siz)
 
 
 function
-do_local_Control(u_ch)
+do_local_Control()
 (
-    // Control part
-    (u_ch === 'g') ? gc_run(2)  :
-    (u_ch === 'm') ? (mem_walk(0);mem_show();)  :
-    (u_ch === 'r') ? (mem_walk(8);mem_show();)  :
-    (u_ch === 'L') ? (gui_show_syslog = ! gui_show_syslog ;)  :
-    (u_ch === 'M') ? (gui_show_memory = ! gui_show_memory;)  :
-    (u_ch === 'c') ? (mSL_Dyn_RecycleF = ! mSL_Dyn_RecycleF;)  :
-    (u_ch === 'l') ? (mm_show_limit = ((mm_show_limit * 10 + 1) % 20 )/ 10;)  :
-    (u_ch === 'k') ? (mSL_kill_all_thread();)  :
-    (u_ch === 'A') ? ( info_config(0, 4, 5, 6, 7, 8, 1, 2, 3, 9, 10, 11); ) :
-    (u_ch === 'Z') ? ( info_config(0, 1, 2, 3); ) :
-    (u_ch === '+') ? (gfx_col_width = min(560, gfx_col_width + 10) ;)  :
-    (u_ch === '-') ? (gfx_col_width = max(260, gfx_col_width - 10) ;)  :
-    (u_ch === '=') ? (gfx_col_width = gfx_col_def_width ;)  :
-    (u_ch === 'a') ? (nbligMax = min(glIsizCnt, nbligMax+1) ;)  :
-    (u_ch === 's') ? (nbligMax = max(1, nbligMax-1); memset(glIsizTab, 0, glIsizCnt);)  :
-    (u_ch === 'r') ? ( // run 1st suspended task
-        ((ent = SchedDetachHead(SchedSuspPts)) != SchedNone) ? (
-            SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
-        );
-    );
-    //
+    // The keys of the status module (the system commands work everywhere : do_System_Keys, see mSL_System_Keys)
+    GM_key_take('A') ? ( info_config(0, 4, 5, 6, 7, 8, 1, 2, 3, 9, 10, 11); ) :
+    GM_key_take('Z') ? ( info_config(0, 1, 2, 3); ) :
+    GM_key_take('+') ? (gfx_col_width = min(560, gfx_col_width + 10) ;)  :
+    GM_key_take('-') ? (gfx_col_width = max(260, gfx_col_width - 10) ;)  :
+    GM_key_take('=') ? (gfx_col_width = gfx_col_def_width ;)  :
+    GM_key_take('a') ? (nbligMax = min(glIsizCnt, nbligMax+1) ;)  :
+    GM_key_take('s') ? (nbligMax = max(1, nbligMax-1); memset(glIsizTab, 0, glIsizCnt);) ;
 );
 
 function
@@ -7268,11 +7245,9 @@ local (uix_jneed, uix_jmini, h1, k, siz, u_ch, Eps, Ublocks)
                 ui_color(Col_Frame);
                 ui_border(); // draws in purple
             ui_pop();
-            u_ch = do_GenericKeyRead();
-            (u_ch != 0) ? (
+            ((u_ch = GM_key_peek()) != 0) ? (
                 sprintf(#gfx_uc, "Keyed: '%c' / %02X   [%d]", u_ch, u_ch, kcnt); kcnt+= 1;
-                Keyed = KeyedT = 0;  // u_ch has not been used
-                do_local_Control(u_ch);
+                do_local_Control(); // takes the keys of the module
             );
         );
         control_group(GName);
@@ -7389,7 +7364,7 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
             );
 
             (zzmi) ? (
-                u_ch = do_GenericKeyRead();
+                u_ch = GM_key_peek(); // the keys of the log (taken below if used)
                 (u_ch != 0) ? (
                     sprintf(#gfx_uc, "Keyed: '%c' / %02X   [%d]", u_ch, u_ch, kcnt); kcnt+= 1;
                     // mSL_log(SysLogBox, #gfx_uc);
@@ -7397,8 +7372,6 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                         sprintf(#sq, "***Key  @  %d  %d  %d [%02x+%02x -> '%c']", mouse_x, mouse_y, mouse_cap, mouse_cap, u_ch, u_ch);
                         mSL_log(SysLogBox, #sq);
                     );
-                    ui_key_next();
-                    Keyed = 0;
                     ((u_ch === ' ') || (u_ch ===  0x0d)) ? (mSL_log(box, " ");) :
                     (u_ch === 'm') ? (box[6] = min(20, box[6]+1);) :
                     (u_ch === 'l') ? (box[6] = max(0, box[6]-1);) :
@@ -7409,8 +7382,8 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                     //(u_ch === 'v') ? (ShowConfig();) :
                     (u_ch === 'up') ? (box[7] = max(0, box[7]-10);) :
                     (u_ch === 'down') ? (box[7] = (box[7]+10) % box[2];) :
-                    ((ui_jmouse_cap === 0) && (u_ch === 'left')) ? (box[7] = 0;) :
-                    ((ui_jmouse_cap === 0) && (u_ch === 'rght')) ? (box[7] = (box[7]+100) % box[2];) :
+                    ((GM_key_mods() === 0) && (u_ch === 'left')) ? (box[7] = 0;) :
+                    ((GM_key_mods() === 0) && (u_ch === 'rght')) ? (box[7] = (box[7]+100) % box[2];) :
                     (u_ch === '1') ? (box[5] = 1;) :
                     (u_ch === '2') ? (box[5] = 2;) :
                     (u_ch === '3') ? (box[5] = 3;) :
@@ -7419,8 +7392,9 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                     (u_ch === '6') ? (box[5] = 6;) :
                     (u_ch === '7') ? (box[5] = 7;) :
                     (u_ch === '8') ? (box[5] = 8;) :
-                    (u_ch === 'p') ? (sysout(box);) ; // log in a text file (see mSL_show_Utilities)
-                    Keyed = KeyedT = 0;  // u_ch has not been used
+                    (u_ch === 'p') ? (sysout(box);) : // log in a text file (see mSL_show_Utilities)
+                    (u_ch = 0); // not a key of the log
+                    GM_key_take(u_ch); // the key has been used
                 );
             );
             nc = max(1, min(8, 0|box[5])); // number of columns to show
@@ -7514,6 +7488,17 @@ function mSL_Dbg_Memory_Updt(membox)
 
 // no_init removes the leading @init of the module (otherwise, the rest of @gfx would be in @init)
 <? no_init = 1; include("GM-Libs/mSL_Dbg_Memory.jsfx-inc"); ?>
+// The system commands typed on the keyboard : do_System_Keys() (mSL_System_Keys.jsfx-inc)
+<? include("GM-Libs/mSL_System_Keys.jsfx-inc"); ?>
+
+// The commands of the plugin : the keys left by the modules, at the end of the frame (then do_System_Keys)
+// (capitals for the displays, see mSL_ui_LibJJ, Keyboard)
+function do_Plugin_Keys()
+(
+    GM_key_take('L') ? (gui_show_syslog = gui_show_syslog ? 0 : 1;) : // show / hide the system log
+    GM_key_take('M') ? (gui_show_memory = gui_show_memory ? 0 : 1;) : // show / hide the memory dumps
+    GM_Tab_Keys(); // Tab, Shift + Tab : next, previous tabulation (see ui-lib-JJ-GUI)
+);
 
 
 (gfxMn !== lastMn) ? (
@@ -7564,6 +7549,7 @@ function mSL_Dbg_Memory_Updt(membox)
     );
 
     update_theme();
+    GM_key_frame(); // the key of the frame (see mSL_ui_LibJJ, Keyboard)
 
     currScreen = ui_screen();
     (stdScreen === Undef) ? (
@@ -7610,6 +7596,10 @@ function mSL_Dbg_Memory_Updt(membox)
         control_system();
     );
 
+    // the keys left by the modules : the commands of the plugin, then the system commands (see mSL_System_Keys)
+    do_Plugin_Keys();
+    do_System_Keys();
+
 /*
     ((gfx_Pw != gfx_w) || (gfx_Ph != gfx_h)) ? (
         gfx_PPw = gfx_Pw; gfx_PPh = gfx_Ph;
@@ -7617,5 +7607,6 @@ function mSL_Dbg_Memory_Updt(membox)
     );
 */
 );
+GM_key_end(); // the key not used is dropped
 
 

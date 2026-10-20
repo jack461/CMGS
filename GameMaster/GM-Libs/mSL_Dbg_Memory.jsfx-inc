@@ -122,7 +122,7 @@ local (h1, h2, uix_jneed, uix_jmini, svr, svz, pt, ptr, dec, nad, cnt, v, zm, ii
                     zzmmd = padDebugp[ui_jpad_lmods];
 
                     (zz & ui_jpad_ev_key) ? (
-                        Keyed = zzch; // note char
+                        // (updtBNumber takes the key if it uses it)
                         (zzent === 1) ? (
                             membox[7] = updtBNumber(membox[7], zzch, dbg_mem_alt);
                         );
@@ -200,40 +200,40 @@ local (h1, h2, uix_jneed, uix_jmini, svr, svz, pt, ptr, dec, nad, cnt, v, zm, ii
                         0;
                     );
 
-                    u_ch = do_GenericKeyRead();
+                    // the keys of the module (the key is taken at the end if one of the branches used it)
+                    u_ch = GM_key_peek();
                     (u_ch != 0) ? (
                         0 ? (
                             sprintf(#gfxu, "Keyed: '%c' / %02X   [%d]", u_ch, u_ch, kcnt); kcnt+= 1;
                             mSL_log(SysLogBox, #gfxu);
                         );
-                        ui_key_next();
 
 
 
                         (u_ms_x === 0) ? (
                             // first column : change address
-                            ((ui_jmouse_cap === 0) && (u_ch === 'up')) ? (
+                            ((GM_key_mods() === 0) && (u_ch === 'up')) ? (
                                 membox[7] = membox[7] - knb;
                             ) :
-                            ((ui_jmouse_cap === 0) && (u_ch === 'down')) ? (
+                            ((GM_key_mods() === 0) && (u_ch === 'down')) ? (
                                 membox[7] = membox[7] + knb;
                             ) :
-                            ((ui_jmouse_cap === 0) && (u_ch === 'left')) ? (
+                            ((GM_key_mods() === 0) && (u_ch === 'left')) ? (
                                 membox[7] = membox[7] - 1;
                             ) :
-                            ((ui_jmouse_cap === 0) && (u_ch === 'rght')) ? (
+                            ((GM_key_mods() === 0) && (u_ch === 'rght')) ? (
                                 membox[7] = membox[7] + 1;
                             ) :
-                            ((ui_jmouse_cap === 8) && (u_ch === 'left')) ? (
+                            ((GM_key_mods() === 8) && (u_ch === 'left')) ? (
                                 membox[7] = membox[7] - knb * 32;
                             ) :
-                            ((ui_jmouse_cap === 8) && (u_ch === 'rght')) ? (
+                            ((GM_key_mods() === 8) && (u_ch === 'rght')) ? (
                                 membox[7] = membox[7] + knb * 32;
                             ) :
-                            ((ui_jmouse_cap === 8) && (u_ch === 'up')) ? (
+                            ((GM_key_mods() === 8) && (u_ch === 'up')) ? (
                                 membox[7] = membox[7] - knb * 256;
                             ) :
-                            ((ui_jmouse_cap === 8) && (u_ch === 'down')) ? (
+                            ((GM_key_mods() === 8) && (u_ch === 'down')) ? (
                                 membox[7] = membox[7] + knb * 256;
                             ) :
                             (u_ch === '=') ? (
@@ -263,24 +263,28 @@ local (h1, h2, uix_jneed, uix_jmini, svr, svz, pt, ptr, dec, nad, cnt, v, zm, ii
                             ) :
                             (u_flg && (dbg_u_zmc & 1)) ? (
                                 membox[7] = membox[7] + knb * u_ms_y;
+                                u_ch = 0; // (a clic, not the key)
                             ) :
                             (u_flg && (dbg_u_zmc & 2)) ? (
                                 membox[7] = membox[7] - knb * u_ms_y;
+                                u_ch = 0;
+                            ) : (
+                                u_ch = 0; // not a key of the module
                             );
                         ) : (
                             // other columns : jump to location
                             dbg_u_za = membox[15] = membox[7] + knb * u_ms_y + u_ms_x - 1;
                             membox[16] = dbg_u_za[0];
-                            ((ui_jmouse_cap === 0) && (u_ch === 'up')) ? (
+                            ((GM_key_mods() === 0) && (u_ch === 'up')) ? (
                                 membox[7] = membox[7] - knb;
                             ) :
-                            ((ui_jmouse_cap === 0) && (u_ch === 'down')) ? (
+                            ((GM_key_mods() === 0) && (u_ch === 'down')) ? (
                                 membox[7] = membox[7] + knb;
                             ) :
-                            ((ui_jmouse_cap === 0) && (u_ch === 'left')) ? (
+                            ((GM_key_mods() === 0) && (u_ch === 'left')) ? (
                                 membox[7] = membox[7] - 1;
                             ) :
-                            ((ui_jmouse_cap === 0) && (u_ch === 'rght')) ? (
+                            ((GM_key_mods() === 0) && (u_ch === 'rght')) ? (
                                 membox[7] = membox[7] + 1;
                             ) :
                             (u_ch === '=') ? (
@@ -303,9 +307,11 @@ local (h1, h2, uix_jneed, uix_jmini, svr, svz, pt, ptr, dec, nad, cnt, v, zm, ii
                                     membox[10] = membox[13] = (membox[13] + 1) % debugDSize;
                                     membox[7] = membox[8] = dbg_last_a = membox[16] - 4;
                                 );
+                            ) : (
+                                u_ch = 0; // not a key of the module
                             );
                         );
-
+                        GM_key_take(u_ch); // the key has been used
                     );
 
                     (u_flg && (dbg_u_zmc === 1)) ? (  //  left clic
@@ -413,7 +419,6 @@ local (h1, h2, uix_jneed, uix_jmini, svr, svz, pt, ptr, dec, nad, cnt, v, zm, ii
     );
     ui_bx_min_w = svr;
     uix_req_w = svz;
-    Keyed = KeyedT = 0;
 
     (act === 1) ? (
         // one more line !

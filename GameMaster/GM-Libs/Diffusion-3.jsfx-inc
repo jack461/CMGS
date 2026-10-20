@@ -227,7 +227,6 @@ defaultconf = 1; // the number of the default configuration
 
 
 // UI sizes, fonts, boxes, colors : see mSL_Live_Screen.jsfx-inc
-Keyed = KeyedT = 0;
 
 
 
@@ -1322,7 +1321,6 @@ gumpages = 0; // graphics uses multiple pages on screen
 // gx* (colored background) and ui* (boxes durations) : see mSL_Live_Screen.jsfx-inc
 
 uix_latestchar = 0;
-uix_altkey = 0;
 
 HP_Box_Id = mSL_symbol("HP_Box");
 mouse_id = mSL_symbol("Mouse");
@@ -2516,8 +2514,7 @@ local (cq, cx, flu, flk, kuz, zplm)
     ) : (
         kuz = 0; // key has not been used
     );
-
-
+    (flk && kuz) ? GM_key_take(key); // the key has been used (a negative key is not a typed key)
 
     num;
 );
@@ -5137,33 +5134,9 @@ gfxStrtT = time_precise() + timeD;
         mSL_log(SysLogBox, #dbg_trace15);
         #dbg_trace15 = "";
     );
-
-
-    KeyedT = 0; // reject previously unused keyed char.
 );
 
-
-// Not simple, but makes sense...
-function do_GenericKeyRead()
-(
-    (KeyedT === 0) ? (
-        KeyedT = Keyed; Keyed = 0;
-    );
-    (KeyedT === 0) ? (
-        (uix_altkey > 0) ? (
-            uix_latestchar = uix_altkey; uix_altkey = -1;
-        ) : (
-            (uix_latestchar <= 0) ? (uix_latestchar = gfx_getchar());
-            (uix_latestchar <= 0) ? uix_latestchar = 0;
-        );
-        uix_char_consumed = 1;
-        KeyedT = uix_latestchar;
-        uix_latestchar = - 1;
-    );
-    (KeyedT > 0) ? AAAA_lastKeyedT = KeyedT;  // just a trace
-
-    KeyedT;
-);
+// (the keys : see mSL_ui_LibJJ, Keyboard)
 
 // draw_around_box, upd_box_size, update_window : see mSL_Live_Screen.jsfx-inc
 
@@ -5176,13 +5149,6 @@ function do_GenericKeyRead()
 // display_boxes() and live_screen() : HP set boxes are drawn by HP_Draw_Pic (mSL_Draw_HPSet, just above)
 <? live_screen_hpset = 1; live_screen_in_gfx = 1; ?>
 <? include("GM-Libs/mSL_Live_Screen_Display.jsfx-inc"); ?>
-
-// keeps a key not used by a module (used by mSL_show_Utilities)
-function do_ModuleKeySave()
-(
-    (KeyedT === 0) ? ( KeyedT = Keyed; Keyed = 0; );
-    KeyedT;
-);
 
 // Shared display modules : show_Scheduler_Pad(title, blkId) (mSL_show_Utilities.jsfx-inc)
 <? shw_part = 2; include("GM-Libs/mSL_show_Utilities.jsfx-inc"); ?>
@@ -5215,15 +5181,15 @@ gxworktodo ? (
 );
 
 
+// The keys of the Live screen : after the box under the mouse (mouse_hover), before the commands of the plugin
 function do_live_actions() local(gwk)
 (
-    (gwk = do_GenericKeyRead()) ? (
+    (gwk = GM_key_peek()) ? (
         statkeyd ? (
             sprintf(#key, "0x%02X '%c'", gwk, gwk);
             box = mk_display_box('Key', #key, "Key", 100, (bx__2strings|bx__boxaround | 5), 4, 3);
             box[bx_extraw] = 12; // add some width
         );
-        KeyedT = 0;
         (gwk === 'g') ? (
             actpars[0] = -1;
             perform_action(1, 1, actpars);
@@ -5262,9 +5228,7 @@ function do_live_actions() local(gwk)
             actpars[0] = -1;
             perform_action(5, 1, actpars);
         ) :
-        ((gwk === 'u')||(gwk === 0x09)) ? ( // tabulation
-            // uix_jmbsel = (uix_jmbsel + 1) % dcbTabsCount;
-            // ui_screen_switch(uix_jG_menuscr[uix_jmbsel]);
+        (gwk === 'u') ? ( // next tabulation (Tab, Shift + Tab : see do_Plugin_Keys)
             actpars[0] = -1;
             perform_action(9, 1, actpars);
         ) :
@@ -5299,44 +5263,18 @@ function do_live_actions() local(gwk)
         (gwk === '.') ? (
             mk_display_box(1, "*", 1, -1, 180); // 1 => sequential
         ) : (
-            KeyedT = gwk; // finally not used
+            gwk = 0; // not a key of the Live screen
         );
+        GM_key_take(gwk); // the key has been used
     );
 );
 
 
-function do_main_actions()
-local (u_ch, ent)
+// The commands of Diffusion-3 : the keys left by the tabs, at the end of the frame (then do_System_Keys)
+// (capitals for the displays, see mSL_ui_LibJJ, Keyboard)
+function do_Plugin_Keys()
 (
-    u_ch = do_GenericKeyRead();
-    (u_ch != 0) ? (
-        // sprintf(#gfx_uc, "Keyed: '%c' [%d]", u_ch, kcnt);
-        kcnt+= 1;
-        // mSL_log(SysLogBox, #gfx_uc);
-        Keyed = KeyedT = 0;  // if u_ch will be used
-    );
-    (u_ch === 0x09) ? (actpars[0] = -1; perform_action(9, 1, actpars);)  :
-    (u_ch === 't') ? (mSL_run_test = (mSL_run_test ? 0 : 1); mSL_run_max = 25)  :
-    (u_ch === 's') ? (mSL_run_test =  0 ; )  :
-    (u_ch === 'o') ? (mSL_run_once = mSL_run_once ? 0 : (mSL_run_test = 1; mSL_run_max = 1))  :
-    (u_ch === 'g') ? (gc_run(2))  :
-    (u_ch === 'm') ? (mem_walk(0);mem_show();)  :
-    (u_ch === 'n') ? (mem_walk(8);mem_show();)  :
-    (u_ch === 'I') ? (gui_show_infos = gui_show_infos ? 0 : 1;)  :
-    (u_ch === 'L') ? (gui_show_syslog = gui_show_syslog ? 0 : 1;)  :
-    (u_ch === 'M') ? (gui_show_memory = gui_show_memory ? 0 : 1;)  :
-    (u_ch === 'c') ? (mSL_Dyn_RecycleF = mSL_Dyn_RecycleF ? 0 : 1;)  :
-    (u_ch === 'l') ? (mm_show_limit = ((mm_show_limit * 10 + 1) % 20 )/ 10;)  :
-    (u_ch === 'k') ? (mSL_kill_all_thread();)  :
-    (u_ch === 'r') ? (
-        ((ent = SchedDetachHead(SchedSuspPts)) != SchedNone) ? (
-            SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
-        );
-    )  :
-    (
-        // u_ch not used - recycle it
-        Keyed = u_ch;
-    );
+    GM_Tab_Keys(); // Tab, Shift + Tab : next, previous tabulation (see ui-lib-JJ-GUI)
 );
 
 // ====== Actual GUI part ======
@@ -5733,11 +5671,10 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
             );
 
             (zzmi) ? (
-                u_ch = do_GenericKeyRead();
+                u_ch = GM_key_peek(); // the keys of the log (taken below if used)
                 (u_ch != 0) ? (
                     // sprintf(#gfx_uc, "Keyed: '%c' [%d]", u_ch, kcnt);
                     kcnt+= 1;
-                    Keyed = KeyedT = 0;  // if u_ch will be used
                     //  mSL_log(SysLogBox, #gfx_uc);
                     (FlagsTbVals[Flgs_Traces] & 1) ? (
                         sprintf(#sq, "***Key  @  %d  %d  %d [%02x+%02x -> '%c']", mouse_x, mouse_y, mouse_cap, mouse_cap, u_ch, u_ch);
@@ -5755,8 +5692,8 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                     //(u_ch === 'v') ? (ShowConfig();) :
                     (u_ch === 'up') ? (box[7] = max(0, box[7]-10);) :
                     (u_ch === 'down') ? (box[7] = (box[7]+10) % box[2];) :
-                    ((ui_jmouse_cap === 0) && (u_ch === 'left')) ? (box[7] = 0;) :
-                    ((ui_jmouse_cap === 0) && (u_ch === 'rght')) ? (box[7] = (box[7]+100) % box[2];) :
+                    ((GM_key_mods() === 0) && (u_ch === 'left')) ? (box[7] = 0;) :
+                    ((GM_key_mods() === 0) && (u_ch === 'rght')) ? (box[7] = (box[7]+100) % box[2];) :
                     (u_ch === '1') ? (box[5] = 1;) :
                     (u_ch === '2') ? (box[5] = 2;) :
                     (u_ch === '3') ? (box[5] = 3;) :
@@ -5766,9 +5703,8 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                     (u_ch === '7') ? (box[5] = 7;) :
                     (u_ch === '8') ? (box[5] = 8;) :
                     (u_ch === 'p') ? (sysout(box);) : // log in a text file (see mSL_show_Utilities)
-                    (
-                        KeyedT = u_ch;  // u_ch has not been used
-                    );
+                    (u_ch = 0); // not a key of the log
+                    GM_key_take(u_ch); // the key has been used
                 );
             );
             nc = max(1, min(8, 0|box[5])); // number of columns to show
@@ -5855,6 +5791,8 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
 
 
 <? include("GM-Libs/mSL_Dbg_Memory.jsfx-inc"); ?>
+// The system commands typed on the keyboard : do_System_Keys() (mSL_System_Keys.jsfx-inc)
+<? include("GM-Libs/mSL_System_Keys.jsfx-inc"); ?>
 
 /*
 (gfxMn !== lastMn) ? (
@@ -6018,7 +5956,6 @@ while (SchedActive &&
 
 function colored_screen()
 (
-    do_live_actions();
     live_screen(); // see mSL_Live_Screen_Display.jsfx-inc
 );
 
@@ -6113,8 +6050,7 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
             AAAAAA_mh_cbx_activ = mh_cur_box[bx_activ];
 
             // Is this a HP box, and is there a special action to do ?
-            ((mh_cur_box[bx_type] === bx_ty_hpset) && (xx = do_GenericKeyRead())) ? (
-                KeyedT = 0;  // if xx will be used
+            ((mh_cur_box[bx_type] === bx_ty_hpset) && (xx = GM_key_peek())) ? (
                 (xx === '=') ? (
                     HP_Dr_updsize(mh_cur_box, max(mh_cur_box[bx_sfact] + 1, ceil(mh_cur_box[bx_sfact]  * 1.04)));
                 ) :
@@ -6156,8 +6092,9 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
                     mh_cur_box[bx_xshift] += 0.04;
                 ) :
                 (
-                    KeyedT = xx;  // reject the char.
+                    xx = 0;  // not a key of the box
                 );
+                GM_key_take(xx); // the key has been used
                 xx = 0;
             );
             // should we display the menu (right click)
@@ -6685,23 +6622,20 @@ local (lpp, pval, upp, tladd, bval, bxn, box, del)
 function do_GenericTabStart()
 (
     ui_jmouse_cap |= mouse_cap;
-    KeyedT = Keyed = 0; Kmouse_cap = ui_jmouse_cap;
     ui_Xtime_period = 1; // refresh screen every second
-    // panes : read the key now (shift + left/right arrows resize the panes)
-    (serialBlock[Pr7_StudLive + TabIdt] == 0) ? do_GenericKeyRead();
 );
 
 function do_GenericTabEnd()
 (
-    // panes : the keys not used by the modules
-    (serialBlock[Pr7_StudLive + TabIdt] == 0) ? do_main_actions();
+    0; // (no tab commands : the commands of the plugin are at the end of the frame, do_Plugin_Keys)
 );
 
 function pns_LiveDisplay()
 (
     ui_Xtime_period = 0.0625; // refresh screen quite often
     colored_screen();
-    mouse_hover();
+    mouse_hover();      // the keys of the box under the mouse, then
+    do_live_actions();  // the keys of the Live screen
 );
 
 function show_Module(igb)
@@ -6751,6 +6685,7 @@ must_do_gfx() ? (
     currScreen = ui_screen();
     serialBlock[Pr7_UiTheme] = uix_jtheme; // saved with the project ('stud' block)
     update_theme();
+    GM_key_frame(); // the key of the frame (see mSL_ui_LibJJ, Keyboard)
 
     ui_font();
 
@@ -6779,7 +6714,10 @@ must_do_gfx() ? (
     );
     my_menu_bar_overlay(uix_jG_menuscr); // "soft" look : the tabs bar over the panes (see ui-lib-JJ-GUI)
 
-
+    // the keys left by the modules and the tabs : the commands of Diffusion-3, then the system commands
+    do_Plugin_Keys();
+    do_System_Keys();
 );
+GM_key_end(); // the key not used is dropped
 
 

@@ -11,3 +11,15 @@ The scripts "Ex-NNNN.mSL" announce their expected output with lines such as
     python3 check_scripts.py [log file | project folder] [-a]
 
 (by default, the most recent "syslog-*.txt" of ~/Music/REAPER-Projects/*/).
+
+## Keyboard keys table
+
+    python3 -I keys_table.py [-raw] [-o output.md]
+
+lists the keys used by the `@gfx` code of the plugins (GamePlayer, FilePlayer, ScriptMaster, Diffusion-3,
+Interstys), per plugin and per level, in the order the levels see the key (the same scheme everywhere, see
+`GM-Libs/mSL_ui_LibJJ.jsfx-inc`, Keyboard: module, pane, tab, plugin, system, Studio pad). It reports the
+branches never reached and the commands masked over a module that uses the same key, and compares the
+commands of the plugins. The levels of the handlers are declared in `HANDLERS` at the top of the script:
+add a line there for a new keyboard handler. By default it writes `../Documents/CMGS-Keys.md` (in `CMGS/`);
+`-raw` prints one line per key test.

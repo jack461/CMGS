@@ -1917,6 +1917,17 @@ function mSL_Dbg_Memory_Updt(membox)
 
 // The memory displayer, in @gfx : it uses keepBlockInfos and mSL_Dbg_Memory_Updt ; no_init removes its leading @init
 <? no_init = 1; include("GM-Libs/mSL_Dbg_Memory.jsfx-inc"); ?>
+// The system commands typed on the keyboard : do_System_Keys() (mSL_System_Keys.jsfx-inc)
+<? include("GM-Libs/mSL_System_Keys.jsfx-inc"); ?>
+
+// The commands of the plugin : the keys left by the modules, at the end of the frame (then do_System_Keys)
+// (capitals for the displays, see mSL_ui_LibJJ, Keyboard)
+function do_Plugin_Keys()
+(
+    GM_key_take('L') ? (gui_show_syslog = gui_show_syslog ? 0 : 1;) : // show / hide the system log
+    GM_key_take('M') ? (gui_show_memory = gui_show_memory ? 0 : 1;) : // show / hide the memory dumps
+    GM_Tab_Keys(); // Tab, Shift + Tab : next, previous tabulation (see ui-lib-JJ-GUI)
+);
 
 
 efi = 1; idx = efs = 0;
@@ -1982,14 +1993,6 @@ while (efi) (
 
 (idx != 0) ? gfx_getdropfile(-1);
 
-
-function do_GenericKeyRead()
-(
-    (KeyedT === 0) ? (KeyedT = Keyed; Keyed = 0; );
-    (KeyedT === 0) ? (KeyedT = ui_key(); );
-    (KeyedT > 0) ? AAAA_lastKeyedT = KeyedT;
-    KeyedT;
-);
 
 mSL_loc_tim = max(mSL_loc_tim - 1, 0);
 
@@ -2321,26 +2324,9 @@ local (uix_jneed, uix_jmini, h1, k, w, siz, u_ch, ent)
                     ui_color(Col_Frame);
                     ui_border(); // draws in purple
                 ui_pop();
-                u_ch = do_GenericKeyRead();
-                (u_ch != 0) ? (
+                // no keys here : the system commands work everywhere (do_System_Keys, see mSL_System_Keys)
+                ((u_ch = GM_key_peek()) != 0) ? (
                     sprintf(#gfx_uc, "Keyed: '%c' [%d]", u_ch, kcnt); kcnt+= 1;
-                    Keyed = KeyedT = 0;  // u_ch has not been used
-                );
-                (u_ch === 't') ? (mSL_run_test = mSL_run_test ? 0 : 1; mSL_run_max = 25);
-                (u_ch === 's') ? (mSL_run_test =  0 ; );
-                (u_ch === 'o') ? (mSL_run_once = mSL_run_once ? 0 : (mSL_run_test = 1; mSL_run_max = 1));
-                (u_ch === 'g') ? gc_run(2);
-                (u_ch === 'm') ? (mem_walk(0);mem_show(););
-                (u_ch === 'n') ? (mem_walk(8);mem_show(););
-                (u_ch === 'L') ? (gui_show_syslog = gui_show_syslog ? 0 : 1;);
-                (u_ch === 'M') ? (gui_show_memory = gui_show_memory ? 0 : 1;);
-                (u_ch === 'c') ? (mSL_Dyn_RecycleF = mSL_Dyn_RecycleF ? 0 : 1;);
-                (u_ch === 'l') ? (mm_show_limit = ((mm_show_limit * 10 + 1) % 20 )/ 10;);
-                (u_ch === 'k') ? (mSL_kill_all_thread(););
-                (u_ch === 'r') ? (
-                    ((ent = SchedDetachHead(SchedSuspPts)) != SchedNone) ? (
-                        SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
-                    );
                 );
             );
             control_group("Script Master Status");
@@ -2471,7 +2457,7 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
             );
 
             (zzmi) ? (
-                u_ch = do_GenericKeyRead();
+                u_ch = GM_key_peek(); // the keys of the log (taken below if used)
                 (u_ch != 0) ? (
                     sprintf(#gfx_uc, "Keyed: '%c' [%d]", u_ch, kcnt); kcnt+= 1;
                     // mSL_log(SysLogBox, #gfx_uc);
@@ -2479,8 +2465,6 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                         sprintf(#sq, "***Key  @  %d  %d  %d [%02x+%02x -> '%c']", mouse_x, mouse_y, mouse_cap, mouse_cap, u_ch, u_ch);
                         mSL_log(SysLogBox, #sq);
                     );
-                    ui_key_next();
-                    Keyed = 0;
                     ((u_ch === ' ') || (u_ch ===  0x0d)) ? (mSL_log(box, " ");) :
                     (u_ch === 'm') ? (box[6] = min(20, box[6]+1);) :
                     (u_ch === 'l') ? (box[6] = max(0, box[6]-1);) :
@@ -2491,8 +2475,8 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                     //(u_ch === 'v') ? (ShowConfig();) :
                     (u_ch === 'up') ? (box[7] = max(0, box[7]-10);) :
                     (u_ch === 'down') ? (box[7] = (box[7]+10) % box[2];) :
-                    ((ui_jmouse_cap === 0) && (u_ch === 'left')) ? (box[7] = 0;) :
-                    ((ui_jmouse_cap === 0) && (u_ch === 'rght')) ? (box[7] = (box[7]+100) % box[2];) :
+                    ((GM_key_mods() === 0) && (u_ch === 'left')) ? (box[7] = 0;) :
+                    ((GM_key_mods() === 0) && (u_ch === 'rght')) ? (box[7] = (box[7]+100) % box[2];) :
                     (u_ch === '1') ? (box[5] = 1;) :
                     (u_ch === '2') ? (box[5] = 2;) :
                     (u_ch === '3') ? (box[5] = 3;) :
@@ -2501,8 +2485,9 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                     (u_ch === '6') ? (box[5] = 6;) :
                     (u_ch === '7') ? (box[5] = 7;) :
                     (u_ch === '8') ? (box[5] = 8;) :
-                    (u_ch === 'p') ? (sysout(box);) ; // log in a text file (see mSL_show_Utilities)
-                    Keyed = KeyedT = 0;  // u_ch has not been used
+                    (u_ch === 'p') ? (sysout(box);) : // log in a text file (see mSL_show_Utilities)
+                    (u_ch = 0); // not a key of the log
+                    GM_key_take(u_ch); // the key has been used
                 );
             );
             nc = max(1, min(8, 0|box[5])); // number of columns to show
@@ -2617,6 +2602,7 @@ must_do_gfx()
     );
 
     update_theme();
+    GM_key_frame(); // the key of the frame (see mSL_ui_LibJJ, Keyboard)
 
     currScreen = ui_screen();
     ui_Xtime_period = 1; // refresh screen every second
@@ -2647,6 +2633,10 @@ must_do_gfx()
         control_system();
     );
 
+    // the keys left by the modules : the commands of the plugin, then the system commands (see mSL_System_Keys)
+    do_Plugin_Keys();
+    do_System_Keys();
+
 /*
     ((gfx_Pw != gfx_w) || (gfx_Ph != gfx_h)) ? (
         gfx_PPw = gfx_Pw; gfx_PPh = gfx_Ph;
@@ -2654,5 +2644,6 @@ must_do_gfx()
     );
 */
 );
+GM_key_end(); // the key not used is dropped
 
 

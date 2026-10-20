@@ -7647,55 +7647,23 @@ ctime = time();
 gfxStrtT = time_precise() + timeD;
 
 
-function do_GenericKeyRead()
-(
-    (KeyedT === 0) ? (KeyedT = Keyed; Keyed = 0; );
-    (KeyedT === 0) ? (KeyedT = ui_key(); );
-    (KeyedT === 0) ? (KeyedT = ui_key_next(); );
-    (KeyedT > 0) ? AAAA_lastKeyedT = KeyedT;
-    KeyedT;
-);
-
-
-
+// The tab commands : the keys left by the modules of the tab (see mSL_ui_LibJJ, Keyboard)
+// (none in Interstys)
 function
 do_Generic_Commands()
-local (z, SKeyedT)
 (
-    do_GenericKeyRead();
     AAAA_uix_jmbsel = uix_jmbsel;
-    (KeyedT > 0) ? (
-        SKeyedT = KeyedT; // Save keyed character
-        AAAA_Key40 = KeyedT;
-        AAAA_Kmouse_cap2 = Kmouse_cap ;
-        AAAA_KcolMouseWasIn = colMouseWasIn;
-        AAAA_KstudDispPCnt = studDispPCnt;
-
-        ((KeyedT === 8)) ? (
-            flagStopOne += 1;
-        ) :
-        (
-            KeyedT = SKeyedT; // restore Keyed character
-        ) ;
-        ui_GFXdoNow |= 1;
-        ui_GFXReason = 15;
-    );
-
-    (KeyedT === 0) ? ui_key_next();
 );
 
 function do_GenericTabStart() local(studio_pad_active)
 (
     ui_jmouse_cap |= mouse_cap;
-    KeyedT = Keyed = 0; AAAA_Kmouse_cap = Kmouse_cap = ui_jmouse_cap;
     studio_pad_active = 0;
-    do_Generic_Commands();
 );
 
 function do_GenericTabEnd()
 (
-    //do_Generic_Commands();
-    0;
+    do_Generic_Commands(); // after the modules
 );
 
 
@@ -7735,44 +7703,27 @@ function do_GenericTabEnd()
     );
 );
 
-// ch = gfx_getchar();
-KeyedT = Keyed = 0; // do not replay a key left over from the previous frame
-ch = do_GenericKeyRead();
-uix_latestchar = KeyedT = 0;
 mcp = mouse_cap;
 (mcp & 2) ? (
     mcp_indic = 20; // right clic in the graphic area
 );
 
-(ui_screen() === "control.prompt") ? (
-    uix_latestchar = ch; // the prompt gets all keys, no shortcuts
-) :
-(ch === 'g') ? (
-    gc_run(2); // run a garbage collection (as in FilePlayer, Diffusion-3, ScriptMaster)
-) :
-(ch === 'm') ? (
-    gui_show_memory = gui_show_memory ? 0 : 1;
-) :
-(ch === 'l') ? (
-    gui_show_syslog = gui_show_syslog ? 0 : 1;
-) :
-(ch === 'u') ? (
-    gui_show_UI = gui_show_UI ? 0 : 1;
-) :
-(ch === 's') ? (
-    (gui_show_sliders = gui_show_sliders ? 0 : 1) ? (
-        slupdt = wrupdt = rdupdt = fxupdt = lnupdt = forceupdt = 1;
-    ) : (
-        slupdt = wrupdt = rdupdt = fxupdt = lnupdt = forceupdt = 0;
-        mod_sliders(0);
-    );
-) :
-(ch === 9) ? (
-    currScreenNb = (currScreenNb  + 1 + dcbTabsCount) % dcbTabsCount;
-    ui_screen_switch(uix_jG_menuscr[currScreenNb]);
-) :
+// The commands of Interstys : the keys left by the tabs, at the end of the frame (then do_System_Keys)
+// (capitals for the displays, see mSL_ui_LibJJ, Keyboard)
+function do_Plugin_Keys()
 (
-    uix_latestchar = ch; // restore keyed
+    GM_key_take('U') ? (
+        gui_show_UI = gui_show_UI ? 0 : 1;
+    ) :
+    GM_key_take('S') ? (
+        (gui_show_sliders = gui_show_sliders ? 0 : 1) ? (
+            slupdt = wrupdt = rdupdt = fxupdt = lnupdt = forceupdt = 1;
+        ) : (
+            slupdt = wrupdt = rdupdt = fxupdt = lnupdt = forceupdt = 0;
+            mod_sliders(0);
+        );
+    ) :
+    GM_Tab_Keys(); // Tab, Shift + Tab : next, previous tabulation (see ui-lib-JJ-GUI)
 );
 
 
@@ -8256,6 +8207,8 @@ local (n, w)
 
 
 <? include("GM-Libs/mSL_Dbg_Memory.jsfx-inc"); ?>
+// The system commands typed on the keyboard : do_System_Keys() (mSL_System_Keys.jsfx-inc)
+<? include("GM-Libs/mSL_System_Keys.jsfx-inc"); ?>
 
 
 
@@ -8336,7 +8289,7 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
             );
 
             (zzmi) ? (
-                u_ch = do_GenericKeyRead();
+                u_ch = GM_key_peek(); // the keys of the log (taken below if used)
                 (u_ch != 0) ? (
                     sprintf(#gfx_uc, "Keyed: '%c' [%d]", u_ch, kcnt); kcnt+= 1;
                     // mSL_log(SysLogBox, #gfx_uc);
@@ -8344,8 +8297,6 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                         sprintf(#sq, "***Key  @  %d  %d  %d [%02x+%02x -> '%c']", mouse_x, mouse_y, mouse_cap, mouse_cap, u_ch, u_ch);
                         mSL_log(SysLogBox, #sq);
                     );
-                    ui_key_next();
-                    Keyed = 0;
                     ((u_ch === ' ') || (u_ch ===  0x0d)) ? (mSL_log(box, " ");) :
                     (u_ch === 'm') ? (box[6] = min(20, box[6]+1);) :
                     (u_ch === 'l') ? (box[6] = max(0, box[6]-1);) :
@@ -8356,8 +8307,8 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                     //(u_ch === 'v') ? (ShowConfig();) :
                     (u_ch === 'up') ? (box[7] = max(0, box[7]-10);) :
                     (u_ch === 'down') ? (box[7] = (box[7]+10) % box[2];) :
-                    ((ui_jmouse_cap === 0) && (u_ch === 'left')) ? (box[7] = 0;) :
-                    ((ui_jmouse_cap === 0) && (u_ch === 'rght')) ? (box[7] = (box[7]+100) % box[2];) :
+                    ((GM_key_mods() === 0) && (u_ch === 'left')) ? (box[7] = 0;) :
+                    ((GM_key_mods() === 0) && (u_ch === 'rght')) ? (box[7] = (box[7]+100) % box[2];) :
                     (u_ch === '1') ? (box[5] = 1;) :
                     (u_ch === '2') ? (box[5] = 2;) :
                     (u_ch === '3') ? (box[5] = 3;) :
@@ -8366,8 +8317,9 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                     (u_ch === '6') ? (box[5] = 6;) :
                     (u_ch === '7') ? (box[5] = 7;) :
                     (u_ch === '8') ? (box[5] = 8;) :
-                    (u_ch === 'p') ? (sysout(box);) ; // log in a text file (see mSL_show_Utilities)
-                    Keyed = KeyedT = 0;  // u_ch has not been used
+                    (u_ch === 'p') ? (sysout(box);) : // log in a text file (see mSL_show_Utilities)
+                    (u_ch = 0); // not a key of the log
+                    GM_key_take(u_ch); // the key has been used
                 );
             );
             nc = max(1, min(8, 0|box[5])); // number of columns to show
@@ -8527,7 +8479,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
     // waveform, between the pad and the sliders, if the reader has a line
     rcbl = Readers_set[RDBL[0]];
     // delay mode : only the first 2 lines of the pad (no transport line)
-    // (no reader yet : the mode chosen in cell 1, RDBL[1])
+    // (no reader yet : the mode chosen in cell 2, RDBL[1])
     h1 = uix_jpadHeight(((((rcbl > BASE_MEMORY) && (rcbl[-2] === KW_read)) ? rcbl[its_Rdr_Mode] : RDBL[1]) === its_RdrMode_Delay) ? 2 : pad_Rdr_NL); // height
     h3 = ((rcbl > BASE_MEMORY) && (rcbl[-2] === KW_read) && ((lcbl = rcbl[its_Rdr_Lcbl]) > BASE_MEMORY)
         && (lcbl[-2] === KW_lcbl) && (RDBL[8] >= its_RdrWaveMin)) ? RDBL[8] : 0;
@@ -8542,6 +8494,8 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
             zzmi = ui_hover();
             jmc = ui_jmouse_cap;
             keepBlockInfos(blockId);
+            // 'd' : dump of the reader in the log (taken before the pad)
+            (zzmi && GM_key_take('d')) ? GM_Dump(rcbl, its_Rdr_BlkSize, sprintf(#, "Reader %d", rdr+1));
             (zzmi) ? (
                 ui_push();
                     // stack is now 2 levels deep
@@ -8590,12 +8544,12 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                         pad_Rdr_Colrs[i] = dfCol;
                         strcpy(pad_Rdr_Labs[i],"");
                         i += 1;);
-                    strcpy(pad_Rdr_Labs[1],menu_Rdr_Type_N[rcbl[its_Rdr_Mode]]);
-                    pad_Rdr_Colrs[1] = dfCol;
-                    strcpy(pad_Rdr_Labs[2],menu_Rdr_Status_N[rcbl[its_Rdr_Status]]);
+                    strcpy(pad_Rdr_Labs[2],menu_Rdr_Type_N[rcbl[its_Rdr_Mode]]);
+                    pad_Rdr_Colrs[2] = dfCol;
+                    strcpy(pad_Rdr_Labs[1],menu_Rdr_Status_N[rcbl[its_Rdr_Status]]);
                     // status : Ready (blue), Paused (orange), Reading (green), else the default color
                     k = rcbl[its_Rdr_Status];
-                    pad_Rdr_Colrs[2] = (k === its_RdrStat_Ready) ? Color_Light_Steel_Blue :
+                    pad_Rdr_Colrs[1] = (k === its_RdrStat_Ready) ? Color_Light_Steel_Blue :
                         (k === its_RdrStat_Paused) ? Color_Dark_Orange :
                         (k === its_RdrStat_Reading) ? Color_Limegreen : dfCol;
                     (rcbl[its_Rdr_LineNb] >= 0) ? (
@@ -8676,8 +8630,8 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                         pad_Rdr_Colrs[i] = dfCol;
                         strcpy(pad_Rdr_Labs[i],"");
                         i += 1;);
-                    strcpy(pad_Rdr_Labs[1],menu_Rdr_Type_N[RDBL[1]]);
-                    strcpy(pad_Rdr_Labs[2],menu_Rdr_Status_N[0]);
+                    strcpy(pad_Rdr_Labs[1],menu_Rdr_Status_N[0]);
+                    strcpy(pad_Rdr_Labs[2],menu_Rdr_Type_N[RDBL[1]]);
                     strcpy(pad_Rdr_Labs[3],"Line: None");
                     // delay mode : the writer to follow can be chosen at once (right clic : menu ; this creates the reader)
                     (RDBL[1] === its_RdrMode_Delay) ? (
@@ -8743,16 +8697,17 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                             ui_menu_tick(menu_Rdr_Ids, k, 0);
                             str_setchar(rgh, 1, ui_jmenu_chSP);
                         ) :
-                        (zzmcl === 1) ? (
+                        (zzmcl === 2) ? (
+                            // the mode
                             k = 1 + (rok ? ( rcbl[its_Rdr_Mode] ) : ( RDBL[1] ));
                             ui_menu_tick(menu_Rdr_Type, k, 1);
                             xx = control_jmenu(menu_Rdr_Type);
-                            sprintf(#itm, "Menu 1 -> %d", xx);
+                            sprintf(#itm, "Menu 2 -> %d", xx);
                             mSL_log(SysLogBox, #itm);
                             (xx != 0) ? (
                                 (rok) ? (
                                     r = Rd_Set_Mode(rdr, xx - 1); // change mode, and prepare the reader for it
-                                    sprintf(#itm, "Menu 1 : %d -> %d -> %d", rdr, xx, r);
+                                    sprintf(#itm, "Menu 2 : %d -> %d -> %d", rdr, xx, r);
                                     mSL_log(SysLogBox, #itm);
                                     // keep the JSFX sliders in sync when this reader is the current one
                                     (rdr === slReader) ? (
@@ -8766,14 +8721,15 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                             );
                             ui_menu_tick(menu_Rdr_Type, -1, 0);
                         ) :
-                        (zzmcl === 2) ? (
+                        (zzmcl === 1) ? (
+                            // the status
                             (rok) ? (
                                 k = rcbl[its_Rdr_Status]+1;
                                 ui_menu_tick(menu_Rdr_Status, k, 1);
                                 xx = control_jmenu(menu_Rdr_Status);
                                 (xx != 0) ? (
                                     x = Rd_Set_Status(rdr, xx - 1);
-                                    sprintf(#itm, "Menu 2 : %d -> %d -> %d", rdr, xx, x);
+                                    sprintf(#itm, "Menu 1 : %d -> %d -> %d", rdr, xx, x);
                                     mSL_log(SysLogBox, #itm);
                                 );
                                 ui_menu_tick(menu_Rdr_Status, -1, 0);
@@ -8891,7 +8847,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                             );
                         ) :
                         (zzmcl === 13) ? (
-                            // Delay mode : choose the writer to follow (no reader yet : RDBL[1] is the mode chosen in cell 1)
+                            // Delay mode : choose the writer to follow (no reader yet : RDBL[1] is the mode chosen in cell 2)
                             (((rok) ? rcbl[its_Rdr_Mode] : RDBL[1]) === its_RdrMode_Delay) ? (
                                 k = (rok) ? rcbl[its_Rdr_WrSrc] + 2 : 1; // 1 for "None"
                                 ui_menu_tick(menu_Wrt_SIds, -1, 0);
@@ -8989,13 +8945,17 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                     //==============================================
                     (zz & ui_jpad_ev_lmc) ? (  // left mouse clic
                         k = (jmc & cmdCap) ? 4 : (jmc & altCap) ? 16 : 1;
+                        (zzmcl === 0) ? (
+                            // the next reader (shift : the previous one)
+                            RDBL[0] = (jmc & shfCap) ? (rdr + RD_CNT - 1) % RD_CNT : (rdr + 1) % RD_CNT;
+                        );
                         // (the reader must exist : rcbl is 0 otherwise)
-                        ((zzmcl === 2) && rok) ? (
+                        ((zzmcl === 1) && rok) ? (
                             // status : Paused -> Reading ; Ready or Reading -> Paused
                             w = rcbl[its_Rdr_Status];
                             ((w === its_RdrStat_Ready) || (w === its_RdrStat_Paused) || (w === its_RdrStat_Reading)) ? (
                                 r = Rd_Set_Status(rdr, (w === its_RdrStat_Paused) ? its_RdrStat_Reading : its_RdrStat_Paused);
-                                sprintf(#itm, "Clic 2 : %d -> %d -> %d (%d)", rdr, w, rcbl[its_Rdr_Status], r);
+                                sprintf(#itm, "Clic 1 : %d -> %d -> %d (%d)", rdr, w, rcbl[its_Rdr_Status], r);
                                 mSL_log(SysLogBox, #itm);
                                 (rdr === slReader) ? (slRStatusPrv = slRStatus = rcbl[its_Rdr_Status]);
                             );
@@ -9095,15 +9055,13 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                     (zz & ui_jpad_ev_key) ? (
                             sprintf(#itm, "PAD -> %d %d %d %d %d", zz, zzch, zzent, zzmcl, zzmmd);
                             mSL_log(SysLogBox, #itm);
-                        (zzch === 'r') ? (
+                        GM_key_take('r') ? (
                             // toggle run/pause state
                             Rd_Set_Status(rdr, -1);
                         ) :
-                        (zzch === 't') ? (
+                        GM_key_take('t') ? (
                             RDBL[6] = (RDBL[6] + 1) % 3;
-                        ) : (
-                            uix_latestchar = zzch; // do not use this key
-                        );
+                        ); // (the other keys are left to the next levels)
                     );
                     /*
                     (zzmi) ? (
@@ -9404,7 +9362,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                 rcbl[its_Rdr_StFlgs] |= its_RdrFlg_Mod;
             );
 
-            do_ModuleKeySave();
         ui_pop();
     );
 );
@@ -9435,6 +9392,8 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
             zzmi = ui_hover();
             jmc = ui_jmouse_cap;
             keepBlockInfos(blockId);
+            // 'd' : dump of the line in the log (taken before the pad)
+            (zzmi && GM_key_take('d')) ? GM_Dump(lcbl, its_Lin_BlkSize, sprintf(#, "Line %d", lnr+1));
             (zzmi) ? (
                 ui_push();
                     // stack is now 2 levels deep
@@ -9562,6 +9521,13 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
                             );
                         );
                     );
+
+                    (zz & ui_jpad_ev_lmc) ? (  // left mouse clic
+                        (zzmcl === 0) ? (
+                            // the next line (shift : the previous one)
+                            LDBL[0] = (jmc & shfCap) ? (lnr + LN_CNT - 1) % LN_CNT : (lnr + 1) % LN_CNT;
+                        );
+                    );
                     wrupdt = 1;
                 );
 
@@ -9602,7 +9568,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
                 ui_pop();
             );
 
-            do_ModuleKeySave();
         ui_pop();
     );
 );
@@ -9680,7 +9645,6 @@ local (h2)
                 );
             ui_pop();
 
-            do_ModuleKeySave();
         ui_pop();
     );
 );
@@ -9689,7 +9653,8 @@ local (h2)
 /*
     WDBL[0] : number of writer to display
     The pad (2 lines of 8 cells), the waveform of the line of the writer (if any), the sliders (record gain, overdub)
-    Cells : 0 writer number, 2 status, 3 line, 4 size, 5 channels, 6 first channel written, 7 channels used,
+    Key 'd' : dump of the writer in the log
+    Cells : 0 writer number (left clic : next one, shift : previous one), 1 status, 3 line, 4 size, 5 channels, 6 first channel written, 7 channels used,
             10 source cell, 11 write position (s), 15 actions (right clic : menus)
 */
 function show_Writer_Pad(WDBL, blockID)
@@ -9712,6 +9677,8 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
             zzmi = ui_hover();
             jmc = ui_jmouse_cap;
             keepBlockInfos(blockId);
+            // 'd' : dump of the writer in the log (taken before the pad)
+            (zzmi && GM_key_take('d')) ? GM_Dump(wcbl, its_Wrt_BlkSize, sprintf(#, "Writer %d", wrt+1));
             (zzmi) ? (
                 ui_push();
                     // stack is now 2 levels deep
@@ -9733,10 +9700,10 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                     i += 1;);
                 sprintf(pad_Wrt_Labs[0],"Writer %d", wrt+1);
                 (wok) ? (
-                    strcpy(pad_Wrt_Labs[2],menu_Wrt_Status_N[wcbl[its_Wrt_Status]]);
+                    strcpy(pad_Wrt_Labs[1],menu_Wrt_Status_N[wcbl[its_Wrt_Status]]);
                     // status : Ready (blue), Paused (orange), Writing (green), else the default color (as for the readers)
                     k = wcbl[its_Wrt_Status];
-                    pad_Wrt_Colrs[2] = (k === its_WrtStat_Ready) ? Color_Light_Steel_Blue :
+                    pad_Wrt_Colrs[1] = (k === its_WrtStat_Ready) ? Color_Light_Steel_Blue :
                         (k === its_WrtStat_Paused) ? Color_Dark_Orange :
                         (k === its_WrtStat_Writing) ? Color_Limegreen : dfCol;
                     (lok) ? (
@@ -9764,7 +9731,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                     );
                     pad_Wrt_Colrs[10] = CP3;
                 ) : (
-                    strcpy(pad_Wrt_Labs[2],menu_Wrt_Status_N[0]);
+                    strcpy(pad_Wrt_Labs[1],menu_Wrt_Status_N[0]);
                     strcpy(pad_Wrt_Labs[3],"Line: None");
                 );
                 strcpy(pad_Wrt_Labs[15],"Action");
@@ -9792,7 +9759,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                             );
                             ui_menu_tick(menu_Wrt_Ids, -1, 0);
                         ) :
-                        (zzmcl === 2) ? (
+                        (zzmcl === 1) ? (
                             (wok) ? (
                                 k = wcbl[its_Wrt_Status]+1;
                                 ui_menu_tick(menu_Wrt_Status, -1, 0);
@@ -9800,7 +9767,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                                 xx = control_jmenu(menu_Wrt_Status);
                                 (xx != 0) ? (
                                     r = Wr_Set_Status(wrt, xx - 1);
-                                    sprintf(#itm, "Wr. Menu 2 : %d -> %d -> %d", wrt, xx, r);
+                                    sprintf(#itm, "Wr. Menu 1 : %d -> %d -> %d", wrt, xx, r);
                                     mSL_log(SysLogBox, #itm);
                                 );
                                 ui_menu_tick(menu_Wrt_Status, -1, 0);
@@ -9909,12 +9876,16 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                     );
 
                     (zz & ui_jpad_ev_lmc) ? (  // left mouse clic
-                        ((zzmcl === 2) && wok) ? (
+                        (zzmcl === 0) ? (
+                            // the next writer (shift : the previous one)
+                            WDBL[0] = (jmc & shfCap) ? (wrt + WR_CNT - 1) % WR_CNT : (wrt + 1) % WR_CNT;
+                        );
+                        ((zzmcl === 1) && wok) ? (
                             // status : Paused -> Writing ; Ready or Writing -> Paused
                             w = wcbl[its_Wrt_Status];
                             ((w === its_WrtStat_Ready) || (w === its_WrtStat_Paused) || (w === its_WrtStat_Writing)) ? (
                                 r = Wr_Set_Status(wrt, (w === its_WrtStat_Paused) ? its_WrtStat_Writing : its_WrtStat_Paused);
-                                sprintf(#itm, "Wr. Clic 2 : %d -> %d -> %d", wrt, w, r);
+                                sprintf(#itm, "Wr. Clic 1 : %d -> %d -> %d", wrt, w, r);
                                 mSL_log(SysLogBox, #itm);
                                 (wrt === slWriter) ? (slWrStatusPrv = slWrStatus = wcbl[its_Wrt_Status]);
                             );
@@ -9968,7 +9939,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                 ui_pop();
             );
 
-            do_ModuleKeySave();
         ui_pop();
     );
 );
@@ -10433,73 +10403,16 @@ local(umid, chk, i, statn, recomp, modInst, modSrc, ucod, uent, err, ut, user_to
 
 
 function genericItemsPos(bNumb)
-local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent)
+local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in)
 (
     blockMouseWasIn = 0;
     PanIdt = bNumb;
     // wst = #;
     ((bNumb >=0) && (bNumb < dcbMCount) && menu_Stud_Mod) ? (
         blockDesc = dcbBlocksAll + bNumb * dcbWSize;
-        (ui_hover()) ? (
+        pn_in = ui_hover(); // (the rect of the pane : the modules below split it)
+        (pn_in) ? (
             colMouseWasIn = studDispCol;
-            ((KeyedT === 'rght') && (Kmouse_cap === 8)) ? (
-                // try to increase colum size
-                p = serialBlock + Pr7_StudRat + 4 * TabIdt;
-                ((colMouseWasIn === 0) && (studDispPCnt >= 2)) ? (
-                    // increase first col. size
-                    k = min(20, max(0, p[1] - ui_MinSize1Pane));p[0] += k; p[1] -= k;
-                ) :
-                ((colMouseWasIn === 1) && (studDispPCnt === 2)) ? (
-                    // increase 2nd col. size
-                    k = min(20, max(0, p[0] - ui_MinSize1Pane)); p[1] += k; p[0] -= k;
-                ) :
-                ((colMouseWasIn === 1) && (studDispPCnt >= 3)) ? (
-                    // increase 2nd col. size
-                    k = min(20, max(0, p[2] - ui_MinSize1Pane)); p[1] += k; p[2] -= k;
-                ) :
-                ((colMouseWasIn === 2) && (studDispPCnt === 3)) ? (
-                    // increase 3nd col. size
-                    k = min(20, max(0, p[0] - ui_MinSize1Pane)); p[2] += k; p[0] -= k;
-                ) :
-                ((colMouseWasIn === 2) && (studDispPCnt === 4)) ? (
-                    // increase 3nd col. size
-                    k = min(20, max(0, p[3] - ui_MinSize1Pane)); p[2] += k; p[3] -= k;
-                ) :
-                ((colMouseWasIn === 3) && (studDispPCnt === 4)) ? (
-                    // increase 4nd col. size
-                    k = min(20, max(0, p[0] - ui_MinSize1Pane)); p[3] += k; p[0] -= k;
-                ) ;
-                KeyedT = 0;
-            ) :
-            ((KeyedT === 'left') && (Kmouse_cap === 8)) ? (
-                // try to increase colum size
-                p = serialBlock + Pr7_StudRat + 4 * TabIdt;
-                ((colMouseWasIn === 0) && (studDispPCnt === 4)) ? (
-                    // increase first col. size
-                    k = min(20, max(0, p[3] - ui_MinSize1Pane));p[0] += k; p[3] -= k;
-                ) :
-                ((colMouseWasIn === 0) && (studDispPCnt === 3)) ? (
-                    // increase first col. size
-                    k = min(20, max(0, p[2] - ui_MinSize1Pane));p[0] += k; p[2] -= k;
-                ) :
-                ((colMouseWasIn === 0) && (studDispPCnt === 2)) ? (
-                    // increase first col. size
-                    k = min(20, max(0, p[1] - ui_MinSize1Pane));p[0] += k; p[1] -= k;
-                ) :
-                ((colMouseWasIn === 1) && (studDispPCnt >= 2)) ? (
-                    // increase first col. size
-                    k = min(20, max(0, p[0] - ui_MinSize1Pane));p[1] += k; p[0] -= k;
-                ) :
-                ((colMouseWasIn === 2) && (studDispPCnt >= 3)) ? (
-                    // increase 2nd col. size
-                    k = min(20, max(0, p[1] - ui_MinSize1Pane)); p[2] += k; p[1] -= k;
-                ) :
-                ((colMouseWasIn === 3) && (studDispPCnt === 4)) ? (
-                    // increase 2nd col. size
-                    k = min(20, max(0, p[2] - ui_MinSize1Pane)); p[3] += k; p[2] -= k;
-                ) ;
-                KeyedT = 0;
-            );
             // Update col. size
             blockMouseWasIn = blockDesc[dcbWSize - 1];
             // we may need to update the menu
@@ -10766,6 +10679,64 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent)
             Bigx += 1;
         );
 
+        // the pane : Shift + arrows change the width of the columns (after its modules, that may use these keys)
+        (pn_in && (GM_key_mods() === 8) && GM_key_take('rght')) ? (
+            // try to increase colum size
+            p = serialBlock + Pr7_StudRat + 4 * TabIdt;
+            ((colMouseWasIn === 0) && (studDispPCnt >= 2)) ? (
+                // increase first col. size
+                k = min(20, max(0, p[1] - ui_MinSize1Pane));p[0] += k; p[1] -= k;
+            ) :
+            ((colMouseWasIn === 1) && (studDispPCnt === 2)) ? (
+                // increase 2nd col. size
+                k = min(20, max(0, p[0] - ui_MinSize1Pane)); p[1] += k; p[0] -= k;
+            ) :
+            ((colMouseWasIn === 1) && (studDispPCnt >= 3)) ? (
+                // increase 2nd col. size
+                k = min(20, max(0, p[2] - ui_MinSize1Pane)); p[1] += k; p[2] -= k;
+            ) :
+            ((colMouseWasIn === 2) && (studDispPCnt === 3)) ? (
+                // increase 3nd col. size
+                k = min(20, max(0, p[0] - ui_MinSize1Pane)); p[2] += k; p[0] -= k;
+            ) :
+            ((colMouseWasIn === 2) && (studDispPCnt === 4)) ? (
+                // increase 3nd col. size
+                k = min(20, max(0, p[3] - ui_MinSize1Pane)); p[2] += k; p[3] -= k;
+            ) :
+            ((colMouseWasIn === 3) && (studDispPCnt === 4)) ? (
+                // increase 4nd col. size
+                k = min(20, max(0, p[0] - ui_MinSize1Pane)); p[3] += k; p[0] -= k;
+            ) ;
+        ) :
+        (pn_in && (GM_key_mods() === 8) && GM_key_take('left')) ? (
+            // try to increase colum size
+            p = serialBlock + Pr7_StudRat + 4 * TabIdt;
+            ((colMouseWasIn === 0) && (studDispPCnt === 4)) ? (
+                // increase first col. size
+                k = min(20, max(0, p[3] - ui_MinSize1Pane));p[0] += k; p[3] -= k;
+            ) :
+            ((colMouseWasIn === 0) && (studDispPCnt === 3)) ? (
+                // increase first col. size
+                k = min(20, max(0, p[2] - ui_MinSize1Pane));p[0] += k; p[2] -= k;
+            ) :
+            ((colMouseWasIn === 0) && (studDispPCnt === 2)) ? (
+                // increase first col. size
+                k = min(20, max(0, p[1] - ui_MinSize1Pane));p[0] += k; p[1] -= k;
+            ) :
+            ((colMouseWasIn === 1) && (studDispPCnt >= 2)) ? (
+                // increase first col. size
+                k = min(20, max(0, p[0] - ui_MinSize1Pane));p[1] += k; p[0] -= k;
+            ) :
+            ((colMouseWasIn === 2) && (studDispPCnt >= 3)) ? (
+                // increase 2nd col. size
+                k = min(20, max(0, p[1] - ui_MinSize1Pane)); p[2] += k; p[1] -= k;
+            ) :
+            ((colMouseWasIn === 3) && (studDispPCnt === 4)) ? (
+                // increase 2nd col. size
+                k = min(20, max(0, p[2] - ui_MinSize1Pane)); p[3] += k; p[2] -= k;
+            ) ;
+        );
+
 
     );
     blockDesc = 0;
@@ -10915,6 +10886,7 @@ local (ww, t, BankLink)
         live_tab_active = 0;
         serialBlock[Pr7_UiTheme] = uix_jtheme; // saved with the preset ('stud' block)
         update_theme();
+        GM_key_frame(); // the key of the frame (see mSL_ui_LibJJ, Keyboard)
 
         currScreen = ui_screen();
         ui_Xtime_period = 1; // refresh screen every second
@@ -11011,7 +10983,11 @@ local (ww, t, BankLink)
     gfx_setpixel(0xee,0xee,0xee);
 );
 
-uix_latestchar = 0;
+// The keys left by the modules and the tabs : the commands of Interstys, then the system commands
+(!gui_show_UI) ? GM_key_frame(); // (no UI : the key is read here, for 'U')
+do_Plugin_Keys();
+do_System_Keys();
+GM_key_end(); // the key not used is dropped
 
 ui_end_do_gfx();
 

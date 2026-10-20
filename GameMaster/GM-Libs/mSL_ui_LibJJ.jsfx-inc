@@ -712,3 +712,78 @@ local (il, ib, uix_bit_mask)
     );
 );
 
+
+
+///-------------------------------------///
+///------------  Keyboard  -------------///
+/*
+    The same scheme in all the plugins of CMGS : a key typed during a @gfx frame triggers at most ONE function.
+
+    1 - One reading per frame : GM_key_frame(), just after update_theme() (that calls ui_start), or alone
+        when the plugin draws no UI. GM_key_end(), at the end of @gfx, drops the key if no one used it.
+    2 - The code that acts on a key takes it with GM_key_take(k) : the key is then cleared for everyone
+        (also uix_latestchar, for the controls of ui-lib). The code that does not use it leaves it alone :
+        a key is never "given back". The pads (control_jpad) report the key of the frame (ui_jpad_ev_key,
+        ui_jpad_lkey) without taking it : the module takes it if it uses it.
+    3 - One order, in all the plugins : each level only sees the keys that the previous levels left
+            text input (the "control.prompt" screen gets all the keys, GM_key_peek() gives 0)
+            -> the module under the mouse (its own keys, then its pads)
+            -> the pane (Shift + arrows : columns width)
+            -> the tab commands (do_Generic_Commands)
+            -> the commands of the plugin (do_Plugin_Keys), then the system commands (do_System_Keys)
+            -> the Studio pad keyboard (GamePlayer)
+    4 - The same key means the same thing in all the plugins (see ../Documents/CMGS-Keys.md, made by
+        Scripts/keys_table.py) : capitals for the displays (L log, M memory...), lower case for the commands.
+
+        GM_key_frame()    -- reads the key of the frame (once per frame)
+        GM_key_end()      -- end of the frame : the key not used is dropped
+        GM_key_peek()     -- the key of the frame not yet used (0 if none)
+        GM_key_take(k)    -- 1 if the key of the frame is k : it is then used (cleared), else 0
+        GM_key_take_in(k) -- the same, only if the mouse is in the current rect (ui_hover)
+        GM_key_mods()     -- the modifiers when the key was read : Cmd 4, Shift 8, Alt 16, Ctrl 32 (Mac)
+*/
+GM_kch = 0;   // the key of the frame, not yet used (0 : no key, or already used)
+GM_kmods = 0; // the modifiers when it was read
+
+function GM_key_frame()
+(
+    // ui_setup (in ui_start) or must_do_gfx may have read it already, in uix_latestchar
+    (uix_latestchar <= 0) ? (
+        uix_latestchar = gfx_getchar();
+        (uix_latestchar < 0) ? uix_latestchar = 0;
+    );
+    GM_kch = uix_latestchar;
+    GM_kmods = mouse_cap & (4|8|16|32);
+    (ui_screen() == "control.prompt") ? GM_kch = 0; // the text input gets all the keys (through uix_latestchar)
+    GM_kch;
+);
+
+function GM_key_end()
+(
+    GM_kch = 0;
+    uix_latestchar = 0;
+);
+
+function GM_key_peek()
+(
+    GM_kch;
+);
+
+function GM_key_mods()
+(
+    GM_kmods;
+);
+
+function GM_key_take(k)
+(
+    ((k > 0) && (GM_kch === k)) ? (
+        GM_kch = 0;
+        uix_latestchar = 0;
+        1;
+    ) : 0;
+);
+
+function GM_key_take_in(k)
+(
+    ui_hover() ? GM_key_take(k) : 0;
+);
