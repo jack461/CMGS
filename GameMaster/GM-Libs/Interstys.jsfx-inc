@@ -296,6 +296,9 @@ its_Wrt_Unuz2 = idx; idx += 1; //  Securité : mot inutilisé
 its_Wrt_BlkSize = idx; // actual size
 
 its_WrtFlg_init = 0x0001; //  si writer initialisé
+// Modes (its_Wrt_Mode) : how the overdub (its_Wrt_Ovrdb, x %) mixes the previous content of the line with the input
+its_WrtMode_XFade = 0; // x % of the previous content + (100 - x) % of the input, then the record gain
+its_WrtMode_Sum = 1; // x % of the previous content (feedback) + the input with the record gain
 // Etats
 its_WrtStat_UnDef = 0;
 its_WrtStat_Created = 1;
@@ -365,7 +368,7 @@ its_Efx_VoldB8 = idx; idx += 1; //  Volume n°8 (dB)
 its_Efx_Vol8 = idx; idx += 1; //  Volume n°8
 its_Efx_Dst8 = idx; idx += 1; //  Destination n°8
 //   40
-idx += 1;
+its_Efx_Error = idx; idx += 1; // last error (exec_fx)
 its_Efx_Check = idx; idx += 1; // quick check
 idx |= 3; // for rounding to a multiple of 4 minus 1
 its_Efx_Unuz2 = idx; idx += 1; //  Securité : mot inutilisé
@@ -382,6 +385,9 @@ its_Efx_TyEQMixer = 3;
 its_Efx_TyMover = 4;
 its_Efx_TyAction = 5;
 its_Efx_TyScript = 6;
+
+its_EfxStat_Off = 0; // its_Efx_Status : the effect is not executed
+its_EfxStat_On = 1; // (= its_Efx_Unspecified, set by FX_Clear)
 
 its_Efx_PhaseStd = 0;
 its_Efx_PhasePre = 1;
@@ -897,6 +903,7 @@ p_wrGain = idx; idx += 1; // record gain of a writer (dB)
 p_wrOvrdb = idx; idx += 1; // overdub of a writer (%)
 p_glInGain = idx; idx += 1; // global input gain (dB) : slider slInGain
 p_glOutVol = idx; idx += 1; // global output volume (dB) : slider slOutVol
+p_fxGain1 = idx; idx += 8; // gains of the 8 sources of a mixer (dB) : p_fxGain1 ... p_fxGain1 + 7
 
 // Global variables
 blockDesc = 0;  // description of the current block
@@ -2798,13 +2805,63 @@ local (fxcb)
 );
 
 
-// Pad for the effects
+// Menu 1 for Effects : their names, in sub-menus of 32 effects (the ">" headers are not counted in the results)
+<? fx_grp = 32; fx_mnc = FX_CNT + (0|((FX_CNT + fx_grp - 1) / fx_grp)); ?>menu_Efx_Ids_N = make_array(<? printf("%d", fx_mnc); ?>);
+<? i=0; j=0; loop(FX_CNT, (i % fx_grp) == 0 ? (printf("menu_Efx_Ids_N[%d] = \">Effects %d-%d\";", j, i+1, min(i+fx_grp, FX_CNT)); j += 1;); printf("menu_Efx_Ids_N[%d] = \"%sEffect %d\";", j, (((i % fx_grp) == fx_grp-1) || (i == FX_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); ?>
+menu_Efx_Ids = make_jmenu(
+    ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "effect-num", <? printf("%d", fx_mnc); ?>, menu_Efx_Ids_N);
+menu_Efx_Grp = <? printf("%d", fx_grp); ?>; // effects per sub-menu : the header of group g is item g * (menu_Efx_Grp + 1)
+
+// Menu 2 for Effects : the types (entry n is the type n)
+menu_Efx_Type_N = make_array(7);
+menu_Efx_Type_N[0] = "Undefined";
+menu_Efx_Type_N[1] = "None";
+menu_Efx_Type_N[2] = "Mixer";
+menu_Efx_Type_N[3] = "EQ Mixer";
+menu_Efx_Type_N[4] = "Mover";
+menu_Efx_Type_N[5] = "Action";
+menu_Efx_Type_N[6] = "Script";
+menu_Efx_Type = make_jmenu(
+    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "effect-type", 7, menu_Efx_Type_N);
+
+// Menu 3 for Effects : the phase (entry n is the phase n)
+menu_Efx_Phase_N = make_array(3);
+menu_Efx_Phase_N[0] = "Standard (after readers)";
+menu_Efx_Phase_N[1] = "Before readers";
+menu_Efx_Phase_N[2] = "After writers";
+menu_Efx_Phase = make_jmenu(
+    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "effect-phase", 3, menu_Efx_Phase_N);
+menu_Efx_PhShort_N = make_array(3); // (labels of the pad)
+menu_Efx_PhShort_N[0] = "Phase Std";
+menu_Efx_PhShort_N[1] = "Phase Pre";
+menu_Efx_PhShort_N[2] = "Phase Post";
+
+// Menu 4 for Effects : the actions (entry n is the action its_EfxAct_... n)
+menu_Efx_Action_N = make_array(10);
+menu_Efx_Action_N[0] = "None";
+menu_Efx_Action_N[1] = "Copy";
+menu_Efx_Action_N[2] = "Paste";
+menu_Efx_Action_N[3] = "Clear";
+menu_Efx_Action_N[4] = "EQ Mix";
+menu_Efx_Action_N[5] = "---";
+menu_Efx_Action_N[6] = "Create";
+menu_Efx_Action_N[7] = "Show";
+menu_Efx_Action_N[8] = "---";
+menu_Efx_Action_N[9] = "Delete";
+menu_Efx_Action = make_jmenu(
+    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "effect-actions", 10, menu_Efx_Action_N);
+
+// Pad for the effects : line 0 common to all types, lines 1 ... 3 for the type (see show_Effect_Pad)
 pad_Efx_NL = 4;
 pad_Efx_NC = 8;
 pad_Efx_Siz = pad_Efx_NL * pad_Efx_NC;
 pad_Effect = make_jpad(
     ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
-    pad_Rdr_NL, pad_Rdr_NC, pad_Rdr_Siz);
+    pad_Efx_NL, pad_Efx_NC, pad_Efx_Siz);
 pad_Efx_Labs = pad_Effect + pad_Effect[ui_jpad_labs]; // addresses of labels
 pad_Efx_Colrs = pad_Effect + pad_Effect[ui_jpad_clrs]; // addresses of colors
 pad_Efx_Cells = pad_Effect + pad_Effect[ui_jpad_cells]; // addresses of cells desc.
@@ -5194,7 +5251,7 @@ local (fxbcl, scnt)
                 fxbcl = 0;
             );
         ) : (
-            (act === Create) ? (
+            (act === its_EfxAct_Create) ? (
                 fxbcl = FX_make(fxnum);
             );
         );
@@ -5692,6 +5749,7 @@ sprintf(#A018, "rdr: %d, wref : %d, wrefP : %d  [%d]", slReader, slRdWref, slRdW
         (slFxChCnt != slFxChCntPrv) ? (
             slFxChCntPrv = slFxChCnt;
             Curreffect[its_Efx_CCnt] = slFxChCnt;
+            fxupdt = 1;
         );
 
         (slEndOut != slEndOutPrv) ? (
@@ -5733,6 +5791,8 @@ sprintf(#A018, "rdr: %d, wref : %d, wrefP : %d  [%d]", slReader, slRdWref, slRdW
         fxupdt = 1;
     );
 
+    // the effect is checked again by exec_fx after a modification
+    (fxupdt && (Curreffect > BASE_MEMORY) && (Curreffect[-2] === KW_effx)) ? Curreffect[its_Efx_Check] = 0;
     (fxupdt) ? display_Effect();
 
 
@@ -5963,6 +6023,14 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_wrOvrdb, "Overdub",  "WrOvrdb",  i_UB|i_SP, "%.1f %%", "Overdub: %.1f %%",   0,   100,    0,  0.1, 0);
     parDcl(p_glInGain, "Input Gain",  "GlInGain",  i_UB|i_SP, "%.1f dB", "Input Gain: %.1f dB",   -120,   20,    0,  0.1, -3);
     parDcl(p_glOutVol, "Output Volume",  "GlOutVol",  i_UB|i_SP, "%.1f dB", "Output Volume: %.1f dB",   -120,   20,    0,  0.1, -3);
+    parDcl(p_fxGain1, "Gain 1",  "FxGain1",  i_UB|i_SP, "%.1f dB", "Gain 1: %.1f dB",   -120,   20,    0,  0.1, -3);
+    parDcl(p_fxGain1+1, "Gain 2",  "FxGain2",  i_UB|i_SP, "%.1f dB", "Gain 2: %.1f dB",   -120,   20,    0,  0.1, -3);
+    parDcl(p_fxGain1+2, "Gain 3",  "FxGain3",  i_UB|i_SP, "%.1f dB", "Gain 3: %.1f dB",   -120,   20,    0,  0.1, -3);
+    parDcl(p_fxGain1+3, "Gain 4",  "FxGain4",  i_UB|i_SP, "%.1f dB", "Gain 4: %.1f dB",   -120,   20,    0,  0.1, -3);
+    parDcl(p_fxGain1+4, "Gain 5",  "FxGain5",  i_UB|i_SP, "%.1f dB", "Gain 5: %.1f dB",   -120,   20,    0,  0.1, -3);
+    parDcl(p_fxGain1+5, "Gain 6",  "FxGain6",  i_UB|i_SP, "%.1f dB", "Gain 6: %.1f dB",   -120,   20,    0,  0.1, -3);
+    parDcl(p_fxGain1+6, "Gain 7",  "FxGain7",  i_UB|i_SP, "%.1f dB", "Gain 7: %.1f dB",   -120,   20,    0,  0.1, -3);
+    parDcl(p_fxGain1+7, "Gain 8",  "FxGain8",  i_UB|i_SP, "%.1f dB", "Gain 8: %.1f dB",   -120,   20,    0,  0.1, -3);
 );
 
 
@@ -6446,7 +6514,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
 );
 
 function exec_writer(writer, nbr)
-local (lcbl, k, s, x, bp, val, vol, f, n)
+local (lcbl, k, s, x, bp, val, vol, f, n, md)
 (
     its_WrtErrXe = (writer[its_Wrt_Check] !== BLOCK_CHECK);
     (its_WrtErrXe) ? (
@@ -6485,6 +6553,7 @@ local (lcbl, k, s, x, bp, val, vol, f, n)
         k = writer[its_Wrt_Abspos];
         x = writer[its_Wrt_Ovrdb];
         vol = writer[its_Wrt_InGain];
+        md = writer[its_Wrt_Mode];
         // Sample read
         lcbl = writer[its_Wrt_Lcbl];
         // the cells [Cell ... Cell+n-1] go to the channels [f ... f+n-1] of the line
@@ -6495,10 +6564,14 @@ local (lcbl, k, s, x, bp, val, vol, f, n)
             // Allows null pointers as output buffers
             ((bp = lcbl[its_Lin_BF1ST + f + s]) !== 0) ? (
                 val = smpl_tab[writer[its_Wrt_Cell] + s];
-                (x > 0) ? (
-                    val = 0.01 * (x * k[bp] + (100 - x) * val);
+                (md === its_WrtMode_Sum) ? (
+                    k[bp] = val = 0.01 * x * k[bp] + vol * val;
+                ) : (
+                    (x > 0) ? (
+                        val = 0.01 * (x * k[bp] + (100 - x) * val);
+                    );
+                    k[bp] = val = vol * val;
                 );
-                k[bp] = val = vol * val;
                 // when at start/end of buffer, duplicate samples in guard area
                 (k < writer[its_Wrt_Start] + BF_LIM) ? (
                     k[bp + writer[its_Wrt_SmplCnt]] = val;
@@ -6545,58 +6618,75 @@ local (lcbl, k, s, x, bp, val, vol, f, n)
 
 );
 
+/*
+    execute the effect "fx" (number "nbr") : called by @sample, in the phase of the effect
+    Mixer and EQ Mixer (the EQ Mixer only sets equal gains, see its_fx_actions) :
+        Out[0 ... CCnt-1] = sum of Vol_i * Src_i[0 ... CCnt-1], for the sources i in [1 ... 8] not null
+    the structure is checked again after each modification (its_Efx_Check reset to 0) ; the error is kept in its_Efx_Error
+    the gains in dB (its_Efx_VoldB_i) are the reference : the linear gains (its_Efx_Vol_i) are computed by the check
+*/
 function exec_fx(fx, nbr)
-local (fxcbl, ty, ptsrc, dst, cc, ccnt, i, zp, err_effect)
+local (ty, ptsrc, src, dst, cc, ccnt, g, i, err)
 (
-    (err_effect = (fx[its_Efx_Check] !== BLOCK_CHECK)) ? (
-        err_effect = 0;
-        ((ty = fx[its_Efx_Type]) === its_Efx_TyMixer) ? (
-            cc = 0; ptsrc = its_Efx_Src1 + fx;
-            loop (8,
-                dst = ptsrc[0];
-                ((dst < 0) || (dst >= SMPL_SIZE)) ? (
-                    err_effect = 320;
-                ) :
-                (dst > 0) ? (
-                    cc += 1;
+    (fx[its_Efx_Check] !== BLOCK_CHECK) ? (
+        err = 0;
+        ty = fx[its_Efx_Type];
+        ccnt = fx[its_Efx_CCnt];
+        dst = fx[its_Efx_Out];
+        ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyEQMixer)) ? (
+            ((ccnt <= 0) || (ccnt > 128) || (ccnt !== floor(ccnt))) ? (
+                err = 2701; // erreur : bad channel count
+            ) :
+            ((dst <= 0) || (dst + ccnt > SMPL_SIZE)) ? (
+                err = 2702; // erreur : bad output cell
+            ) : (
+                cc = 0; ptsrc = fx + its_Efx_Src1;
+                loop(8,
+                    g = ptsrc[its_Efx_VoldB1 - its_Efx_Src1];
+                    ptsrc[its_Efx_Vol1 - its_Efx_Src1] = (g > -120) ? 10^(g/20) : 0;
+                    src = ptsrc[0];
+                    ((src < 0) || (src + ccnt > SMPL_SIZE)) ? (
+                        err = 2703; // erreur : bad source cell
+                    ) :
+                    ((src > 0) && (src < dst + ccnt) && (src + ccnt > dst)) ? (
+                        err = 2704; // erreur : a source overlaps the output
+                    ) :
+                    (src > 0) ? (
+                        cc += 1;
+                    );
+                    ptsrc += its_EfxDist;
                 );
-                ptsrc += its_EfxDist;
-            );
-            (cc === 0) ? (
-                err_effect = 321;
-            );
-            (((dst = fx[its_Efx_Out]) <= 0) || (dst >= SMPL_SIZE)) ? (
-                err_effect = 310;
-            );
-            (((ccnt = fx[its_Efx_CCnt]) <= 0) || (ccnt > 128)) ? (
-                err_effect = 312;
+                ((err === 0) && (cc === 0)) ? (
+                    err = 2705; // erreur : no source
+                );
             );
         ) : (
-            err_effect = 810;
+            err = 2706; // erreur : type not (yet) executed
         );
-        (err_effect === 0) ? (
-            fx[its_Efx_Check] !== BLOCK_CHECK;
+        fx[its_Efx_Error] = err;
+        (err === 0) ? (
+            fx[its_Efx_Check] = BLOCK_CHECK;
         );
     );
-    (err_effect === 0) ? (
-        ((ty = fx[its_Efx_Type]) === its_Efx_TyMixer) ? (
-            dst = fx[its_Efx_Out] + smpl_tab;
-            ccnt = fx[its_Efx_CCnt];
-            i = 0; loop(ccnt, dst[i] = 0; i += 1;);
-            ptsrc = its_Efx_Src1 + fx;
-            loop (8,
-                (zp = ptsrc[0] > 0) ? (
-                    i = 0; loop(ccnt,
-                        dst[i] += smpl_tab[zp+i] * zp[2];
-                        i += 1;
-                    );
+    (fx[its_Efx_Check] === BLOCK_CHECK) ? (
+        // Mixer, EQ Mixer
+        dst = fx[its_Efx_Out] + smpl_tab;
+        ccnt = fx[its_Efx_CCnt];
+        i = 0; loop(ccnt, dst[i] = 0; i += 1;);
+        ptsrc = fx + its_Efx_Src1;
+        loop (8,
+            ((src = ptsrc[0]) > 0) ? (
+                src += smpl_tab;
+                g = ptsrc[its_Efx_Vol1 - its_Efx_Src1];
+                i = 0; loop(ccnt,
+                    dst[i] += g * src[i];
+                    i += 1;
                 );
-                ptsrc += its_EfxDist;
             );
-            exec_effect += 1;
+            ptsrc += its_EfxDist;
         );
+        exec_effect += 1;
     );
-
 );
 
 
@@ -9530,27 +9620,175 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
 
 
 /*
-   RDBL[0] = effect to display
-   RDBL[1] = effect type
-   RDBL[2] = effect class
-   RDBL[3] = effect height
-   RDBL[4] = Speed display option
-   RDBL[5] = Neded sliders count
-   RDBL[6] = region length size option
-   RDBL[7] = region length option
+    Effects pad helpers
+*/
+// label of the cell "cell" (smpl_tab index = 1 + type * 256 + number ; 0 : none) in the string "str"
+function its_Cell_Label(str, cell)
+(
+    (cell <= 0) ? strcpy(str, "none") :
+        sprintf(str, "%s(%d)", menu_XCells_Ids_D[menu_XCells_Ids_Names + ((cell - 1) >> 8)], (cell - 1) & 0xFF);
+);
+
+// menu of the cells, the cell "cell" ticked ; returns the cell chosen (0 : none), -1 if no choice
+// (the type and the number are chosen separately, as for the source of a writer)
+function its_Cell_Choose(cell)
+local (k, x, xx, wgh, res)
+(
+    res = -1;
+    k = cell - 1;
+    ui_menu_tick(menu_XCells_Ids, -1, 0);
+    (k < 0) ? (
+        ui_menu_tick(menu_XCells_Ids, 1, 1);
+    ) : (
+        ui_menu_tick(menu_XCells_Ids, (k >> 8) + 2, 1);
+        ui_menu_tick(menu_XCells_Ids, (k & 0xFF) + menu_XCells_Ids_Nums + 2, 1);
+        // also tick the header of the sub-menu that holds the number (reset below by the tick -1)
+        wgh = menu_XCells_Ids[ui_jmenu_items + menu_XCells_Ids_Hdr0 + ((k & 0xFF) >> 5) * 33];
+        str_setchar(wgh, 1, '!');
+    );
+    xx = control_jmenu(menu_XCells_Ids); // select a type or a number
+    (xx != 0) ? (
+        x = xx - 2;
+        (x < 0) ? (
+            res = 0;
+        ) : (
+            k = max(0, k);
+            (x < menu_XCells_Ids_Nums) ? (
+                k = x * 256 + (k & 0xFF); // new type
+            ) : (
+                k = (k >> 8) * 256 + ((x - menu_XCells_Ids_Nums) & 0xFF); // new number
+            );
+            res = k + 1;
+        );
+    );
+    ui_menu_tick(menu_XCells_Ids, -1, 0);
+    res;
+);
+
+// EQ Mixer : the same gain -20*log10(N) (rounded to 0.01 dB) for the N sources not null
+function FX_EQ_Gains(fx)
+local (n, g, p)
+(
+    n = 0; p = fx + its_Efx_Src1;
+    loop(8, (p[0] > 0) ? (n += 1); p += its_EfxDist;);
+    g = (n > 0) ? floor(0.5 - 2000 * log10(n)) / 100 : 0;
+    p = fx + its_Efx_Src1;
+    loop(8, p[its_Efx_VoldB1 - its_Efx_Src1] = (p[0] > 0) ? g : -120; p += its_EfxDist;);
+    fx[its_Efx_Check] = 0;
+);
+
+/*
+    The part of the pad specific to a type : one function per type, "what" tells what to do
+        FXP_Dims : set RDBL[3] (lines of the pad, the common line included) and RDBL[5] (count of sliders)
+        FXP_Fill : labels and colors of the cells of the lines 1 ... RDBL[3]-1 (cells 8 ...)
+        FXP_Click : event "ev" (ui_jpad_ev_...) on the cell "cell" (8 ...)
+        FXP_Sliders : draw and handle the sliders
+    After a modification, the function resets fx[its_Efx_Check] (the effect is checked again by exec_fx)
+*/
+FXP_Dims = 0;
+FXP_Fill = 1;
+FXP_Click = 2;
+FXP_Sliders = 3;
+
+// Mixer and EQ Mixer : line 1 = the 8 sources (right clic : menu of the cells) ; the gains of the Mixer as sliders
+function FX_Mixer_Pad(RDBL, fx, fxn, what, cell, ev)
+local (i, k, p, r, zi, mix)
+(
+    mix = (fx[its_Efx_Type] === its_Efx_TyMixer); // the EQ Mixer computes its gains
+    (what === FXP_Dims) ? (
+        RDBL[3] = 2;
+        k = 0; p = fx + its_Efx_Src1;
+        loop(8, (p[0] > 0) ? (k += 1); p += its_EfxDist;);
+        RDBL[5] = mix ? k : 0;
+    ) :
+    (what === FXP_Fill) ? (
+        i = 0; p = fx + its_Efx_Src1;
+        loop(8,
+            k = p[0];
+            (k > 0) ? (
+                its_Cell_Label(pad_Efx_Labs[8 + i], k);
+                pad_Efx_Colrs[8 + i] = CP3;
+            ) : (
+                sprintf(pad_Efx_Labs[8 + i], "Src %d", i + 1);
+                pad_Efx_Colrs[8 + i] = CP1;
+            );
+            i += 1; p += its_EfxDist;
+        );
+    ) :
+    (what === FXP_Click) ? (
+        ((ev & ui_jpad_ev_rmc) && (cell >= 8) && (cell < 16)) ? (
+            p = fx + its_Efx_Src1 + (cell - 8) * its_EfxDist;
+            ((k = its_Cell_Choose(p[0])) >= 0) ? (
+                p[0] = k;
+                mix ? (fx[its_Efx_Check] = 0) : FX_EQ_Gains(fx);
+            );
+        );
+    ) :
+    (what === FXP_Sliders) ? (
+        mix ? (
+            i = 0; p = fx + its_Efx_Src1;
+            loop(8,
+                (p[0] > 0) ? (
+                    paramValues[p_fxGain1 + i] = p[its_Efx_VoldB1 - its_Efx_Src1];
+                    r = parCtl(p_fxGain1 + i);
+                    (r != 0) ? (
+                        zi = (r === 8) ? 0 : parV(p_fxGain1 + i); // right clic : 0 dB
+                        p[its_Efx_VoldB1 - its_Efx_Src1] = zi;
+                        fx[its_Efx_Check] = 0; // exec_fx computes the linear gain
+                    );
+                );
+                i += 1; p += its_EfxDist;
+            );
+        );
+    );
+);
+
+// the dispatcher : calls the function of the type of the effect (a type without function : the common line only)
+function FX_Type_Pad(RDBL, fx, fxn, what, cell, ev)
+local (ty)
+(
+    ty = fx[its_Efx_Type];
+    ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyEQMixer)) ? (
+        FX_Mixer_Pad(RDBL, fx, fxn, what, cell, ev);
+    ) : (
+        (what === FXP_Dims) ? (RDBL[3] = 1; RDBL[5] = 0;);
+    );
+);
+
+/*
+    RDBL[0] : number of the effect to display
+    RDBL[3] : lines of the pad (set by the function of the type)
+    RDBL[5] : count of sliders (set by the function of the type)
+    Line 0, common to all types :
+        0 effect number (left clic : next one, shift : previous one ; right clic : menu)
+        1 type (right clic : menu ; creates the effect if needed)
+        2 phase (left clic : next one ; right clic : menu)
+        3 On / Off (left clic)
+        4 channel count (right clic : menu)
+        5 output cell (right clic : menu)
+        6 error (last error of exec_fx)
+        7 actions (right clic : menu)
+    Lines 1 ... 3 and the sliders : the function of the type (FX_Type_Pad)
+    Key 'd' : dump of the effect in the log
 */
 function show_Effect_Pad(RDBL, blockId)
-local (h2)
+local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh, zz, zzmcl, act)
 (
-    h1 = uix_jpadHeight(RDBL[3] = max(1, RDBL[3])); // height depending on effect
-    h2 = (RDBL[5] > 0) ? ui_jd_slidh * RDBL[5] + 3 : 0;
-    uix_jneed = uix_jmini = h1+h2+ui_jd_ctgr;
-    (ui_height() >= uix_jmini) ? (
+    fxn = RDBL[0]; // number of the effect to be displayed
+    fx = Effects_set[fxn];
+    fok = (fx > BASE_MEMORY) && (fx[-2] === KW_effx);
+    fok ? FX_Type_Pad(RDBL, fx, fxn, FXP_Dims, 0, 0) : (RDBL[3] = 1; RDBL[5] = 0;);
+    h1 = uix_jpadHeight(RDBL[3]);
+    h2 = (RDBL[5] > 0) ? ui_jd_slidh * RDBL[5] + 6 : 0;
+    uix_jneed = h1+h2+ui_jd_ctgr;
+    (ui_height() >= uix_jneed) ? (
         ui_split_top(uix_jneed);
             ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
             zzmi = ui_hover();
             jmc = ui_jmouse_cap;
             keepBlockInfos(blockId);
+            // 'd' : dump of the effect in the log (taken before the pad)
+            (zzmi && fok && GM_key_take('d')) ? GM_Dump(fx, its_Efx_BlkSize, sprintf(#, "Effect %d", fxn+1));
             (zzmi) ? (
                 ui_push();
                     // stack is now 2 levels deep
@@ -9558,7 +9796,7 @@ local (h2)
                     ui_border(); // draws in purple
                 ui_pop();
                 (dpa != 0) ? (
-                    // audio file droped here
+                    // audio file droped here : ignored (but consumed)
                     sprintf(#s, "Effect::drop file : \"%s\" - %d, %d, %d", efs, msx, msy, msc);
                     mSL_log(SysLogBox, #s);
                     dpa = 0;
@@ -9567,51 +9805,191 @@ local (h2)
             control_group(blockDispNames[blockDispInverts[blockId]]);
             ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
 
-            rdr = RDBL[0]; // number of effect to be displayed
-            rcbl = Effects_set[rdr];
             ui_split_top(h1);
                 ui_pad(1,2,2,2);
-                mSL_setStrArray(pad_Efx_Labs, pad_Rdr_Siz);
-
-                rok = (rcbl > BASE_MEMORY) && (rcbl[-2] === KW_effx);
+                mSL_setStrArray(pad_Efx_Labs, pad_Efx_Siz);
                 CL1 = Color_Cornflower_Blue;
-
-                (rok) ? (
-                    dfCol = Col_InfoA ;
-                    i = 0; loop(pad_Efx_Siz,
-                        pad_Efx_Colrs[i] = dfCol;
-                        strcpy(pad_Efx_Labs[i],"");
-                        i += 1;);
+                dfCol = fok ? Col_InfoA : Col_Inactive;
+                i = 0; loop(pad_Efx_Siz,
+                    pad_Efx_Colrs[i] = dfCol;
+                    strcpy(pad_Efx_Labs[i],"");
+                    i += 1;);
+                sprintf(pad_Efx_Labs[0],"Effect %d", fxn+1);
+                (fok) ? (
+                    strcpy(pad_Efx_Labs[1], menu_Efx_Type_N[max(0, min(6, fx[its_Efx_Type]))]);
+                    pad_Efx_Colrs[1] = CP3;
+                    strcpy(pad_Efx_Labs[2], menu_Efx_PhShort_N[max(0, min(2, fx[its_Efx_Phase]))]);
+                    pad_Efx_Colrs[2] = CL1;
+                    (fx[its_Efx_Status] !== its_EfxStat_Off) ? (
+                        strcpy(pad_Efx_Labs[3], "On");
+                        pad_Efx_Colrs[3] = Color_Limegreen;
+                    ) : (
+                        strcpy(pad_Efx_Labs[3], "Off");
+                        pad_Efx_Colrs[3] = Color_Dark_Orange;
+                    );
+                    sprintf(pad_Efx_Labs[4], "Channels %d", fx[its_Efx_CCnt]);
+                    pad_Efx_Colrs[4] = Color_Heliotrope;
+                    its_Cell_Label(pad_Efx_Labs[5], fx[its_Efx_Out]);
+                    pad_Efx_Colrs[5] = CP3;
+                    (fx[its_Efx_Status] === its_EfxStat_Off) ? (
+                        strcpy(pad_Efx_Labs[6], "---");
+                    ) :
+                    ((k = fx[its_Efx_Error]) !== 0) ? (
+                        sprintf(pad_Efx_Labs[6], "Err: %04d", k);
+                        pad_Efx_Colrs[6] = CP6;
+                    ) :
+                    (fx[its_Efx_Check] === BLOCK_CHECK) ? (
+                        strcpy(pad_Efx_Labs[6], "OK");
+                        pad_Efx_Colrs[6] = Color_Limegreen;
+                    ) : (
+                        strcpy(pad_Efx_Labs[6], "...");
+                    );
+                    FX_Type_Pad(RDBL, fx, fxn, FXP_Fill, 0, 0);
                 ) : (
-                    dfCol = Col_Inactive ;
-                    RDBL[5] = 0;
-                    i = 0; loop(pad_Efx_Siz,
-                        pad_Efx_Colrs[i] = dfCol;
-                        strcpy(pad_Efx_Labs[i],"");
-                        i += 1;);
+                    strcpy(pad_Efx_Labs[1], menu_Efx_Type_N[0]);
+                    pad_Efx_Colrs[1] = CP1;
                 );
-                sprintf(pad_Efx_Labs[0],"Effect %d", rdr+1);
+                strcpy(pad_Efx_Labs[7],"Action");
+                pad_Efx_Colrs[7] = CP1;
+
                 zz = control_jpad(pad_Effect, RDBL[3], -1, 1);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 34;
-                    zzch = pad_Effect[ui_jpad_lkey];
-                    zzent = pad_Effect[ui_jpad_entkey]-1;
                     zzmcl = pad_Effect[ui_jpad_last]-1;
-                    zzmmd = pad_Effect[ui_jpad_lmods];
+
+                    (zz & ui_jpad_ev_rmc) ? (  // right mouse clic
+                        (zzmcl === 0) ? (
+                            // the effect to display
+                            ui_menu_tick(menu_Efx_Ids, fxn+1, 1);
+                            // also tick the header of the sub-menu that holds the current effect (reset below by the tick -1)
+                            wgh = menu_Efx_Ids[ui_jmenu_items + (0|(fxn / menu_Efx_Grp)) * (menu_Efx_Grp + 1)];
+                            str_setchar(wgh, 1, '!');
+                            xx = control_jmenu(menu_Efx_Ids);
+                            (xx != 0) ? (
+                                RDBL[0] = xx - 1; // select a new effect to display
+                            );
+                            ui_menu_tick(menu_Efx_Ids, -1, 0);
+                        ) :
+                        (zzmcl === 1) ? (
+                            // the type (the effect is created if needed)
+                            ui_menu_tick(menu_Efx_Type, -1, 0);
+                            ui_menu_tick(menu_Efx_Type, (fok ? fx[its_Efx_Type] : 0) + 1, 1);
+                            xx = control_jmenu(menu_Efx_Type);
+                            (xx != 0) ? (
+                                (!fok) ? (fx = FX_make(fxn); fok = 1;);
+                                fx[its_Efx_Type] = xx - 1;
+                                fx[its_Efx_Check] = 0;
+                                (fx[its_Efx_Type] === its_Efx_TyEQMixer) ? FX_EQ_Gains(fx);
+                            );
+                            ui_menu_tick(menu_Efx_Type, -1, 0);
+                        ) :
+                        ((zzmcl === 2) && fok) ? (
+                            ui_menu_tick(menu_Efx_Phase, -1, 0);
+                            ui_menu_tick(menu_Efx_Phase, fx[its_Efx_Phase] + 1, 1);
+                            xx = control_jmenu(menu_Efx_Phase);
+                            (xx != 0) ? (
+                                fx[its_Efx_Phase] = xx - 1;
+                            );
+                            ui_menu_tick(menu_Efx_Phase, -1, 0);
+                        ) :
+                        ((zzmcl === 4) && fok) ? (
+                            k = fx[its_Efx_CCnt];
+                            ui_menu_tick(menu_128_1_Ids, -1, 0);
+                            ui_menu_tick(menu_128_1_Ids, k, 1);
+                            // also tick the header of the sub-menu that holds the current count (reset below by the tick -1)
+                            (k >= 1) ? (
+                                wgh = menu_128_1_Ids[ui_jmenu_items + (0|((k - 1) / menu_128_Grp)) * (menu_128_Grp + 1)];
+                                str_setchar(wgh, 1, '!');
+                            );
+                            xx = control_jmenu(menu_128_1_Ids); // select a count
+                            (xx != 0) ? (
+                                fx[its_Efx_CCnt] = xx;
+                                fx[its_Efx_Check] = 0;
+                            );
+                            ui_menu_tick(menu_128_1_Ids, -1, 0);
+                        ) :
+                        ((zzmcl === 5) && fok) ? (
+                            ((k = its_Cell_Choose(fx[its_Efx_Out])) >= 0) ? (
+                                fx[its_Efx_Out] = k;
+                                fx[its_Efx_Check] = 0;
+                            );
+                        ) :
+                        (zzmcl === 7) ? (
+                            xx = control_jmenu(menu_Efx_Action);
+                            act = xx - 1;
+                            (act === its_EfxAct_Create) ? (
+                                (!fok) ? FX_make(fxn);
+                            ) :
+                            (!fok) ? (
+                                0; // the other actions need an effect
+                            ) :
+                            (act === its_EfxAct_Copy) ? (
+                                (Effects_set[FX_CNT] === 0) ? FX_make(FX_CNT); // the reserve
+                                memcpy(Effects_set[FX_CNT], fx, its_Efx_BlkSize);
+                            ) :
+                            (act === its_EfxAct_Paste) ? (
+                                (Effects_set[FX_CNT] !== 0) ? (
+                                    memcpy(fx, Effects_set[FX_CNT], its_Efx_BlkSize);
+                                    fx[its_Efx_Numb] = fxn;
+                                    fx[its_Efx_Check] = 0;
+                                );
+                            ) :
+                            (act === its_EfxAct_Clear) ? (
+                                FX_Clear(fxn);
+                            ) :
+                            (act === its_EfxAct_EQMix) ? (
+                                FX_EQ_Gains(fx);
+                            ) :
+                            (act === its_EfxAct_Show) ? (
+                                GM_Dump(fx, its_Efx_BlkSize, sprintf(#, "Effect %d", fxn+1));
+                            ) :
+                            (act === its_EfxAct_Delete) ? (
+                                FX_Delete(fxn);
+                                fok = 0;
+                            );
+                        ) :
+                        ((zzmcl >= 8) && fok) ? (
+                            FX_Type_Pad(RDBL, fx, fxn, FXP_Click, zzmcl, zz);
+                        );
+                    );
+
+                    (zz & ui_jpad_ev_lmc) ? (  // left mouse clic
+                        (zzmcl === 0) ? (
+                            // the next effect (shift : the previous one)
+                            RDBL[0] = (jmc & shfCap) ? (fxn + FX_CNT - 1) % FX_CNT : (fxn + 1) % FX_CNT;
+                        ) :
+                        ((zzmcl === 2) && fok) ? (
+                            fx[its_Efx_Phase] = (fx[its_Efx_Phase] + 1) % 3;
+                        ) :
+                        ((zzmcl === 3) && fok) ? (
+                            fx[its_Efx_Status] = (fx[its_Efx_Status] !== its_EfxStat_Off) ? its_EfxStat_Off : its_EfxStat_On;
+                        ) :
+                        ((zzmcl >= 8) && fok) ? (
+                            FX_Type_Pad(RDBL, fx, fxn, FXP_Click, zzmcl, zz);
+                        );
+                    );
                 );
             ui_pop();
+
+            // Sliders of the type (the pad may have changed the effect)
+            fx = Effects_set[RDBL[0]];
+            ((h2 > 0) && (RDBL[0] === fxn) && (fx > BASE_MEMORY) && (fx[-2] === KW_effx)) ? (
+                ui_split_top(h2);
+                    ui_pad(1,3,1,0);
+                    FX_Type_Pad(RDBL, fx, fxn, FXP_Sliders, 0, 0);
+                ui_pop();
+            );
 
         ui_pop();
     );
 );
-
 
 /*
     WDBL[0] : number of writer to display
     The pad (2 lines of 8 cells), the waveform of the line of the writer (if any), the sliders (record gain, overdub)
     Key 'd' : dump of the writer in the log
     Cells : 0 writer number (left clic : next one, shift : previous one), 1 status, 3 line, 4 size, 5 channels, 6 first channel written, 7 channels used,
-            10 source cell, 11 write position (s), 15 actions (right clic : menus)
+            10 source cell, 11 write position (s), 12 overdub mode (left clic : X-fade / Sum), 15 actions (right clic : menus)
 */
 function show_Writer_Pad(WDBL, blockID)
 local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, CL1, dfCol, i, k, r, w, x, xx, zi, zz, zzch,
@@ -9686,6 +10064,8 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                         sprintf(pad_Wrt_Labs[10],"%s(%d)", menu_XCells_Ids_D[menu_XCells_Ids_Names + (k >> 8)], k & 0xFF);
                     );
                     pad_Wrt_Colrs[10] = CP3;
+                    strcpy(pad_Wrt_Labs[12], (wcbl[its_Wrt_Mode] === its_WrtMode_Sum) ? "Overdub Sum" : "Overdub X-fade");
+                    pad_Wrt_Colrs[12] = CL1;
                 ) : (
                     strcpy(pad_Wrt_Labs[1],menu_Wrt_Status_N[0]);
                     strcpy(pad_Wrt_Labs[3],"Line: None");
@@ -9835,6 +10215,10 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                                 r = Wr_Set_Status(wrt, (w === its_WrtStat_Paused) ? its_WrtStat_Writing : its_WrtStat_Paused);
                                 (wrt === slWriter) ? (slWrStatusPrv = slWrStatus = wcbl[its_Wrt_Status]);
                             );
+                        );
+                        ((zzmcl === 12) && wok) ? (
+                            // overdub mode : X-fade <-> Sum
+                            wcbl[its_Wrt_Mode] = (wcbl[its_Wrt_Mode] === its_WrtMode_Sum) ? its_WrtMode_XFade : its_WrtMode_Sum;
                         );
                     );
                 );
