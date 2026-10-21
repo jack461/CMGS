@@ -22,15 +22,21 @@ SL_COUNT= <? printf("%d", slnum); ?>; // nombre de sliders utilisés
 CH_NB = <? printf("%d", CH_NB); ?>; // nombre de canaux gérés [typiquement 128]
 RD_CNT = <? printf("%d", RD_CNT); ?>; // nombre de lecteurs
 WR_CNT = <? printf("%d", WR_CNT); ?>; // nombre de writers
-NB_WRK = <? printf("%d", NB_WRK); ?>; // nombre de mots de travail
 // Buffers audio
 LN_CNT = <? printf("%d", LN_CNT); ?>; // nombre de buffers
 FX_CNT = <? printf("%d", FX_CNT); ?>; // nombre d'effets
-SMPL_SIZE = <? printf("%d", SMPL_SIZE); ?>; // nombre total de cellules
-TEMP_SIZE = <? printf("%d", TEMP_SIZE); ?>; // nombre total de cellules
-NB_AUX = <? printf("%d", NB_AUX); ?>; // nombre de cellules auxiliaires / temporaires
-SPL_P = <? printf("%d", SPL_P); ?>; // position 1 pour les samples d'entrée [1 .. 128]
-OUT_P = <? printf("%d", OUT_P); ?>; // position 2 pour les copies des samples d'entrée
+SMPL_SIZE = <? printf("%d", SMPL_SIZE); ?>; // nombre total de cellules (voir le plan dans Interstys.jsfx)
+IN_P = <? printf("%d", IN_P); ?>; // In : les entrées de la piste
+OUT_P = <? printf("%d", OUT_P); ?>; // Out : le bus de sortie
+BUS_P = <? printf("%d", BUS_P); ?>; // les bus utilisateur
+NB_BUS = <? printf("%d", NB_BUS); ?>; // nombre de bus
+BUS_W = <? printf("%d", BUS_W); ?>; // canaux par bus
+CTL_P = <? printf("%d", CTL_P); ?>; // les cellules de contrôle
+NB_CTL = <? printf("%d", NB_CTL); ?>; // nombre de cellules de contrôle
+CBL_P = <? printf("%d", CBL_P); ?>; // le Pool des câbles
+CBL_CELLS = <? printf("%d", CBL_CELLS); ?>; // taille du Pool
+ZERO_P = <? printf("%d", ZERO_P); ?>; // 128 cellules toujours nulles
+TRASH_P = <? printf("%d", TRASH_P); ?>; // 128 cellules "poubelle"
 SPDMAX = <? printf("%d", SPDMAX); ?>; // max speed.
 BF_BASE = srate; // 1 second
 
@@ -140,9 +146,9 @@ its_Rdr_Low = idx; idx += 1; //  pointeur vers le premier mot du tampon
 its_Rdr_Relpos = idx; idx += 1; //  Position [0 ... 100] de la tête de lecture
 its_Rdr_Last = idx; idx += 1; //  pointeur vers le dernier mot du tampon
 its_Rdr_High = idx; idx += 1; //  pointeur vers le dernier mot du tampon
-its_Rdr_RCell = idx; idx += 1; // Cellule de sortie du lecteur
-its_Rdr_RCellT = idx; idx += 1; // Cellule de sortie du lecteur (type)
-its_Rdr_RCellN = idx; idx += 1; // Cellule de sortie du lecteur (num)
+its_Rdr_OutK = idx; idx += 1; // sortie : 0 son câble propre, sinon Out ou un bus (kind * ITS_KMul + number)
+its_Rdr_OutOff = idx; idx += 1; // sortie : premier canal dans le bus
+its_Rdr_OutCell = idx; idx += 1; // sortie : première cellule (calculée par exec_reader)
 its_Rdr_Speed = idx; idx += 1; //  Vitesse de lecture
 its_Rdr_SpeedPrev = idx; idx += 1; //  Vitesse de lecture
 //  0x18 - 24
@@ -199,6 +205,9 @@ its_Rdr_Tmp9 = idx; idx += 1; // temp 9
 its_Rdr_TmpA = idx; idx += 1; // temp A
 its_Rdr_TmpB = idx; idx += 1; // temp B
 its_Rdr_TmpC = idx; idx += 1; // temp C
+its_Rdr_OutAdd = idx; idx += 1; // sortie : 1 pour un bus (addition), 0 pour le câble propre (affectation)
+its_Rdr_OutDirty = idx; idx += 1; // le câble propre a été écrit (il est effacé quand le reader s'arrête)
+its_Rdr_Owner = idx; idx += 1; // propriétaire : 0 le patch utilisateur, sinon une instance d'algorithme
 //  0x40 - 72
 its_Rdr_Abspos = idx; idx += its_RdrMaxMulti; //  Position [its_Rdr_Start ... its_Rdr_Last - 1] de lecture en samples
 its_Rdr_AbsInc = idx; idx += its_RdrMaxMulti; //  Incrément de la position
@@ -274,7 +283,7 @@ its_Wrt_SmplCnt = idx; idx += 1; //  Taille de la zone utile
 its_Wrt_Start = idx; idx += 1; //  pointeur vers le premier mot du tampon
 its_Wrt_BfChanUsed = idx; idx += 1; // nombre de canaux écrits, 0 : tous, à partir du premier (mot "Relpos", inutilisé)
 its_Wrt_Last = idx; idx += 1; //  pointeur vers le dernier mot du tampon
-its_Wrt_Cell = idx; idx += 1; // numéro du (premier) mot écrit par le writer
+its_Wrt_Src = idx; idx += 1; // source de l'entrée (kind * ITS_KMul + number, 0 : aucune)
 its_Wrt_Abspos = idx; idx += 1; //  Position [0 ... size - 1] de la tête d'écriture
 its_Wrt_Buff_1 = idx; idx += 1; // pointeur sur le 1er buffer
 its_Wrt_Ovrdb = idx; idx += 1; // recycling
@@ -290,6 +299,9 @@ its_Wrt_Tmp3 = idx; idx += 1; // temp 3
 its_Wrt_Tmp4 = idx; idx += 1; // temp 4
 its_Wrt_Tmp5 = idx; idx += 1; // temp 5
 its_Wrt_Tmp6 = idx; idx += 1; // temp 6
+its_Wrt_SrcOff = idx; idx += 1; // premier canal pris dans la source
+its_Wrt_InCell = idx; idx += 1; // première cellule lue (calculée par exec_writer)
+its_Wrt_Owner = idx; idx += 1; // propriétaire : 0 le patch utilisateur, sinon une instance d'algorithme
 // 30
 idx |= 3; // for rounding to a multiple of 4 minus 1
 its_Wrt_Unuz2 = idx; idx += 1; //  Securité : mot inutilisé
@@ -331,43 +343,54 @@ its_Efx_Type = idx; idx += 1; //  Type de l'effet
 its_Efx_Numb = idx; idx += 1; //  Numéro de l'effet
 its_Efx_Phase = idx; idx += 1; //  Phase de l'effet
 its_Efx_CCnt = idx; idx += 1; //  Channel count
-its_Efx_Out = idx; idx += 1; //  Sortie de l'effet
+its_Efx_OutK = idx; idx += 1; //  sortie : 0 son câble propre, sinon Out ou un bus (kind * ITS_KMul + number)
+its_Efx_OutOff = idx; idx += 1; //  sortie : premier canal dans le bus
+its_Efx_OutCell = idx; idx += 1; //  sortie : première cellule (calculée par exec_fx)
+its_Efx_OutAdd = idx; idx += 1; //  sortie : 1 pour un bus (addition), 0 pour le câble propre (affectation)
+its_Efx_OutDirty = idx; idx += 1; //  le câble propre a été écrit (il est effacé quand l'effet s'arrête)
+its_Efx_Owner = idx; idx += 1; //  propriétaire : 0 le patch utilisateur, sinon une instance d'algorithme
+its_Efx_Rank = idx; idx += 1; //  rang d'exécution (futur : algorithmes)
+// 8 entrées : source (kind * ITS_KMul + number), premier canal, gain (dB), gain, première cellule (calculée par exec_fx)
 its_Efx_Src1 = idx; idx += 1; //  Source n°1
+its_Efx_Off1 = idx; idx += 1; //  Premier canal de la source n°1
 its_Efx_VoldB1 = idx; idx += 1; //  Volume n°1 (dB)
-//   10
 its_Efx_Vol1 = idx; idx += 1; //  Volume n°1
-its_Efx_Dst1 = idx; idx += 1; //  Destination n°1
+its_Efx_Cell1 = idx; idx += 1; //  Cellule de la source n°1
 its_Efx_Src2 = idx; idx += 1; //  Source n°2
+its_Efx_Off2 = idx; idx += 1; //  Premier canal de la source n°2
 its_Efx_VoldB2 = idx; idx += 1; //  Volume n°2 (dB)
 its_Efx_Vol2 = idx; idx += 1; //  Volume n°2
-its_Efx_Dst2 = idx; idx += 1; //  Destination n°2
+its_Efx_Cell2 = idx; idx += 1; //  Cellule de la source n°2
 its_Efx_Src3 = idx; idx += 1; //  Source n°3
+its_Efx_Off3 = idx; idx += 1; //  Premier canal de la source n°3
 its_Efx_VoldB3 = idx; idx += 1; //  Volume n°3 (dB)
 its_Efx_Vol3 = idx; idx += 1; //  Volume n°3
-its_Efx_Dst3 = idx; idx += 1; //  Destination n°3
-//   20
+its_Efx_Cell3 = idx; idx += 1; //  Cellule de la source n°3
 its_Efx_Src4 = idx; idx += 1; //  Source n°4
+its_Efx_Off4 = idx; idx += 1; //  Premier canal de la source n°4
 its_Efx_VoldB4 = idx; idx += 1; //  Volume n°4 (dB)
 its_Efx_Vol4 = idx; idx += 1; //  Volume n°4
-its_Efx_Dst4 = idx; idx += 1; //  Destination n°4
+its_Efx_Cell4 = idx; idx += 1; //  Cellule de la source n°4
 its_Efx_Src5 = idx; idx += 1; //  Source n°5
+its_Efx_Off5 = idx; idx += 1; //  Premier canal de la source n°5
 its_Efx_VoldB5 = idx; idx += 1; //  Volume n°5 (dB)
 its_Efx_Vol5 = idx; idx += 1; //  Volume n°5
-its_Efx_Dst5 = idx; idx += 1; //  Destination n°5
+its_Efx_Cell5 = idx; idx += 1; //  Cellule de la source n°5
 its_Efx_Src6 = idx; idx += 1; //  Source n°6
+its_Efx_Off6 = idx; idx += 1; //  Premier canal de la source n°6
 its_Efx_VoldB6 = idx; idx += 1; //  Volume n°6 (dB)
-//   30
 its_Efx_Vol6 = idx; idx += 1; //  Volume n°6
-its_Efx_Dst6 = idx; idx += 1; //  Destination n°6
+its_Efx_Cell6 = idx; idx += 1; //  Cellule de la source n°6
 its_Efx_Src7 = idx; idx += 1; //  Source n°7
+its_Efx_Off7 = idx; idx += 1; //  Premier canal de la source n°7
 its_Efx_VoldB7 = idx; idx += 1; //  Volume n°7 (dB)
 its_Efx_Vol7 = idx; idx += 1; //  Volume n°7
-its_Efx_Dst7 = idx; idx += 1; //  Destination n°7
+its_Efx_Cell7 = idx; idx += 1; //  Cellule de la source n°7
 its_Efx_Src8 = idx; idx += 1; //  Source n°8
+its_Efx_Off8 = idx; idx += 1; //  Premier canal de la source n°8
 its_Efx_VoldB8 = idx; idx += 1; //  Volume n°8 (dB)
 its_Efx_Vol8 = idx; idx += 1; //  Volume n°8
-its_Efx_Dst8 = idx; idx += 1; //  Destination n°8
-//   40
+its_Efx_Cell8 = idx; idx += 1; //  Cellule de la source n°8
 its_Efx_Error = idx; idx += 1; // last error (exec_fx)
 its_Efx_Check = idx; idx += 1; // quick check
 idx |= 3; // for rounding to a multiple of 4 minus 1
@@ -459,6 +482,15 @@ mSL_run_max = 0;
 // mSL_insts_per_s = 14000000; // Mac Book Pro
 mSL_insts_per_s = 32000000; // Mac Studio Pro
 #efs = "";
+
+// Sources of the inputs and destinations of the outputs : kind * ITS_KMul + number (0 : none) ; see its_Src_Cell
+ITS_KMul = 4096;
+ITS_KIn = 1; // In, the inputs of the track
+ITS_KOut = 2; // Out, the output bus
+ITS_KBus = 3; // a user bus
+ITS_KCtl = 4; // a control cell
+ITS_KRdr = 5; // the own cable of a reader
+ITS_KFx = 6; // the own cable of an effect
 
 KW_read = 'read';
 KW_writ = 'writ';
@@ -1555,17 +1587,137 @@ ser_Init();
 
 
 // Créations des tables d'objets et de cellules
-function updt_tables(wa) local(spl_tab)
+function updt_tables(wa)
 (
     Lines_Set = wa;
     Readers_set = Lines_Set + LN_CNT+1;
     Writers_set = Readers_set + RD_CNT+1;
     Effects_set = Writers_set + WR_CNT+1;
     smpl_tab = Effects_set + FX_CNT +1;
-    spl_tab = smpl_tab + SPL_P; // sous-table des samples
-    alt_tab = smpl_tab + OUT_P; // sous-table des "alt"
 );
 updt_tables(StaticWA);
+
+
+//===== CABLES
+/*
+    Each output of a module (reader, effect) owns a cable : CBL_W cells of the Pool, its only source.
+    An output can instead add into a bus (Out, Bus k) : the buses are cleared at each sample.
+    An input names its source (kind * ITS_KMul + number, see the ITS_K... kinds) and the first channel taken.
+    The cables are allocated by its_Patch_Update (in @gfx) ; the modules compute the cells of their inputs
+    and outputs when they are checked (exec_reader, exec_writer, exec_fx), after each change of the patch.
+*/
+CblRdStart = make_array(RD_CNT + 1); // first cell of the cable of each reader (0 : none)
+CblRdWidth = make_array(RD_CNT + 1); // its width (channels)
+CblFxStart = make_array(FX_CNT + 1); // first cell of the cable of each effect (0 : none)
+CblFxWidth = make_array(FX_CNT + 1); // its width (channels)
+CblPool = make_array(CBL_CELLS); // 1 : cell of the Pool used by a cable
+its_PatchV = 0; // version of the patch : changes when a cable is allocated or freed
+its_PatchForce = 1; // 1 : check again all the modules (start, preset loaded)
+
+// allocate "w" cells in the Pool (first fit) ; returns the first cell, 0 if no room
+function Cbl_Alloc(w)
+local (i, n, res)
+(
+    res = n = i = 0;
+    while ((res === 0) && (i < CBL_CELLS)) (
+        (CblPool[i] === 0) ? (
+            n += 1;
+            (n >= w) ? (res = CBL_P + i - w + 1);
+        ) : (
+            n = 0;
+        );
+        i += 1;
+    );
+    (res > 0) ? (
+        memset(CblPool + res - CBL_P, 1, w);
+        memset(smpl_tab + res, 0, w);
+    ) : (
+        sprintf(#cblmsg, "Cables : no room for %d channels in the Pool (%d cells)", w, CBL_CELLS);
+        mSL_log(SysLogBox, #cblmsg);
+    );
+    res;
+);
+
+// free the "w" cells from "start"
+function Cbl_Free(start, w)
+(
+    (start >= CBL_P) ? (
+        memset(CblPool + start - CBL_P, 0, w);
+        memset(smpl_tab + start, 0, w);
+    );
+);
+
+/*
+    first cell of the "w" channels taken from the channel "off" of the source "src" (kind * ITS_KMul + number)
+    returns 0 for no source, -1 if the source is not valid (unknown, without cable, too narrow)
+*/
+function its_Src_Cell(src, off, w)
+local (k, n, base, bw)
+(
+    k = floor(src / ITS_KMul);
+    n = src - k * ITS_KMul;
+    base = bw = 0;
+    (k === ITS_KIn) ? (base = IN_P; bw = CH_NB;) :
+    (k === ITS_KOut) ? (base = OUT_P; bw = CH_NB;) :
+    ((k === ITS_KBus) && (n < NB_BUS)) ? (base = BUS_P + n * BUS_W; bw = BUS_W;) :
+    ((k === ITS_KCtl) && (n < NB_CTL)) ? (base = CTL_P + n; bw = NB_CTL - n;) :
+    ((k === ITS_KRdr) && (n < RD_CNT)) ? (base = CblRdStart[n]; bw = CblRdWidth[n];) :
+    ((k === ITS_KFx) && (n < FX_CNT)) ? (base = CblFxStart[n]; bw = CblFxWidth[n];);
+    (src === 0) ? 0 :
+    ((base > 0) && (off >= 0) && (w >= 1) && (off + w <= bw)) ? base + off : -1;
+);
+
+/*
+    first cell of the "w" channels of an output : "dst" 0 is the own cable of the module ("own", "ownw" channels),
+    else Out or a bus (with the first channel "off") ; returns -1 if not valid
+*/
+function its_Out_Cell(dst, off, w, own, ownw)
+local (k)
+(
+    k = floor(dst / ITS_KMul);
+    (dst === 0) ? (((own > 0) && (w <= ownw)) ? own : -1) :
+    ((k === ITS_KOut) || (k === ITS_KBus)) ? its_Src_Cell(dst, off, w) : -1;
+);
+
+/*
+    the cables follow the modules : called at each frame of @gfx (and forced after a load)
+    a reader or an effect whose output is its own cable gets a cable of its width ; after a change,
+    all the modules are checked again (their cells are computed again by exec_reader, exec_writer, exec_fx)
+*/
+function its_Patch_Update()
+local (i, b, w, chg)
+(
+    chg = its_PatchForce;
+    its_PatchForce = 0;
+    i = 0; loop(RD_CNT,
+        b = Readers_set[i];
+        w = ((b > BASE_MEMORY) && (b[-2] === KW_read) && (b[its_Rdr_OutK] === 0)) ? max(1, min(128, b[its_Rdr_BfChanUsed])) : 0;
+        (w !== CblRdWidth[i]) ? (
+            Cbl_Free(CblRdStart[i], CblRdWidth[i]);
+            CblRdStart[i] = (w > 0) ? Cbl_Alloc(w) : 0;
+            CblRdWidth[i] = w;
+            chg = 1;
+        );
+        i += 1;
+    );
+    i = 0; loop(FX_CNT,
+        b = Effects_set[i];
+        w = ((b > BASE_MEMORY) && (b[-2] === KW_effx) && (b[its_Efx_OutK] === 0)) ? max(1, min(128, b[its_Efx_CCnt])) : 0;
+        (w !== CblFxWidth[i]) ? (
+            Cbl_Free(CblFxStart[i], CblFxWidth[i]);
+            CblFxStart[i] = (w > 0) ? Cbl_Alloc(w) : 0;
+            CblFxWidth[i] = w;
+            chg = 1;
+        );
+        i += 1;
+    );
+    (chg) ? (
+        its_PatchV += 1;
+        i = 0; loop(RD_CNT+1, ((b = Readers_set[i]) > BASE_MEMORY) ? (b[its_Rdr_Check] = 0); i += 1;);
+        i = 0; loop(WR_CNT+1, ((b = Writers_set[i]) > BASE_MEMORY) ? (b[its_Wrt_Check] = 0); i += 1;);
+        i = 0; loop(FX_CNT+1, ((b = Effects_set[i]) > BASE_MEMORY) ? (b[its_Efx_Check] = 0); i += 1;);
+    );
+);
 
 
 
@@ -2146,26 +2298,18 @@ function some_reset() local(slLnActnPrv)
     slReaderPrv = -1;
     slRSpeedPrv = -1;
     slRStatusPrv = -1;
-    slTypePrv = slType; // not -1 : a difference would create effect "slEffect" (see update_sliders)
-    slEPhasePrv = slEPhase; // idem
     slRdModePrv = -1;
     slRdSrcLNbPrv = -1;
     slRDlSizePrv = -1;
     slRPosPrv = -1;
     slRdOutVolPrv = -1;
-    slEffectPrv = -1;
-    slEndOutPrv = -1;
     slWDlLinePrv = -1;
     slRdWrefPrv = -1;
     slRdOffsPrv = -1;
-    slFxActMxPrv = -1;
-    slFxChCntPrv = -1;
     slInGainPrv = -1;
     slSmplPrv = -1;
-    slWritCellPrv = -1;
     slWrStatusPrv = -1;
     slOutVolPrv = -1;
-    slRdrOutPrv = -1;
     slWrOvrdbPrv = -1;
     slRdLnChCntPrv = -1;
     slWrLnChCntPrv = -1;
@@ -2266,154 +2410,23 @@ menu_256_1_Ids = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "nums-256-1", 256, menu_256_1_Ids_N);
 
-menu_Cells_Ids_N = make_array(9);
-menu_Cells_Ids_N[0] = "None";
-menu_Cells_Ids_N[1] = "spl_in()";
-menu_Cells_Ids_N[2] = "spl_out()";
-menu_Cells_Ids_N[3] = "aux";
-menu_Cells_Ids_N[4] = "tmp";
-menu_Cells_Ids_N[5] = "Work";
-menu_Cells_Ids_N[6] = "Reader";
-menu_Cells_Ids_N[7] = "Writer";
-menu_Cells_Ids_N[8] = "Effect";
-menu_Cells_Ids = make_jmenu(
-    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-            "cells-types", 9, menu_Cells_Ids_N);
+// Menu of the sources (inputs of the modules) : None, In and Out (their first ITS_MNCH channels, in sub-menus of 32),
+// the buses, the readers, the effects (the ">" headers are not counted in the results : see its_Src_MenuIdx / its_Src_FromIdx)
+ITS_MNCH = 128; // channels of In and Out in the menus (the others : left clic on the cell, menu of the first channel)
+<? src_n = 1 + 2 * (128 + 4) + 1 + NB_BUS + RD_CNT + (0|((RD_CNT + 31) / 32)) + FX_CNT + (0|((FX_CNT + 31) / 32)); ?>menu_Src_Ids_N = make_array(<? printf("%d", src_n); ?>);
+menu_Src_Ids_N[0] = "None";
+<? j = 1; k = 0; loop(2, i = 0; loop(128, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">%s %d-%d\";", j, k ? "Out" : "In", i, i+31); j += 1;); printf("menu_Src_Ids_N[%d] = \"%s%s:%d\";", j, ((i % 32) == 31) ? "<" : "", k ? "Out" : "In", i); i += 1; j += 1;); k += 1;); printf("menu_Src_Ids_N[%d] = \">Buses\";", j); j += 1; i = 0; loop(NB_BUS, printf("menu_Src_Ids_N[%d] = \"%sBus %d\";", j, (i == NB_BUS-1) ? "<" : "", i+1); i += 1; j += 1;); i = 0; loop(RD_CNT, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">Readers %d-%d\";", j, i+1, min(i+32, RD_CNT)); j += 1;); printf("menu_Src_Ids_N[%d] = \"%sReader %d\";", j, (((i % 32) == 31) || (i == RD_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); i = 0; loop(FX_CNT, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">Effects %d-%d\";", j, i+1, min(i+32, FX_CNT)); j += 1;); printf("menu_Src_Ids_N[%d] = \"%sEffect %d\";", j, (((i % 32) == 31) || (i == FX_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); ?>
+menu_Src_Ids = make_jmenu(
+    ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "sources", <? printf("%d", src_n); ?>, menu_Src_Ids_N);
 
-
-XCells = 15 + 8 + 256; // ">Type", None, 12 types, "", 8 headers ">Number", 256 numbers
-menu_XCells_Ids_N = make_array(XCells);
-menu_XCells_Ids_D = make_array(16);
-idx = 0;
-menu_XCells_Ids_N[idx] = ">Type"; idx += 1;
-menu_XCells_Ids_N[idx] = "!&1 None"; idx += 1;
-menu_XCells_Ids_Names = idx; // First ident number
-menu_XCells_Ids_D[idx] = "spl_in";
-menu_XCells_Ids_N[idx] = "&1 spl_in()"; idx += 1;
-menu_XCells_Ids_D[idx] = "spl_out";
-menu_XCells_Ids_N[idx] = "&1 spl_out()"; idx += 1;
-menu_XCells_Ids_D[idx] = "aux";
-menu_XCells_Ids_N[idx] = "&1 aux"; idx += 1;
-menu_XCells_Ids_D[idx] = "tmp";
-menu_XCells_Ids_N[idx] = "&1 tmp"; idx += 1;
-menu_XCells_Ids_D[idx] = "fmr";
-menu_XCells_Ids_N[idx] = "&1 fmr"; idx += 1;
-menu_XCells_Ids_D[idx] = "loc";
-menu_XCells_Ids_N[idx] = "&1 loc"; idx += 1;
-menu_XCells_Ids_D[idx] = "var";
-menu_XCells_Ids_N[idx] = "&1 var"; idx += 1;
-menu_XCells_Ids_D[idx] = "cst";
-menu_XCells_Ids_N[idx] = "&1 cst"; idx += 1;
-menu_XCells_Ids_D[idx] = "Work";
-menu_XCells_Ids_N[idx] = "&1 Work"; idx += 1;
-menu_XCells_Ids_D[idx] = "Reader";
-menu_XCells_Ids_N[idx] = "&1 Reader"; idx += 1;
-menu_XCells_Ids_D[idx] = "Writer";
-menu_XCells_Ids_N[idx] = "&1 Writer"; idx += 1;
-menu_XCells_Ids_D[idx] = "Effect";
-menu_XCells_Ids_N[idx] = "<&1 Effect"; idx += 1;
-menu_XCells_Ids_N[idx] = ""; idx += 1;
-// the numbers 0 ... 255 in 8 sub-menus of 32 (tick class "X" : the type and the number are both ticked)
-menu_XCells_Ids_Nums = idx - 3; // = count of types : in the results (x = xx - 2), the numbers come after them
-menu_XCells_Ids_Hdr0 = idx; // item of the first ">Number" header ; the header of group g is item Hdr0 + g * 33
-<? i=0; j=15; loop(256, (i % 32) == 0 ? (printf("menu_XCells_Ids_N[%d] = \">Number %d..%d\";", j, i, i+31); j += 1;); printf("menu_XCells_Ids_N[%d] = \"%s&X %d\";", j, ((i % 32) == 31) ? "<" : "", i); i += 1; j += 1;); ?>
-
-menu_XCells_Ids = make_jmenu(
-    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-            "cells-xtypes", XCells, menu_XCells_Ids_N);
-
-function updateRdCellIdent(rcbl)
-local (num)
-(
-/*
-    num = rcbl[its_Rdr_RCell];
-    (num > (v = 1 + CH_NB + CH_NB + NB_AUX + NB_AUX + NB_WRK + RD_CNT + WR_CNT)) ? (
-        ty = 8;
-    ) :
-    (num > (v = 1 + CH_NB + CH_NB + NB_AUX + NB_AUX + NB_WRK + RD_CNT)) ? (
-        ty = 7;
-    ) :
-    (num > (v = 1 + CH_NB + CH_NB + NB_AUX + NB_AUX + NB_WRK)) ? (
-        ty = 6;
-    ) :
-    (num > (v = 1 + CH_NB + CH_NB + NB_AUX + NB_AUX)) ? (
-        ty = 5;
-    ) :
-    (num > (v = 1 + CH_NB + CH_NB + NB_AUX)) ? (
-        ty = 4;
-    ) :
-    (num > (v = 1 + CH_NB + CH_NB)) ? (
-        ty = 3;
-    ) :
-    (num > (v = 1 + CH_NB)) ? (
-        ty = 2;
-    ) :
-    (num > (v = 1)) ? (
-        ty = 1;
-    ) : (
-        ty = 0;
-    );
-    rcbl[its_Rdr_RCellT] = ty;
-    rcbl[its_Rdr_RCellN] = num - v;
-*/
-    num = rcbl[its_Rdr_RCell] - 1;
-    (num < 0) ? (
-        rcbl[its_Rdr_RCellT] = rcbl[its_Rdr_RCellN] = 0;
-    ) : (
-        rcbl[its_Rdr_RCellT] = num >> 8;
-        rcbl[its_Rdr_RCellN] = num & 0xFF;
-    );
-);
-
-
-function setCellIdent(num, add1, add2)
-local (v, a)
-(
-    (num >= (v = 1 + CH_NB + CH_NB + NB_AUX + NB_AUX + NB_WRK + RD_CNT + WR_CNT)) ? (
-        strcpy(add1[0], "Effect"); a = 1;
-    ) :
-    (num >= (v = 1 + CH_NB + CH_NB + NB_AUX + NB_AUX + NB_WRK + RD_CNT)) ? (
-        strcpy(add1[0], "Writer"); a = 1;
-    ) :
-    (num >= (v = 1 + CH_NB + CH_NB + NB_AUX + NB_AUX + NB_WRK)) ? (
-        strcpy(add1[0], "Reader"); a = 1;
-    ) :
-    (num >= (v = 1 + CH_NB + CH_NB + NB_AUX + NB_AUX)) ? (
-        strcpy(add1[0], "Work"); a = 1;
-    ) :
-    (num >= (v = 1 + CH_NB + CH_NB + NB_AUX)) ? (
-        strcpy(add1[0], "tmp"); a = 0;
-    ) :
-    (num >= (v = 1 + CH_NB + CH_NB)) ? (
-        strcpy(add1[0], "aux"); a = 0;
-    ) :
-    (num >= (v = 1 + CH_NB)) ? (
-        strcpy(add1[0], "spl_out()"); a = 0;
-    ) :
-    (num >= (v = 1)) ? (
-        strcpy(add1[0], "spl_in()"); a = 0;
-    ) : (
-        strcpy(add1[0], "None"); a = 0;
-    );
-    sprintf(add2[0], "%d", max(0, num + a - v));
-);
-
-CellCount = make_array(10);
-CellCount[0] = 0;
-CellCount[1] = 1;
-CellCount[2] = 1 + CH_NB;
-CellCount[3] = 1 + CH_NB + CH_NB;
-CellCount[4] = 1 + CH_NB + CH_NB + NB_AUX;
-CellCount[5] = 1 + CH_NB + CH_NB + NB_AUX + NB_AUX;
-CellCount[6] = 1 + CH_NB + CH_NB + NB_AUX + NB_AUX + NB_WRK;
-CellCount[7] = 1 + CH_NB + CH_NB + NB_AUX + NB_AUX + NB_WRK + RD_CNT;
-CellCount[8] = 1 + CH_NB + CH_NB + NB_AUX + NB_AUX + NB_WRK + RD_CNT + WR_CNT;
-CellCount[9] = 1 + CH_NB + CH_NB + NB_AUX + NB_AUX + NB_WRK + RD_CNT + WR_CNT + FX_CNT;
-function getCellIdent(num1, num2)
-(
-    num1 = max(0, min(9, num1));
-    CellCount[num1] + num2 % ((num1 <= 4) ? 128 : 256);
-);
+// Menu of the destinations (outputs of the modules) : own cable, Out (its first ITS_MNCH channels, in sub-menus of 32), the buses
+<? dst_n = 1 + 128 + 4 + 1 + NB_BUS; ?>menu_Dst_Ids_N = make_array(<? printf("%d", dst_n); ?>);
+menu_Dst_Ids_N[0] = "Own cable";
+<? j = 1; i = 0; loop(128, (i % 32) == 0 ? (printf("menu_Dst_Ids_N[%d] = \">Out %d-%d\";", j, i, i+31); j += 1;); printf("menu_Dst_Ids_N[%d] = \"%sOut:%d\";", j, ((i % 32) == 31) ? "<" : "", i); i += 1; j += 1;); printf("menu_Dst_Ids_N[%d] = \">Buses\";", j); j += 1; i = 0; loop(NB_BUS, printf("menu_Dst_Ids_N[%d] = \"%sBus %d\";", j, (i == NB_BUS-1) ? "<" : "", i+1); i += 1; j += 1;); ?>
+menu_Dst_Ids = make_jmenu(
+    ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "destinations", <? printf("%d", dst_n); ?>, menu_Dst_Ids_N);
 
 
 /*  Tests for dtds et dstd */
@@ -2501,6 +2514,7 @@ local(rcb)
         rcb[its_Rdr_Speed] = 1;
         rcb[its_Rdr_AbsInc] = 1;
         rcb[its_Rdr_OutVol] = 1;
+        rcb[its_Rdr_OutK] = ITS_KOut * ITS_KMul; // default output : Out, channel 0
         rcb[its_Rdr_NxtPosSec] = -1;
         rcb[its_Rdr_Unuz1] = rcb[its_Rdr_Unuz2] = SECURE_BL;
         rcb[its_Rdr_Number] = rnum;
@@ -3125,8 +3139,6 @@ Currreader = Readers_set[slReader];
 CurrreaderNb = slReader;
 Currwriter = Writers_set[slWriter];
 CurrwriterNb = slWriter;
-Curreffect = Effects_set[slEffect];
-CurreffectNb = slEffect;
 CurrLine = Lines_Set[slLine];
 CurrLineNb = slLine;
 
@@ -3335,8 +3347,6 @@ local(reader, lcbl, err, w)
             reader[its_Rdr_Status] = max(reader[its_Rdr_Status], its_RdrStat_Ready);
             reader[its_Rdr_SpeedPrev] = reader[its_Rdr_RegSizeSecPrv]
                 = reader[its_Rdr_RegPosSecPrv] = reader[its_Rdr_XFade_mSecPrv] = -1;
-            (reader[its_Rdr_RCell] === 0) ? reader[its_Rdr_RCell] = rdrn + OUT_P;
-            updateRdCellIdent(reader);
             Rd_Update(rdrn); // Update other fields
         );
         reader[its_Rdr_Check] = -1;
@@ -3406,9 +3416,6 @@ local(reader, wcbl, lcbl, err)
                 reader[its_Rdr_Tmp6] = ts();
             );
             reader[its_Rdr_WrSrc] = wrnb - 1;
-            // a reader without output cell is silent : give it its default one
-            (reader[its_Rdr_RCell] === 0) ? reader[its_Rdr_RCell] = rdrn + OUT_P;
-            updateRdCellIdent(reader);
         ) : (
             // writer indéfini, ou sans ligne
             reader[its_Rdr_WrSrc] = -1;
@@ -3552,8 +3559,8 @@ local (reader, md, rdst)
         lcbl = reader[its_Rdr_Lcbl];
         // Type is "reader"
         (md === its_RdrMode_Read) ? (
-            ((lcbl === 0) || (reader[its_Rdr_RCell] === 0)) ? (
-                // No line or no output cell
+            (lcbl === 0) ? (
+                // No line
                 ns = its_RdrStat_Created;
             ) :
             (nstat === its_RdrStat_Paused) ? (
@@ -3774,8 +3781,8 @@ local(writer, lcbl)
         writer[its_Wrt_Abspos] = lcbl[its_Lin_Start];
         writer[its_Wrt_Flgs] |= its_WrtFlg_init;
         writer[its_Wrt_Check] = -1;
-        // default source cell : spl_in(wrtn)
-        (writer[its_Wrt_Cell] === 0) ? (writer[its_Wrt_Cell] = 1 + wrtn);
+        // default source : In, channel 0
+        (writer[its_Wrt_Src] === 0) ? (writer[its_Wrt_Src] = ITS_KIn * ITS_KMul);
         writer[its_Wrt_Status] = max(writer[its_Wrt_Status], its_WrtStat_Ready);
         Wr_Followers(writer, 0); // the delay readers take the new line
         0;
@@ -3793,7 +3800,7 @@ local(writer, lcbl)
     ((wrtn < 0) || (wrtn >= WR_CNT) || ((writer = Writers_set[wrtn]) <= BASE_MEMORY) || (writer[-2] !== KW_writ)) ? (
         -1;
     ) : (
-        (((lcbl = writer[its_Wrt_Lcbl]) <= BASE_MEMORY) || (lcbl[-2] !== KW_lcbl) || (writer[its_Wrt_Cell] === 0)) ? (
+        (((lcbl = writer[its_Wrt_Lcbl]) <= BASE_MEMORY) || (lcbl[-2] !== KW_lcbl) || (writer[its_Wrt_Src] === 0)) ? (
             st = its_WrtStat_Created;
         ) : (
             st = max(its_WrtStat_Ready, min(its_WrtStat_Writing, st));
@@ -4733,14 +4740,12 @@ local (bfr, flg, ds, slRdModePrev)
         slRPosPrv = slRPos = 0;
         slRdWrefPrv = slRdWref = -1;
         slRdOffsPrv = slRdOffs = 0;
-        slRdrOutPrv = slRdrOut = 0;
         slRdOutVolPrv = slRdOutVol = 0;
 
         slider_show(slRDlSize,0);
         slider_show(slRSpeed,0);
         slider_show(slRPos,0);
         slider_show(slRdOffs,0);
-        slider_show(slRdrOut,0);
         slider_show(slRdOutVol,0);
         slider_show(slRd1stCh,0);
         slider_show(slRdChUsedCnt,0);
@@ -4770,7 +4775,6 @@ local (bfr, flg, ds, slRdModePrev)
         slRPosPrv = slRPos = max(0,min(100, 100 * (Currreader[its_Rdr_Abspos] - Currreader[its_Rdr_Start])/max(1, Currreader[its_Rdr_Last] - Currreader[its_Rdr_Start]))) ;
         slRdWrefPrv = slRdWref = 1 + Currreader[its_Rdr_WrSrc];
         slRdOffsPrv = slRdOffs = Currreader[its_Rdr_WOffset];
-        slRdrOutPrv = slRdrOut = Currreader[its_Rdr_RCell];
 
         bfr = Currreader[its_Rdr_Lcbl];
         flg = Currreader[its_Rdr_Flgs];
@@ -4827,12 +4831,6 @@ local (bfr, flg, ds, slRdModePrev)
             );
             slRdOffsPrv = slRdOffs = Currreader[its_Rdr_WOffset];
         );
-        (Currreader[its_Rdr_RCell] === 0) ? (
-            Currreader[its_Rdr_RCell] = OUT_P + slReader;
-            updateRdCellIdent(Currreader);
-        );
-        slRdrOutPrv = slRdrOut = Currreader[its_Rdr_RCell];
-        slider_show(slRdrOut,(flg & its_RdrFlg_init)&&gui_show_sliders);
         slRSpeedPrv = slRSpeed = Currreader[its_Rdr_Speed];
     (Currreader[its_Rdr_Status] === its_RdrStat_Reading) ? (
             Currreader[its_Rdr_Tmp4] = 100;
@@ -4853,13 +4851,11 @@ local (bfr, flg, W_pos)
     slider_show(slWriter,gui_show_sliders);
     slider_show(slWrStatus,gui_show_sliders);
     slider_show(slWDlLine,gui_show_sliders);
-    slider_show(slWritCell,gui_show_sliders);
     slider_show(slWrtAct,gui_show_sliders);
 
     (Currwriter === 0) ? (
         slWrStatusPrv = slWrStatus = 0;
         slWDlLinePrv = slWDlLine = 0;
-        slWritCellPrv = slWritCell = 0;
         slWDlSizePrv = slWDlSize = 0;
         slWrtActPrv = slWrtAct = 0;
         slWrPosPrv = slWrPos = 0;
@@ -4867,7 +4863,6 @@ local (bfr, flg, W_pos)
         slWrInGainPrv = slWrInGain = 0;
 
         slider_show(slWDlSize,0);
-        slider_show(slWritCell,0);
         slider_show(slWrPos,0);
         slider_show(slWrOvrdb,0);
         slider_show(slWrLnChCnt,0);
@@ -4901,180 +4896,18 @@ local (bfr, flg, W_pos)
         );
         slWrStatusPrv = slWrStatus = Currwriter[its_Wrt_Status];
         slWrOvrdbPrv = slWrOvrdb = Currwriter[its_Wrt_Ovrdb];
-        ((bfr !== 0) && (Currwriter[its_Wrt_Cell] === 0)) ? (
-            Currwriter[its_Wrt_Cell] = 1 + slWriter;
-        );
-        slWritCellPrv = slWritCell = Currwriter[its_Wrt_Cell];
-        ((bfr === 0) && (Currwriter[its_Wrt_Cell] === 0)) ? (
+        ((bfr === 0) && (Currwriter[its_Wrt_Src] === 0)) ? (
             slider_show(slWDlSize,0);
             slider_show(slWrPos,0);
-            slider_show(slWritCell,0);
             slider_show(slWrOvrdb,0);
         ) : (
             slider_show(slWDlSize,gui_show_sliders);
             slider_show(slWrPos,gui_show_sliders);
-            slider_show(slWritCell,gui_show_sliders);
             slider_show(slWrtAct,gui_show_sliders);
             slider_show(slWrOvrdb,gui_show_sliders);
         );
     );
 );
-
-// Affiche les caractéristiques de l'effet choisi par slEffect
-function display_Effect()
-local (f, ty)
-(
-    // effacement de tous les sliders sauf les sliders "de base"
-    slider_show(slEffect,gui_show_sliders);
-    slider_show(slEPhase,gui_show_sliders);
-    slider_show(slType,gui_show_sliders);
-    slider_show(slFxActMx,gui_show_sliders);
-
-    <? i=1; loop(8, printf("
-        slRnSrc%dPrv = slRnSrc%d = Curreffect[its_Efx_Src%d];
-        slRnDst%dPrv = slRnDst%d = Curreffect[its_Efx_Dst%d];
-        slRnGain%dPrv = slRnGain%d = Curreffect[its_Efx_VoldB%d];
-        slider_show(slRnSrc%d,0); slider_show(slRnGain%d,0); slider_show(slRnDst%d,0);",
-            i, i, i, i, i, i, i, i, i, i, i, i);
-        i += 1;);
-    ?>
-    slider_show(slEndOut,0);
-    slider_show(slFxChCnt,0);
-
-    (Curreffect === 0) ? (
-        slTypePrv = slType = its_Efx_Undefined;
-    ) : (
-        slEndOut = Curreffect[its_Efx_Out];
-        ty = Curreffect[its_Efx_Type];
-        (ty === its_Efx_TyNone) ? (
-            Curreffect[its_Efx_Status] = 0;
-        ) :
-        ((ty === its_Efx_TyMixer)
-            || (ty === its_Efx_TyEQMixer)
-        ) ? (
-            slFxChCntPrv = slFxChCnt = Curreffect[its_Efx_CCnt];
-            slider_show(slFxChCnt,gui_show_sliders);
-            slider_show(slEndOut,gui_show_sliders);
-            (slEndOut != 0) ? (
-                f = 8;
-                (slRnSrc8 == 0) ? (
-                    f = 7;
-                    (slRnSrc7 == 0) ? (
-                        f = 6;
-                        (slRnSrc6 == 0) ? (
-                            f = 5;
-                            (slRnSrc5 == 0) ? (
-                                f = 4;
-                                (slRnSrc4 == 0) ? (
-                                    f = 3;
-                                    (slRnSrc3 == 0) ? (
-                                        f = 2;
-                                        (slRnSrc2 == 0) ? (
-                                            f = 1;
-                                        );
-                                    );
-                                );
-                            );
-                        );
-                    );
-                );
-                slider_show(slRnSrc1,gui_show_sliders);
-                slider_show(slRnGain1,gui_show_sliders);
-                (f >= 1) ? (
-                    slider_show(slRnSrc2,gui_show_sliders);
-                    slider_show(slRnGain2,gui_show_sliders);
-                    (f >= 2) ? (
-                        slider_show(slRnSrc3,gui_show_sliders);
-                        slider_show(slRnGain3,gui_show_sliders);
-                        (f >= 3) ? (
-                            slider_show(slRnSrc4,gui_show_sliders);
-                            slider_show(slRnGain4,gui_show_sliders);
-                            (f >= 4) ? (
-                                slider_show(slRnSrc5,gui_show_sliders);
-                                slider_show(slRnGain5,gui_show_sliders);
-                                (f >= 5) ? (
-                                    slider_show(slRnSrc6,gui_show_sliders);
-                                    slider_show(slRnGain6,gui_show_sliders);
-                                    (f >= 6) ? (
-                                        slider_show(slRnSrc7,gui_show_sliders);
-                                        slider_show(slRnGain7,gui_show_sliders);
-                                        (f >= 7) ? (
-                                            slider_show(slRnSrc8,gui_show_sliders);
-                                            slider_show(slRnGain8,gui_show_sliders);
-                                        );
-                                    );
-                                );
-                            );
-                        );
-                    );
-                );
-            );
-        ) :
-        (ty === its_Efx_TyMover) ? (
-            slider_show(slFxChCnt,gui_show_sliders);
-            f = 8;
-            (slRnSrc8 == 0) ? (
-                f = 7;
-                (slRnSrc7 == 0) ? (
-                    f = 6;
-                    (slRnSrc6 == 0) ? (
-                        f = 5;
-                        (slRnSrc5 == 0) ? (
-                            f = 4;
-                            (slRnSrc4 == 0) ? (
-                                f = 3;
-                                (slRnSrc3 == 0) ? (
-                                    f = 2;
-                                    (slRnSrc2 == 0) ? (
-                                        f = 1;
-                                        (slRnSrc1 == 0) ? (
-                                            f = 0;
-                                        );
-                                    );
-                                );
-                            );
-                        );
-                    );
-                );
-            );
-            slider_show(slRnSrc1,gui_show_sliders);
-            slider_show(slRnDst1,gui_show_sliders);
-            (f >= 1) ? (
-                slider_show(slRnSrc2,gui_show_sliders);
-                slider_show(slRnDst2,gui_show_sliders);
-                (f >= 2) ? (
-                    slider_show(slRnSrc3,gui_show_sliders);
-                    slider_show(slRnDst3,gui_show_sliders);
-                    (f >= 3) ? (
-                        slider_show(slRnSrc4,gui_show_sliders);
-                        slider_show(slRnDst4,gui_show_sliders);
-                        (f >= 4) ? (
-                            slider_show(slRnSrc5,gui_show_sliders);
-                            slider_show(slRnDst5,gui_show_sliders);
-                            (f >= 5) ? (
-                                slider_show(slRnSrc6,gui_show_sliders);
-                                slider_show(slRnDst6,gui_show_sliders);
-                                (f >= 6) ? (
-                                    slider_show(slRnSrc7,gui_show_sliders);
-                                    slider_show(slRnDst7,gui_show_sliders);
-                                    (f >= 7) ? (
-                                        slider_show(slRnSrc8,gui_show_sliders);
-                                        slider_show(slRnDst8,gui_show_sliders);
-                                    );
-                                );
-                            );
-                        );
-                    );
-                );
-            );
-        );
-        ((fxupdt != 0) && (ty === its_Efx_TyEQMixer)) ? (
-            FX_action = 4; // force eq mixing
-            forceupdt = 1; // then update effects
-        );
-    );
-);
-
 
 function display_globals()
 (
@@ -5107,41 +4940,8 @@ function mod_sliders(flag)
     slider_show(slRPos,flag);
     slider_show(slRdWref,flag);
     slider_show(slRdOffs,flag);
-    slider_show(slRdrOut,flag);
     slider_show(slRdOutVol,flag);
     slider_show(slRdActRd,flag);
-
-    // Effects
-    slider_show(slEffect,flag);
-    slider_show(slEPhase,flag);
-    slider_show(slType,flag);
-    slider_show(slFxChCnt,flag);
-    slider_show(slEndOut,flag);
-    slider_show(slRnSrc1,flag);
-    slider_show(slRnGain1,flag);
-    slider_show(slRnDst1,flag);
-    slider_show(slRnSrc2,flag);
-    slider_show(slRnGain2,flag);
-    slider_show(slRnDst2,flag);
-    slider_show(slRnSrc3,flag);
-    slider_show(slRnGain3,flag);
-    slider_show(slRnDst3,flag);
-    slider_show(slRnSrc4,flag);
-    slider_show(slRnGain4,flag);
-    slider_show(slRnDst4,flag);
-    slider_show(slRnSrc5,flag);
-    slider_show(slRnGain5,flag);
-    slider_show(slRnDst5,flag);
-    slider_show(slRnSrc6,flag);
-    slider_show(slRnGain6,flag);
-    slider_show(slRnDst6,flag);
-    slider_show(slRnSrc7,flag);
-    slider_show(slRnGain7,flag);
-    slider_show(slRnDst7,flag);
-    slider_show(slRnSrc8,flag);
-    slider_show(slRnGain8,flag);
-    slider_show(slRnDst8,flag);
-    slider_show(slFxActMx,flag);
 
     // Writers
     slider_show(slWriter,flag);
@@ -5150,7 +4950,6 @@ function mod_sliders(flag)
     slider_show(slWrLnChCnt,flag);
     slider_show(slWDlSize,flag);
     slider_show(slWrPos,flag);
-    slider_show(slWritCell,flag);
     slider_show(slWrInGain,flag);
     slider_show(slWrOvrdb,flag);
     slider_show(slWrtAct,flag);
@@ -5175,91 +4974,6 @@ local (i)
     updt_tables(StaticWA);
 );
 
-
-function its_fx_actions(act, fxnum)
-local (fxbcl, scnt)
-(
-    fxbcl = Effects_set[fxnum];
-    (act != 0) ? (
-        (Effects_set[fxnum] !== 0) ? (
-            (act === its_EfxAct_Copy) ? (
-                // copy to reserve
-                (Effects_set[FX_CNT] === 0) ? (
-                    // create an area for the copy
-                    FX_make(FX_CNT);
-                );
-                memcpy(Effects_set[FX_CNT], Effects_set[fxnum], its_Efx_BlkSize);
-            ) :
-            (act === its_EfxAct_Paste) ? (
-                (Effects_set[FX_CNT] !== 0) ? (
-                    // paste from reserve
-                    memcpy(Effects_set[fxnum], Effects_set[FX_CNT], its_Efx_BlkSize);
-                );
-            ) :
-            (act === its_EfxAct_Clear) ? (
-                FX_Clear(fxnum);
-            ) :
-            (act === its_EfxAct_EQMix) ? (
-                // Apply EQ Mix on "N" values : set volume to -20*log(N)
-                scnt = 8;
-                (fxbcl[its_Efx_Src8] === 0) ? (
-                    scnt = 7;
-                    (fxbcl[its_Efx_Src7] === 0) ? (
-                        scnt = 6;
-                        (fxbcl[its_Efx_Src6] === 0) ? (
-                            scnt = 5;
-                            (fxbcl[its_Efx_Src5] === 0) ? (
-                                scnt = 4;
-                                (fxbcl[its_Efx_Src4] === 0) ? (
-                                    scnt = 3;
-                                    (fxbcl[its_Efx_Src3] === 0) ? (
-                                        scnt = 2;
-                                        (fxbcl[its_Efx_Src2] === 0) ? (
-                                            scnt = 1;
-                                        );
-                                    );
-                                );
-                            );
-                        );
-                    );
-                );
-                tmp = -20 * log10(scnt);
-                tmp = floor (0.5 + 100 * tmp)/100; // petit arrondi joli
-                tmdisp = 10^(tmp/20);
-                fxbcl[its_Efx_VoldB1] = slRnGain1Prv = slRnGain1 = (scnt >= 1) ? tmp : -120;
-                fxbcl[its_Efx_VoldB2] = slRnGain2Prv = slRnGain2 = (scnt >= 2) ? tmp : -120;
-                fxbcl[its_Efx_VoldB3] = slRnGain3Prv = slRnGain3 = (scnt >= 3) ? tmp : -120;
-                fxbcl[its_Efx_VoldB4] = slRnGain4Prv = slRnGain4 = (scnt >= 4) ? tmp : -120;
-                fxbcl[its_Efx_VoldB5] = slRnGain5Prv = slRnGain5 = (scnt >= 5) ? tmp : -120;
-                fxbcl[its_Efx_VoldB6] = slRnGain6Prv = slRnGain6 = (scnt >= 6) ? tmp : -120;
-                fxbcl[its_Efx_VoldB7] = slRnGain7Prv = slRnGain7 = (scnt >= 7) ? tmp : -120;
-                fxbcl[its_Efx_VoldB8] = slRnGain8Prv = slRnGain8 = (scnt >= 8) ? tmp : -120;
-                fxbcl[its_Efx_Vol1] = (scnt >= 1) ? tmdisp : 0;
-                fxbcl[its_Efx_Vol2] = (scnt >= 2) ? tmdisp : 0;
-                fxbcl[its_Efx_Vol3] = (scnt >= 3) ? tmdisp : 0;
-                fxbcl[its_Efx_Vol4] = (scnt >= 4) ? tmdisp : 0;
-                fxbcl[its_Efx_Vol5] = (scnt >= 5) ? tmdisp : 0;
-                fxbcl[its_Efx_Vol6] = (scnt >= 6) ? tmdisp : 0;
-                fxbcl[its_Efx_Vol7] = (scnt >= 7) ? tmdisp : 0;
-                fxbcl[its_Efx_Vol8] = (scnt >= 8) ? tmdisp : 0;
-            ) :
-            (act === its_EfxAct_Show) ? (
-                dbg_show_3(fxbcl, 1020);
-            ) :
-            (act === its_EfxAct_Delete) ? (
-                FX_Delete(fxnum);
-                fxbcl = 0;
-            );
-        ) : (
-            (act === its_EfxAct_Create) ? (
-                fxbcl = FX_make(fxnum);
-            );
-        );
-    );
-    (fxnum === slEffect) ? (
-        Curreffect = fxbcl; forceupdt = 1;
-    );
-);
 
 function its_actions(act)
 local (i, cbl)
@@ -5348,8 +5062,8 @@ local (i, cbl)
     ) :
     (act === its_GlAct_DelAll) ? (
         delete_all_struct();
-        slLinePrv = slReaderPrv = slEffectPrv = slWriterPrv = -1;
-        slLine = slReader = slEffect = slWriter = 0;
+        slLinePrv = slReaderPrv = slWriterPrv = -1;
+        slLine = slReader = slWriter = 0;
         str_mess = "Delete all structures";
     );
 );
@@ -5483,7 +5197,6 @@ sprintf(#A021, "st = %d prvst = %d", slRStatus, slRStatusPrv);
         // Reader currently undefined
         slRStatusPrv = slRStatus = its_RdrStat_UnDef;
         slRSpeedPrv = slRSpeed = 0;
-        slRdrOutPrv = slRdrOut = 0;
         slRPosPrv = slRPos = 0;
     );
 */
@@ -5510,7 +5223,6 @@ sprintf(#A021, "st = %d prvst = %d", slRStatus, slRStatusPrv);
             slRPosPrv = slRPos = max(0,min(100, 100 * (Currreader[its_Rdr_Abspos] - Currreader[its_Rdr_Start])/max(1, Currreader[its_Rdr_Last] - Currreader[its_Rdr_Start]))) ;
             slRdWrefPrv = slRdWref = 1 + Currreader[its_Rdr_WrSrc];
             slRdOffsPrv = slRdOffs = Currreader[its_Rdr_WOffset];
-            slRdrOutPrv = slRdrOut = Currreader[its_Rdr_RCell];
             slRdOutVolPrv = slRdOutVol = Currreader[its_Rdr_OutVoldB];
             dbg_show_3(Currreader, 100);
         ) : (
@@ -5525,7 +5237,6 @@ sprintf(#A021, "st = %d prvst = %d", slRStatus, slRStatusPrv);
             slRPosPrv = slRPos = 0;
             slRdWrefPrv = slRdWref = -1;
             slRdOffsPrv = slRdOffs = 0;
-            slRdrOutPrv = slRdrOut = 0;
             slRdOutVolPrv = slRdOutVol = 0;
         );
         rdupdt = 1; // reader modified
@@ -5642,14 +5353,6 @@ sprintf(#A018, "rdr: %d, wref : %d, wrefP : %d  [%d]", slReader, slRdWref, slRdW
         rdupdt = 1;
     );
 
-    (slRdrOut != slRdrOutPrv) ? (
-        (Currreader !== 0) ? (
-            Currreader[its_Rdr_RCell] = slRdrOutPrv = slRdrOut;
-            updateRdCellIdent(Currreader);
-        );
-        rdupdt = 1;
-    );
-
     (slRdLnChCnt != slRdLnChCntPrv) ? (
         (Currreader !== 0) ? (
             slRdLnChCntPrv = slRdLnChCnt = Currreader[its_Rdr_ChNbr] - 1;
@@ -5690,114 +5393,6 @@ sprintf(#A018, "rdr: %d, wref : %d, wrefP : %d  [%d]", slReader, slRdWref, slRdW
 
 
     //-------------------------------------------------
-    //-----  EFFECTS
-    Preveffect = Curreffect;
-    Curreffect = Effects_set[slEffect];
-    CurreffectNb = slEffect;
-
-    (Curreffect === 0) ? (
-        (slFxActMx != 0) ? (
-            (slFxActMx === its_EfxAct_Create) ? (
-                Curreffect = FX_make(slEffect);
-                // Can set type & phase
-                sltype = max(sltype, its_Efx_Unspecified);
-                Curreffect[its_Efx_Phase] = slEPhasePrv = slEPhase;
-                Curreffect[its_Efx_Type] = slTypePrv = slType;
-            );
-            slFxActMx = 0;
-        );
-        (slType != slTypePrv) ? (
-            // Create the effect and give it a type
-            (Curreffect === 0) ? (
-                Curreffect = FX_make(slEffect);
-            );
-            Curreffect[its_Efx_Phase] = slEPhasePrv = slEPhase;
-            Curreffect[its_Efx_Type] = slTypePrv = slType;
-        );
-        (slEPhase != slEPhasePrv) ? (
-            // Create the effect and define its phase
-            (Curreffect === 0) ? (
-                Curreffect = FX_make(slEffect);
-            );
-            Curreffect[its_Efx_Phase] = slEPhasePrv = slEPhase;
-            Curreffect[its_Efx_Type] = slTypePrv = slType;
-        );
-        fxupdt = 1;
-    ) : (
-        ty = Curreffect[its_Efx_Type]; // type courant
-
-        (slEffect != slEffectPrv) ? (
-            slEffectPrv = slEffect;
-            slTypePrv = slType = Curreffect[its_Efx_Type];
-            slEPhasePrv = slEPhase = Curreffect[its_Efx_Phase];
-            slEndOutPrv = slEndOut = Curreffect[its_Efx_Out] ;
-            fxupdt = 1;
-        );
-
-        (slType != slTypePrv) ? (
-            slTypePrv = slType;
-            Curreffect[its_Efx_Type] = slType;
-            fxupdt = 1;
-        );
-
-        (slEPhase != slEPhasePrv) ? (
-            slEPhasePrv = slEPhase;
-            Curreffect[its_Efx_Phase] = slEPhase;
-            fxupdt = 1;
-        );
-
-        (slFxChCnt != slFxChCntPrv) ? (
-            slFxChCntPrv = slFxChCnt;
-            Curreffect[its_Efx_CCnt] = slFxChCnt;
-            fxupdt = 1;
-        );
-
-        (slEndOut != slEndOutPrv) ? (
-            slEndOutPrv = slEndOut;
-            Curreffect[its_Efx_Out] = slEndOut;
-            fxupdt = 1;
-        );
-
-        <? i = 1; loop(8, printf("
-        (slRnSrc%d!= slRnSrc%dPrv) ? (
-            slRnSrc%dPrv = slRnSrc%d;
-            Curreffect[its_Efx_Src%d] = slRnSrc%d;
-            fxupdt = 1;
-        );
-        (slRnGain%d != slRnGain%dPrv) ? (
-            slRnGain%dPrv = slRnGain%d;
-            Curreffect[its_Efx_VoldB%d] = slRnGain%d;
-            Curreffect[its_Efx_Vol%d] = (slRnGain%d > -120) ? (10^(slRnGain%d/20)) : 0;
-            fxupdt = 1;
-        );
-        (slRnDst%d != slRnDst%dPrv) ? (
-            slRnDst%dPrv = slRnDst%d;
-            Curreffect[its_Efx_Dst%d] = slRnDst%d;
-            fxupdt = 1;
-        );", i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i); i += 1;);
-        ?>
-
-    );
-
-    (slFxActMx != slFxActMxPrv) ? (
-        FX_action = slFxActMx;
-        slFxActMxPrv = slFxActMx = 0;
-    );
-
-
-    (FX_action != 0) ? (
-        its_fx_actions(FX_action, slEffect);
-        FX_action = 0;
-        fxupdt = 1;
-    );
-
-    // the effect is checked again by exec_fx after a modification
-    (fxupdt && (Curreffect > BASE_MEMORY) && (Curreffect[-2] === KW_effx)) ? Curreffect[its_Efx_Check] = 0;
-    (fxupdt) ? display_Effect();
-
-
-
-    //-------------------------------------------------
     //-----  WRITERS
     Prevwriter = Currwriter;
     Currwriter = Writers_set[slWriter];
@@ -5814,7 +5409,6 @@ sprintf(#A018, "rdr: %d, wref : %d, wrefP : %d  [%d]", slReader, slRdWref, slRdW
         slWriterPrv = slWriter;
         (Currwriter === 0) ? (
             slWDlLinePrv = slWDlLine = 0;
-            slWritCellPrv = slWritCell = 0;
         );
         // Currwriter[its_Wrt_Check] = 0;
         wrupdt = 1;
@@ -5853,12 +5447,8 @@ sprintf(#A016,"Wrt. %d  st=%d/%d (%d : %d)", slWriter, slWrStatus, Currwriter[it
                     // slWDlSizePrv = slWDlSize = floor(1000 * bfr[its_Lin_SmplCnt]/srate) / 1000;
                     slWDlSizePrv = slWDlSize = bfr[its_Lin_SmplCntSec];
                 );
-                (Currwriter[its_Wrt_Cell] === 0) ?  (
-                    Currwriter[its_Wrt_Cell] = 1 + slWriter;
-                );
                 slWrStatus = max(slWrStatus, its_WrtStat_Ready);
             );
-            slWritCellPrv = slWritCell = Currwriter[its_Wrt_Cell];
             Currwriter[its_Wrt_Status] = slWrStatusPrv = slWrStatus;
 sprintf(#A012,"Wr.set-line %d {%d  %d} st=%d", slWriter, Currwriter[its_Wrt_LineNb], Currwriter[its_Wrt_Lcbl], slWrStatus);
         );
@@ -5884,14 +5474,6 @@ sprintf(#A012,"Wr.set-line %d {%d  %d} st=%d", slWriter, Currwriter[its_Wrt_Line
         ) : (
             0;
         );
-    );
-
-    (slWritCell != slWritCellPrv) ? (
-        (Currwriter !== 0) ? (
-            Currwriter[its_Wrt_Cell] = slWritCell;
-        );
-        slWritCellPrv = slWritCell;
-        wrupdt = 1;
     );
 
     (slWDlSize != slWDlSizePrv) ? (
@@ -6150,7 +5732,7 @@ local (FFrRate, FlCC, Fhandle, Fformat, FFSize, cbfsiz, bread, ptbuf, bcnt, addb
     Execute a read - the reader is defined and in status "reading"
 */
 function exec_reader(reader, nbr)
-local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc, loc_aux, SP, A, A_aux, playing, l_valid, lax_valid, wps)
+local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc, loc_aux, SP, A, A_aux, playing, l_valid, lax_valid, wps, oc)
 (
     its_RdrErrXe = (reader[its_Rdr_Check] !== BLOCK_CHECK);
     (its_RdrErrXe) ? (
@@ -6215,6 +5797,20 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
         ) : (
             its_RdrErrXe = 130; // erreur - unknown exec mode
         );
+        (its_RdrErrXe === 0) ? (
+            // the output : own cable, or a bus ; an error is not fatal (the samples go to the trash cells)
+            oc = its_Out_Cell(reader[its_Rdr_OutK], reader[its_Rdr_OutOff], reader[its_Rdr_BfChanUsed], CblRdStart[nbr], CblRdWidth[nbr]);
+            (oc > 0) ? (
+                reader[its_Rdr_OutCell] = oc;
+                reader[its_Rdr_OutAdd] = (reader[its_Rdr_OutK] !== 0);
+                reader[its_Rdr_Error] = 0;
+            ) : (
+                reader[its_Rdr_OutCell] = TRASH_P;
+                reader[its_Rdr_OutAdd] = 0;
+                reader[its_Rdr_Check] = 0; // checked again at the next sample
+                reader[its_Rdr_Error] = 2711; // erreur : the output (own cable or bus) is not valid
+            );
+        );
     );
 
 
@@ -6234,6 +5830,11 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
         lcbl = reader[its_Rdr_Lcbl]; // the line
         lcn = reader[its_Rdr_BfChanUsed]; // count of used channels
         vol = reader[its_Rdr_OutVol]; // output read volume
+        oc = reader[its_Rdr_OutCell]; // first output cell (own cable, bus or trash)
+        (reader[its_Rdr_OutAdd] === 0) ? (
+            memset(smpl_tab + oc, 0, lcn); // own cable : this reader is its only source
+            reader[its_Rdr_OutDirty] = (oc !== TRASH_P);
+        );
         mdr = reader[its_Rdr_Mode]; // reader mode
 
         (mdr === its_RdrMode_Read) ? (
@@ -6270,7 +5871,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                                 lax_valid ? (val_aux = inter_cube(bfr, loc_aux));
                             );
                         );
-                        smpl_tab[reader[its_Rdr_RCell] + s] += vol * (val * A + val_aux * A_aux);
+                        smpl_tab[oc + s] += vol * (val * A + val_aux * A_aux);
                         s += 1;
                     );
                 );
@@ -6306,7 +5907,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                                 val = inter_cube(bfr, loc);;
                             );
                         );
-                        smpl_tab[reader[its_Rdr_RCell] + s] += vol * val;
+                        smpl_tab[oc + s] += vol * val;
                         s += 1;
                     );
                 );
@@ -6458,7 +6059,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                         ((bfr = lcbl[s + d]) !== (val = 0)) ? (
                             val = A * loc[bfr] + A_aux * loc_aux[bfr];
                         );
-                        smpl_tab[reader[its_Rdr_RCell] + s] += val;
+                        smpl_tab[oc + s] += val;
                         s += 1;
                     );
                 ) : (
@@ -6466,7 +6067,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                         ((bfr = lcbl[s + d]) !== (val = 0)) ? (
                             val = vol * loc[bfr];
                         );
-                        smpl_tab[reader[its_Rdr_RCell] + s] += val;
+                        smpl_tab[oc + s] += val;
                         s += 1;
                     );
                 );
@@ -6487,20 +6088,16 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
         // An error occured OR the reader is muted
         ((reader > BASE_MEMORY) && (reader[-2] === KW_read)) ? (
             // fill the output with zeroes (ex. mute)
-            s = 0; d = its_Lin_BF1ST + reader[its_Rdr_Bf1stChan];
-            /*
-            loop(reader[its_Rdr_BfChanUsed],
-                smpl_tab[reader[its_Rdr_RCell] + s] = 0 ;
-                s += 1;
-            );
-            */
+            // its own cable is silent
+            (CblRdStart[nbr] > 0) ? memset(smpl_tab + CblRdStart[nbr], 0, CblRdWidth[nbr]);
+            reader[its_Rdr_OutDirty] = 0;
             (its_RdrErrXe > 0) ? (
                 (reader[its_Rdr_Status] === its_RdrStat_Reading) ? (
                         reader[its_Rdr_Tmp4] = 150;
                         reader[its_Rdr_Tmp5] = reader[its_Rdr_Status];
                         reader[its_Rdr_Tmp6] = ts();
                 );
-                ((reader[its_Rdr_Lcbl] > BASE_MEMORY) && (reader[its_Rdr_RCell] != 0)) ? (
+                (reader[its_Rdr_Lcbl] > BASE_MEMORY) ? (
                     reader[its_Rdr_Status] = its_RdrStat_Ready;
                 ) : (
                     reader[its_Rdr_Status] = its_RdrStat_Created;
@@ -6514,7 +6111,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
 );
 
 function exec_writer(writer, nbr)
-local (lcbl, k, s, x, bp, val, vol, f, n, md)
+local (lcbl, k, s, x, bp, val, vol, f, n, md, ic)
 (
     its_WrtErrXe = (writer[its_Wrt_Check] !== BLOCK_CHECK);
     (its_WrtErrXe) ? (
@@ -6547,6 +6144,21 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md)
             );
             writer[its_Wrt_Check] = BLOCK_CHECK;
             its_WrtErrXe = 0;
+            // the source (the channels written, as below) : an error is not fatal (the writer records silence)
+            f = max(0, min(writer[its_Wrt_ChNbr] - 1, writer[its_Wrt_Bf1stChan]));
+            n = writer[its_Wrt_ChNbr] - f;
+            (writer[its_Wrt_BfChanUsed] > 0) ? (n = min(n, writer[its_Wrt_BfChanUsed]));
+            ic = its_Src_Cell(writer[its_Wrt_Src], writer[its_Wrt_SrcOff], n);
+            (ic > 0) ? (
+                writer[its_Wrt_InCell] = ic;
+                writer[its_Wrt_Error] = 0;
+            ) : (
+                writer[its_Wrt_InCell] = ZERO_P;
+                (ic < 0) ? (
+                    writer[its_Wrt_Check] = 0; // checked again at the next sample
+                    writer[its_Wrt_Error] = 2712; // erreur : the source is not valid
+                );
+            );
         );
     );
     (its_WrtErrXe === 0) ? (
@@ -6554,6 +6166,7 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md)
         x = writer[its_Wrt_Ovrdb];
         vol = writer[its_Wrt_InGain];
         md = writer[its_Wrt_Mode];
+        ic = writer[its_Wrt_InCell]; // first cell read (source, or the zero cells)
         // Sample read
         lcbl = writer[its_Wrt_Lcbl];
         // the cells [Cell ... Cell+n-1] go to the channels [f ... f+n-1] of the line
@@ -6563,7 +6176,7 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md)
         s = 0; loop(n,
             // Allows null pointers as output buffers
             ((bp = lcbl[its_Lin_BF1ST + f + s]) !== 0) ? (
-                val = smpl_tab[writer[its_Wrt_Cell] + s];
+                val = smpl_tab[ic + s];
                 (md === its_WrtMode_Sum) ? (
                     k[bp] = val = 0.01 * x * k[bp] + vol * val;
                 ) : (
@@ -6585,8 +6198,8 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md)
         /*
         Trace_X_its_Wrt_5_Loop = s;
         Trace_X_its_Wrt_4_smpl = val;
-        Trace_X_its_Wrt_5_A1 = smpl_tab[writer[its_Wrt_Cell] + 0];
-        Trace_X_its_Wrt_5_A2 = smpl_tab[writer[its_Wrt_Cell] + 1];
+        Trace_X_its_Wrt_5_A1 = smpl_tab[writer[its_Wrt_InCell] + 0];
+        Trace_X_its_Wrt_5_A2 = smpl_tab[writer[its_Wrt_InCell] + 1];
         Trace_X_its_Wrt_5_C1 = k[lcbl[its_Lin_BF1ST]];
         Trace_X_its_Wrt_5_C2 = k[lcbl[its_Lin_BF1ST + 1]];
         */
@@ -6605,7 +6218,7 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md)
     ) : (
         // An error occured
         ((writer > BASE_MEMORY) && (writer[-2] === KW_writ)) ? (
-            ((writer[its_Wrt_Lcbl] > BASE_MEMORY) && (writer[its_Wrt_Cell] != 0)) ? (
+            ((writer[its_Wrt_Lcbl] > BASE_MEMORY) && (writer[its_Wrt_Src] != 0)) ? (
                 writer[its_Wrt_Status] = its_WrtStat_Ready;
             ) : (
                 writer[its_Wrt_Status] = its_WrtStat_Created;
@@ -6620,33 +6233,36 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md)
 
 /*
     execute the effect "fx" (number "nbr") : called by @sample, in the phase of the effect
-    Mixer and EQ Mixer (the EQ Mixer only sets equal gains, see its_fx_actions) :
-        Out[0 ... CCnt-1] = sum of Vol_i * Src_i[0 ... CCnt-1], for the sources i in [1 ... 8] not null
+    Mixer and EQ Mixer (the EQ Mixer only sets equal gains, see FX_EQ_Gains) :
+        Out[0 ... CCnt-1] = sum of Vol_i * Src_i[Off_i ... Off_i+CCnt-1], for the sources i in [1 ... 8] not null
+        the output is the own cable of the effect (assigned), or Out or a bus (added)
     the structure is checked again after each modification (its_Efx_Check reset to 0) ; the error is kept in its_Efx_Error
     the gains in dB (its_Efx_VoldB_i) are the reference : the linear gains (its_Efx_Vol_i) are computed by the check
 */
 function exec_fx(fx, nbr)
-local (ty, ptsrc, src, dst, cc, ccnt, g, i, err)
+local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err)
 (
     (fx[its_Efx_Check] !== BLOCK_CHECK) ? (
         err = 0;
         ty = fx[its_Efx_Type];
         ccnt = fx[its_Efx_CCnt];
-        dst = fx[its_Efx_Out];
         ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyEQMixer)) ? (
             ((ccnt <= 0) || (ccnt > 128) || (ccnt !== floor(ccnt))) ? (
                 err = 2701; // erreur : bad channel count
             ) :
-            ((dst <= 0) || (dst + ccnt > SMPL_SIZE)) ? (
-                err = 2702; // erreur : bad output cell
+            ((dst = its_Out_Cell(fx[its_Efx_OutK], fx[its_Efx_OutOff], ccnt, CblFxStart[nbr], CblFxWidth[nbr])) <= 0) ? (
+                err = 2702; // erreur : bad output (own cable, Out or bus)
             ) : (
+                fx[its_Efx_OutCell] = dst;
+                fx[its_Efx_OutAdd] = (fx[its_Efx_OutK] !== 0);
                 cc = 0; ptsrc = fx + its_Efx_Src1;
                 loop(8,
                     g = ptsrc[its_Efx_VoldB1 - its_Efx_Src1];
                     ptsrc[its_Efx_Vol1 - its_Efx_Src1] = (g > -120) ? 10^(g/20) : 0;
-                    src = ptsrc[0];
-                    ((src < 0) || (src + ccnt > SMPL_SIZE)) ? (
-                        err = 2703; // erreur : bad source cell
+                    src = its_Src_Cell(ptsrc[0], ptsrc[its_Efx_Off1 - its_Efx_Src1], ccnt);
+                    ptsrc[its_Efx_Cell1 - its_Efx_Src1] = max(0, src);
+                    (src < 0) ? (
+                        err = 2703; // erreur : bad source
                     ) :
                     ((src > 0) && (src < dst + ccnt) && (src + ccnt > dst)) ? (
                         err = 2704; // erreur : a source overlaps the output
@@ -6670,13 +6286,16 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, err)
     );
     (fx[its_Efx_Check] === BLOCK_CHECK) ? (
         // Mixer, EQ Mixer
-        dst = fx[its_Efx_Out] + smpl_tab;
+        dst = fx[its_Efx_OutCell] + smpl_tab;
         ccnt = fx[its_Efx_CCnt];
-        i = 0; loop(ccnt, dst[i] = 0; i += 1;);
+        (fx[its_Efx_OutAdd] === 0) ? (
+            memset(dst, 0, ccnt); // own cable : this effect is its only source
+            fx[its_Efx_OutDirty] = 1;
+        );
         ptsrc = fx + its_Efx_Src1;
         loop (8,
-            ((src = ptsrc[0]) > 0) ? (
-                src += smpl_tab;
+            ((c = ptsrc[its_Efx_Cell1 - its_Efx_Src1]) > 0) ? (
+                src = smpl_tab + c;
                 g = ptsrc[its_Efx_Vol1 - its_Efx_Src1];
                 i = 0; loop(ccnt,
                     dst[i] += g * src[i];
@@ -6686,6 +6305,11 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, err)
             ptsrc += its_EfxDist;
         );
         exec_effect += 1;
+    ) :
+    (fx[its_Efx_OutDirty] && (CblFxStart[nbr] > 0)) ? (
+        // not executed : its own cable is silent
+        memset(smpl_tab + CblFxStart[nbr], 0, CblFxWidth[nbr]);
+        fx[its_Efx_OutDirty] = 0;
     );
 );
 
@@ -7509,6 +7133,7 @@ chcnt = num_ch;
     perform_loading = 0;
     recreate_structures(); // also update tables
     load_loadarea();
+    its_PatchForce = 1; // the cables and the cells of all the modules (see its_Patch_Update)
     // force sliders update
     lnupdt = slupdt = wrupdt = rdupdt = fxupdt = 1;
     handling_load = 0;
@@ -7586,10 +7211,10 @@ its_RdrSolos = j; // count of readers in solo mode
 
 (pgmode < 2) ? (
     // Phase 1 --
-    // reset all temporaries tables
-    memset(smpl_tab, 0, TEMP_SIZE);
+    // clear Out and the buses : several sources add into them (a cable is written by its only source)
+    memset(smpl_tab + OUT_P, 0, CTL_P - OUT_P);
     // get input samples ;
-    i = 0; j = smpl_tab + SPL_P; loop (chcnt,
+    i = 0; j = smpl_tab + IN_P; loop (chcnt,
         j[0] = vol_inp * spl(i);
         spl(i) = 0;
         i += 1; j += 1;
@@ -7609,6 +7234,11 @@ its_RdrSolos = j; // count of readers in solo mode
         (((X_rd = Readers_set[rdn]) !== 0) && (X_rd[its_Rdr_Flgs] !== 0) && (X_rd[its_Rdr_Status] === its_RdrStat_Reading)) ? (
             Trace_X_exec_reader = X_rd;
             exec_reader(X_rd, rdn);
+        ) :
+        ((X_rd !== 0) && X_rd[its_Rdr_OutDirty]) ? (
+            // a reader stopped : its own cable is silent
+            (CblRdStart[rdn] > 0) ? memset(smpl_tab + CblRdStart[rdn], 0, CblRdWidth[rdn]);
+            X_rd[its_Rdr_OutDirty] = 0;
         );
         rdn += 1;
     );
@@ -7622,6 +7252,11 @@ Trace_D_Readers_stat_0 = X_rdz[its_Rdr_Status];
         (((fx = Effects_set[fxn]) != 0) && (fx[its_Efx_Status] != 0)
             && (fx[its_Efx_Phase] === its_Efx_PhaseStd)) ? (
             exec_fx(fx, fxn);
+        ) :
+        ((fx != 0) && (fx[its_Efx_Status] == 0) && fx[its_Efx_OutDirty]) ? (
+            // an effect turned off : its own cable is silent
+            (CblFxStart[fxn] > 0) ? memset(smpl_tab + CblFxStart[fxn], 0, CblFxWidth[fxn]);
+            fx[its_Efx_OutDirty] = 0;
         );
         fxn += 1;
     );
@@ -8132,6 +7767,9 @@ while (SchedActive &&
     forceupdt = 0;
 );
 
+// the cables follow the modules
+its_Patch_Update();
+
 // A pad asked for too many cells (damaged pad ?) : see the guard in control_jpad (mSL_ui_Pads)
 ((ui_jpad_bad_cnt != ui_jpad_bad_seen) && (time() != ui_jpad_bad_t)) ? (
     ui_jpad_bad_seen = ui_jpad_bad_cnt; ui_jpad_bad_t = time(); // at most one message per second
@@ -8185,10 +7823,10 @@ local (n, w)
             w = Effects_set;
         ) :
         (n === 11) ? (
-            w = smpl_tab + SPL_P;
+            w = smpl_tab + IN_P;
         ) :
         (n === 12) ? (
-            w = alt_tab + OUT_P;
+            w = smpl_tab + OUT_P;
         ) :
         (n === 21) ? (
             w = Readers_set[0];
@@ -8514,6 +8152,107 @@ local (fa, fb, ra, rb, nch, ch0)
 
 
 /*
+    Pads helpers : the sources and destinations (see its_Src_Cell, its_Out_Cell)
+*/
+// label of the source "src" (kind * ITS_KMul + number), first channel "off", in the string "str"
+function its_Src_Label(str, src, off)
+local (k, n)
+(
+    k = floor(src / ITS_KMul);
+    n = src - k * ITS_KMul;
+    (src === 0) ? strcpy(str, "none") :
+    (k === ITS_KIn) ? sprintf(str, "In:%d", off) :
+    (k === ITS_KOut) ? sprintf(str, "Out:%d", off) :
+    (k === ITS_KBus) ? sprintf(str, "Bus %d:%d", n + 1, off) :
+    (k === ITS_KCtl) ? sprintf(str, "Ctl %d", n + 1 + off) :
+    (k === ITS_KRdr) ? ((off > 0) ? sprintf(str, "R%d:%d", n + 1, off) : sprintf(str, "Reader %d", n + 1)) :
+    (k === ITS_KFx) ? ((off > 0) ? sprintf(str, "E%d:%d", n + 1, off) : sprintf(str, "Effect %d", n + 1)) :
+    strcpy(str, "???");
+);
+
+// label of the destination "dst" of an output (0 : own cable)
+function its_Out_Label(str, dst, off)
+(
+    (dst === 0) ? strcpy(str, "Own cable") : its_Src_Label(str, dst, off);
+);
+
+// item of menu_Src_Ids for the source "src", first channel "off" (0 : not in the menu) ; the source of the item "r"
+// items : 1 None, 2 ... In:0 ..., then Out:0 ..., the buses, the readers, the effects
+function its_Src_MenuIdx(src, off)
+local (k, n)
+(
+    k = floor(src / ITS_KMul);
+    n = src - k * ITS_KMul;
+    (src === 0) ? 1 :
+    (k === ITS_KIn) ? ((off < ITS_MNCH) ? 2 + off : 0) :
+    (k === ITS_KOut) ? ((off < ITS_MNCH) ? 2 + ITS_MNCH + off : 0) :
+    (k === ITS_KBus) ? 2 + 2 * ITS_MNCH + n :
+    (k === ITS_KRdr) ? 2 + 2 * ITS_MNCH + NB_BUS + n :
+    (k === ITS_KFx) ? 2 + 2 * ITS_MNCH + NB_BUS + RD_CNT + n : 0;
+);
+// the source of the item "r" ; its first channel in its_Src_ChOff (0 for a bus, a reader, an effect)
+function its_Src_FromIdx(r)
+(
+    its_Src_ChOff = 0;
+    (r <= 1) ? 0 :
+    (r < 2 + ITS_MNCH) ? (its_Src_ChOff = r - 2; ITS_KIn * ITS_KMul) :
+    (r < 2 + 2 * ITS_MNCH) ? (its_Src_ChOff = r - 2 - ITS_MNCH; ITS_KOut * ITS_KMul) :
+    (r < 2 + 2 * ITS_MNCH + NB_BUS) ? ITS_KBus * ITS_KMul + r - 2 - 2 * ITS_MNCH :
+    (r < 2 + 2 * ITS_MNCH + NB_BUS + RD_CNT) ? ITS_KRdr * ITS_KMul + r - 2 - 2 * ITS_MNCH - NB_BUS :
+    ITS_KFx * ITS_KMul + r - 2 - 2 * ITS_MNCH - NB_BUS - RD_CNT;
+);
+
+// menu of the sources, "src" (first channel "off") ticked ; returns the source chosen (0 : none), -1 if no choice ;
+// the first channel chosen is in its_Src_ChOff
+function its_Src_Choose(src, off)
+local (k, xx, res)
+(
+    res = -1;
+    ui_menu_tick(menu_Src_Ids, -1, 0);
+    ((k = its_Src_MenuIdx(src, off)) > 0) ? ui_menu_tick(menu_Src_Ids, k, 1);
+    xx = control_jmenu(menu_Src_Ids);
+    (xx != 0) ? (res = its_Src_FromIdx(xx));
+    ui_menu_tick(menu_Src_Ids, -1, 0);
+    res;
+);
+
+// menu of the destinations of an output, "dst" (first channel "off") ticked ; returns the destination chosen
+// (0 : own cable), -1 if no choice ; the first channel chosen is in its_Src_ChOff (0 for the own cable, a bus)
+// items : 1 own cable, 2 ... Out:0 ..., then the buses
+function its_Dst_Choose(dst, off)
+local (k, n, xx, res)
+(
+    res = -1;
+    k = floor(dst / ITS_KMul);
+    n = dst - k * ITS_KMul;
+    ui_menu_tick(menu_Dst_Ids, -1, 0);
+    k = (dst === 0) ? 1 : (k === ITS_KOut) ? ((off < ITS_MNCH) ? 2 + off : 0) : 2 + ITS_MNCH + n;
+    (k > 0) ? ui_menu_tick(menu_Dst_Ids, k, 1);
+    xx = control_jmenu(menu_Dst_Ids);
+    (xx != 0) ? (
+        its_Src_ChOff = 0;
+        res = (xx === 1) ? 0 :
+            (xx < 2 + ITS_MNCH) ? (its_Src_ChOff = xx - 2; ITS_KOut * ITS_KMul) :
+            ITS_KBus * ITS_KMul + xx - 2 - ITS_MNCH;
+    );
+    ui_menu_tick(menu_Dst_Ids, -1, 0);
+    res;
+);
+
+// menu of the first channel [0 ... 127], "off" ticked ; returns the channel chosen, -1 if no choice
+function its_Off_Choose(off)
+local (xx, res)
+(
+    res = -1;
+    ui_menu_tick(menu_128_0_Ids, -1, 0);
+    ui_menu_tick(menu_128_0_Ids, off + 1, 1);
+    xx = control_jmenu(menu_128_0_Ids);
+    (xx != 0) ? (res = xx - 1);
+    ui_menu_tick(menu_128_0_Ids, -1, 0);
+    res;
+);
+
+/*
    RDBL[0] = reader to display
    RDBL[1] = reader type
    RDBL[2] = UI Error
@@ -8614,16 +8353,9 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                         sprintf(pad_Rdr_Labs[7], "Used %d", rcbl[its_Rdr_BfChanUsed]);
                         sprintf(pad_Rdr_Labs[11], "Pos %.3f s", max(0, min(rcbl[its_Rdr_Last], rcbl[its_Rdr_Abspos]) - rcbl[its_Rdr_Start]) / srate); // (as in the writer pad)
                         sprintf(pad_Rdr_Labs[12], "Speed %.3f", rcbl[its_Rdr_Speed]);
-                        // setCellIdent(rcbl[its_Rdr_RCell], pad_Rdr_Labs+10, pad_Rdr_Labs+11);
                         pad_Rdr_Colrs[3] = pad_Rdr_Colrs[4] = pad_Rdr_Colrs[5] =
                         pad_Rdr_Colrs[6] = pad_Rdr_Colrs[7] = Color_Heliotrope;
-                        k = rcbl[its_Rdr_RCell] -1;
-                        (k < 0) ? (
-                            strcpy(pad_Rdr_Labs[10],"none");
-                        ) : (
-                            sprintf(pad_Rdr_Labs[10],"%s(%d)", menu_XCells_Ids_D[menu_XCells_Ids_Names + (k >> 8)],
-                                        k & 0xFF);
-                        );
+                        its_Out_Label(pad_Rdr_Labs[10], rcbl[its_Rdr_OutK], rcbl[its_Rdr_OutOff]);
                     );
                     // Mute
                     (rcbl[its_Rdr_StFlgs] & its_RdrFlg_mute) ? (
@@ -8827,62 +8559,18 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                                 xx = control_jmenu(menu_128_1_Ids); // select a count
                                 (xx != 0) ? (
                                     rcbl[its_Rdr_BfChanUsed] = xx;
+                                    rcbl[its_Rdr_Check] = 0; // (output width)
                                 );
                                 ui_menu_tick(menu_128_1_Ids, -1, 0);
                             );
                         ) :
                         (zzmcl === 10) ? (
-                            (rok) ? (
-                                k = rcbl[its_Rdr_RCell] -1;
-                                ui_menu_tick(menu_XCells_Ids, -1, 0);
-                                (k < 0) ? (
-                                    ui_menu_tick(menu_XCells_Ids, 1, 1);
-                                ) : (
-                                    ui_menu_tick(menu_XCells_Ids, (k >> 8) + 2, 1);
-                                    ui_menu_tick(menu_XCells_Ids, (k & 0xFF) + menu_XCells_Ids_Nums + 2, 1);
-                                    // also tick the header of the sub-menu that holds the number (reset below by the tick -1)
-                                    rgh = menu_XCells_Ids[ui_jmenu_items + menu_XCells_Ids_Hdr0 + ((k & 0xFF) >> 5) * 33];
-                                    str_setchar(rgh, 1, '!');
-                                );
-                                xx = control_jmenu(menu_XCells_Ids); // select a count
-                                (xx != 0) ? (
-                                    x = xx - 2;
-                                    sprintf(#itm, "Menu 8 : %d -> %d -> %d", rdr, xx, x);
-                                    mSL_log(SysLogBox, #itm);
-                                    (x < 0) ? (
-                                        rcbl[its_Rdr_RCell] = rcbl[its_Rdr_RCellT] = rcbl[its_Rdr_RCellN] = 0;
-                                    ) : (
-                                        (x < menu_XCells_Ids_Nums) ? (
-                                            rcbl[its_Rdr_RCellT] = x;
-                                        ) : (
-                                            rcbl[its_Rdr_RCellN] = (x - menu_XCells_Ids_Nums) & 0xFF; // (% 0xFF : 255 gave 0)
-                                        );
-                                        rcbl[its_Rdr_RCell] = rcbl[its_Rdr_RCellT] * 256 + rcbl[its_Rdr_RCellN] + 1;
-                                    );
-                                );
-                                ui_menu_tick(menu_XCells_Ids, -1, 0);
+                            // the output : own cable, Out or a bus (left clic : the first channel in the bus)
+                            ((rok) && ((k = its_Dst_Choose(rcbl[its_Rdr_OutK], rcbl[its_Rdr_OutOff])) >= 0)) ? (
+                                rcbl[its_Rdr_OutK] = k;
+                                rcbl[its_Rdr_OutOff] = its_Src_ChOff;
+                                rcbl[its_Rdr_Check] = 0;
                             );
-                            /*
-                            (rok) ? (
-                                w = rcbl[its_Rdr_RCellT];
-                                k = rcbl[its_Rdr_RCellT]+1;
-                                ui_menu_tick(menu_Cells_Ids, k, 1);
-                                xx = control_jmenu(menu_Cells_Ids);
-                                (xx != 0) ? (
-                                    rcbl[its_Rdr_RCellT] = ty = xx - 1;
-                                    (ty === 0) ? (rcbl[its_Rdr_RCellN] = 0);
-                                    rcbl[its_Rdr_RCell] = getCellIdent(rcbl[its_Rdr_RCellT], rcbl[its_Rdr_RCellN] % (w <= 4 ? 128 : 256));
-                                    updateRdCellIdent(rcbl);
-                                    sprintf(#itm, "Menu 10 -> %d %d %d", rcbl[its_Rdr_RCellT],
-                                        rcbl[its_Rdr_RCellN], rcbl[its_Rdr_RCell]);
-                                    mSL_log(SysLogBox, #itm);
-                                );
-                                ui_menu_tick(menu_Cells_Ids, k, 0);
-                            );
-                            */
-                        ) :
-                        (zzmcl === 11) ? (
-                            w = rcbl[its_Rdr_RCellT];
                         ) :
                         (zzmcl === 12) ? (
                             (rok) ? (
@@ -9024,6 +8712,12 @@ local (h1, h2, h3, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi,
                                 rcbl[its_Rdr_StFlgs] &= -1 ~ its_RdrFlg_solo;
                             ) : (
                                 rcbl[its_Rdr_StFlgs] |= its_RdrFlg_solo;
+                            );
+                        ) :
+                        ((zzmcl === 10) && rok) ? (
+                            ((k = its_Off_Choose(rcbl[its_Rdr_OutOff])) >= 0) ? (
+                                rcbl[its_Rdr_OutOff] = k;
+                                rcbl[its_Rdr_Check] = 0;
                             );
                         ) :
                         ((zzmcl === 14) && rok) ? (
@@ -9619,52 +9313,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
 );
 
 
-/*
-    Effects pad helpers
-*/
-// label of the cell "cell" (smpl_tab index = 1 + type * 256 + number ; 0 : none) in the string "str"
-function its_Cell_Label(str, cell)
-(
-    (cell <= 0) ? strcpy(str, "none") :
-        sprintf(str, "%s(%d)", menu_XCells_Ids_D[menu_XCells_Ids_Names + ((cell - 1) >> 8)], (cell - 1) & 0xFF);
-);
-
-// menu of the cells, the cell "cell" ticked ; returns the cell chosen (0 : none), -1 if no choice
-// (the type and the number are chosen separately, as for the source of a writer)
-function its_Cell_Choose(cell)
-local (k, x, xx, wgh, res)
-(
-    res = -1;
-    k = cell - 1;
-    ui_menu_tick(menu_XCells_Ids, -1, 0);
-    (k < 0) ? (
-        ui_menu_tick(menu_XCells_Ids, 1, 1);
-    ) : (
-        ui_menu_tick(menu_XCells_Ids, (k >> 8) + 2, 1);
-        ui_menu_tick(menu_XCells_Ids, (k & 0xFF) + menu_XCells_Ids_Nums + 2, 1);
-        // also tick the header of the sub-menu that holds the number (reset below by the tick -1)
-        wgh = menu_XCells_Ids[ui_jmenu_items + menu_XCells_Ids_Hdr0 + ((k & 0xFF) >> 5) * 33];
-        str_setchar(wgh, 1, '!');
-    );
-    xx = control_jmenu(menu_XCells_Ids); // select a type or a number
-    (xx != 0) ? (
-        x = xx - 2;
-        (x < 0) ? (
-            res = 0;
-        ) : (
-            k = max(0, k);
-            (x < menu_XCells_Ids_Nums) ? (
-                k = x * 256 + (k & 0xFF); // new type
-            ) : (
-                k = (k >> 8) * 256 + ((x - menu_XCells_Ids_Nums) & 0xFF); // new number
-            );
-            res = k + 1;
-        );
-    );
-    ui_menu_tick(menu_XCells_Ids, -1, 0);
-    res;
-);
-
 // EQ Mixer : the same gain -20*log10(N) (rounded to 0.01 dB) for the N sources not null
 function FX_EQ_Gains(fx)
 local (n, g, p)
@@ -9690,7 +9338,7 @@ FXP_Fill = 1;
 FXP_Click = 2;
 FXP_Sliders = 3;
 
-// Mixer and EQ Mixer : line 1 = the 8 sources (right clic : menu of the cells) ; the gains of the Mixer as sliders
+// Mixer and EQ Mixer : line 1 = the 8 sources (right clic : the source ; left clic : its first channel) ; the gains of the Mixer as sliders
 function FX_Mixer_Pad(RDBL, fx, fxn, what, cell, ev)
 local (i, k, p, r, zi, mix)
 (
@@ -9706,7 +9354,7 @@ local (i, k, p, r, zi, mix)
         loop(8,
             k = p[0];
             (k > 0) ? (
-                its_Cell_Label(pad_Efx_Labs[8 + i], k);
+                its_Src_Label(pad_Efx_Labs[8 + i], k, p[its_Efx_Off1 - its_Efx_Src1]);
                 pad_Efx_Colrs[8 + i] = CP3;
             ) : (
                 sprintf(pad_Efx_Labs[8 + i], "Src %d", i + 1);
@@ -9716,11 +9364,20 @@ local (i, k, p, r, zi, mix)
         );
     ) :
     (what === FXP_Click) ? (
-        ((ev & ui_jpad_ev_rmc) && (cell >= 8) && (cell < 16)) ? (
+        ((cell >= 8) && (cell < 16)) ? (
             p = fx + its_Efx_Src1 + (cell - 8) * its_EfxDist;
-            ((k = its_Cell_Choose(p[0])) >= 0) ? (
-                p[0] = k;
-                mix ? (fx[its_Efx_Check] = 0) : FX_EQ_Gains(fx);
+            (ev & ui_jpad_ev_rmc) ? (
+                ((k = its_Src_Choose(p[0], p[its_Efx_Off1 - its_Efx_Src1])) >= 0) ? (
+                    p[0] = k;
+                    p[its_Efx_Off1 - its_Efx_Src1] = its_Src_ChOff;
+                    mix ? (fx[its_Efx_Check] = 0) : FX_EQ_Gains(fx);
+                );
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                ((k = its_Off_Choose(p[its_Efx_Off1 - its_Efx_Src1])) >= 0) ? (
+                    p[its_Efx_Off1 - its_Efx_Src1] = k;
+                    fx[its_Efx_Check] = 0;
+                );
             );
         );
     ) :
@@ -9765,7 +9422,7 @@ local (ty)
         2 phase (left clic : next one ; right clic : menu)
         3 On / Off (left clic)
         4 channel count (right clic : menu)
-        5 output cell (right clic : menu)
+        5 output : own cable, Out or a bus (right clic : menu ; left clic : first channel in the bus)
         6 error (last error of exec_fx)
         7 actions (right clic : menu)
     Lines 1 ... 3 and the sliders : the function of the type (FX_Type_Pad)
@@ -9829,7 +9486,7 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                     );
                     sprintf(pad_Efx_Labs[4], "Channels %d", fx[its_Efx_CCnt]);
                     pad_Efx_Colrs[4] = Color_Heliotrope;
-                    its_Cell_Label(pad_Efx_Labs[5], fx[its_Efx_Out]);
+                    its_Out_Label(pad_Efx_Labs[5], fx[its_Efx_OutK], fx[its_Efx_OutOff]);
                     pad_Efx_Colrs[5] = CP3;
                     (fx[its_Efx_Status] === its_EfxStat_Off) ? (
                         strcpy(pad_Efx_Labs[6], "---");
@@ -9909,8 +9566,9 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                             ui_menu_tick(menu_128_1_Ids, -1, 0);
                         ) :
                         ((zzmcl === 5) && fok) ? (
-                            ((k = its_Cell_Choose(fx[its_Efx_Out])) >= 0) ? (
-                                fx[its_Efx_Out] = k;
+                            ((k = its_Dst_Choose(fx[its_Efx_OutK], fx[its_Efx_OutOff])) >= 0) ? (
+                                fx[its_Efx_OutK] = k;
+                                fx[its_Efx_OutOff] = its_Src_ChOff;
                                 fx[its_Efx_Check] = 0;
                             );
                         ) :
@@ -9964,6 +9622,12 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                         ((zzmcl === 3) && fok) ? (
                             fx[its_Efx_Status] = (fx[its_Efx_Status] !== its_EfxStat_Off) ? its_EfxStat_Off : its_EfxStat_On;
                         ) :
+                        ((zzmcl === 5) && fok) ? (
+                            ((k = its_Off_Choose(fx[its_Efx_OutOff])) >= 0) ? (
+                                fx[its_Efx_OutOff] = k;
+                                fx[its_Efx_Check] = 0;
+                            );
+                        ) :
                         ((zzmcl >= 8) && fok) ? (
                             FX_Type_Pad(RDBL, fx, fxn, FXP_Click, zzmcl, zz);
                         );
@@ -9989,7 +9653,8 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
     The pad (2 lines of 8 cells), the waveform of the line of the writer (if any), the sliders (record gain, overdub)
     Key 'd' : dump of the writer in the log
     Cells : 0 writer number (left clic : next one, shift : previous one), 1 status, 3 line, 4 size, 5 channels, 6 first channel written, 7 channels used,
-            10 source cell, 11 write position (s), 12 overdub mode (left clic : X-fade / Sum), 15 actions (right clic : menus)
+            10 source (right clic : menu ; left clic : first channel taken), 11 write position (s), 12 overdub mode (left clic : X-fade / Sum),
+            15 actions (right clic : menus)
 */
 function show_Writer_Pad(WDBL, blockID)
 local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, CL1, dfCol, i, k, r, w, x, xx, zi, zz, zzch,
@@ -10057,12 +9722,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                     ) : (
                         strcpy(pad_Wrt_Labs[3],"Line: None");
                     );
-                    k = wcbl[its_Wrt_Cell] - 1;
-                    (k < 0) ? (
-                        strcpy(pad_Wrt_Labs[10],"none");
-                    ) : (
-                        sprintf(pad_Wrt_Labs[10],"%s(%d)", menu_XCells_Ids_D[menu_XCells_Ids_Names + (k >> 8)], k & 0xFF);
-                    );
+                    its_Src_Label(pad_Wrt_Labs[10], wcbl[its_Wrt_Src], wcbl[its_Wrt_SrcOff]);
                     pad_Wrt_Colrs[10] = CP3;
                     strcpy(pad_Wrt_Labs[12], (wcbl[its_Wrt_Mode] === its_WrtMode_Sum) ? "Overdub Sum" : "Overdub X-fade");
                     pad_Wrt_Colrs[12] = CL1;
@@ -10136,6 +9796,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                                 xx = control_jmenu(menu_128_0_Ids); // select a number
                                 (xx != 0) ? (
                                     wcbl[its_Wrt_Bf1stChan] = xx - 1;
+                                    wcbl[its_Wrt_Check] = 0; // (source width)
                                 );
                                 ui_menu_tick(menu_128_0_Ids, -1, 0);
                             );
@@ -10153,41 +9814,18 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                                 xx = control_jmenu(menu_128_1_Ids); // select a count
                                 (xx != 0) ? (
                                     wcbl[its_Wrt_BfChanUsed] = xx;
+                                    wcbl[its_Wrt_Check] = 0; // (source width)
                                 );
                                 ui_menu_tick(menu_128_1_Ids, -1, 0);
                             );
                         ) :
                         (zzmcl === 10) ? (
-                            // the source cell : smpl_tab index = 1 + type * 256 + number (as the output cell of a reader)
-                            (wok) ? (
-                                k = wcbl[its_Wrt_Cell] - 1;
-                                ui_menu_tick(menu_XCells_Ids, -1, 0);
-                                (k < 0) ? (
-                                    ui_menu_tick(menu_XCells_Ids, 1, 1);
-                                ) : (
-                                    ui_menu_tick(menu_XCells_Ids, (k >> 8) + 2, 1);
-                                    ui_menu_tick(menu_XCells_Ids, (k & 0xFF) + menu_XCells_Ids_Nums + 2, 1);
-                                    // also tick the header of the sub-menu that holds the number (reset below by the tick -1)
-                                    wgh = menu_XCells_Ids[ui_jmenu_items + menu_XCells_Ids_Hdr0 + ((k & 0xFF) >> 5) * 33];
-                                    str_setchar(wgh, 1, '!');
-                                );
-                                xx = control_jmenu(menu_XCells_Ids); // select a type or a number
-                                (xx != 0) ? (
-                                    x = xx - 2;
-                                    (x < 0) ? (
-                                        wcbl[its_Wrt_Cell] = 0;
-                                    ) : (
-                                        k = max(0, k);
-                                        (x < menu_XCells_Ids_Nums) ? (
-                                            k = x * 256 + (k & 0xFF); // new type
-                                        ) : (
-                                            k = (k >> 8) * 256 + ((x - menu_XCells_Ids_Nums) & 0xFF); // new number
-                                        );
-                                        wcbl[its_Wrt_Cell] = k + 1;
-                                    );
-                                    Wr_Set_Status(wrt, wcbl[its_Wrt_Status]); // no source cell : "Created"
-                                );
-                                ui_menu_tick(menu_XCells_Ids, -1, 0);
+                            // the source (left clic : the first channel taken in the source)
+                            ((wok) && ((x = its_Src_Choose(wcbl[its_Wrt_Src], wcbl[its_Wrt_SrcOff])) >= 0)) ? (
+                                wcbl[its_Wrt_Src] = x;
+                                wcbl[its_Wrt_SrcOff] = its_Src_ChOff;
+                                wcbl[its_Wrt_Check] = 0;
+                                Wr_Set_Status(wrt, wcbl[its_Wrt_Status]); // no source : "Created"
                             );
                         ) :
                         (zzmcl === 15) ? (
@@ -10214,6 +9852,12 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                             ((w === its_WrtStat_Ready) || (w === its_WrtStat_Paused) || (w === its_WrtStat_Writing)) ? (
                                 r = Wr_Set_Status(wrt, (w === its_WrtStat_Paused) ? its_WrtStat_Writing : its_WrtStat_Paused);
                                 (wrt === slWriter) ? (slWrStatusPrv = slWrStatus = wcbl[its_Wrt_Status]);
+                            );
+                        );
+                        ((zzmcl === 10) && wok) ? (
+                            ((x = its_Off_Choose(wcbl[its_Wrt_SrcOff])) >= 0) ? (
+                                wcbl[its_Wrt_SrcOff] = x;
+                                wcbl[its_Wrt_Check] = 0;
                             );
                         );
                         ((zzmcl === 12) && wok) ? (

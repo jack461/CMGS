@@ -20,43 +20,30 @@ options:gmem=GM_SHM
     LN_CNT = 256; // nombre de buffers audio
     FX_CNT = 256; // Nombre d'effets
     CH_NB = 256; // nombre de canaux à gérer (spl_in & spl_out)
-    NB_AUX = 256; // autres zones de travail (aux & tmp)
-    NB_WRK = 256; // mots immédiats
+    NB_BUS = 16; // nombre de bus utilisateur
+    BUS_W = 8; // canaux par bus
+    NB_CTL = 64; // cellules de contrôle (sliders génériques)
+    CBL_CELLS = 16384; // cellules des câbles (le "Pool")
     /*
-        Les cellules sont, dans l'ordre
-        1 : "None" - cellule toujours inutilisée
-        ---- temporaires
-        CH_NB : les spl_in (128)
-        CH_NB : les spl_out (128)
-        NB_AUX : les aux
-        NB_AUX : les tmp
-        NB_AUX : les fmr
-        NB_AUX : les loc
-        ---- rémanentes
-        NB_AUX : les var
-        NB_AUX : les cst
-        NB_WRK : mots de travail, "Work i"
-        RD_CNT : mots de travail, "Reader i"
-        WR_CNT : mots de travail, "Writer i"
-        FX_CNT : mots de travail, "Effect i"
+        Les cellules (smpl_tab), dans l'ordre
+        0 : "None", toujours 0
+        IN_P : In, les CH_NB entrées de la piste (écrites au début de @sample)
+        OUT_P : Out, le bus de sortie, CH_NB canaux
+        BUS_P : NB_BUS bus de BUS_W canaux
+        ---- Out et les bus (OUT_P ... CTL_P-1) sont effacés à chaque échantillon : plusieurs sources s'y ajoutent
+        CTL_P : NB_CTL cellules de contrôle, tenues (sliders génériques)
+        CBL_P : le Pool, CBL_CELLS cellules : les câbles propres des sorties (une seule source chacun)
+        ZERO_P : 128 cellules toujours nulles (entrée non branchée ou invalide)
+        TRASH_P : 128 cellules "poubelle" (sortie invalide)
     */
-    SMPL_SIZE = 1 + NB_WRK + RD_CNT + WR_CNT + FX_CNT + 2 * CH_NB + 6 * NB_AUX; // Taille totale de la zone
-    TEMP_SIZE = 1 + 2 * CH_NB + 4 * NB_AUX; // taille des temporaires
-    SPL_P = 1;
-    OUT_P = 1 + CH_NB;
-    // Génération des noms des cellules
-    function gen_cells_names()
-    (
-        printf("None");
-        i = 0; loop(CH_NB, printf(",spl_in(%d)", i); i+=1;);
-        i = 0; loop(CH_NB, printf(",spl_out(%d)", i); i+=1;);
-        i = 0; loop(NB_AUX, printf(",aux %d", i); i+=1;);
-        i = 0; loop(NB_AUX, printf(",tmp %d", i); i+=1;);
-        i = 1; loop(NB_WRK, printf(",Work %d", i); i+=1;);
-        i = 1; loop(RD_CNT, printf(",Reader %d", i); i+=1;);
-        i = 1; loop(WR_CNT, printf(",Writer %d", i); i+=1;);
-        i = 1; loop(FX_CNT, printf(",Effect %d", i); i+=1;);
-    );
+    IN_P = 1;
+    OUT_P = IN_P + CH_NB;
+    BUS_P = OUT_P + CH_NB;
+    CTL_P = BUS_P + NB_BUS * BUS_W;
+    CBL_P = CTL_P + NB_CTL;
+    ZERO_P = CBL_P + CBL_CELLS;
+    TRASH_P = ZERO_P + 128;
+    SMPL_SIZE = TRASH_P + 128; // Taille totale de la zone
     slnum = 1;
     SPDMAX = 4;
     // Options
@@ -85,45 +72,8 @@ slider<? printf("%d", (slnum += 1)); ?>:slRSpeed=0<-<? printf("%d", SPDMAX); ?>,
 slider<? printf("%d", (slnum += 1)); ?>:slRPos=0<0,100,0.001>-Position
 slider<? printf("%d", (slnum += 1)); ?>:slRdWref=0<0,<? printf("%d", WR_CNT); ?>,1{None<? i=1; loop(WR_CNT, printf(",Writer %d",i); i+= 1;); ?>}>-Writer reference
 slider<? printf("%d", (slnum += 1)); ?>:slRdOffs=0<0,600,0.00001:sqr=5>-Offset (s)
-slider<? printf("%d", (slnum += 1)); ?>:slRdrOut=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Reader output
 slider<? printf("%d", (slnum += 1)); ?>:slRdOutVol=0<-120,20,0.1>-Play volume
 slider<? printf("%d", (slnum += 1)); ?>:slRdActRd=0<0,10,1{Done,Copy,Paste,Clear,Rewind,Speed 1,Create,Activate,Show,---,Delete}>-Action
-
-
-<? slnum += 1; ?>
-
-
-slider<? printf("%d", (slnum += 1)); ?>:slEffect=0<0,<? printf("%d", FX_CNT-1); ?>,1{Effect 1<? i=2; loop(FX_CNT-1, printf(",Effect %d",i); i+= 1;); ?>}>================> Selected Effect :
-slider<? printf("%d", (slnum += 1)); ?>:slEPhase=0<0,2,1{Standard,Before readers,After writers}>Position
-slider<? printf("%d", (slnum += 1)); ?>:slType=0<0,6,1{Undefined,unused,Mixer,EQ Mixer,Mover,Action,Script}>Type
-slider<? printf("%d", (slnum += 1)); ?>:slFxChCnt=0<0,128,1{0<? i=1; loop(128, printf(",%d", i); i+= 1;); ?>}>-Channel Count :
-slider<? printf("%d", (slnum += 1)); ?>:slEndOut=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Output
-<? FXarray=slnum; ?>
-slider<? printf("%d", (slnum += 1)); ?>:slRnSrc1=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Source 1
-slider<? printf("%d", (slnum += 1)); ?>:slRnGain1=0<-120,20,0.1>-Gain 1 (dB)
-slider<? printf("%d", (slnum += 1)); ?>:slRnDst1=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Destination 1
-slider<? printf("%d", (slnum += 1)); ?>:slRnSrc2=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Source 2
-slider<? printf("%d", (slnum += 1)); ?>:slRnGain2=-120<-120,20,0.1>-Gain 2 (dB)
-slider<? printf("%d", (slnum += 1)); ?>:slRnDst2=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Destination 2
-slider<? printf("%d", (slnum += 1)); ?>:slRnSrc3=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Source 3
-slider<? printf("%d", (slnum += 1)); ?>:slRnGain3=-120<-120,20,0.1>-Gain 3 (dB)
-slider<? printf("%d", (slnum += 1)); ?>:slRnDst3=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Destination 3
-slider<? printf("%d", (slnum += 1)); ?>:slRnSrc4=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Source 4
-slider<? printf("%d", (slnum += 1)); ?>:slRnGain4=-120<-120,20,0.1>-Gain 4 (dB)
-slider<? printf("%d", (slnum += 1)); ?>:slRnDst4=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Destination 4
-slider<? printf("%d", (slnum += 1)); ?>:slRnSrc5=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Source 5
-slider<? printf("%d", (slnum += 1)); ?>:slRnGain5=-120<-120,20,0.1>-Gain 5 (dB)
-slider<? printf("%d", (slnum += 1)); ?>:slRnDst5=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Destination 5
-slider<? printf("%d", (slnum += 1)); ?>:slRnSrc6=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Source 6
-slider<? printf("%d", (slnum += 1)); ?>:slRnGain6=-120<-120,20,0.1>-Gain 6 (dB)
-slider<? printf("%d", (slnum += 1)); ?>:slRnDst6=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Destination 6
-slider<? printf("%d", (slnum += 1)); ?>:slRnSrc7=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Source 7
-slider<? printf("%d", (slnum += 1)); ?>:slRnGain7=-120<-120,20,0.1>-Gain 7 (dB)
-slider<? printf("%d", (slnum += 1)); ?>:slRnDst7=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Destination 7
-slider<? printf("%d", (slnum += 1)); ?>:slRnSrc8=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Source 8
-slider<? printf("%d", (slnum += 1)); ?>:slRnGain8=-120<-120,20,0.1>-Gain 8 (dB)
-slider<? printf("%d", (slnum += 1)); ?>:slRnDst8=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Destination 8
-slider<? printf("%d", (slnum += 1)); ?>:slFxActMx=0<0,7,1{Done,Copy,Paste,Clear,EQ Mix,Reset,Create,Show,---,Delete}>-Action
 
 
 <? slnum += 1; ?>
@@ -135,7 +85,6 @@ slider<? printf("%d", (slnum += 1)); ?>:slWDlLine=0<0,<? printf("%d", LN_CNT); ?
 slider<? printf("%d", (slnum += 1)); ?>:slWrLnChCnt=0<0,<? printf("%d", CH_NB-1); ?>,1{1<? i=2; loop(CH_NB-1, printf(",%d",i); i+= 1;); ?>}>-Line channels count
 slider<? printf("%d", (slnum += 1)); ?>:slWDlSize=0<1,1200,0.001>-Line size (s)
 slider<? printf("%d", (slnum += 1)); ?>:slWrPos=0<0,100,0.0001>-Position (%)
-slider<? printf("%d", (slnum += 1)); ?>:slWritCell=0<0,<? printf("%d", SMPL_SIZE-1); ?>,1{<? gen_cells_names(); ?>}>-Source cell
 slider<? printf("%d", (slnum += 1)); ?>:slWrInGain=0<-120,20,0.1>-Record gain
 slider<? printf("%d", (slnum += 1)); ?>:slWrOvrdb=0<0,100,0.0001>-Overdub (%)
 slider<? printf("%d", (slnum += 1)); ?>:slWrtAct=0<0,10,1{Done,Copy,Paste,Clear,Rewind,Reset,Create,Activate,Show,---,Delete}>-Action
