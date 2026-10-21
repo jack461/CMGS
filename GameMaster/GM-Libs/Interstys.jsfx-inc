@@ -28,9 +28,7 @@ FX_CNT = <? printf("%d", FX_CNT); ?>; // nombre d'effets
 SMPL_SIZE = <? printf("%d", SMPL_SIZE); ?>; // nombre total de cellules (voir le plan dans Interstys.jsfx)
 IN_P = <? printf("%d", IN_P); ?>; // In : les entrées de la piste
 OUT_P = <? printf("%d", OUT_P); ?>; // Out : le bus de sortie
-BUS_P = <? printf("%d", BUS_P); ?>; // les bus utilisateur
-NB_BUS = <? printf("%d", NB_BUS); ?>; // nombre de bus
-BUS_W = <? printf("%d", BUS_W); ?>; // canaux par bus
+NB_BUS = <? printf("%d", NB_BUS); ?>; // nombre de bus (virtuels : alloués dans le Pool, voir its_Patch_Update)
 CTL_P = <? printf("%d", CTL_P); ?>; // les cellules de contrôle
 NB_CTL = <? printf("%d", NB_CTL); ?>; // nombre de cellules de contrôle
 NB_GSL = <? printf("%d", NB_GSL); ?>; // sliders génériques : Ctl 1 ... NB_GSL
@@ -971,6 +969,7 @@ EffectsStructH = idx; idx += LinesBlockSize;
 EffectsStructI = idx; idx += LinesBlockSize;
 EffectsStructJ = idx; idx += LinesBlockSize;
 ControlsStruct = idx; idx += 8; // the module "Controls" : [0] the page of sliders shown
+PatchStruct = idx; idx += 8; // the module "Patch" : [0] the view (its_PchV...), [1] the page
 // the display blocks of the modules above (number of the object shown, display options) : saved in the 'disp' block
 DispStructsSize = idx - ReadersStructA;
 
@@ -1731,6 +1730,12 @@ CblRdWidth = make_array(RD_CNT + 1); // its width (channels)
 CblFxStart = make_array(FX_CNT + 1); // first cell of the cable of each effect (0 : none)
 CblFxWidth = make_array(FX_CNT + 1); // its width (channels)
 CblPool = make_array(CBL_CELLS); // 1 : cell of the Pool used by a cable
+// The buses are virtual : a bus used (as an input or an output) gets cells of the Pool, as wide as its users need
+BusStart = make_array(NB_BUS); // first cell of each bus (0 : none)
+BusWidth = make_array(NB_BUS); // its width (channels)
+BusNeed = make_array(NB_BUS); // the width asked by its users (see its_Patch_Scan(-2))
+BusAct = make_array(NB_BUS); // the buses that have cells : BusAct[0 ... BusActN-1] (cleared at each sample)
+BusActN = 0;
 its_PatchV = 0; // version of the patch : changes when a cable is allocated or freed
 its_PatchForce = 1; // 1 : check again all the modules (start, preset loaded)
 
@@ -1779,7 +1784,7 @@ local (k, n, base, bw)
     base = bw = 0;
     (k === ITS_KIn) ? (base = IN_P; bw = CH_NB;) :
     (k === ITS_KOut) ? (base = OUT_P; bw = CH_NB;) :
-    ((k === ITS_KBus) && (n < NB_BUS)) ? (base = BUS_P + n * BUS_W; bw = BUS_W;) :
+    ((k === ITS_KBus) && (n < NB_BUS)) ? (base = BusStart[n]; bw = BusWidth[n];) :
     ((k === ITS_KCtl) && (n < NB_CTL)) ? (base = CTL_P + n; bw = NB_CTL - n;) :
     ((k === ITS_KRdr) && (n < RD_CNT)) ? (base = CblRdStart[n]; bw = CblRdWidth[n];) :
     ((k === ITS_KFx) && (n < FX_CNT)) ? (base = CblFxStart[n]; bw = CblFxWidth[n];);
@@ -1903,13 +1908,125 @@ local (i, b, wn)
     );
 );
 
+// the inputs of a reader meaningful in its mode : offset (delay mode), speed (reader mode), volume (both)
+function its_Rdr_ModOk(rcbl)
+(
+    4 | ((rcbl[its_Rdr_Mode] === its_RdrMode_Delay) ? 1 : 2);
+);
+
+/*
+    The module "Patch" : the use of the cells (the cables of the modular)
+    its_Patch_Scan(-1) counts the writers (its_PchW) and the readers (its_PchR) of each cell, from the settings of the
+    modules (On or Off), and the connections that are not valid (its_PchBad) ; its_Patch_Scan(cell) writes in #its_PchWs
+    and #its_PchRs who writes and who reads the cells [cell, cell + its_PchCellW) (the text shown under the pad, for the
+    cell under the mouse) ; its_Patch_Scan(-2) computes the width asked for each bus (BusNeed, see its_Patch_Update)
+    its_Pch_Use : the connection "code" (source or destination, kind * ITS_KMul + number), first channel "off", resolved
+    in the cell "c" (0 : none, -1 : not valid), "w" channels, written (wr = 1) or read
+*/
+its_PchCellW = 1;
+function its_Pch_Use(code, off, c, w, wr, kind, n, role)
+local (k)
+(
+    (its_PchCell === -2) ? (
+        k = floor(code / ITS_KMul);
+        ((k === ITS_KBus) && ((k = code - k * ITS_KMul) < NB_BUS)) ? (BusNeed[k] = max(BusNeed[k], off + w));
+    ) :
+    (c < 0) ? (
+        (its_PchCell === -1) ? (its_PchBad += 1);
+    ) :
+    (c > 0) ? (
+        (its_PchCell === -1) ? (
+            k = c; loop(w, wr ? (its_PchW[k] += 1) : (its_PchR[k] += 1); k += 1;);
+        ) :
+        ((its_PchCell < c + w) && (its_PchCell + its_PchCellW > c)) ? (
+            sprintf(#its_PchTmp, "%s %d %s", kind, n + 1, role);
+            wr ? (
+                (strlen(#its_PchWs) > 0) ? strcat(#its_PchWs, ", ");
+                strcat(#its_PchWs, #its_PchTmp);
+            ) : (
+                (strlen(#its_PchRs) > 0) ? strcat(#its_PchRs, ", ");
+                strcat(#its_PchRs, #its_PchTmp);
+            );
+        );
+    );
+);
+
+// the modulation inputs "mp" (n inputs, names "names", meaningful "okm") of the module "kind" n° "num"
+function its_Pch_Mods(mp, n, names, okm, kind, num)
+local (j, p)
+(
+    j = 0; loop(n,
+        p = mp + j * its_ModDist;
+        its_Mod_Used(mp, j, okm) ? its_Pch_Use(p[its_Mod_Src], p[its_Mod_Off], its_Src_Cell(p[its_Mod_Src], p[its_Mod_Off], 1), 1, 0,
+            kind, num, names[j]);
+        j += 1;
+    );
+);
+
+function its_Patch_Scan(cell)
+local (i, b, w, f, n, ty, p)
+(
+    its_PchCell = cell;
+    (cell === -2) ? (
+        memset(BusNeed, 0, NB_BUS);
+    ) :
+    (cell === -1) ? (
+        memset(its_PchW, 0, SMPL_SIZE);
+        memset(its_PchR, 0, SMPL_SIZE);
+        its_PchBad = 0;
+    ) : (
+        strcpy(#its_PchWs, "");
+        strcpy(#its_PchRs, "");
+    );
+    i = 0; loop(RD_CNT,
+        b = Readers_set[i];
+        ((b > BASE_MEMORY) && (b[-2] === KW_read)) ? (
+            w = max(1, min(128, b[its_Rdr_BfChanUsed]));
+            its_Pch_Use(b[its_Rdr_OutK], b[its_Rdr_OutOff],
+                its_Out_Cell(b[its_Rdr_OutK], b[its_Rdr_OutOff], w, CblRdStart[i], CblRdWidth[i]), w, 1, "Reader", i, "output");
+            its_Pch_Mods(b + its_Rdr_Mod1, 3, its_ModN_Rdr, its_Rdr_ModOk(b), "Reader", i);
+        );
+        i += 1;
+    );
+    i = 0; loop(WR_CNT,
+        b = Writers_set[i];
+        ((b > BASE_MEMORY) && (b[-2] === KW_writ)) ? (
+            f = max(0, min(b[its_Wrt_ChNbr] - 1, b[its_Wrt_Bf1stChan]));
+            n = b[its_Wrt_ChNbr] - f;
+            (b[its_Wrt_BfChanUsed] > 0) ? (n = min(n, b[its_Wrt_BfChanUsed]));
+            (n > 0) ? its_Pch_Use(b[its_Wrt_Src], b[its_Wrt_SrcOff], its_Src_Cell(b[its_Wrt_Src], b[its_Wrt_SrcOff], n), n, 0,
+                "Writer", i, "input");
+            its_Pch_Mods(b + its_Wrt_Mod1, 2, its_ModN_Wrt, 3, "Writer", i);
+        );
+        i += 1;
+    );
+    i = 0; loop(FX_CNT,
+        b = Effects_set[i];
+        ((b > BASE_MEMORY) && (b[-2] === KW_effx) && (its_Fx_NSrc(ty = b[its_Efx_Type]) >= 0)) ? (
+            w = max(1, min(128, floor(b[its_Efx_CCnt])));
+            its_Pch_Use(b[its_Efx_OutK], b[its_Efx_OutOff],
+                its_Out_Cell(b[its_Efx_OutK], b[its_Efx_OutOff], w, CblFxStart[i], CblFxWidth[i]), w, 1, "Effect", i, "output");
+            n = 0; p = b + its_Efx_Src1; loop(its_Fx_NSrc(ty),
+                (p[0] !== 0) ? its_Pch_Use(p[0], p[its_Efx_Off1 - its_Efx_Src1], its_Src_Cell(p[0], p[its_Efx_Off1 - its_Efx_Src1], w), w, 0,
+                    "Effect", i,
+                    (its_Fx_NSrc(ty) > 1) ? sprintf(#its_PchRole, "source %d", n + 1) : "source");
+                n += 1; p += its_EfxDist;
+            );
+            (ty === its_Efx_TyFilter) ? its_Pch_Mods(b + its_Efx_Mod1, 2, its_ModN_Flt, 3, "Effect", i) :
+            (ty === its_Efx_TySat) ? its_Pch_Mods(b + its_Efx_Mod1, 2, its_ModN_Sat, 3, "Effect", i);
+        );
+        i += 1;
+    );
+);
+
 /*
     the cables follow the modules : called at each frame of @gfx (and forced after a load)
-    a reader or an effect whose output is its own cable gets a cable of its width ; after a change,
-    all the modules are checked again (their cells are computed again by exec_reader, exec_writer, exec_fx)
+    a reader or an effect whose output is its own cable gets a cable of its width, a bus used gets the width that its
+    users ask (first channel + width), a bus no longer used is freed ; after a change, all the modules are checked again
+    (their cells are computed again by exec_reader, exec_writer, exec_fx)
 */
 function its_Patch_Update()
-local (i, b, w, wk, chg)
+local (i, b, w, wk, chg, n)
 (
     chg = its_PatchForce;
     its_PatchForce = 0;
@@ -1934,6 +2051,26 @@ local (i, b, w, wk, chg)
             chg = 1;
         );
         i += 1;
+    );
+    // the buses
+    its_Patch_Scan(-2);
+    i = 0; loop(NB_BUS,
+        w = min(128, BusNeed[i]);
+        (w !== BusWidth[i]) ? (
+            Cbl_Free(BusStart[i], BusWidth[i]);
+            BusStart[i] = (w > 0) ? Cbl_Alloc(w) : 0;
+            BusWidth[i] = w;
+            chg = 1;
+        );
+        i += 1;
+    );
+    (chg) ? (
+        // the buses cleared at each sample (@sample)
+        n = 0; i = 0; loop(NB_BUS,
+            (BusStart[i] > 0) ? (BusAct[n] = i; n += 1;);
+            i += 1;
+        );
+        BusActN = n;
     );
     // the work areas of the effects : a new one when the size changes (not during a load : @block replaces the effects)
     (perform_loading === 0) ? (
@@ -1973,6 +2110,11 @@ local (i, b, w, wk, chg)
 
 
 
+
+// The module "Patch" (see its_Patch_Scan) : count of the writers and of the readers of each cell
+its_PchW = make_array(SMPL_SIZE);
+its_PchR = make_array(SMPL_SIZE);
+its_PchCbl = make_array(RD_CNT + FX_CNT); // the own cables that exist (see its_Pch_Cables)
 
 mm_limit_a = make_array(2);
 mm_limit_a[0] = 'STRT'; mm_limit_a[1] = 'MEMR';
@@ -2665,17 +2807,17 @@ menu_256_1_Ids = make_jmenu(
 // Menu of the sources (inputs of the modules) : None, In and Out (their first ITS_MNCH channels, in sub-menus of 32),
 // the buses, the controls (generic sliders), the readers, the effects (the ">" headers are not counted in the results : see its_Src_MenuIdx / its_Src_FromIdx)
 ITS_MNCH = 128; // channels of In and Out in the menus (the others : left clic on the cell, menu of the first channel)
-<? src_n = 1 + 2 * (128 + 4) + 1 + NB_BUS + 1 + NB_GSL + RD_CNT + (0|((RD_CNT + 31) / 32)) + FX_CNT + (0|((FX_CNT + 31) / 32)); ?>menu_Src_Ids_N = make_array(<? printf("%d", src_n); ?>);
+<? src_n = 1 + 2 * (128 + 4) + NB_BUS + (0|((NB_BUS + 31) / 32)) + 1 + NB_GSL + RD_CNT + (0|((RD_CNT + 31) / 32)) + FX_CNT + (0|((FX_CNT + 31) / 32)); ?>menu_Src_Ids_N = make_array(<? printf("%d", src_n); ?>);
 menu_Src_Ids_N[0] = "None";
-<? j = 1; k = 0; loop(2, i = 0; loop(128, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">%s %d-%d\";", j, k ? "Out" : "In", i, i+31); j += 1;); printf("menu_Src_Ids_N[%d] = \"%s%s:%d\";", j, ((i % 32) == 31) ? "<" : "", k ? "Out" : "In", i); i += 1; j += 1;); k += 1;); printf("menu_Src_Ids_N[%d] = \">Buses\";", j); j += 1; i = 0; loop(NB_BUS, printf("menu_Src_Ids_N[%d] = \"%sBus %d\";", j, (i == NB_BUS-1) ? "<" : "", i+1); i += 1; j += 1;); printf("menu_Src_Ids_N[%d] = \">Controls\";", j); j += 1; i = 0; loop(NB_GSL, printf("menu_Src_Ids_N[%d] = \"%sCtl %d\";", j, (i == NB_GSL-1) ? "<" : "", i+1); i += 1; j += 1;); i = 0; loop(RD_CNT, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">Readers %d-%d\";", j, i+1, min(i+32, RD_CNT)); j += 1;); printf("menu_Src_Ids_N[%d] = \"%sReader %d\";", j, (((i % 32) == 31) || (i == RD_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); i = 0; loop(FX_CNT, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">Effects %d-%d\";", j, i+1, min(i+32, FX_CNT)); j += 1;); printf("menu_Src_Ids_N[%d] = \"%sEffect %d\";", j, (((i % 32) == 31) || (i == FX_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); ?>
+<? j = 1; k = 0; loop(2, i = 0; loop(128, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">%s %d-%d\";", j, k ? "Out" : "In", i, i+31); j += 1;); printf("menu_Src_Ids_N[%d] = \"%s%s:%d\";", j, ((i % 32) == 31) ? "<" : "", k ? "Out" : "In", i); i += 1; j += 1;); k += 1;); i = 0; loop(NB_BUS, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">Buses %d-%d\";", j, i+1, min(i+32, NB_BUS)); j += 1;); printf("menu_Src_Ids_N[%d] = \"%sBus %d\";", j, (((i % 32) == 31) || (i == NB_BUS-1)) ? "<" : "", i+1); i += 1; j += 1;); printf("menu_Src_Ids_N[%d] = \">Controls\";", j); j += 1; i = 0; loop(NB_GSL, printf("menu_Src_Ids_N[%d] = \"%sCtl %d\";", j, (i == NB_GSL-1) ? "<" : "", i+1); i += 1; j += 1;); i = 0; loop(RD_CNT, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">Readers %d-%d\";", j, i+1, min(i+32, RD_CNT)); j += 1;); printf("menu_Src_Ids_N[%d] = \"%sReader %d\";", j, (((i % 32) == 31) || (i == RD_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); i = 0; loop(FX_CNT, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">Effects %d-%d\";", j, i+1, min(i+32, FX_CNT)); j += 1;); printf("menu_Src_Ids_N[%d] = \"%sEffect %d\";", j, (((i % 32) == 31) || (i == FX_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); ?>
 menu_Src_Ids = make_jmenu(
     ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "sources", <? printf("%d", src_n); ?>, menu_Src_Ids_N);
 
 // Menu of the destinations (outputs of the modules) : own cable, Out (its first ITS_MNCH channels, in sub-menus of 32), the buses
-<? dst_n = 1 + 128 + 4 + 1 + NB_BUS; ?>menu_Dst_Ids_N = make_array(<? printf("%d", dst_n); ?>);
+<? dst_n = 1 + 128 + 4 + NB_BUS + (0|((NB_BUS + 31) / 32)); ?>menu_Dst_Ids_N = make_array(<? printf("%d", dst_n); ?>);
 menu_Dst_Ids_N[0] = "Own cable";
-<? j = 1; i = 0; loop(128, (i % 32) == 0 ? (printf("menu_Dst_Ids_N[%d] = \">Out %d-%d\";", j, i, i+31); j += 1;); printf("menu_Dst_Ids_N[%d] = \"%sOut:%d\";", j, ((i % 32) == 31) ? "<" : "", i); i += 1; j += 1;); printf("menu_Dst_Ids_N[%d] = \">Buses\";", j); j += 1; i = 0; loop(NB_BUS, printf("menu_Dst_Ids_N[%d] = \"%sBus %d\";", j, (i == NB_BUS-1) ? "<" : "", i+1); i += 1; j += 1;); ?>
+<? j = 1; i = 0; loop(128, (i % 32) == 0 ? (printf("menu_Dst_Ids_N[%d] = \">Out %d-%d\";", j, i, i+31); j += 1;); printf("menu_Dst_Ids_N[%d] = \"%sOut:%d\";", j, ((i % 32) == 31) ? "<" : "", i); i += 1; j += 1;); i = 0; loop(NB_BUS, (i % 32) == 0 ? (printf("menu_Dst_Ids_N[%d] = \">Buses %d-%d\";", j, i+1, min(i+32, NB_BUS)); j += 1;); printf("menu_Dst_Ids_N[%d] = \"%sBus %d\";", j, (((i % 32) == 31) || (i == NB_BUS-1)) ? "<" : "", i+1); i += 1; j += 1;); ?>
 menu_Dst_Ids = make_jmenu(
     ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "destinations", <? printf("%d", dst_n); ?>, menu_Dst_Ids_N);
@@ -3046,6 +3188,30 @@ ii = 0; loop(pad_Ctl_Siz,
             pad_Ctl_Labs[ii] = "";
             ii+=1;
 );
+
+// Pads of the module "Patch" (see show_Patch_Pad) : the views, then the cells (8 x 16)
+pad_Pch_Siz = 8;
+pad_Patch = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    1, pad_Pch_Siz, pad_Pch_Siz);
+pad_Pch_Labs = pad_Patch + pad_Patch[ui_jpad_labs]; // addresses of labels
+pad_Pch_Colrs = pad_Patch + pad_Patch[ui_jpad_clrs]; // addresses of colors
+pad_PchG_NL = 16;
+pad_PchG_Siz = 8 * pad_PchG_NL;
+pad_PatchG = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    pad_PchG_NL, 8, pad_PchG_Siz);
+pad_PchG_Labs = pad_PatchG + pad_PatchG[ui_jpad_labs];
+pad_PchG_Colrs = pad_PatchG + pad_PatchG[ui_jpad_clrs];
+ii = 0; loop(pad_Pch_Siz, pad_Pch_Colrs[ii] = Col_Inactive; pad_Pch_Labs[ii] = ""; ii += 1;);
+ii = 0; loop(pad_PchG_Siz, pad_PchG_Colrs[ii] = Col_Inactive; pad_PchG_Labs[ii] = ""; ii += 1;);
+// the views of the module "Patch"
+its_PchV_In = 0;
+its_PchV_Out = 1;
+its_PchV_Bus = 2;
+its_PchV_Ctl = 3;
+its_PchV_Cbl = 4;
+its_PchV_Cnt = 5;
 
 // Pad for the globals (see show_Global_Pad)
 pad_Glb_NL = 1;
@@ -4432,6 +4598,8 @@ local (i, g, it, fid, ttl, gl0, gl1, gl2, gl3, othFirst, tmp, bln, blu, itdsp, M
     blockDispNames[blockGlobal] = "Globals"; // see show_Global_Pad
     blockControls = (itdsp += 1);
     blockDispNames[blockControls] = "Controls"; // see show_Controls_Pad
+    blockPatch = (itdsp += 1);
+    blockDispNames[blockPatch] = "Patch"; // see show_Patch_Pad
 
     blockUsrFirst = itdsp+1;
     // Add users modules
@@ -6905,14 +7073,37 @@ function check_its_block(cbl)
     (cbl[0] !== SECURE_BL) || (cbl[cbl[-1]-1] !== SECURE_BL);
 );
 
-function recreate_structures()
-local (ln, renew, nlcbl, olcbl, nrcbl, nwcbl, alt, i)
+// free the blocks of a load not used (DuplWA) : the lines have no buffers yet (see recreate_structures)
+function its_Load_Drop()
+local (i, b)
 (
-    // Update newly loaded line structures
+    i = 0; loop(PtrsInWA,
+        ((b = DuplWA[i]) > BASE_MEMORY) ? (
+            (b[-2] === KW_lcbl) ? memset(b + its_Lin_BF1ST, 0, 128); // (pointers of the saved line : not ours)
+            mSL_Dyn_Free(b);
+        );
+        DuplWA[i] = 0;
+        i += 1;
+    );
+);
+
+function recreate_structures()
+local (ln, renew, nlcbl, olcbl, nrcbl, nwcbl, alt, i, nl, nr, nw, nf, bad)
+(
+    // what was loaded (see the log)
+    nl = nr = nw = nf = bad = 0;
+    i = 0; loop(LN_CNT + 1, (Lines_Set[i + AltWAdec] !== 0) ? (nl += 1); i += 1;);
+    i = 0; loop(RD_CNT + 1, (Readers_set[i + AltWAdec] !== 0) ? (nr += 1); i += 1;);
+    i = 0; loop(WR_CNT + 1, (Writers_set[i + AltWAdec] !== 0) ? (nw += 1); i += 1;);
+    i = 0; loop(FX_CNT + 1, (Effects_set[i + AltWAdec] !== 0) ? (nf += 1); i += 1;);
+    // the old lines : their Tmp1 tells if they are reused (see below)
+    ln = 0; loop(LN_CNT + 1, ((olcbl = Lines_Set[ln]) !== 0) ? (olcbl[its_Lin_Tmp1] = 0); ln += 1;);
+    // Update newly loaded line structures : first, the lines that can reuse the buffers of an old line
     ln = 0; loop(LN_CNT + 1,
         renew = -1;
         nlcbl = Lines_Set[ln+AltWAdec]; // nouvelle "ln"
         (nlcbl !== 0) ? (
+            memset(nlcbl+its_Lin_BF1ST, 0, 128); // (pointers of the saved line : not ours)
             olcbl = Lines_Set[ln]; // ancienne "ln"
             (olcbl !== 0) ? (
                 // Peut-on réutiliser l'ancienne ligne ?
@@ -6937,14 +7128,7 @@ local (ln, renew, nlcbl, olcbl, nrcbl, nwcbl, alt, i)
             );
 
             (renew < 0) ? (
-                // recréons de nouveaux buffers
-                memset(nlcbl+its_Lin_BF1ST, 0, 128); // clear previous content
-                i = its_Lin_BF1ST; loop(nlcbl[its_Lin_ChCnt],
-                    nlcbl[i] = mSL_Dyn_Alloc(nlcbl[its_Lin_ActBSize], KW_buff, mSL_StM_FlClear);
-sprintf(#A007,"buff-n  %d {%d  ch=%d  bf=%d}", ln, nlcbl, i-1-its_Lin_BF1ST, nlcbl[i-1]);
-sprintf(#A008,"buff-n  %d {%d  ch=%d  bf=%d}", ln, nlcbl, i-its_Lin_BF1ST, nlcbl[i]);
-                    i += 1;
-                );
+                nlcbl[its_Lin_Tmp1] = -1; // new buffers : allocated below, once the old lines not reused are freed
             ) : (
                 // On réutilise les buffers de l'ancienne ligne
                 olcbl = Lines_Set[renew];
@@ -6958,6 +7142,35 @@ sprintf(#A008,"buff-r  %d {%d  ch=%d  bf=%d}", ln, nlcbl, i, nlcbl[i]);
             nlcbl[its_Lin_Check] = 0; // for future fast check
 sprintf(#A006,"nlcbl %d {%d  ch=%d  sz=%d}", ln, nlcbl, nlcbl[its_Lin_ChCnt], nlcbl[its_Lin_SmplCnt]);
             dbg_show_2(mem,66)
+        );
+        ln += 1;
+    );
+    // the old lines not reused are freed first : a large line could not be allocated while the old ones still exist
+    ln = 0; loop(LN_CNT + 1,
+        (((olcbl = Lines_Set[ln]) !== 0) && (olcbl[its_Lin_Tmp1] === 0)) ? Ln_Delete(ln);
+        ln += 1;
+    );
+    // then the new buffers (a line that cannot get all its buffers is not created : error 2610 in its pad)
+    ln = 0; loop(LN_CNT + 1,
+        nlcbl = Lines_Set[ln+AltWAdec];
+        ((nlcbl !== 0) && (nlcbl[its_Lin_Tmp1] === -1)) ? (
+            nlcbl[its_Lin_Tmp1] = 0;
+            renew = 1; // all the buffers allocated
+            i = its_Lin_BF1ST; loop(nlcbl[its_Lin_ChCnt],
+                ((nlcbl[i] = mSL_Dyn_Alloc(nlcbl[its_Lin_ActBSize], KW_buff, mSL_StM_FlClear)) < BASE_MEMORY) ? (
+                    nlcbl[i] = 0; renew = 0;
+                );
+                i += 1;
+            );
+            (renew) ? (
+                Ln_MemErr[ln] = 0;
+            ) : (
+                i = its_Lin_BF1ST; loop(128, (nlcbl[i] > BASE_MEMORY) ? mSL_Dyn_Free(nlcbl[i]); nlcbl[i] = 0; i += 1;);
+                mSL_Dyn_Free(nlcbl);
+                Lines_Set[ln+AltWAdec] = 0;
+                Ln_MemErr[ln] = 1;
+                bad += 1;
+            );
         );
         ln += 1;
     );
@@ -7019,6 +7232,8 @@ sprintf(#A005,"UpdWr %d st=%d bn=%d ba=%d", ln, nwcbl[its_Wrt_Status], nwcbl[its
     memcpy(StaticWA, DuplWA, StaticWASize);
     memset(DuplWA, 0, StaticWASize);
     updt_tables(StaticWA);
+    sprintf(#its_LdMsg, "Load : %d lines, %d readers, %d writers, %d effects ; %d lines without memory", nl, nr, nw, nf, bad);
+    its_LdMsgOn = 1; // written in the log by @gfx
 );
 
 /*
@@ -7044,6 +7259,24 @@ function load_loadarea()
     slSmpl = 0; slSmplPrv = -1;
     sliderchange(slSmpl);
     vol_out = lodarea[12];
+);
+
+/*
+    put in place the structures of a load (@serialize) : by @block, between two audio blocks ; but REAPER does not call
+    @block when the track is not processed (after a load, until the audio restarts) : then @gfx does it, once @block has
+    not run for its_LdWait seconds (its_Hold stops @sample meanwhile, in case the audio restarts)
+*/
+its_LdWait = 0.25;
+its_BlkCnt = its_LdBlk = its_LdTime = its_LdSeen = its_Hold = 0;
+function its_Load_Install()
+(
+    perform_loading = 0;
+    recreate_structures(); // also update tables
+    load_loadarea();
+    its_PatchForce = 1; // the cables and the cells of all the modules (see its_Patch_Update)
+    // force sliders update
+    lnupdt = slupdt = wrupdt = rdupdt = fxupdt = 1;
+    handling_load = 0;
 );
 
 
@@ -7548,7 +7781,12 @@ loadMode ? (
     // ===LOAD===
 
     doingLoad = 1;
+    // a previous load not yet taken by @block (see recreate_structures) : first, @block must not take this one
+    // before it is complete ; then the blocks of the previous one are freed
+    ldprev = perform_loading;
+    perform_loading = 0;
     handling_load = 1;
+    (ldprev) ? its_Load_Drop();
     lditmc = 0; ldstud = 0; ldtnam = -1; // count of tabs names read (-1 : none in this preset)
     ldtotal = 0;
     lderr = 0;
@@ -7646,6 +7884,10 @@ loadMode ? (
     (lderr === 0) ? (
         perform_loading = 1;
         handling_load = 1;
+    ) : (
+        // failed : the blocks already read are freed, the current structures are kept
+        its_Load_Drop();
+        handling_load = 0;
     );
 
 
@@ -7714,16 +7956,9 @@ chcnt = num_ch;
 // the generic sliders (automatable by REAPER) : the control cells Ctl 1 ... NB_GSL (smoothed by the inputs that read them)
 ctl_i = 0; loop(NB_GSL, smpl_tab[CTL_P + ctl_i] = slider(GSL_FIRST + ctl_i); ctl_i += 1;);
 
+its_BlkCnt += 1; // @block runs (see its_Load_Install)
 // We achieve preset loading here to avoid conflicts with readers/writers
-(perform_loading !== 0) ? (
-    perform_loading = 0;
-    recreate_structures(); // also update tables
-    load_loadarea();
-    its_PatchForce = 1; // the cables and the cells of all the modules (see its_Patch_Update)
-    // force sliders update
-    lnupdt = slupdt = wrupdt = rdupdt = fxupdt = 1;
-    handling_load = 0;
-);
+(perform_loading !== 0) ? its_Load_Install();
 
 dbg_show_2(Readers_set[0],67);
 
@@ -7798,10 +8033,11 @@ its_RdrSolos = j; // count of readers in solo mode
 
 @sample
 
-(pgmode < 2) ? (
+((pgmode < 2) && (its_Hold === 0)) ? (
     // Phase 1 --
     // clear Out and the buses : several sources add into them (a cable is written by its only source)
-    memset(smpl_tab + OUT_P, 0, CTL_P - OUT_P);
+    memset(smpl_tab + OUT_P, 0, CH_NB);
+    bus_i = 0; loop(BusActN, bus_k = BusAct[bus_i]; memset(smpl_tab + BusStart[bus_k], 0, BusWidth[bus_k]); bus_i += 1;);
     // get input samples ;
     i = 0; j = smpl_tab + IN_P; loop (chcnt,
         j[0] = vol_inp * spl(i);
@@ -7913,6 +8149,21 @@ ctime = time();
 // gfxMaxDur = 0.01; // 10 ms
 gfxStrtT = time_precise() + timeD;
 
+// a load not yet put in place by @block : @block does not run (the track is not processed), @gfx does it
+(perform_loading !== 0) ? (
+    (its_LdSeen === 0) ? (
+        its_LdSeen = 1; its_LdBlk = its_BlkCnt; its_LdTime = time_precise();
+    ) :
+    ((its_BlkCnt === its_LdBlk) && (time_precise() - its_LdTime > its_LdWait)) ? (
+        its_Hold = 1;
+        its_Load_Install();
+        its_Hold = 0;
+        str_mess = "Load put in place by @gfx (no audio processing)";
+    );
+) : (
+    its_LdSeen = 0;
+);
+
 
 // The tab commands : the keys left by the modules of the tab (see mSL_ui_LibJJ, Keyboard)
 // (none in Interstys)
@@ -8005,6 +8256,10 @@ function do_Plugin_Keys()
 (str_mess !== 0) ? (
     mSL_log(SysLogBox, str_mess);
     str_mess = 0;
+);
+(its_LdMsgOn) ? (
+    mSL_log(SysLogBox, #its_LdMsg); // the structures loaded (see recreate_structures)
+    its_LdMsgOn = 0;
 );
 
 
@@ -8948,12 +9203,6 @@ local (j, p, r)
         );
         j += 1;
     );
-);
-
-// the inputs of a reader meaningful in its mode : offset (delay mode), speed (reader mode), volume (both)
-function its_Rdr_ModOk(rcbl)
-(
-    4 | ((rcbl[its_Rdr_Mode] === its_RdrMode_Delay) ? 1 : 2);
 );
 
 /*
@@ -10985,6 +11234,218 @@ local (h1, h2, uix_jneed, zzmi, i, n, r, zz, zzmcl, pg, npg)
     );
 );
 
+// the own cables that exist (readers 0 ... RD_CNT-1, then effects RD_CNT ...) : its_PchCbl[0 ... its_PchCblN-1]
+function its_Pch_Cables()
+local (i)
+(
+    its_PchCblN = 0;
+    i = 0; loop(RD_CNT + FX_CNT,
+        (((i < RD_CNT) ? CblRdStart[i] : CblFxStart[i - RD_CNT]) > 0) ? (
+            its_PchCbl[its_PchCblN] = i;
+            its_PchCblN += 1;
+        );
+        i += 1;
+    );
+);
+
+// the cell shown in the entry "e" of the grid of the view "v" (page "pg") ; 0 : none (a cable : its first cell)
+function its_Pch_GridCell(v, pg, e)
+local (k, m)
+(
+    k = pg * pad_PchG_Siz + e;
+    (v === its_PchV_In) ? ((k < CH_NB) ? IN_P + k : 0) :
+    (v === its_PchV_Out) ? ((k < CH_NB) ? OUT_P + k : 0) :
+    (v === its_PchV_Bus) ? ((k < BusActN) ? BusStart[BusAct[k]] : 0) :
+    (v === its_PchV_Ctl) ? ((k < NB_CTL) ? CTL_P + k : 0) :
+    (k < its_PchCblN) ? (
+        m = its_PchCbl[k];
+        (m < RD_CNT) ? CblRdStart[m] : CblFxStart[m - RD_CNT];
+    ) : 0;
+);
+
+// the count of the readers of the cable "m" (its_PchCbl), and its width in its_PchCblW
+function its_Pch_CblReads(m)
+local (c, kr)
+(
+    c = (m < RD_CNT) ? CblRdStart[m] : CblFxStart[m - RD_CNT];
+    its_PchCblW = (m < RD_CNT) ? CblRdWidth[m] : CblFxWidth[m - RD_CNT];
+    kr = 0; loop(its_PchCblW, kr += its_PchR[c]; c += 1;);
+    kr;
+);
+
+/*
+    The pad of the module "Patch"
+    line 1 : 0 "Patch", 1 ... 5 the views (In, Out, Buses, Controls, Cables ; the buses and the cables that exist), 6 the page (left clic : the next one ;
+    right clic : the previous one), 7 the count of problems (connections not valid, buses read but not written,
+    cables not read)
+    the grid : one cell of the patch per entry (the cables : one cable per entry) ; colors : green written and read,
+    orange written but not read, red read but not written (buses), grey unused
+    the text : the cell under the mouse, its value, who writes it, who reads it
+*/
+function show_Patch_Pad(blockId)
+local (h1, h2, h3, uix_jneed, zzmi, i, k, c, w, v, pg, npg, ncel, nl, zz, zzmcl, nbad, hc, hx, hy, kw, kr, ch)
+(
+    v = PatchStruct[0] = max(0, min(its_PchV_Cnt - 1, 0|PatchStruct[0]));
+    its_Pch_Cables();
+    ncel = ((v === its_PchV_In) || (v === its_PchV_Out)) ? min(CH_NB, max(8, chcnt)) :
+        (v === its_PchV_Bus) ? BusActN : (v === its_PchV_Ctl) ? NB_CTL : its_PchCblN;
+    npg = max(1, ceil(ncel / pad_PchG_Siz));
+    pg = PatchStruct[1] = max(0, min(npg - 1, 0|PatchStruct[1]));
+    nl = max(1, min(pad_PchG_NL, ceil((ncel - pg * pad_PchG_Siz) / 8)));
+    h1 = uix_jpadHeight(1);
+    h2 = uix_jpadHeight(nl);
+    h3 = uix_jBoxHeight(3);
+    uix_jneed = h1+h2+h3+ui_jd_ctgr;
+    (ui_height() >= uix_jneed) ? (
+        ui_split_top(uix_jneed);
+        ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
+            zzmi = ui_hover();
+            keepBlockInfos(blockId);
+            (zzmi) ? (
+                ui_push();
+                    // stack is now 2 levels deep
+                    ui_color(Col_Frame);
+                    ui_border(); // draws in purple
+                ui_pop();
+            );
+            control_group(blockDispNames[blockDispInverts[blockId]]);
+            ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+
+            its_Patch_Scan(-1);
+            // the problems : connections not valid, buses read but not written, cables not read
+            nbad = its_PchBad;
+            i = 0; loop(BusActN,
+                k = BusStart[BusAct[i]]; kw = kr = 0;
+                loop(BusWidth[BusAct[i]], kw += its_PchW[k]; kr += its_PchR[k]; k += 1;);
+                ((kr > 0) && (kw === 0)) ? (nbad += 1);
+                i += 1;
+            );
+            i = 0; loop(its_PchCblN,
+                (its_Pch_CblReads(its_PchCbl[i]) === 0) ? (nbad += 1);
+                i += 1;
+            );
+
+            // the views
+            ui_split_top(h1);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_Pch_Labs, pad_Pch_Siz);
+                i = 0; loop(pad_Pch_Siz, pad_Pch_Colrs[i] = Col_InfoA; i += 1;);
+                strcpy(pad_Pch_Labs[0], "Patch");
+                strcpy(pad_Pch_Labs[1], "In");
+                strcpy(pad_Pch_Labs[2], "Out");
+                strcpy(pad_Pch_Labs[3], "Buses");
+                strcpy(pad_Pch_Labs[4], "Controls");
+                strcpy(pad_Pch_Labs[5], "Cables");
+                i = 0; loop(its_PchV_Cnt, pad_Pch_Colrs[1 + i] = (i === v) ? Color_Limegreen : CP1; i += 1;);
+                sprintf(pad_Pch_Labs[6], "Page %d / %d", pg + 1, npg);
+                pad_Pch_Colrs[6] = (npg > 1) ? CP3 : Col_Inactive;
+                (nbad > 0) ? (
+                    sprintf(pad_Pch_Labs[7], "Problems %d", nbad);
+                    pad_Pch_Colrs[7] = CP6;
+                ) : (
+                    strcpy(pad_Pch_Labs[7], "No problem");
+                    pad_Pch_Colrs[7] = Color_Limegreen;
+                );
+                zz = control_jpad(pad_Patch);
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4; ui_GFXReason = 36;
+                    zzmcl = pad_Patch[ui_jpad_last]-1;
+                    ((zz & ui_jpad_ev_lmc) && (zzmcl >= 1) && (zzmcl <= its_PchV_Cnt)) ? (
+                        PatchStruct[0] = zzmcl - 1; // another view : its first page
+                        PatchStruct[1] = 0;
+                    ) :
+                    (zzmcl === 6) ? (
+                        (zz & ui_jpad_ev_lmc) ? (PatchStruct[1] = (pg + 1) % npg) :
+                        (zz & ui_jpad_ev_rmc) ? (PatchStruct[1] = (pg + npg - 1) % npg);
+                    );
+                );
+            ui_pop();
+
+            // the grid of the cells
+            ui_split_top(h2);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_PchG_Labs, 8 * nl);
+                hc = 0;
+                i = 0; loop(8 * nl,
+                    c = its_Pch_GridCell(v, pg, i);
+                    k = pg * pad_PchG_Siz + i;
+                    pad_PchG_Colrs[i] = Col_Inactive;
+                    (c > 0) ? (
+                        (v === its_PchV_Cbl) ? (
+                            // a cable : read if one of its cells is read
+                            ch = its_PchCbl[k];
+                            kr = its_Pch_CblReads(ch);
+                            (ch < RD_CNT) ? sprintf(pad_PchG_Labs[i], "R%d [%d]", ch + 1, its_PchCblW) :
+                                sprintf(pad_PchG_Labs[i], "E%d [%d]", ch - RD_CNT + 1, its_PchCblW);
+                            pad_PchG_Colrs[i] = (kr > 0) ? Color_Limegreen : Color_Dark_Orange;
+                        ) :
+                        (v === its_PchV_Bus) ? (
+                            // a bus : all its channels
+                            ch = BusAct[k];
+                            kw = kr = 0; w = c; loop(BusWidth[ch], kw += its_PchW[w]; kr += its_PchR[w]; w += 1;);
+                            sprintf(pad_PchG_Labs[i], "Bus %d [%d]", ch + 1, BusWidth[ch]);
+                            pad_PchG_Colrs[i] = ((kw > 0) && (kr > 0)) ? Color_Limegreen :
+                                (kw > 0) ? Color_Dark_Orange : (kr > 0) ? CP6 : Col_Inactive;
+                        ) : (
+                            kw = its_PchW[c]; kr = its_PchR[c];
+                            (v === its_PchV_In) ? sprintf(pad_PchG_Labs[i], "In:%d", k) :
+                            (v === its_PchV_Out) ? sprintf(pad_PchG_Labs[i], "Out:%d", k) :
+                            sprintf(pad_PchG_Labs[i], "Ctl %d", k + 1);
+                            // In and the controls are written by REAPER (the track, the sliders), Out is read by REAPER
+                            ((v === its_PchV_In) || (v === its_PchV_Ctl)) ? (kw = 1) : (v === its_PchV_Out) ? (kr += (kw > 0));
+                            pad_PchG_Colrs[i] = ((kw > 0) && (kr > 0)) ? Color_Limegreen :
+                                (kw > 0) ? Color_Dark_Orange : (kr > 0) ? CP6 : Col_Inactive;
+                            (((v === its_PchV_In) || (v === its_PchV_Ctl)) && (kr === 0)) ? (pad_PchG_Colrs[i] = Col_Inactive);
+                        );
+                    );
+                    i += 1;
+                );
+                zz = control_jpad(pad_PatchG, nl, -1, 1);
+                // the entry under the mouse (geometry of the pad just drawn, see ui_jpad_cell_pos)
+                (ui_hover() && (ui_jpad_lst_wi > 0) && (ui_jpad_lst_he > 0)) ? (
+                    hx = floor((uix_mouse_x - ui_jpad_lst_left) / ui_jpad_lst_wi);
+                    hy = floor((uix_mouse_y - ui_jpad_lst_top) / ui_jpad_lst_he);
+                    ((hx >= 0) && (hx < 8) && (hy >= 0) && (hy < nl)) ? (hc = its_Pch_GridCell(v, pg, k = hy * 8 + hx));
+                );
+            ui_pop();
+
+            // the text : the cell under the mouse
+            ui_split_top(h3);
+                ui_pad(4,2,4,2);
+                ui_pcolor(ui_jcolor_text);
+                ui_align(0, 0);
+                (hc > 0) ? (
+                    // a cable, a bus : all its cells
+                    k += pg * pad_PchG_Siz;
+                    its_PchCellW = (v === its_PchV_Cbl) ? ((its_PchCbl[k] < RD_CNT) ? CblRdWidth[its_PchCbl[k]] : CblFxWidth[its_PchCbl[k] - RD_CNT]) :
+                        (v === its_PchV_Bus) ? BusWidth[BusAct[k]] : 1;
+                    its_Patch_Scan(hc);
+                    its_PchCellW = 1;
+                    (v === its_PchV_Cbl) ? (
+                        ch = its_PchCbl[k];
+                        (ch < RD_CNT) ? sprintf(#its_PchName, "Cable of Reader %d", ch + 1) :
+                            sprintf(#its_PchName, "Cable of Effect %d", ch - RD_CNT + 1);
+                    ) :
+                    strcpy(#its_PchName, pad_PchG_Labs[hy * 8 + hx]);
+                    sprintf(#its_PchTxt, "%s = %.4f", #its_PchName, smpl_tab[hc]);
+                    ui_split_top(ui_texth()); ui_text(#its_PchTxt); ui_pop();
+                    sprintf(#its_PchTxt, "Written by: %s", (strlen(#its_PchWs) > 0) ? #its_PchWs :
+                        ((v === its_PchV_In) ? "the track" : (v === its_PchV_Ctl) ? "the slider" : "nobody"));
+                    ui_split_top(ui_texth()); ui_text(#its_PchTxt); ui_pop();
+                    sprintf(#its_PchTxt, "Read by: %s", (strlen(#its_PchRs) > 0) ? #its_PchRs :
+                        ((v === its_PchV_Out) ? "the track" : "nobody"));
+                    ui_split_top(ui_texth()); ui_text(#its_PchTxt); ui_pop();
+                ) : (
+                    sprintf(#its_PchTxt, "%d connections not valid", its_PchBad);
+                    ui_split_top(ui_texth()); ui_text("Mouse over a cell : who writes it, who reads it."); ui_pop();
+                    ui_split_top(ui_texth()); ui_text(#its_PchTxt); ui_pop();
+                );
+            ui_pop();
+
+        ui_pop();
+    );
+);
+
 /*
     The globals of Interstys (they replace the last native sliders) : one line of 8 cells
     0 : "Globals"  1 : channels  2 : track samples (menu)  3..6 : count of lines, readers, writers, effects
@@ -11839,6 +12300,9 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in)
                 ) :
                 (igb === blockControls) ? (
                     show_Controls_Pad(blockControls);
+                ) :
+                (igb === blockPatch) ? (
+                    show_Patch_Pad(blockPatch);
                 ) :
                 ((igb >= blockUsrFirst) && (igb <= blockUsrLast)) && (blockUsrChecks[blockUsrNum[igb - blockUsrFirst]]) ? (
                     show_UserModule(igb);
