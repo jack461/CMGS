@@ -33,6 +33,8 @@ NB_BUS = <? printf("%d", NB_BUS); ?>; // nombre de bus
 BUS_W = <? printf("%d", BUS_W); ?>; // canaux par bus
 CTL_P = <? printf("%d", CTL_P); ?>; // les cellules de contrôle
 NB_CTL = <? printf("%d", NB_CTL); ?>; // nombre de cellules de contrôle
+NB_GSL = <? printf("%d", NB_GSL); ?>; // sliders génériques : Ctl 1 ... NB_GSL
+GSL_FIRST = <? printf("%d", GSL_FIRST); ?>; // numéro du premier slider générique
 CBL_P = <? printf("%d", CBL_P); ?>; // le Pool des câbles
 CBL_CELLS = <? printf("%d", CBL_CELLS); ?>; // taille du Pool
 ZERO_P = <? printf("%d", ZERO_P); ?>; // 128 cellules toujours nulles
@@ -208,17 +210,18 @@ its_Rdr_TmpC = idx; idx += 1; // temp C
 its_Rdr_OutAdd = idx; idx += 1; // sortie : 1 pour un bus (addition), 0 pour le câble propre (affectation)
 its_Rdr_OutDirty = idx; idx += 1; // le câble propre a été écrit (il est effacé quand le reader s'arrête)
 its_Rdr_Owner = idx; idx += 1; // propriétaire : 0 le patch utilisateur, sinon une instance d'algorithme
-// 3 entrées de modulation (1 canal chacune) : 0 le décalage (mode delay), 1 la vitesse (mode reader), 2 le volume
-its_RdrMod_Src = 0; // source (kind * ITS_KMul + number, 0 : aucune)
-its_RdrMod_Off = 1; // canal pris dans la source
-its_RdrMod_Depth = 2; // profondeur : ms pour le décalage, vitesse, fraction du volume
-its_RdrMod_Cell = 3; // cellule lue (calculée par exec_reader)
-its_RdrMod_Ctl = 4; // 1 : une cellule de contrôle, lissée
-its_RdrMod_Smooth = 5; // valeur lissée
-its_RdrMod_Att = 6; // atténuverteur [-10 ... 10] (1 à la connexion)
-its_RdrMod_ShowAtt = 7; // 1 : le slider de l'atténuverteur est affiché (clic gauche sur la cellule)
-its_RdrModDist = 8;
-its_Rdr_Mod1 = idx; idx += 3 * its_RdrModDist;
+// une entrée de modulation (1 canal) : ces champs, its_ModDist mots, dans le bloc d'un module (reader, writer, effet)
+its_Mod_Src = 0; // source (kind * ITS_KMul + number, 0 : aucune)
+its_Mod_Off = 1; // canal pris dans la source
+its_Mod_Depth = 2; // profondeur : ms pour le décalage, vitesse, fraction du volume
+its_Mod_Cell = 3; // cellule lue (calculée par exec_reader)
+its_Mod_Ctl = 4; // 1 : une cellule de contrôle, lissée
+its_Mod_Smooth = 5; // valeur lissée
+its_Mod_Att = 6; // atténuverteur [-10 ... 10] (1 à la connexion)
+its_Mod_ShowAtt = 7; // 1 : le slider de l'atténuverteur est affiché (clic gauche sur la cellule)
+its_ModDist = 8;
+// 3 entrées de modulation : 0 le décalage (mode delay), 1 la vitesse (mode reader), 2 le volume
+its_Rdr_Mod1 = idx; idx += 3 * its_ModDist;
 //  0x40 - 72
 its_Rdr_Abspos = idx; idx += its_RdrMaxMulti; //  Position [its_Rdr_Start ... its_Rdr_Last - 1] de lecture en samples
 its_Rdr_AbsInc = idx; idx += its_RdrMaxMulti; //  Incrément de la position
@@ -313,6 +316,8 @@ its_Wrt_Tmp6 = idx; idx += 1; // temp 6
 its_Wrt_SrcOff = idx; idx += 1; // premier canal pris dans la source
 its_Wrt_InCell = idx; idx += 1; // première cellule lue (calculée par exec_writer)
 its_Wrt_Owner = idx; idx += 1; // propriétaire : 0 le patch utilisateur, sinon une instance d'algorithme
+// 2 entrées de modulation : 0 le gain d'enregistrement (profondeur en dB), 1 l'overdub (profondeur en %)
+its_Wrt_Mod1 = idx; idx += 2 * its_ModDist;
 // 30
 idx |= 3; // for rounding to a multiple of 4 minus 1
 its_Wrt_Unuz2 = idx; idx += 1; //  Securité : mot inutilisé
@@ -361,10 +366,18 @@ its_Efx_OutAdd = idx; idx += 1; //  sortie : 1 pour un bus (addition), 0 pour le
 its_Efx_OutDirty = idx; idx += 1; //  le câble propre a été écrit (il est effacé quand l'effet s'arrête)
 its_Efx_Owner = idx; idx += 1; //  propriétaire : 0 le patch utilisateur, sinon une instance d'algorithme
 its_Efx_Rank = idx; idx += 1; //  rang d'exécution (futur : algorithmes)
+// zone de travail (KW_fxwk, non sauvée) : allouée par @gfx (its_Patch_Update), mise en place par @block (its_Fx_WorkSwitch)
+its_Efx_Work = idx; idx += 1; //  la zone utilisée par exec_fx (0 : aucune)
+its_Efx_WkNew = idx; idx += 1; //  la zone préparée par @gfx (-1 : plus de zone), prise par @block
+its_Efx_WkOld = idx; idx += 1; //  la zone remplacée par @block, libérée par @gfx à la frame suivante
 // paramètres et états propres à un type (LFO : Par1 fréquence (Hz), Par2 forme, Par3 amplitude, Par4 décalage,
-// Par5 déphasage entre les canaux (en tours) ; St1 phase [0, 1[)
+// Par5 déphasage entre les canaux (en tours) ; St1 phase [0, 1[ ; Filter : Par1 fréquence de coupure (Hz), Par2 Q,
+// Par3 mode, Par4 pente (2^Par4 étages) ; Saturation : Par1 drive (dB), Par2 mode, Par3 biais, Par4 mix [0, 1],
+// Par5 suréchantillonnage (2^Par5 fois), Par6 gain de sortie (dB))
 its_Efx_Par1 = idx; idx += 8;
 its_Efx_St1 = idx; idx += 4;
+// 2 entrées de modulation (Filter : 0 la fréquence de coupure (octaves), 1 la résonance (octaves))
+its_Efx_Mod1 = idx; idx += 2 * its_ModDist;
 // 8 entrées : source (kind * ITS_KMul + number), premier canal, gain (dB), gain, première cellule (calculée par exec_fx)
 its_Efx_Src1 = idx; idx += 1; //  Source n°1
 its_Efx_Off1 = idx; idx += 1; //  Premier canal de la source n°1
@@ -419,12 +432,38 @@ its_Efx_Undefined = 0;
 its_Efx_Unspecified = 1;
 its_Efx_TyNone = 1;
 its_Efx_TyMixer = 2;
-its_Efx_TyEQMixer = 3;
+its_Efx_TyAutoMix = 3;
 its_Efx_TyMover = 4;
 its_Efx_TyAction = 5;
 its_Efx_TyScript = 6;
 its_Efx_TyLFO = 7;
-its_Efx_TyCnt = 8; // count of types
+its_Efx_TyFilter = 8;
+its_Efx_TySat = 9;
+its_Efx_TyCnt = 10; // count of types
+// Filter modes (its_Efx_Par3)
+its_FltLP1 = 0; // low pass, 1 pole
+its_FltHP1 = 1; // high pass, 1 pole
+its_FltLP = 2; // low pass, biquad
+its_FltHP = 3; // high pass, biquad
+its_FltBP = 4; // band pass, biquad
+its_FltNotch = 5; // notch, biquad
+its_FltSlopes = 4; // slopes (its_Efx_Par4) : 1, 2, 4 or 8 stages
+// Saturation modes (its_Efx_Par2)
+its_SatSoft = 0; // tanh
+its_SatHard = 1; // hard clip
+its_SatFold = 2; // triangular wavefolder
+its_SatSine = 3; // sine wavefolder
+its_SatOSCnt = 4; // oversampling (its_Efx_Par5) : 1, 2, 4 or 8 times
+its_SatChW = 12; // words per channel in the work area : previous input, DC blocker (2), anti-aliasing biquads (4 x 2)
+its_SatDcK = 1 - 2 * $pi * 10 / srate; // DC blocker : pole
+// Work area of an effect (KW_fxwk, see its_Fx_WorkSize) ; Filter : the header, then 5 coefficients
+// [b0, b1, b2, a1, a2] per stage, then the states (2 per stage and per channel) ; Saturation : the header (its_FxW_Md :
+// the oversampling of the coefficients), the coefficients of the 4 anti-aliasing biquads, then its_SatChW words per channel
+its_FxW_Size = 0; // size of the area (words)
+its_FxW_F = 1; // frequency, Q and mode of the coefficients
+its_FxW_Q = 2;
+its_FxW_Md = 3;
+its_FxW_Hdr = 8; // first coefficient
 // LFO shapes (its_Efx_Par2)
 its_LfoSine = 0;
 its_LfoTri = 1;
@@ -434,6 +473,7 @@ its_LfoSquare = 4;
 
 its_EfxStat_Off = 0; // its_Efx_Status : the effect is not executed
 its_EfxStat_On = 1; // (= its_Efx_Unspecified, set by FX_Clear)
+its_EfxStat_Bypass = 2; // the first source goes unchanged to the output (an LFO is silent)
 
 its_Efx_PhaseStd = 0;
 its_Efx_PhasePre = 1;
@@ -442,7 +482,7 @@ its_Efx_PhasePost = 2;
 its_EfxAct_Copy = 1;
 its_EfxAct_Paste = 2;
 its_EfxAct_Clear = 3;
-its_EfxAct_EQMix = 4;
+its_EfxAct_AutoGains = 4;
 its_EfxAct_Reset = 5;
 its_EfxAct_Create = 6;
 its_EfxAct_Show = 7;
@@ -520,6 +560,7 @@ KW_writ = 'writ';
 KW_effx = 'effx';
 KW_lcbl = 'lcbl';
 KW_buff = 'buff';
+KW_fxwk = 'fxwk';
 
 //================== The includes
 // The Strings and constants
@@ -893,7 +934,7 @@ ReadersStructE = idx; idx += ReadersBlockSize;
 ReadersStructF = idx; idx += ReadersBlockSize;
 ReadersStructG = idx; idx += ReadersBlockSize;
 ReadersStructH = idx; idx += ReadersBlockSize;
-// Display of a reader : RDBL[8] = waveform height (no waveform under its_RdrWaveMin), RDBL[9] = waveform zoom [1 .. 100]
+// Display of a reader : RDBL[8] = waveform height, RDBL[9] = waveform zoom [1 .. 100], RDBL[10] = waveform flags (its_Wave_...)
 its_RdrWaveH = 100; // default waveform height
 its_RdrWaveMin = 24; // smaller : no waveform
 ii = 0; loop(8, p = ReadersStructA + ii * ReadersBlockSize; p[8] = its_RdrWaveH; p[9] = 1; ii += 1;);
@@ -929,11 +970,12 @@ EffectsStructG = idx; idx += LinesBlockSize;
 EffectsStructH = idx; idx += LinesBlockSize;
 EffectsStructI = idx; idx += LinesBlockSize;
 EffectsStructJ = idx; idx += LinesBlockSize;
+ControlsStruct = idx; idx += 8; // the module "Controls" : [0] the page of sliders shown
 // the display blocks of the modules above (number of the object shown, display options) : saved in the 'disp' block
 DispStructsSize = idx - ReadersStructA;
 
 // Parameters
-paramCount = 48;
+paramCount = 64;
 paramNMax = paramCount - 1; // (GP_Parameters, included before, computed it with paramCount = 0 at the first @init)
 paramEntSize = 20;
 paramValues = idx; idx += paramCount;
@@ -965,6 +1007,18 @@ p_fxLfoFreq = idx; idx += 1; // LFO : frequency (Hz)
 p_fxLfoAmp = idx; idx += 1; // LFO : amplitude
 p_fxLfoDC = idx; idx += 1; // LFO : offset
 p_fxLfoSpread = idx; idx += 1; // LFO : phase spread between the channels (turns)
+p_wrModDepth1 = idx; idx += 2; // depths of the 2 modulation inputs of a writer : record gain (dB), overdub (%)
+p_wrModAtt1 = idx; idx += 2; // their attenuverters [-10 ... 10]
+p_fxFltFreq = idx; idx += 1; // Filter : cutoff frequency (Hz)
+p_fxFltQ = idx; idx += 1; // Filter : resonance (Q)
+p_fxFltModD1 = idx; idx += 2; // depths of the 2 modulation inputs of a filter : cutoff, resonance (octaves)
+p_fxFltModA1 = idx; idx += 2; // their attenuverters [-10 ... 10]
+p_fxSatDrive = idx; idx += 1; // Saturation : drive (dB)
+p_fxSatBias = idx; idx += 1; // Saturation : bias
+p_fxSatMix = idx; idx += 1; // Saturation : mix (%)
+p_fxSatOut = idx; idx += 1; // Saturation : output gain (dB)
+p_fxSatModD1 = idx; idx += 2; // depths of the 2 modulation inputs of a saturation : drive (dB), bias
+p_fxSatModA1 = idx; idx += 2; // their attenuverters [-10 ... 10]
 
 // Global variables
 blockDesc = 0;  // description of the current block
@@ -1064,6 +1118,43 @@ shw_AppName = "Interstys"; // in the names of the log files (sysout)
 ui_audio_init();
 its_LinWaveH = 120; // height of the waveform of a line
 its_LinWaveMax = 4; // max channels shown (the loudest ones)
+// The waveform of a module (Line, Reader, Writer) : its height and flags are kept in the display block of the module
+its_WaveHide = 1; // flag : the waveform is not shown
+its_WaveOver = 2; // flag : the channels are superposed (else one band per channel)
+its_WaveHMin = 40; // heights (keys '+' and '-')
+its_WaveHMax = 600;
+its_WaveHStep = 20;
+// height of the waveform ("hp" : the height kept, 0 for the default "dflt" ; "fp" : the flags) ; 0 if hidden
+function its_Wave_H(hp, fp, dflt)
+(
+    (fp[0] & its_WaveHide) ? 0 : (hp[0] > 0) ? hp[0] : dflt;
+);
+// the flags of ui_audio_wave
+function its_Wave_Flags(fp)
+(
+    (fp[0] & its_WaveOver) ? ui_aud_Axis : ui_aud_Sep | ui_aud_Axis;
+);
+// keys of the waveform, the mouse over the module : 'w' shows / hides it, '+' (or '=') and '-' change its height,
+// 'v' superposes / separates the channels
+function its_Wave_Keys(hp, fp, dflt)
+local (h)
+(
+    h = (hp[0] > 0) ? hp[0] : dflt;
+    GM_key_take('w') ? (
+        fp[0] = fp[0] ~ its_WaveHide; // show / hide the waveform
+    ) :
+    (GM_key_take('+') || GM_key_take('=')) ? (
+        hp[0] = min(its_WaveHMax, h + its_WaveHStep); // taller waveform
+        fp[0] -= fp[0] & its_WaveHide;
+    ) :
+    GM_key_take('-') ? (
+        hp[0] = max(its_WaveHMin, h - its_WaveHStep); // smaller waveform
+        fp[0] -= fp[0] & its_WaveHide;
+    ) :
+    GM_key_take('v') ? (
+        fp[0] = fp[0] ~ its_WaveOver; // channels superposed / separate
+    );
+);
 // Colors of the markers and of the region in the waveforms
 // (set by its_wave_colors before each waveform : darker hues with the light themes, see uix_theme_thickline)
 its_WaveColWrt = 0x20FF20; // writing head : green
@@ -1709,16 +1800,107 @@ local (k)
 );
 
 /*
-    value of a modulation input "p" (its block in a module, see its_RdrMod_...) multiplied by its depth and its attenuverter ;
+    value of a modulation input "p" (its block in a module, see its_Mod_...) multiplied by its depth and its attenuverter ;
     a control cell (slider) is smoothed (time constant about 10 ms) : the cables of the modules are not
 */
 its_ModSmK = 1 - exp(-1 / (0.010 * srate));
 function its_Mod_Val(p)
 local (x)
 (
-    x = smpl_tab[p[its_RdrMod_Cell]];
-    (p[its_RdrMod_Ctl]) ? (x = (p[its_RdrMod_Smooth] += its_ModSmK * (x - p[its_RdrMod_Smooth])));
-    x * p[its_RdrMod_Depth] * p[its_RdrMod_Att];
+    x = smpl_tab[p[its_Mod_Cell]];
+    (p[its_Mod_Ctl]) ? (x = (p[its_Mod_Smooth] += its_ModSmK * (x - p[its_Mod_Smooth])));
+    x * p[its_Mod_Depth] * p[its_Mod_Att];
+);
+
+// the "n" modulation inputs from "mp" : attenuverters 1 (a new module)
+function its_Mod_Init(mp, n)
+(
+    loop(n, mp[its_Mod_Att] = 1; mp += its_ModDist;);
+);
+
+// the "n" modulation inputs from "mp" : the cells read (an invalid source : no modulation) ; returns 1 if a source is not valid
+// (called when the module is checked, in @sample)
+function its_Mod_Resolve(mp, n)
+local (c, bad)
+(
+    bad = 0;
+    loop(n,
+        c = its_Src_Cell(mp[its_Mod_Src], mp[its_Mod_Off], 1);
+        mp[its_Mod_Cell] = (c > 0) ? c : ZERO_P;
+        mp[its_Mod_Ctl] = (floor(mp[its_Mod_Src] / ITS_KMul) === ITS_KCtl);
+        (c < 0) ? (bad = 1);
+        mp += its_ModDist;
+    );
+    bad;
+);
+
+// the input "j" of "mp" is used : connected, and meaningful ("okm" : mask of the inputs meaningful in the mode of the module)
+function its_Mod_Used(mp, j, okm)
+(
+    (mp[j * its_ModDist + its_Mod_Src] !== 0) && ((okm & (1 << j)) !== 0);
+);
+
+// Filter : count of stages (biquads, or one pole filters)
+function its_Flt_Stages(fx)
+(
+    2^max(0, min(its_FltSlopes - 1, floor(fx[its_Efx_Par1 + 3])));
+);
+
+// size of the work area of the effect "fx" (0 : none)
+function its_Fx_WorkSize(fx)
+local (ns)
+(
+    (fx[its_Efx_Type] === its_Efx_TyFilter) ? (
+        ns = its_Flt_Stages(fx);
+        its_FxW_Hdr + 5 * ns + 2 * ns * max(1, min(128, floor(fx[its_Efx_CCnt])));
+    ) :
+    (fx[its_Efx_Type] === its_Efx_TySat) ? (
+        its_FxW_Hdr + 5 * 4 + its_SatChW * max(1, min(128, floor(fx[its_Efx_CCnt])));
+    ) : 0;
+);
+
+// count of sources of an effect type (-1 : a type not executed)
+function its_Fx_NSrc(ty)
+(
+    ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? 8 :
+    ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat)) ? 1 :
+    (ty === its_Efx_TyLFO) ? 0 : -1;
+);
+
+// Saturation : the curve of the mode "md" (in [-1, 1])
+function its_Sat_Shape(u, md)
+(
+    (md === its_SatSoft) ? (u = max(-20, min(20, u)); 1 - 2 / (exp(2 * u) + 1)) : // tanh
+    (md === its_SatHard) ? max(-1, min(1, u)) :
+    (md === its_SatFold) ? (u = 0.25 * (u + 1); 1 - 4 * abs(u - floor(u) - 0.5)) : // folds back at -1 and 1
+    sin(0.5 * $pi * u);
+);
+
+// free the work areas of the effect "fx" (deleted)
+function its_Fx_WorkFree(fx)
+(
+    (fx[its_Efx_Work] > BASE_MEMORY) ? mSL_Dyn_Free(fx[its_Efx_Work]);
+    (fx[its_Efx_WkNew] > BASE_MEMORY) ? mSL_Dyn_Free(fx[its_Efx_WkNew]);
+    (fx[its_Efx_WkOld] > BASE_MEMORY) ? mSL_Dyn_Free(fx[its_Efx_WkOld]);
+    fx[its_Efx_Work] = fx[its_Efx_WkNew] = fx[its_Efx_WkOld] = 0;
+);
+
+/*
+    the work areas of the effects, put in place by @block between two audio blocks : all the @sample of an audio block
+    see the same area (prepared by its_Patch_Update in @gfx, which frees the old one at its next frame)
+*/
+function its_Fx_WorkSwitch()
+local (i, b, wn)
+(
+    i = 0; loop(FX_CNT,
+        b = Effects_set[i];
+        ((b > BASE_MEMORY) && ((wn = b[its_Efx_WkNew]) !== 0)) ? (
+            b[its_Efx_WkOld] = b[its_Efx_Work];
+            b[its_Efx_Work] = max(0, wn);
+            b[its_Efx_WkNew] = 0;
+        );
+        i += 1;
+    );
 );
 
 /*
@@ -1727,7 +1909,7 @@ local (x)
     all the modules are checked again (their cells are computed again by exec_reader, exec_writer, exec_fx)
 */
 function its_Patch_Update()
-local (i, b, w, chg)
+local (i, b, w, wk, chg)
 (
     chg = its_PatchForce;
     its_PatchForce = 0;
@@ -1752,6 +1934,34 @@ local (i, b, w, chg)
             chg = 1;
         );
         i += 1;
+    );
+    // the work areas of the effects : a new one when the size changes (not during a load : @block replaces the effects)
+    (perform_loading === 0) ? (
+        i = 0; loop(FX_CNT,
+            b = Effects_set[i];
+            ((b > BASE_MEMORY) && (b[-2] === KW_effx)) ? (
+                (b[its_Efx_WkOld] > BASE_MEMORY) ? (
+                    mSL_Dyn_Free(b[its_Efx_WkOld]); // replaced by @block before the current audio block
+                    b[its_Efx_WkOld] = 0;
+                ) :
+                (b[its_Efx_WkNew] === 0) ? (
+                    w = its_Fx_WorkSize(b);
+                    wk = b[its_Efx_Work];
+                    (w !== ((wk > BASE_MEMORY) ? wk[its_FxW_Size] : 0)) ? (
+                        (w === 0) ? (
+                            b[its_Efx_WkNew] = -1; // no more area
+                        ) : (
+                            wk = mSL_Dyn_Alloc(w, KW_fxwk, mSL_StM_FlClear);
+                            (wk > BASE_MEMORY) ? (
+                                wk[its_FxW_Size] = w;
+                                b[its_Efx_WkNew] = wk;
+                            );
+                        );
+                    );
+                );
+            );
+            i += 1;
+        );
     );
     (chg) ? (
         its_PatchV += 1;
@@ -2453,11 +2663,11 @@ menu_256_1_Ids = make_jmenu(
             "nums-256-1", 256, menu_256_1_Ids_N);
 
 // Menu of the sources (inputs of the modules) : None, In and Out (their first ITS_MNCH channels, in sub-menus of 32),
-// the buses, the readers, the effects (the ">" headers are not counted in the results : see its_Src_MenuIdx / its_Src_FromIdx)
+// the buses, the controls (generic sliders), the readers, the effects (the ">" headers are not counted in the results : see its_Src_MenuIdx / its_Src_FromIdx)
 ITS_MNCH = 128; // channels of In and Out in the menus (the others : left clic on the cell, menu of the first channel)
-<? src_n = 1 + 2 * (128 + 4) + 1 + NB_BUS + RD_CNT + (0|((RD_CNT + 31) / 32)) + FX_CNT + (0|((FX_CNT + 31) / 32)); ?>menu_Src_Ids_N = make_array(<? printf("%d", src_n); ?>);
+<? src_n = 1 + 2 * (128 + 4) + 1 + NB_BUS + 1 + NB_GSL + RD_CNT + (0|((RD_CNT + 31) / 32)) + FX_CNT + (0|((FX_CNT + 31) / 32)); ?>menu_Src_Ids_N = make_array(<? printf("%d", src_n); ?>);
 menu_Src_Ids_N[0] = "None";
-<? j = 1; k = 0; loop(2, i = 0; loop(128, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">%s %d-%d\";", j, k ? "Out" : "In", i, i+31); j += 1;); printf("menu_Src_Ids_N[%d] = \"%s%s:%d\";", j, ((i % 32) == 31) ? "<" : "", k ? "Out" : "In", i); i += 1; j += 1;); k += 1;); printf("menu_Src_Ids_N[%d] = \">Buses\";", j); j += 1; i = 0; loop(NB_BUS, printf("menu_Src_Ids_N[%d] = \"%sBus %d\";", j, (i == NB_BUS-1) ? "<" : "", i+1); i += 1; j += 1;); i = 0; loop(RD_CNT, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">Readers %d-%d\";", j, i+1, min(i+32, RD_CNT)); j += 1;); printf("menu_Src_Ids_N[%d] = \"%sReader %d\";", j, (((i % 32) == 31) || (i == RD_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); i = 0; loop(FX_CNT, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">Effects %d-%d\";", j, i+1, min(i+32, FX_CNT)); j += 1;); printf("menu_Src_Ids_N[%d] = \"%sEffect %d\";", j, (((i % 32) == 31) || (i == FX_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); ?>
+<? j = 1; k = 0; loop(2, i = 0; loop(128, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">%s %d-%d\";", j, k ? "Out" : "In", i, i+31); j += 1;); printf("menu_Src_Ids_N[%d] = \"%s%s:%d\";", j, ((i % 32) == 31) ? "<" : "", k ? "Out" : "In", i); i += 1; j += 1;); k += 1;); printf("menu_Src_Ids_N[%d] = \">Buses\";", j); j += 1; i = 0; loop(NB_BUS, printf("menu_Src_Ids_N[%d] = \"%sBus %d\";", j, (i == NB_BUS-1) ? "<" : "", i+1); i += 1; j += 1;); printf("menu_Src_Ids_N[%d] = \">Controls\";", j); j += 1; i = 0; loop(NB_GSL, printf("menu_Src_Ids_N[%d] = \"%sCtl %d\";", j, (i == NB_GSL-1) ? "<" : "", i+1); i += 1; j += 1;); i = 0; loop(RD_CNT, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">Readers %d-%d\";", j, i+1, min(i+32, RD_CNT)); j += 1;); printf("menu_Src_Ids_N[%d] = \"%sReader %d\";", j, (((i % 32) == 31) || (i == RD_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); i = 0; loop(FX_CNT, (i % 32) == 0 ? (printf("menu_Src_Ids_N[%d] = \">Effects %d-%d\";", j, i+1, min(i+32, FX_CNT)); j += 1;); printf("menu_Src_Ids_N[%d] = \"%sEffect %d\";", j, (((i % 32) == 31) || (i == FX_CNT-1)) ? "<" : "", i+1); i += 1; j += 1;); ?>
 menu_Src_Ids = make_jmenu(
     ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "sources", <? printf("%d", src_n); ?>, menu_Src_Ids_N);
@@ -2557,8 +2767,7 @@ local(rcb)
         rcb[its_Rdr_AbsInc] = 1;
         rcb[its_Rdr_OutVol] = 1;
         rcb[its_Rdr_OutK] = ITS_KOut * ITS_KMul; // default output : Out, channel 0
-        rcb[its_Rdr_Mod1 + its_RdrMod_Att] = rcb[its_Rdr_Mod1 + its_RdrModDist + its_RdrMod_Att]
-            = rcb[its_Rdr_Mod1 + 2 * its_RdrModDist + its_RdrMod_Att] = 1; // modulation attenuverters
+        its_Mod_Init(rcb + its_Rdr_Mod1, 3); // modulation attenuverters
         rcb[its_Rdr_NxtPosSec] = -1;
         rcb[its_Rdr_Unuz1] = rcb[its_Rdr_Unuz2] = SECURE_BL;
         rcb[its_Rdr_Number] = rnum;
@@ -2608,7 +2817,7 @@ ii = 0; loop(pad_Rdr_Siz,
             pad_Rdr_Labs[ii] = "";
             ii+=1;
 );
-// Pad of the modulation inputs of a reader (see Rd_Mod_Pad) : one line
+// Pad of the modulation inputs of a reader or a writer (see its_Mod_Row) : one line
 pad_RdM_Siz = 8;
 pad_RdMod = make_jpad(
     ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
@@ -2712,6 +2921,7 @@ function Wr_Clear(wnum)
         wcb[its_Wrt_Status] = its_WrtStat_Created;
         wcb[its_Wrt_Unuz1] = wcb[its_Wrt_Unuz2] = SECURE_BL;
         wcb[its_Wrt_Number] = wnum;
+        its_Mod_Init(wcb + its_Wrt_Mod1, 2); // modulation attenuverters
     );
 );
 // Create a writer in slot "wnum" or return the existing writer
@@ -2824,6 +3034,19 @@ menu_Glb_Smpl = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "global-samples", 3, menu_Glb_Smpl_N);
 
+// Pad of the module "Controls" (see show_Controls_Pad)
+pad_Ctl_Siz = 8;
+pad_Controls = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    1, pad_Ctl_Siz, pad_Ctl_Siz);
+pad_Ctl_Labs = pad_Controls + pad_Controls[ui_jpad_labs]; // addresses of labels
+pad_Ctl_Colrs = pad_Controls + pad_Controls[ui_jpad_clrs]; // addresses of colors
+ii = 0; loop(pad_Ctl_Siz,
+            pad_Ctl_Colrs[ii] = Col_Inactive;
+            pad_Ctl_Labs[ii] = "";
+            ii+=1;
+);
+
 // Pad for the globals (see show_Global_Pad)
 pad_Glb_NL = 1;
 pad_Glb_NC = 8;
@@ -2842,15 +3065,19 @@ ii = 0; loop(pad_Glb_Siz,
 //===== EFFECTS Handling
 // Effects_set[FX_CNT]
 // Réinitialiser un effet
+// (the effect keeps its work areas : its_Patch_Update frees them)
 function FX_Clear(enum)
-local (fxcb)
+local (fxcb, w0, w1, w2)
 (
     ((enum >= 0) && (enum <= FX_CNT) && ((fxcb = Effects_set[enum]) > BASE_MEMORY) && (fxcb[-2] === KW_effx)) ? (
+        w0 = fxcb[its_Efx_Work]; w1 = fxcb[its_Efx_WkNew]; w2 = fxcb[its_Efx_WkOld];
         memset(fxcb, 0, its_Efx_BlkSize);
+        fxcb[its_Efx_Work] = w0; fxcb[its_Efx_WkNew] = w1; fxcb[its_Efx_WkOld] = w2;
         fxcb[its_Efx_Status] = its_Efx_Unspecified;
         fxcb[its_Efx_Phase] = its_Efx_PhaseStd;
         fxcb[its_Efx_Numb] = enum;
         fxcb[its_Efx_CCnt] = 1;
+        its_Mod_Init(fxcb + its_Efx_Mod1, 2); // modulation attenuverters
         fxcb[its_Efx_Unuz1] = fxcb[its_Efx_Unuz2] = SECURE_BL;
     );
 );
@@ -2869,9 +3096,20 @@ function FX_Delete(enum)
 local (fxcb)
 (
     ((enum >= 0) && (enum <= FX_CNT) && ((fxcb = Effects_set[enum]) > BASE_MEMORY) && (fxcb[-2] === KW_effx)) ? (
+        Effects_set[enum] = 0; // first : the audio thread no longer sees it
+        its_Fx_WorkFree(fxcb);
         mSL_Dyn_Free(fxcb);
     );
     Effects_set[enum] = 0;
+);
+
+// Copy the effect "src" into "dst" (Copy, Paste) : "dst" keeps its own work areas
+function FX_Copy(dst, src)
+local (w0, w1, w2)
+(
+    w0 = dst[its_Efx_Work]; w1 = dst[its_Efx_WkNew]; w2 = dst[its_Efx_WkOld];
+    memcpy(dst, src, its_Efx_BlkSize);
+    dst[its_Efx_Work] = w0; dst[its_Efx_WkNew] = w1; dst[its_Efx_WkOld] = w2;
 );
 
 
@@ -2888,14 +3126,48 @@ menu_Efx_Type_N = make_array(its_Efx_TyCnt);
 menu_Efx_Type_N[0] = "Undefined";
 menu_Efx_Type_N[1] = "None";
 menu_Efx_Type_N[2] = "Mixer";
-menu_Efx_Type_N[3] = "EQ Mixer";
+menu_Efx_Type_N[3] = "Auto Mixer";
 menu_Efx_Type_N[4] = "Mover";
 menu_Efx_Type_N[5] = "Action";
 menu_Efx_Type_N[6] = "Script";
 menu_Efx_Type_N[7] = "LFO";
+menu_Efx_Type_N[8] = "Filter";
+menu_Efx_Type_N[9] = "Saturation";
 menu_Efx_Type = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "effect-type", its_Efx_TyCnt, menu_Efx_Type_N);
+
+// Menu 6 for Effects : the modes of the Filter (entry n is the mode n)
+menu_Efx_FltMode_N = make_array(6);
+menu_Efx_FltMode_N[0] = "LP 1 pole";
+menu_Efx_FltMode_N[1] = "HP 1 pole";
+menu_Efx_FltMode_N[2] = "Low pass";
+menu_Efx_FltMode_N[3] = "High pass";
+menu_Efx_FltMode_N[4] = "Band pass";
+menu_Efx_FltMode_N[5] = "Notch";
+menu_Efx_FltMode = make_jmenu(
+    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "filter-mode", 6, menu_Efx_FltMode_N);
+
+// Menu 7 for Effects : the modes of the Saturation (entry n is the mode n)
+menu_Efx_SatMode_N = make_array(4);
+menu_Efx_SatMode_N[0] = "Soft (tanh)";
+menu_Efx_SatMode_N[1] = "Hard clip";
+menu_Efx_SatMode_N[2] = "Fold";
+menu_Efx_SatMode_N[3] = "Sine fold";
+menu_Efx_SatMode = make_jmenu(
+    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "saturation-mode", 4, menu_Efx_SatMode_N);
+
+// The modulation inputs of the modules : their names, and their first depths (when first connected)
+its_ModN_Rdr = make_array(3); its_ModN_Rdr[0] = "Offset"; its_ModN_Rdr[1] = "Speed"; its_ModN_Rdr[2] = "Volume";
+its_ModD_Rdr = make_array(3); its_ModD_Rdr[0] = 2; its_ModD_Rdr[1] = 0.1; its_ModD_Rdr[2] = 0.5;
+its_ModN_Wrt = make_array(2); its_ModN_Wrt[0] = "Gain"; its_ModN_Wrt[1] = "Overdub";
+its_ModD_Wrt = make_array(2); its_ModD_Wrt[0] = 6; its_ModD_Wrt[1] = 20;
+its_ModN_Flt = make_array(2); its_ModN_Flt[0] = "Cutoff"; its_ModN_Flt[1] = "Reso";
+its_ModD_Flt = make_array(2); its_ModD_Flt[0] = 2; its_ModD_Flt[1] = 1;
+its_ModN_Sat = make_array(2); its_ModN_Sat[0] = "Drive"; its_ModN_Sat[1] = "Bias";
+its_ModD_Sat = make_array(2); its_ModD_Sat[0] = 12; its_ModD_Sat[1] = 0.5;
 
 // Menu 5 for Effects : the shapes of the LFO (entry n is the shape n)
 menu_Efx_LfoShape_N = make_array(5);
@@ -2927,7 +3199,7 @@ menu_Efx_Action_N[0] = "None";
 menu_Efx_Action_N[1] = "Copy";
 menu_Efx_Action_N[2] = "Paste";
 menu_Efx_Action_N[3] = "Clear";
-menu_Efx_Action_N[4] = "EQ Mix";
+menu_Efx_Action_N[4] = "Auto gains";
 menu_Efx_Action_N[5] = "---";
 menu_Efx_Action_N[6] = "Create";
 menu_Efx_Action_N[7] = "Show";
@@ -4158,6 +4430,8 @@ local (i, g, it, fid, ttl, gl0, gl1, gl2, gl3, othFirst, tmp, bln, blu, itdsp, M
     blockDispNames[blockProcessesMgr] = "Processes Manager"; // see mSL_show_Utilities
     blockGlobal = (itdsp += 1);
     blockDispNames[blockGlobal] = "Globals"; // see show_Global_Pad
+    blockControls = (itdsp += 1);
+    blockDispNames[blockControls] = "Controls"; // see show_Controls_Pad
 
     blockUsrFirst = itdsp+1;
     // Add users modules
@@ -5703,10 +5977,29 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_rdModAtt1, "Offset atten.",  "RdAttOff",  i_UB|i_SP, "%.3f", "Offset atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_rdModAtt1+1, "Speed atten.",  "RdAttSpd",  i_UB|i_SP, "%.3f", "Speed atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_rdModAtt1+2, "Volume atten.",  "RdAttVol",  i_UB|i_SP, "%.3f", "Volume atten.: %.3f",   -10,   10,    1,  0.001, 0);
-    parDcl(p_fxLfoFreq, "LFO Frequency",  "LfoFreq",  i_UB|i_SP, "%.3f Hz", "LFO Frequency: %.3f Hz",   0.001,   200,    1,  0.001, 6);
+    parDcl(p_fxLfoFreq, "LFO Frequency",  "LfoFreq",  i_UB|i_SP, "%.3f Hz", "LFO Frequency: %.3f Hz",   0.001,   10000,    1,  0.001, 14); // exponential : about 9 Hz at the middle
     parDcl(p_fxLfoAmp, "LFO Amplitude",  "LfoAmp",  i_UB|i_SP, "%.3f", "LFO Amplitude: %.3f",   0,   10,    1,  0.001, 4.5); // exponential : 1 near the middle
     parDcl(p_fxLfoDC, "LFO Offset",  "LfoDC",  i_UB|i_SP, "%.3f", "LFO Offset: %.3f",   -10,   10,    0,  0.001, 0);
     parDcl(p_fxLfoSpread, "LFO Phase spread",  "LfoSprd",  i_UB|i_SP, "%.3f", "LFO Phase spread: %.3f",   0,   1,    0,  0.001, 0);
+    parDcl(p_wrModDepth1, "Gain depth",  "WrModGn",  i_UB|i_SP, "%.1f dB", "Gain depth: %.1f dB",   0,   60,    6,  0.1, 2);
+    parDcl(p_wrModDepth1+1, "Overdub depth",  "WrModOv",  i_UB|i_SP, "%.1f %%", "Overdub depth: %.1f %%",   0,   100,    20,  0.1, 0);
+    parDcl(p_wrModAtt1, "Gain atten.",  "WrAttGn",  i_UB|i_SP, "%.3f", "Gain atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_wrModAtt1+1, "Overdub atten.",  "WrAttOv",  i_UB|i_SP, "%.3f", "Overdub atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    // exponential : about 600 Hz in the middle of the slider
+    parDcl(p_fxFltFreq, "Cutoff",  "FltFreq",  i_UB|i_SP, "%.1f Hz", "Cutoff: %.1f Hz",   10,   20000,    1000,  0.1, 7);
+    parDcl(p_fxFltQ, "Resonance",  "FltQ",  i_UB|i_SP, "%.3f", "Resonance (Q): %.3f",   0.1,   30,    0.707,  0.001, 4);
+    parDcl(p_fxFltModD1, "Cutoff depth",  "FltModF",  i_UB|i_SP, "%.3f oct", "Cutoff depth: %.3f oct",   0,   10,    2,  0.001, 2);
+    parDcl(p_fxFltModD1+1, "Resonance depth",  "FltModQ",  i_UB|i_SP, "%.3f oct", "Resonance depth: %.3f oct",   0,   4,    1,  0.001, 2);
+    parDcl(p_fxFltModA1, "Cutoff atten.",  "FltAttF",  i_UB|i_SP, "%.3f", "Cutoff atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxFltModA1+1, "Resonance atten.",  "FltAttQ",  i_UB|i_SP, "%.3f", "Resonance atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxSatDrive, "Drive",  "SatDrive",  i_UB|i_SP, "%.1f dB", "Drive: %.1f dB",   0,   48,    12,  0.1, 0);
+    parDcl(p_fxSatBias, "Bias",  "SatBias",  i_UB|i_SP, "%.3f", "Bias: %.3f",   -1,   1,    0,  0.001, 0);
+    parDcl(p_fxSatMix, "Mix",  "SatMix",  i_UB|i_SP, "%.1f %%", "Mix: %.1f %%",   0,   100,    100,  0.1, 0);
+    parDcl(p_fxSatOut, "Output",  "SatOut",  i_UB|i_SP, "%.1f dB", "Output: %.1f dB",   -24,   12,    0,  0.1, 0);
+    parDcl(p_fxSatModD1, "Drive depth",  "SatModD",  i_UB|i_SP, "%.1f dB", "Drive depth: %.1f dB",   0,   48,    12,  0.1, 0);
+    parDcl(p_fxSatModD1+1, "Bias depth",  "SatModB",  i_UB|i_SP, "%.3f", "Bias depth: %.3f",   0,   2,    0.5,  0.001, 0);
+    parDcl(p_fxSatModA1, "Drive atten.",  "SatAttD",  i_UB|i_SP, "%.3f", "Drive atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxSatModA1+1, "Bias atten.",  "SatAttB",  i_UB|i_SP, "%.3f", "Bias atten.: %.3f",   -10,   10,    1,  0.001, 0);
 );
 
 
@@ -5906,16 +6199,9 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                 reader[its_Rdr_Error] = 2711; // erreur : the output (own cable or bus) is not valid
             );
             // the modulation inputs (1 channel each) : an error is not fatal (no modulation)
-            mp = reader + its_Rdr_Mod1;
-            loop(3,
-                c = its_Src_Cell(mp[its_RdrMod_Src], mp[its_RdrMod_Off], 1);
-                mp[its_RdrMod_Cell] = (c > 0) ? c : ZERO_P;
-                mp[its_RdrMod_Ctl] = (floor(mp[its_RdrMod_Src] / ITS_KMul) === ITS_KCtl);
-                (c < 0) ? (
-                    reader[its_Rdr_Check] = 0; // checked again at the next sample
-                    reader[its_Rdr_Error] = 2713; // erreur : a modulation input is not valid
-                );
-                mp += its_RdrModDist;
+            its_Mod_Resolve(reader + its_Rdr_Mod1, 3) ? (
+                reader[its_Rdr_Check] = 0; // checked again at the next sample
+                reader[its_Rdr_Error] = 2713; // erreur : a modulation input is not valid
             );
         );
     );
@@ -5936,7 +6222,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
     (its_RdrErrXe === 0) ? (
         lcbl = reader[its_Rdr_Lcbl]; // the line
         lcn = reader[its_Rdr_BfChanUsed]; // count of used channels
-        vol = reader[its_Rdr_OutVol] * (1 + its_Mod_Val(reader + its_Rdr_Mod1 + 2 * its_RdrModDist)); // output volume, modulated
+        vol = reader[its_Rdr_OutVol] * (1 + its_Mod_Val(reader + its_Rdr_Mod1 + 2 * its_ModDist)); // output volume, modulated
         oc = reader[its_Rdr_OutCell]; // first output cell (own cable, bus or trash)
         (reader[its_Rdr_OutAdd] === 0) ? (
             memset(smpl_tab + oc, 0, lcn); // own cable : this reader is its only source
@@ -5946,7 +6232,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
 
         (mdr === its_RdrMode_Read) ? (
             // Mode reader
-            inc = (reader[its_Rdr_AbsInc] + its_Mod_Val(reader + its_Rdr_Mod1 + its_RdrModDist)) * reader[its_Rdr_AdjInc]; // speed, modulated
+            inc = (reader[its_Rdr_AbsInc] + its_Mod_Val(reader + its_Rdr_Mod1 + its_ModDist)) * reader[its_Rdr_AdjInc]; // speed, modulated
             loc = reader[its_Rdr_Abspos]; // loc is the index to read
             it = (loc === floor(loc)); // true if reading at integer positions
             ty = reader[its_Rdr_LoopType];
@@ -6222,7 +6508,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
 );
 
 function exec_writer(writer, nbr)
-local (lcbl, k, s, x, bp, val, vol, f, n, md, ic)
+local (lcbl, k, s, x, bp, val, vol, f, n, md, ic, mp)
 (
     its_WrtErrXe = (writer[its_Wrt_Check] !== BLOCK_CHECK);
     (its_WrtErrXe) ? (
@@ -6270,6 +6556,11 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md, ic)
                     writer[its_Wrt_Error] = 2712; // erreur : the source is not valid
                 );
             );
+            // the modulation inputs : an error is not fatal (no modulation)
+            its_Mod_Resolve(writer + its_Wrt_Mod1, 2) ? (
+                writer[its_Wrt_Check] = 0; // checked again at the next sample
+                writer[its_Wrt_Error] = 2714; // erreur : a modulation input is not valid
+            );
         );
     );
     (its_WrtErrXe === 0) ? (
@@ -6278,6 +6569,10 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md, ic)
         vol = writer[its_Wrt_InGain];
         md = writer[its_Wrt_Mode];
         ic = writer[its_Wrt_InCell]; // first cell read (source, or the zero cells)
+        // the modulations : record gain (depth in dB), overdub (depth in %)
+        mp = writer + its_Wrt_Mod1;
+        (mp[its_Mod_Src] !== 0) ? (vol *= 10^(its_Mod_Val(mp) / 20));
+        (mp[its_ModDist + its_Mod_Src] !== 0) ? (x = max(0, min(100, x + its_Mod_Val(mp + its_ModDist))));
         // Sample read
         lcbl = writer[its_Wrt_Lcbl];
         // the cells [Cell ... Cell+n-1] go to the channels [f ... f+n-1] of the line
@@ -6345,20 +6640,28 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md, ic)
 /*
     execute the effect "fx" (number "nbr") : called by @sample, in the phase of the effect
     the output is the own cable of the effect (assigned), or Out or a bus (added)
-    Mixer and EQ Mixer (the EQ Mixer only sets equal gains, see FX_EQ_Gains) :
+    Mixer and Auto Mixer (the Auto Mixer only sets equal gains, see FX_Auto_Gains) :
         Out[0 ... CCnt-1] = sum of Vol_i * Src_i[Off_i ... Off_i+CCnt-1], for the sources i in [1 ... 8] not null
         the gains in dB (its_Efx_VoldB_i) are the reference : the linear gains (its_Efx_Vol_i) are computed by the check
     LFO : Out[c] = Par4 + Par3 * shape(phase + c * Par5), the phase turning at Par1 Hz
+    Filter : Out = filter(Vol_1 * Src_1), cutoff Par1 (Hz) and resonance Par2 (Q), both modulated (octaves), mode Par3,
+        2^Par4 stages (low pass, high pass : Butterworth cascade, the resonance on the last stage) ; its coefficients and
+        states are in its work area (silent until @block has put in place an area of the right size)
+    Saturation : Out = Par6 * ((1 - Par4) * x + Par4 * (shape(Par1 * x + Par3) - shape(Par3))), x = Vol_1 * Src_1, with the drive
+        (Par1, dB) and the bias (Par3) modulated ; computed 2^Par5 times per sample (linear interpolation of x, then an
+        anti-aliasing low pass, 8th order Butterworth at 0.45 * srate), then a DC blocker ; in its work area
+    Bypass (its_EfxStat_Bypass) : Out = the first source not null, unchanged (an LFO : nothing)
     the structure is checked again after each modification (its_Efx_Check reset to 0) ; the error is kept in its_Efx_Error
 */
 function exec_fx(fx, nbr)
-local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr)
+local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, mbad, mp, f, q, md, cf, st, w, cw, sw, al, a0, b0, b1, b2, y,
+       wk, ns, k, qk, s, os, gd, bi, shb, mix, og, u, p, yd)
 (
     (fx[its_Efx_Check] !== BLOCK_CHECK) ? (
-        err = 0;
+        err = mbad = 0;
         ty = fx[its_Efx_Type];
         ccnt = fx[its_Efx_CCnt];
-        ((ty !== its_Efx_TyMixer) && (ty !== its_Efx_TyEQMixer) && (ty !== its_Efx_TyLFO)) ? (
+        (its_Fx_NSrc(ty) < 0) ? (
             err = 2706; // erreur : type not (yet) executed
         ) :
         ((ccnt <= 0) || (ccnt > 128) || (ccnt !== floor(ccnt))) ? (
@@ -6369,10 +6672,10 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr)
         ) : (
             fx[its_Efx_OutCell] = dst;
             fx[its_Efx_OutAdd] = (fx[its_Efx_OutK] !== 0);
-            (ty !== its_Efx_TyLFO) ? (
-                // Mixer, EQ Mixer : the sources
+            (its_Fx_NSrc(ty) > 0) ? (
+                // Mixer, Auto Mixer : the sources ; Filter, Saturation : its source (the first one)
                 cc = 0; ptsrc = fx + its_Efx_Src1;
-                loop(8,
+                loop(its_Fx_NSrc(ty),
                     g = ptsrc[its_Efx_VoldB1 - its_Efx_Src1];
                     ptsrc[its_Efx_Vol1 - its_Efx_Src1] = (g > -120) ? 10^(g/20) : 0;
                     src = its_Src_Cell(ptsrc[0], ptsrc[its_Efx_Off1 - its_Efx_Src1], ccnt);
@@ -6392,8 +6695,10 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr)
                     err = 2705; // erreur : no source
                 );
             );
+            // the modulation inputs : an error is not fatal (no modulation, the error is shown)
+            ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat)) ? (mbad = its_Mod_Resolve(fx + its_Efx_Mod1, 2));
         );
-        fx[its_Efx_Error] = err;
+        fx[its_Efx_Error] = (err === 0) && mbad ? 2715 : err; // 2715 : a modulation input is not valid
         (err === 0) ? (
             fx[its_Efx_Check] = BLOCK_CHECK;
         );
@@ -6405,6 +6710,24 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr)
             memset(dst, 0, ccnt); // own cable : this effect is its only source
             fx[its_Efx_OutDirty] = 1;
         );
+        (fx[its_Efx_Status] === its_EfxStat_Bypass) ? (
+            (its_Fx_NSrc(fx[its_Efx_Type]) > 0) ? (
+                c = 0; ptsrc = fx + its_Efx_Src1;
+                loop(its_Fx_NSrc(fx[its_Efx_Type]),
+                    (c === 0) ? (c = ptsrc[its_Efx_Cell1 - its_Efx_Src1]);
+                    ptsrc += its_EfxDist;
+                );
+                (c > 0) ? (
+                    src = smpl_tab + c;
+                    i = 0; loop(ccnt,
+                        dst[i] += src[i];
+                        i += 1;
+                    );
+                );
+            );
+            // the filter, the saturation start again from silence when turned on (their states are cleared, see its_FxW_Md)
+            ((wk = fx[its_Efx_Work]) > BASE_MEMORY) ? (wk[its_FxW_Md] = -1);
+        ) :
         (fx[its_Efx_Type] === its_Efx_TyLFO) ? (
             ph = fx[its_Efx_St1];
             sh = fx[its_Efx_Par1 + 1];
@@ -6424,8 +6747,132 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr)
             );
             ph += fx[its_Efx_Par1] / srate;
             fx[its_Efx_St1] = ph - floor(ph);
+        ) :
+        (fx[its_Efx_Type] === its_Efx_TyFilter) ? (
+            wk = fx[its_Efx_Work];
+            ((wk > BASE_MEMORY) && (wk[its_FxW_Size] === its_Fx_WorkSize(fx))) ? (
+                src = smpl_tab + fx[its_Efx_Cell1];
+                g = fx[its_Efx_Vol1];
+                mp = fx + its_Efx_Mod1;
+                f = max(10, min(0.45 * srate, fx[its_Efx_Par1] * 2^its_Mod_Val(mp)));
+                q = max(0.1, min(100, fx[its_Efx_Par1 + 1] * 2^its_Mod_Val(mp + its_ModDist)));
+                md = fx[its_Efx_Par1 + 2];
+                ns = its_Flt_Stages(fx);
+                cf = wk + its_FxW_Hdr;
+                st = cf + 5 * ns;
+                (md !== wk[its_FxW_Md]) ? memset(st, 0, 2 * ns * ccnt); // another mode : another use of the states
+                ((f !== wk[its_FxW_F]) || (q !== wk[its_FxW_Q]) || (md !== wk[its_FxW_Md])) ? (
+                    // the coefficients (biquads : RBJ cookbook)
+                    wk[its_FxW_F] = f; wk[its_FxW_Q] = q; wk[its_FxW_Md] = md;
+                    w = 2 * $pi * f / srate;
+                    (md < its_FltLP) ? (
+                        cf[0] = 1 - exp(-w); // the same for all the stages
+                    ) : (
+                        cw = cos(w); sw = sin(w);
+                        c = cf; k = 0; loop(ns,
+                            // low pass, high pass : Q of the stage k of a Butterworth filter of order 2 * ns, the last one
+                            // (the highest Q) multiplied by the resonance ; band pass, notch : the same stages
+                            qk = ((md === its_FltLP) || (md === its_FltHP)) ?
+                                0.5 / cos((2 * k + 1) * $pi / (4 * ns)) * ((k === ns - 1) ? q / sqrt(0.5) : 1) : q;
+                            al = sw / (2 * qk); a0 = 1 + al;
+                            (md === its_FltLP) ? (b0 = (1 - cw) / 2; b1 = 1 - cw; b2 = b0;) :
+                            (md === its_FltHP) ? (b0 = (1 + cw) / 2; b1 = -(1 + cw); b2 = b0;) :
+                            (md === its_FltBP) ? (b0 = al; b1 = 0; b2 = -al;) :
+                            (b0 = 1; b1 = -2 * cw; b2 = 1;); // notch
+                            c[0] = b0 / a0; c[1] = b1 / a0; c[2] = b2 / a0; c[3] = -2 * cw / a0; c[4] = (1 - al) / a0;
+                            c += 5; k += 1;
+                        );
+                    );
+                );
+                (md < its_FltLP) ? (
+                    // one pole stages : low pass, or the input minus the low pass
+                    i = 0; loop(ccnt,
+                        x = g * src[i];
+                        s = st + 2 * ns * i;
+                        loop(ns,
+                            s[0] += cf[0] * (x - s[0]);
+                            x = (md === its_FltLP1) ? s[0] : x - s[0];
+                            s += 2;
+                        );
+                        dst[i] += x;
+                        i += 1;
+                    );
+                ) : (
+                    // biquads, transposed direct form II (2 states per stage and per channel)
+                    i = 0; loop(ccnt,
+                        x = g * src[i];
+                        s = st + 2 * ns * i;
+                        c = cf;
+                        loop(ns,
+                            y = c[0] * x + s[0];
+                            s[0] = c[1] * x - c[3] * y + s[1];
+                            s[1] = c[2] * x - c[4] * y;
+                            x = y;
+                            s += 2; c += 5;
+                        );
+                        dst[i] += x;
+                        i += 1;
+                    );
+                );
+            );
+        ) :
+        (fx[its_Efx_Type] === its_Efx_TySat) ? (
+            wk = fx[its_Efx_Work];
+            ((wk > BASE_MEMORY) && (wk[its_FxW_Size] === its_Fx_WorkSize(fx))) ? (
+                src = smpl_tab + fx[its_Efx_Cell1];
+                g = fx[its_Efx_Vol1];
+                mp = fx + its_Efx_Mod1;
+                gd = 10^(max(-24, min(72, fx[its_Efx_Par1] + its_Mod_Val(mp))) / 20); // drive
+                bi = max(-2, min(2, fx[its_Efx_Par1 + 2] + its_Mod_Val(mp + its_ModDist))); // bias
+                md = fx[its_Efx_Par1 + 1];
+                mix = max(0, min(1, fx[its_Efx_Par1 + 3]));
+                og = 10^(fx[its_Efx_Par1 + 5] / 20);
+                os = 2^max(0, min(its_SatOSCnt - 1, floor(fx[its_Efx_Par1 + 4])));
+                shb = its_Sat_Shape(bi, md); // the output for a null input : removed
+                cf = wk + its_FxW_Hdr;
+                st = cf + 5 * 4;
+                (os !== wk[its_FxW_Md]) ? (
+                    // another oversampling : the anti-aliasing filter, 4 biquads (Butterworth, order 8) at 0.45 * srate
+                    wk[its_FxW_Md] = os;
+                    memset(st, 0, its_SatChW * ccnt);
+                    w = 2 * $pi * 0.45 / os; cw = cos(w); sw = sin(w);
+                    c = cf; k = 0; loop(4,
+                        qk = 0.5 / cos((2 * k + 1) * $pi / 16);
+                        al = sw / (2 * qk); a0 = 1 + al;
+                        c[0] = (1 - cw) / (2 * a0); c[1] = (1 - cw) / a0; c[2] = c[0]; c[3] = -2 * cw / a0; c[4] = (1 - al) / a0;
+                        c += 5; k += 1;
+                    );
+                );
+                i = 0; loop(ccnt,
+                    x = g * src[i];
+                    s = st + its_SatChW * i;
+                    (os === 1) ? (
+                        y = its_Sat_Shape(gd * x + bi, md) - shb;
+                    ) : (
+                        k = 1; loop(os,
+                            u = s[0] + (x - s[0]) * k / os; // linear interpolation from the previous input
+                            v = its_Sat_Shape(gd * u + bi, md) - shb;
+                            c = cf; p = s + 3;
+                            loop(4,
+                                y = c[0] * v + p[0];
+                                p[0] = c[1] * v - c[3] * y + p[1];
+                                p[1] = c[2] * v - c[4] * y;
+                                v = y;
+                                p += 2; c += 5;
+                            );
+                            k += 1;
+                        );
+                        y = v; // the last value : decimation
+                        s[0] = x;
+                    );
+                    yd = y - s[1] + its_SatDcK * s[2]; // DC blocker (about 10 Hz)
+                    s[1] = y; s[2] = yd;
+                    dst[i] += og * ((1 - mix) * x + mix * yd);
+                    i += 1;
+                );
+            );
         ) : (
-            // Mixer, EQ Mixer
+            // Mixer, Auto Mixer
             ptsrc = fx + its_Efx_Src1;
             loop (8,
                 ((c = ptsrc[its_Efx_Cell1 - its_Efx_Src1]) > 0) ? (
@@ -7137,6 +7584,7 @@ loadMode ? (
                         ldok = 0;
                         lderr = 156;
                     ) : (
+                        (sbty === KW_effx) ? (sbl[its_Efx_Work] = sbl[its_Efx_WkNew] = sbl[its_Efx_WkOld] = 0);
                         DuplWA[si] = sbl;
                         lditmc += 1;
                     );
@@ -7263,6 +7711,9 @@ doingLoad = doingSave = 0;
 gm_time_keep(); // shared gmem time fields, if nobody keeps them (see mSL_clip_lib)
 chcnt = num_ch;
 
+// the generic sliders (automatable by REAPER) : the control cells Ctl 1 ... NB_GSL (smoothed by the inputs that read them)
+ctl_i = 0; loop(NB_GSL, smpl_tab[CTL_P + ctl_i] = slider(GSL_FIRST + ctl_i); ctl_i += 1;);
+
 // We achieve preset loading here to avoid conflicts with readers/writers
 (perform_loading !== 0) ? (
     perform_loading = 0;
@@ -7275,6 +7726,9 @@ chcnt = num_ch;
 );
 
 dbg_show_2(Readers_set[0],67);
+
+// the work areas of the effects prepared by @gfx (see its_Patch_Update)
+its_Fx_WorkSwitch();
 
 
 // Count Solo Readers
@@ -8264,7 +8718,7 @@ local (i, x, m, p, lab)
 // Waveform of the channels read by reader "rcbl" (number "rdr") in line "lcbl", zoom in [1, 100]
 // The region (if it does not cover the whole line) and the zoom work in all the reading modes, so that the
 // limits can be set before switching to a loop mode : the zoom goes from the whole line to [its_Rdr_RegSOut, its_Rdr_RegEOut)
-function its_wave_reader(lcbl, rcbl, rdr, zoom)
+function its_wave_reader(lcbl, rcbl, rdr, zoom, flags)
 local (fa, fb, ra, rb, nch, ch0)
 (
     its_wave_colors();
@@ -8282,7 +8736,7 @@ local (fa, fb, ra, rb, nch, ch0)
     nch = max(0, min(rcbl[its_Rdr_BfChanUsed], lcbl[its_Lin_ChCnt] - ch0)); // only the channels read
     ui_aud_chan0 = ch0; // each channel keeps the color of its number in the line
     ui_audio_wave(0, nch, lcbl + its_Lin_BF1ST + ch0, lcbl[its_Lin_ActBSize],
-        ui_aud_za, ui_aud_zb, ui_aud_Sep | ui_aud_Axis, its_LinWaveMax);
+        ui_aud_za, ui_aud_zb, flags, its_LinWaveMax);
 );
 
 
@@ -8312,7 +8766,7 @@ function its_Out_Label(str, dst, off)
 );
 
 // item of menu_Src_Ids for the source "src", first channel "off" (0 : not in the menu) ; the source of the item "r"
-// items : 1 None, 2 ... In:0 ..., then Out:0 ..., the buses, the readers, the effects
+// items : 1 None, 2 ... In:0 ..., then Out:0 ..., the buses, the controls, the readers, the effects
 function its_Src_MenuIdx(src, off)
 local (k, n)
 (
@@ -8322,10 +8776,11 @@ local (k, n)
     (k === ITS_KIn) ? ((off < ITS_MNCH) ? 2 + off : 0) :
     (k === ITS_KOut) ? ((off < ITS_MNCH) ? 2 + ITS_MNCH + off : 0) :
     (k === ITS_KBus) ? 2 + 2 * ITS_MNCH + n :
-    (k === ITS_KRdr) ? 2 + 2 * ITS_MNCH + NB_BUS + n :
-    (k === ITS_KFx) ? 2 + 2 * ITS_MNCH + NB_BUS + RD_CNT + n : 0;
+    (k === ITS_KCtl) ? ((n + off < NB_GSL) ? 2 + 2 * ITS_MNCH + NB_BUS + n + off : 0) :
+    (k === ITS_KRdr) ? 2 + 2 * ITS_MNCH + NB_BUS + NB_GSL + n :
+    (k === ITS_KFx) ? 2 + 2 * ITS_MNCH + NB_BUS + NB_GSL + RD_CNT + n : 0;
 );
-// the source of the item "r" ; its first channel in its_Src_ChOff (0 for a bus, a reader, an effect)
+// the source of the item "r" ; its first channel in its_Src_ChOff (0 for a bus, a control, a reader, an effect)
 function its_Src_FromIdx(r)
 (
     its_Src_ChOff = 0;
@@ -8333,8 +8788,9 @@ function its_Src_FromIdx(r)
     (r < 2 + ITS_MNCH) ? (its_Src_ChOff = r - 2; ITS_KIn * ITS_KMul) :
     (r < 2 + 2 * ITS_MNCH) ? (its_Src_ChOff = r - 2 - ITS_MNCH; ITS_KOut * ITS_KMul) :
     (r < 2 + 2 * ITS_MNCH + NB_BUS) ? ITS_KBus * ITS_KMul + r - 2 - 2 * ITS_MNCH :
-    (r < 2 + 2 * ITS_MNCH + NB_BUS + RD_CNT) ? ITS_KRdr * ITS_KMul + r - 2 - 2 * ITS_MNCH - NB_BUS :
-    ITS_KFx * ITS_KMul + r - 2 - 2 * ITS_MNCH - NB_BUS - RD_CNT;
+    (r < 2 + 2 * ITS_MNCH + NB_BUS + NB_GSL) ? ITS_KCtl * ITS_KMul + r - 2 - 2 * ITS_MNCH - NB_BUS :
+    (r < 2 + 2 * ITS_MNCH + NB_BUS + NB_GSL + RD_CNT) ? ITS_KRdr * ITS_KMul + r - 2 - 2 * ITS_MNCH - NB_BUS - NB_GSL :
+    ITS_KFx * ITS_KMul + r - 2 - 2 * ITS_MNCH - NB_BUS - NB_GSL - RD_CNT;
 );
 
 // menu of the sources, "src" (first channel "off") ticked ; returns the source chosen (0 : none), -1 if no choice ;
@@ -8388,74 +8844,116 @@ local (xx, res)
 );
 
 /*
-    The modulation inputs of a reader (see its_RdrMod_...) : "j" is used if connected and meaningful in the mode of the reader
-    (0 the offset : delay mode ; 1 the speed : reader mode ; 2 the volume : both)
+    The modulation inputs, in the pads (reader, writer : a line of their own ; effects : cells of the line of their type)
+    right clic : the source ; left clic : shows / hides the slider of the attenuverter ; shift + left clic : the channel
+    the depths and the attenuverters are sliders of the module
 */
-function Rd_Mod_Used(rcbl, j)
-local (p, md)
+// the cells [c0 ... c0+n-1] of a pad ("labs", "colrs") show the "n" inputs "mp", named "names" ("okm" : see its_Mod_Used)
+function its_Mod_Fill(labs, colrs, c0, mp, n, names, okm)
+local (j, p)
 (
-    p = rcbl + its_Rdr_Mod1 + j * its_RdrModDist;
-    md = rcbl[its_Rdr_Mode];
-    (p[its_RdrMod_Src] !== 0) && ((j === 2) || ((j === 0) && (md === its_RdrMode_Delay)) || ((j === 1) && (md === its_RdrMode_Read)));
+    j = 0; loop(n,
+        p = mp + j * its_ModDist;
+        its_Src_Label(#modsrc, p[its_Mod_Src], p[its_Mod_Off]);
+        ((p[its_Mod_Src] !== 0) && (p[its_Mod_Att] !== 1)) ? (
+            sprintf(labs[c0 + j], "%s: %s x%.2f", names[j], #modsrc, p[its_Mod_Att]);
+        ) : (
+            sprintf(labs[c0 + j], "%s: %s", names[j], #modsrc);
+        );
+        colrs[c0 + j] = ((okm & (1 << j)) === 0) ? Col_Inactive : (p[its_Mod_Src] !== 0) ? CP3 : CP1;
+        j += 1;
+    );
 );
 
-/*
-    Pad of the modulation inputs of a reader : one line of 8 cells
-        0 "Modulation", 1 offset (delay mode, depth in ms), 2 speed (reader mode), 3 volume (depth : a fraction of the volume)
-        right clic : the source ; left clic : shows / hides the slider of the attenuverter ; shift + left clic : the channel
-        the depths and the attenuverters are sliders of the reader pad
-*/
-function Rd_Mod_Pad(rcbl)
-local (j, p, k, zz, zzmcl, md, ok, jmc)
+// a clic "ev" (mouse modifiers "jmc") on the input "j" of "mp" ; "defs" : the first depths ; returns 1 if the source changed
+function its_Mod_Click(mp, j, ev, jmc, defs)
+local (p, k, chg)
 (
+    chg = 0;
+    p = mp + j * its_ModDist;
+    (ev & ui_jpad_ev_rmc) ? (
+        ((k = its_Src_Choose(p[its_Mod_Src], p[its_Mod_Off])) >= 0) ? (
+            (p[its_Mod_Src] === 0) ? (p[its_Mod_Att] = 1); // a new connection : attenuverter 1
+            p[its_Mod_Src] = k;
+            p[its_Mod_Off] = its_Src_ChOff;
+            (p[its_Mod_Depth] === 0) ? (p[its_Mod_Depth] = defs[j]);
+            chg = 1;
+        );
+    ) :
+    ((ev & ui_jpad_ev_lmc) && (jmc & shfCap)) ? (
+        ((k = its_Off_Choose(p[its_Mod_Off])) >= 0) ? (
+            p[its_Mod_Off] = k;
+            chg = 1;
+        );
+    ) :
+    (ev & ui_jpad_ev_lmc) ? (
+        p[its_Mod_ShowAtt] = !p[its_Mod_ShowAtt];
+    );
+    chg;
+);
+
+// a line of its own for the "n" inputs "mp" (reader, writer) : 0 "Modulation", 1 ... n the inputs ; returns 1 if a source changed
+function its_Mod_Row(mp, n, names, okm, defs)
+local (j, zz, zzmcl, jmc, chg)
+(
+    chg = 0;
     mSL_setStrArray(pad_RdM_Labs, pad_RdM_Siz);
-    md = rcbl[its_Rdr_Mode];
     j = 0; loop(pad_RdM_Siz,
         pad_RdM_Colrs[j] = Col_InfoA;
         strcpy(pad_RdM_Labs[j], "");
         j += 1;
     );
     strcpy(pad_RdM_Labs[0], "Modulation");
-    j = 0; loop(3,
-        p = rcbl + its_Rdr_Mod1 + j * its_RdrModDist;
-        ok = (j === 2) || ((j === 0) && (md === its_RdrMode_Delay)) || ((j === 1) && (md === its_RdrMode_Read));
-        its_Src_Label(#rdmod, p[its_RdrMod_Src], p[its_RdrMod_Off]);
-        ((p[its_RdrMod_Src] !== 0) && (p[its_RdrMod_Att] !== 1)) ? (
-            sprintf(pad_RdM_Labs[1 + j], "%s: %s x%.2f", (j === 0) ? "Offset" : (j === 1) ? "Speed" : "Volume", #rdmod, p[its_RdrMod_Att]);
-        ) : (
-            sprintf(pad_RdM_Labs[1 + j], "%s: %s", (j === 0) ? "Offset" : (j === 1) ? "Speed" : "Volume", #rdmod);
-        );
-        pad_RdM_Colrs[1 + j] = (!ok) ? Col_Inactive : (p[its_RdrMod_Src] !== 0) ? CP3 : CP1;
-        j += 1;
-    );
+    its_Mod_Fill(pad_RdM_Labs, pad_RdM_Colrs, 1, mp, n, names, okm);
     jmc = ui_jmouse_cap;
     zz = control_jpad(pad_RdMod);
     (zz > 0) ? (
         ui_GFXdoNow |= 4; ui_GFXReason = 34;
         zzmcl = pad_RdMod[ui_jpad_last] - 1;
-        ((zzmcl >= 1) && (zzmcl <= 3)) ? (
-            p = rcbl + its_Rdr_Mod1 + (zzmcl - 1) * its_RdrModDist;
-            (zz & ui_jpad_ev_rmc) ? (
-                ((k = its_Src_Choose(p[its_RdrMod_Src], p[its_RdrMod_Off])) >= 0) ? (
-                    (p[its_RdrMod_Src] === 0) ? (p[its_RdrMod_Att] = 1); // a new connection : attenuverter 1
-                    p[its_RdrMod_Src] = k;
-                    p[its_RdrMod_Off] = its_Src_ChOff;
-                    // a first depth : 2 ms, speed 0.1, half the volume
-                    (p[its_RdrMod_Depth] === 0) ? (p[its_RdrMod_Depth] = (zzmcl === 1) ? 2 : (zzmcl === 2) ? 0.1 : 0.5);
-                    rcbl[its_Rdr_Check] = 0;
+        ((zzmcl >= 1) && (zzmcl <= n)) ? (chg = its_Mod_Click(mp, zzmcl - 1, zz, jmc, defs));
+    );
+    chg;
+);
+
+// count of the sliders of the inputs used : the depth, and the attenuverter if shown
+function its_Mod_SlCount(mp, n, okm)
+local (j, c)
+(
+    c = j = 0; loop(n,
+        its_Mod_Used(mp, j, okm) ? (c += 1 + (mp[j * its_ModDist + its_Mod_ShowAtt] != 0));
+        j += 1;
+    );
+    c;
+);
+
+// the sliders of the inputs used : depth (parameter "pd" + j ; right clic : no modulation), attenuverter if shown ("pa" + j ; right clic : 1)
+function its_Mod_Sliders(mp, n, okm, pd, pa)
+local (j, p, r)
+(
+    j = 0; loop(n,
+        its_Mod_Used(mp, j, okm) ? (
+            p = mp + j * its_ModDist;
+            paramValues[pd + j] = p[its_Mod_Depth];
+            r = parCtl(pd + j);
+            (r != 0) ? (
+                p[its_Mod_Depth] = (r === 8) ? 0 : parV(pd + j);
+            );
+            (p[its_Mod_ShowAtt]) ? (
+                paramValues[pa + j] = p[its_Mod_Att];
+                r = parCtl(pa + j);
+                (r != 0) ? (
+                    p[its_Mod_Att] = (r === 8) ? 1 : max(-10, min(10, parV(pa + j)));
                 );
-            ) :
-            ((zz & ui_jpad_ev_lmc) && (jmc & shfCap)) ? (
-                ((k = its_Off_Choose(p[its_RdrMod_Off])) >= 0) ? (
-                    p[its_RdrMod_Off] = k;
-                    rcbl[its_Rdr_Check] = 0;
-                );
-            ) :
-            (zz & ui_jpad_ev_lmc) ? (
-                p[its_RdrMod_ShowAtt] = !p[its_RdrMod_ShowAtt];
             );
         );
+        j += 1;
     );
+);
+
+// the inputs of a reader meaningful in its mode : offset (delay mode), speed (reader mode), volume (both)
+function its_Rdr_ModOk(rcbl)
+(
+    4 | ((rcbl[its_Rdr_Mode] === its_RdrMode_Delay) ? 1 : 2);
 );
 
 /*
@@ -8467,8 +8965,9 @@ local (j, p, k, zz, zzmcl, md, ok, jmc)
    RDBL[5] = Neded sliders count
    RDBL[6] = region length size option
    RDBL[7] = region length option
-   RDBL[8] = waveform height (no waveform if smaller than its_RdrWaveMin)
+   RDBL[8] = waveform height (0 : its_RdrWaveH)
    RDBL[9] = waveform zoom [1 .. 100] (slider "Zoom")
+   RDBL[10] = waveform flags (its_WaveHide, its_WaveOver ; keys 'w', '+', '-', 'v' : see its_Wave_Keys)
 */
 function show_Reader_Pad(RDBL, blockId)
 local (h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi, i, xx, w, k, r, jmc,
@@ -8481,7 +8980,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, z
     // (no reader yet : the mode chosen in cell 2, RDBL[1])
     h1 = uix_jpadHeight(((((rcbl > BASE_MEMORY) && (rcbl[-2] === KW_read)) ? rcbl[its_Rdr_Mode] : RDBL[1]) === its_RdrMode_Delay) ? 2 : pad_Rdr_NL); // height
     h3 = ((rcbl > BASE_MEMORY) && (rcbl[-2] === KW_read) && ((lcbl = rcbl[its_Rdr_Lcbl]) > BASE_MEMORY)
-        && (lcbl[-2] === KW_lcbl) && (RDBL[8] >= its_RdrWaveMin)) ? RDBL[8] : 0;
+        && (lcbl[-2] === KW_lcbl)) ? its_Wave_H(RDBL + 8, RDBL + 10, its_RdrWaveH) : 0;
     h4 = ((rcbl > BASE_MEMORY) && (rcbl[-2] === KW_read)) ? uix_jpadHeight(1) : 0; // the modulation inputs
     uix_jneed = h1+h2+h3+h4+ui_jd_ctgr;
     uix_jmini = h1+h2+h4+ui_jd_ctgr;
@@ -8496,6 +8995,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, z
             keepBlockInfos(blockId);
             // 'd' : dump of the reader in the log (taken before the pad)
             (zzmi && GM_key_take('d')) ? GM_Dump(rcbl, its_Rdr_BlkSize, sprintf(#, "Reader %d", rdr+1));
+            (zzmi) ? its_Wave_Keys(RDBL + 8, RDBL + 10, its_RdrWaveH);
             (zzmi) ? (
                 ui_push();
                     // stack is now 2 levels deep
@@ -8541,10 +9041,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, z
                     RDBL[5] = (rcbl[its_Rdr_Mode] === its_RdrMode_Delay) ? 2 : // delay mode : volume and offset only
                         (h3 > 0) ? 9 : 8; // + "Zoom" slider when the waveform is shown
                     // + the depths of the modulations used, and their attenuverters if shown
-                    i = 0; loop(3,
-                        Rd_Mod_Used(rcbl, i) ? (RDBL[5] += 1 + (rcbl[its_Rdr_Mod1 + i * its_RdrModDist + its_RdrMod_ShowAtt] != 0));
-                        i += 1;
-                    );
+                    RDBL[5] += its_Mod_SlCount(rcbl + its_Rdr_Mod1, 3, its_Rdr_ModOk(rcbl));
                     i = 0; loop(pad_Rdr_Siz,
                         pad_Rdr_Colrs[i] = dfCol;
                         strcpy(pad_Rdr_Labs[i],"");
@@ -9039,7 +9536,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, z
             (rok && (h4 > 0)) ? (
                 ui_split_top(h4);
                     ui_pad(1,2,2,2);
-                    Rd_Mod_Pad(rcbl);
+                    its_Mod_Row(rcbl + its_Rdr_Mod1, 3, its_ModN_Rdr, its_Rdr_ModOk(rcbl), its_ModD_Rdr) ? (rcbl[its_Rdr_Check] = 0);
                 ui_pop();
             );
 
@@ -9050,7 +9547,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, z
                 (((lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) && (w >= its_RdrWaveMin)) ? (
                     ui_split_top(w);
                         ui_pad(1,2,1,2);
-                        its_wave_reader(lcbl, rcbl, rdr, RDBL[9]);
+                        its_wave_reader(lcbl, rcbl, rdr, RDBL[9], its_Wave_Flags(RDBL + 10));
                     ui_pop();
                 );
             );
@@ -9320,25 +9817,8 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, z
                         );
                     );
 
-                    // the depths of the modulation inputs used (right clic : no modulation), their attenuverters if shown (right clic : 1)
-                    i = 0; loop(3,
-                        Rd_Mod_Used(rcbl, i) ? (
-                            p = rcbl + its_Rdr_Mod1 + i * its_RdrModDist;
-                            paramValues[p_rdModDepth1 + i] = p[its_RdrMod_Depth];
-                            r = parCtl(p_rdModDepth1 + i);
-                            (r != 0) ? (
-                                p[its_RdrMod_Depth] = (r === 8) ? 0 : parV(p_rdModDepth1 + i);
-                            );
-                            (p[its_RdrMod_ShowAtt]) ? (
-                                paramValues[p_rdModAtt1 + i] = p[its_RdrMod_Att];
-                                r = parCtl(p_rdModAtt1 + i);
-                                (r != 0) ? (
-                                    p[its_RdrMod_Att] = (r === 8) ? 1 : max(-10, min(10, parV(p_rdModAtt1 + i)));
-                                );
-                            );
-                        );
-                        i += 1;
-                    );
+                    // the depths of the modulation inputs used, their attenuverters if shown
+                    its_Mod_Sliders(rcbl + its_Rdr_Mod1, 3, its_Rdr_ModOk(rcbl), p_rdModDepth1, p_rdModAtt1);
 
                 ui_pop();
 
@@ -9357,6 +9837,8 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, z
    LDBL[0] = Line to display
    LDBL[1] = size in seconds
    LDBL[2] = channel count
+   LDBL[5] = waveform height (0 : its_LinWaveH)
+   LDBL[6] = waveform flags (its_WaveHide, its_WaveOver ; keys 'w', '+', '-', 'v' : see its_Wave_Keys)
 */
 function show_Line_Pad(LDBL, blockId)
 local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, dfCol, zzch, zzent, zzmcl,
@@ -9366,7 +9848,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
     h2 = ui_jd_slidh * 1 + 4;
     // waveform, if the line exists (see mSL_ui_audio.jsfx-inc)
     lcbl = Lines_Set[LDBL[0]];
-    h3 = ((lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) ? its_LinWaveH : 0;
+    h3 = ((lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) ? its_Wave_H(LDBL + 5, LDBL + 6, its_LinWaveH) : 0;
     uix_jneed = h1+h2+h3+ui_jd_ctgr;
     uix_jmini = h1+h2+ui_jd_ctgr;
     (ui_height() >= uix_jmini) ? (
@@ -9380,6 +9862,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
             keepBlockInfos(blockId);
             // 'd' : dump of the line in the log (taken before the pad)
             (zzmi && GM_key_take('d')) ? GM_Dump(lcbl, its_Lin_BlkSize, sprintf(#, "Line %d", lnr+1));
+            (zzmi) ? its_Wave_Keys(LDBL + 5, LDBL + 6, its_LinWaveH);
             (zzmi) ? (
                 ui_push();
                     // stack is now 2 levels deep
@@ -9546,7 +10029,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
                     its_wave_marks(lcbl, -1);
                     // the samples are in [its_Lin_Start, its_Lin_Last) of each buffer (BF_LIM guard samples around)
                     ui_audio_wave(h3, lcbl[its_Lin_ChCnt], lcbl + its_Lin_BF1ST, lcbl[its_Lin_ActBSize],
-                        lcbl[its_Lin_Start], lcbl[its_Lin_Last], ui_aud_Sep | ui_aud_Axis, its_LinWaveMax);
+                        lcbl[its_Lin_Start], lcbl[its_Lin_Last], its_Wave_Flags(LDBL + 6), its_LinWaveMax);
                 ui_pop();
             );
 
@@ -9555,8 +10038,8 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
 );
 
 
-// EQ Mixer : the same gain -20*log10(N) (rounded to 0.01 dB) for the N sources not null
-function FX_EQ_Gains(fx)
+// Auto Mixer : the same gain -20*log10(N) (rounded to 0.01 dB) for the N sources not null
+function FX_Auto_Gains(fx)
 local (n, g, p)
 (
     n = 0; p = fx + its_Efx_Src1;
@@ -9580,11 +10063,11 @@ FXP_Fill = 1;
 FXP_Click = 2;
 FXP_Sliders = 3;
 
-// Mixer and EQ Mixer : line 1 = the 8 sources (right clic : the source ; left clic : its first channel) ; the gains of the Mixer as sliders
+// Mixer and Auto Mixer : line 1 = the 8 sources (right clic : the source ; left clic : its first channel) ; the gains of the Mixer as sliders
 function FX_Mixer_Pad(RDBL, fx, fxn, what, cell, ev)
 local (i, k, p, r, zi, mix)
 (
-    mix = (fx[its_Efx_Type] === its_Efx_TyMixer); // the EQ Mixer computes its gains
+    mix = (fx[its_Efx_Type] === its_Efx_TyMixer); // the Auto Mixer computes its gains
     (what === FXP_Dims) ? (
         RDBL[3] = 2;
         k = 0; p = fx + its_Efx_Src1;
@@ -9612,7 +10095,7 @@ local (i, k, p, r, zi, mix)
                 ((k = its_Src_Choose(p[0], p[its_Efx_Off1 - its_Efx_Src1])) >= 0) ? (
                     p[0] = k;
                     p[its_Efx_Off1 - its_Efx_Src1] = its_Src_ChOff;
-                    mix ? (fx[its_Efx_Check] = 0) : FX_EQ_Gains(fx);
+                    mix ? (fx[its_Efx_Check] = 0) : FX_Auto_Gains(fx);
                 );
             ) :
             (ev & ui_jpad_ev_lmc) ? (
@@ -9683,16 +10166,193 @@ local (k, r, xx, pw)
     );
 );
 
+// Filter : line 1, cell 8 = the source (right clic : menu ; left clic : its first channel), cell 9 = the mode (left clic :
+// the next one ; right clic : menu), cell 10 = the slope (left clic : the next one ; right clic : the previous one) ;
+// line 2 : the modulation inputs (cutoff, resonance) ; sliders : cutoff, resonance, input gain, and the modulations used
+function FX_Filter_Pad(RDBL, fx, fxn, what, cell, ev)
+local (k, r, xx, zi, ns, md)
+(
+    (what === FXP_Dims) ? (
+        RDBL[3] = 3;
+        RDBL[5] = 3 + its_Mod_SlCount(fx + its_Efx_Mod1, 2, 3);
+    ) :
+    (what === FXP_Fill) ? (
+        (fx[its_Efx_Src1] !== 0) ? (
+            its_Src_Label(pad_Efx_Labs[8], fx[its_Efx_Src1], fx[its_Efx_Off1]);
+            pad_Efx_Colrs[8] = CP3;
+        ) : (
+            strcpy(pad_Efx_Labs[8], "Source");
+            pad_Efx_Colrs[8] = CP1;
+        );
+        strcpy(pad_Efx_Labs[9], menu_Efx_FltMode_N[max(0, min(5, fx[its_Efx_Par1 + 2]))]);
+        pad_Efx_Colrs[9] = CP3;
+        ns = its_Flt_Stages(fx);
+        md = fx[its_Efx_Par1 + 2];
+        (md === its_FltNotch) ? sprintf(pad_Efx_Labs[10], "%d stage%s", ns, (ns > 1) ? "s" : "") :
+            sprintf(pad_Efx_Labs[10], "%d dB/oct", ((md === its_FltLP) || (md === its_FltHP)) ? 12 * ns : 6 * ns);
+        pad_Efx_Colrs[10] = CP3;
+        strcpy(pad_Efx_Labs[16], "Modulation");
+        its_Mod_Fill(pad_Efx_Labs, pad_Efx_Colrs, 17, fx + its_Efx_Mod1, 2, its_ModN_Flt, 3);
+    ) :
+    (what === FXP_Click) ? (
+        (cell === 8) ? (
+            (ev & ui_jpad_ev_rmc) ? (
+                ((k = its_Src_Choose(fx[its_Efx_Src1], fx[its_Efx_Off1])) >= 0) ? (
+                    fx[its_Efx_Src1] = k;
+                    fx[its_Efx_Off1] = its_Src_ChOff;
+                    fx[its_Efx_Check] = 0;
+                );
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                ((k = its_Off_Choose(fx[its_Efx_Off1])) >= 0) ? (
+                    fx[its_Efx_Off1] = k;
+                    fx[its_Efx_Check] = 0;
+                );
+            );
+        ) :
+        (cell === 9) ? (
+            (ev & ui_jpad_ev_rmc) ? (
+                ui_menu_tick(menu_Efx_FltMode, -1, 0);
+                ui_menu_tick(menu_Efx_FltMode, fx[its_Efx_Par1 + 2] + 1, 1);
+                xx = control_jmenu(menu_Efx_FltMode);
+                (xx != 0) ? (fx[its_Efx_Par1 + 2] = xx - 1);
+                ui_menu_tick(menu_Efx_FltMode, -1, 0);
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                fx[its_Efx_Par1 + 2] = (fx[its_Efx_Par1 + 2] + 1) % 6;
+            );
+        ) :
+        (cell === 10) ? (
+            k = max(0, min(its_FltSlopes - 1, floor(fx[its_Efx_Par1 + 3])));
+            (ev & ui_jpad_ev_rmc) ? (fx[its_Efx_Par1 + 3] = (k + its_FltSlopes - 1) % its_FltSlopes) :
+            (ev & ui_jpad_ev_lmc) ? (fx[its_Efx_Par1 + 3] = (k + 1) % its_FltSlopes);
+        ) :
+        ((cell === 17) || (cell === 18)) ? (
+            its_Mod_Click(fx + its_Efx_Mod1, cell - 17, ev, its_PadJmc, its_ModD_Flt) ? (fx[its_Efx_Check] = 0);
+        );
+    ) :
+    (what === FXP_Sliders) ? (
+        // cutoff, resonance : read at each sample
+        paramValues[p_fxFltFreq] = fx[its_Efx_Par1];
+        r = parCtl(p_fxFltFreq);
+        (r != 0) ? (fx[its_Efx_Par1] = (r === 8) ? 1000 : parV(p_fxFltFreq));
+        paramValues[p_fxFltQ] = fx[its_Efx_Par1 + 1];
+        r = parCtl(p_fxFltQ);
+        (r != 0) ? (fx[its_Efx_Par1 + 1] = (r === 8) ? 0.707 : parV(p_fxFltQ));
+        // input gain : its linear value is computed by the check
+        paramValues[p_fxGain1] = fx[its_Efx_VoldB1];
+        r = parCtl(p_fxGain1);
+        (r != 0) ? (
+            fx[its_Efx_VoldB1] = (r === 8) ? 0 : parV(p_fxGain1);
+            fx[its_Efx_Check] = 0;
+        );
+        its_Mod_Sliders(fx + its_Efx_Mod1, 2, 3, p_fxFltModD1, p_fxFltModA1);
+    );
+);
+
+// Saturation : line 1, cell 8 = the source (right clic : menu ; left clic : its first channel), cell 9 = the mode (left clic :
+// the next one ; right clic : menu), cell 10 = the oversampling (left clic : the next one ; right clic : the previous one) ;
+// line 2 : the modulation inputs (drive, bias) ; sliders : drive, bias, mix, output, input gain, and the modulations used
+function FX_Sat_Pad(RDBL, fx, fxn, what, cell, ev)
+local (k, r, xx)
+(
+    (what === FXP_Dims) ? (
+        RDBL[3] = 3;
+        RDBL[5] = 5 + its_Mod_SlCount(fx + its_Efx_Mod1, 2, 3);
+    ) :
+    (what === FXP_Fill) ? (
+        (fx[its_Efx_Src1] !== 0) ? (
+            its_Src_Label(pad_Efx_Labs[8], fx[its_Efx_Src1], fx[its_Efx_Off1]);
+            pad_Efx_Colrs[8] = CP3;
+        ) : (
+            strcpy(pad_Efx_Labs[8], "Source");
+            pad_Efx_Colrs[8] = CP1;
+        );
+        strcpy(pad_Efx_Labs[9], menu_Efx_SatMode_N[max(0, min(3, fx[its_Efx_Par1 + 1]))]);
+        pad_Efx_Colrs[9] = CP3;
+        sprintf(pad_Efx_Labs[10], "Oversampling %dx", 2^max(0, min(its_SatOSCnt - 1, floor(fx[its_Efx_Par1 + 4]))));
+        pad_Efx_Colrs[10] = CP3;
+        strcpy(pad_Efx_Labs[16], "Modulation");
+        its_Mod_Fill(pad_Efx_Labs, pad_Efx_Colrs, 17, fx + its_Efx_Mod1, 2, its_ModN_Sat, 3);
+    ) :
+    (what === FXP_Click) ? (
+        (cell === 8) ? (
+            (ev & ui_jpad_ev_rmc) ? (
+                ((k = its_Src_Choose(fx[its_Efx_Src1], fx[its_Efx_Off1])) >= 0) ? (
+                    fx[its_Efx_Src1] = k;
+                    fx[its_Efx_Off1] = its_Src_ChOff;
+                    fx[its_Efx_Check] = 0;
+                );
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                ((k = its_Off_Choose(fx[its_Efx_Off1])) >= 0) ? (
+                    fx[its_Efx_Off1] = k;
+                    fx[its_Efx_Check] = 0;
+                );
+            );
+        ) :
+        (cell === 9) ? (
+            (ev & ui_jpad_ev_rmc) ? (
+                ui_menu_tick(menu_Efx_SatMode, -1, 0);
+                ui_menu_tick(menu_Efx_SatMode, fx[its_Efx_Par1 + 1] + 1, 1);
+                xx = control_jmenu(menu_Efx_SatMode);
+                (xx != 0) ? (fx[its_Efx_Par1 + 1] = xx - 1);
+                ui_menu_tick(menu_Efx_SatMode, -1, 0);
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                fx[its_Efx_Par1 + 1] = (fx[its_Efx_Par1 + 1] + 1) % 4;
+            );
+        ) :
+        (cell === 10) ? (
+            k = max(0, min(its_SatOSCnt - 1, floor(fx[its_Efx_Par1 + 4])));
+            (ev & ui_jpad_ev_rmc) ? (fx[its_Efx_Par1 + 4] = (k + its_SatOSCnt - 1) % its_SatOSCnt) :
+            (ev & ui_jpad_ev_lmc) ? (fx[its_Efx_Par1 + 4] = (k + 1) % its_SatOSCnt);
+        ) :
+        ((cell === 17) || (cell === 18)) ? (
+            its_Mod_Click(fx + its_Efx_Mod1, cell - 17, ev, its_PadJmc, its_ModD_Sat) ? (fx[its_Efx_Check] = 0);
+        );
+    ) :
+    (what === FXP_Sliders) ? (
+        // drive, bias, mix, output : read at each sample
+        paramValues[p_fxSatDrive] = fx[its_Efx_Par1];
+        r = parCtl(p_fxSatDrive);
+        (r != 0) ? (fx[its_Efx_Par1] = (r === 8) ? 12 : parV(p_fxSatDrive));
+        paramValues[p_fxSatBias] = fx[its_Efx_Par1 + 2];
+        r = parCtl(p_fxSatBias);
+        (r != 0) ? (fx[its_Efx_Par1 + 2] = (r === 8) ? 0 : parV(p_fxSatBias));
+        paramValues[p_fxSatMix] = 100 * fx[its_Efx_Par1 + 3];
+        r = parCtl(p_fxSatMix);
+        (r != 0) ? (fx[its_Efx_Par1 + 3] = (r === 8) ? 1 : parV(p_fxSatMix) / 100);
+        paramValues[p_fxSatOut] = fx[its_Efx_Par1 + 5];
+        r = parCtl(p_fxSatOut);
+        (r != 0) ? (fx[its_Efx_Par1 + 5] = (r === 8) ? 0 : parV(p_fxSatOut));
+        // input gain : its linear value is computed by the check
+        paramValues[p_fxGain1] = fx[its_Efx_VoldB1];
+        r = parCtl(p_fxGain1);
+        (r != 0) ? (
+            fx[its_Efx_VoldB1] = (r === 8) ? 0 : parV(p_fxGain1);
+            fx[its_Efx_Check] = 0;
+        );
+        its_Mod_Sliders(fx + its_Efx_Mod1, 2, 3, p_fxSatModD1, p_fxSatModA1);
+    );
+);
+
 // the dispatcher : calls the function of the type of the effect (a type without function : the common line only)
 function FX_Type_Pad(RDBL, fx, fxn, what, cell, ev)
 local (ty)
 (
     ty = fx[its_Efx_Type];
-    ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyEQMixer)) ? (
+    ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? (
         FX_Mixer_Pad(RDBL, fx, fxn, what, cell, ev);
     ) :
     (ty === its_Efx_TyLFO) ? (
         FX_LFO_Pad(RDBL, fx, fxn, what, cell, ev);
+    ) :
+    (ty === its_Efx_TyFilter) ? (
+        FX_Filter_Pad(RDBL, fx, fxn, what, cell, ev);
+    ) :
+    (ty === its_Efx_TySat) ? (
+        FX_Sat_Pad(RDBL, fx, fxn, what, cell, ev);
     ) : (
         (what === FXP_Dims) ? (RDBL[3] = 1; RDBL[5] = 0;);
     );
@@ -9706,7 +10366,7 @@ local (ty)
         0 effect number (left clic : next one, shift : previous one ; right clic : menu)
         1 type (right clic : menu ; creates the effect if needed)
         2 phase (left clic : next one ; right clic : menu)
-        3 On / Off (left clic)
+        3 On / Off / Bypass (left clic : On / Off ; right clic : Bypass / On)
         4 channel count (right clic : menu)
         5 output : own cable, Out or a bus (right clic : menu ; left clic : first channel in the bus)
         6 error (last error of exec_fx)
@@ -9763,6 +10423,10 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                     pad_Efx_Colrs[1] = CP3;
                     strcpy(pad_Efx_Labs[2], menu_Efx_PhShort_N[max(0, min(2, fx[its_Efx_Phase]))]);
                     pad_Efx_Colrs[2] = CL1;
+                    (fx[its_Efx_Status] === its_EfxStat_Bypass) ? (
+                        strcpy(pad_Efx_Labs[3], "Bypass");
+                        pad_Efx_Colrs[3] = Color_Goldenrod;
+                    ) :
                     (fx[its_Efx_Status] !== its_EfxStat_Off) ? (
                         strcpy(pad_Efx_Labs[3], "On");
                         pad_Efx_Colrs[3] = Color_Limegreen;
@@ -9795,12 +10459,16 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                 strcpy(pad_Efx_Labs[7],"Action");
                 pad_Efx_Colrs[7] = CP1;
 
+                its_PadJmc = jmc; // mouse modifiers, for the functions of the types (see its_Mod_Click)
                 zz = control_jpad(pad_Effect, RDBL[3], -1, 1);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 34;
                     zzmcl = pad_Effect[ui_jpad_last]-1;
 
                     (zz & ui_jpad_ev_rmc) ? (  // right mouse clic
+                        ((zzmcl === 3) && fok) ? (
+                            fx[its_Efx_Status] = (fx[its_Efx_Status] !== its_EfxStat_Bypass) ? its_EfxStat_Bypass : its_EfxStat_On;
+                        ) :
                         (zzmcl === 0) ? (
                             // the effect to display
                             ui_menu_tick(menu_Efx_Ids, fxn+1, 1);
@@ -9820,12 +10488,27 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                             xx = control_jmenu(menu_Efx_Type);
                             (xx != 0) ? (
                                 (!fok) ? (fx = FX_make(fxn); fok = 1;);
+                                k = fx[its_Efx_Type]; // the previous type
                                 fx[its_Efx_Type] = xx - 1;
                                 fx[its_Efx_Check] = 0;
-                                (fx[its_Efx_Type] === its_Efx_TyEQMixer) ? FX_EQ_Gains(fx);
+                                (fx[its_Efx_Type] === its_Efx_TyAutoMix) ? FX_Auto_Gains(fx);
                                 ((fx[its_Efx_Type] === its_Efx_TyLFO) && (fx[its_Efx_Par1] === 0)) ? (
                                     fx[its_Efx_Par1] = 1; // 1 Hz
                                     fx[its_Efx_Par1 + 2] = 1; // amplitude 1
+                                );
+                                ((fx[its_Efx_Type] === its_Efx_TyFilter) && (fx[its_Efx_Par1] < 10)) ? (
+                                    fx[its_Efx_Par1] = 1000; // 1 kHz
+                                    fx[its_Efx_Par1 + 1] = 0.707; // Q
+                                    fx[its_Efx_Par1 + 2] = its_FltLP; // biquad low pass
+                                    fx[its_Efx_Par1 + 3] = 0; // 12 dB/oct
+                                );
+                                ((fx[its_Efx_Type] === its_Efx_TySat) && (k !== its_Efx_TySat)) ? (
+                                    fx[its_Efx_Par1] = 12; // drive (dB)
+                                    fx[its_Efx_Par1 + 1] = its_SatSoft;
+                                    fx[its_Efx_Par1 + 2] = 0; // bias
+                                    fx[its_Efx_Par1 + 3] = 1; // mix : 100 %
+                                    fx[its_Efx_Par1 + 4] = 2; // oversampling 4x
+                                    fx[its_Efx_Par1 + 5] = -6; // output (dB)
                                 );
                             );
                             ui_menu_tick(menu_Efx_Type, -1, 0);
@@ -9873,11 +10556,11 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                             ) :
                             (act === its_EfxAct_Copy) ? (
                                 (Effects_set[FX_CNT] === 0) ? FX_make(FX_CNT); // the reserve
-                                memcpy(Effects_set[FX_CNT], fx, its_Efx_BlkSize);
+                                FX_Copy(Effects_set[FX_CNT], fx);
                             ) :
                             (act === its_EfxAct_Paste) ? (
                                 (Effects_set[FX_CNT] !== 0) ? (
-                                    memcpy(fx, Effects_set[FX_CNT], its_Efx_BlkSize);
+                                    FX_Copy(fx, Effects_set[FX_CNT]);
                                     fx[its_Efx_Numb] = fxn;
                                     fx[its_Efx_Check] = 0;
                                 );
@@ -9885,8 +10568,8 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                             (act === its_EfxAct_Clear) ? (
                                 FX_Clear(fxn);
                             ) :
-                            (act === its_EfxAct_EQMix) ? (
-                                FX_EQ_Gains(fx);
+                            (act === its_EfxAct_AutoGains) ? (
+                                FX_Auto_Gains(fx);
                             ) :
                             (act === its_EfxAct_Show) ? (
                                 GM_Dump(fx, its_Efx_BlkSize, sprintf(#, "Effect %d", fxn+1));
@@ -9910,7 +10593,7 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                             fx[its_Efx_Phase] = (fx[its_Efx_Phase] + 1) % 3;
                         ) :
                         ((zzmcl === 3) && fok) ? (
-                            fx[its_Efx_Status] = (fx[its_Efx_Status] !== its_EfxStat_Off) ? its_EfxStat_Off : its_EfxStat_On;
+                            fx[its_Efx_Status] = (fx[its_Efx_Status] === its_EfxStat_On) ? its_EfxStat_Off : its_EfxStat_On;
                         ) :
                         ((zzmcl === 5) && fok) ? (
                             ((k = its_Off_Choose(fx[its_Efx_OutOff])) >= 0) ? (
@@ -9940,14 +10623,15 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
 
 /*
     WDBL[0] : number of writer to display
+    WDBL[5] : waveform height (0 : its_LinWaveH) ; WDBL[6] : waveform flags (its_WaveHide, its_WaveOver)
     The pad (2 lines of 8 cells), the waveform of the line of the writer (if any), the sliders (record gain, overdub)
-    Key 'd' : dump of the writer in the log
+    Key 'd' : dump of the writer in the log ; keys 'w', '+', '-', 'v' : the waveform (see its_Wave_Keys)
     Cells : 0 writer number (left clic : next one, shift : previous one), 1 status, 3 line, 4 size, 5 channels, 6 first channel written, 7 channels used,
             10 source (right clic : menu ; left clic : first channel taken), 11 write position (s), 12 overdub mode (left clic : X-fade / Sum),
             15 actions (right clic : menus)
 */
 function show_Writer_Pad(WDBL, blockID)
-local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, CL1, dfCol, i, k, r, w, x, xx, zi, zz, zzch,
+local (h1, h2, h3, h4, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, CL1, dfCol, i, k, r, w, x, xx, zi, zz, zzch,
         zzent, zzmcl, zzmmd, wgh, f, n)
 (
     h1 = uix_jpadHeight(pad_Wrt_NL); // height
@@ -9956,10 +10640,12 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
     wok = (wcbl > BASE_MEMORY) && (wcbl[-2] === KW_writ);
     lcbl = wok ? wcbl[its_Wrt_Lcbl] : 0;
     lok = wok && (lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl);
-    h2 = wok ? ui_jd_slidh * 2 + 6 : 0; // sliders : record gain, overdub
-    h3 = lok ? its_LinWaveH : 0; // waveform of the line, between the pad and the sliders
-    uix_jneed = h1+h2+h3+ui_jd_ctgr;
-    uix_jmini = h1+h2+ui_jd_ctgr;
+    // sliders : record gain, overdub, and the modulations used
+    h2 = wok ? ui_jd_slidh * (2 + its_Mod_SlCount(wcbl + its_Wrt_Mod1, 2, 3)) + 6 : 0;
+    h3 = lok ? its_Wave_H(WDBL + 5, WDBL + 6, its_LinWaveH) : 0; // waveform of the line, between the pad and the sliders
+    h4 = wok ? uix_jpadHeight(1) : 0; // the modulation inputs
+    uix_jneed = h1+h2+h3+h4+ui_jd_ctgr;
+    uix_jmini = h1+h2+h4+ui_jd_ctgr;
     (ui_height() >= uix_jmini) ? (
         ui_split_top(min(uix_jneed, ui_height()));
         ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
@@ -9968,6 +10654,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
             keepBlockInfos(blockId);
             // 'd' : dump of the writer in the log (taken before the pad)
             (zzmi && GM_key_take('d')) ? GM_Dump(wcbl, its_Wrt_BlkSize, sprintf(#, "Writer %d", wrt+1));
+            (zzmi) ? its_Wave_Keys(WDBL + 5, WDBL + 6, its_LinWaveH);
             (zzmi) ? (
                 ui_push();
                     // stack is now 2 levels deep
@@ -10164,6 +10851,14 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
             lcbl = wok ? wcbl[its_Wrt_Lcbl] : 0;
             lok = wok && (lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl);
 
+            // the modulation inputs : record gain, overdub
+            (wok && (h4 > 0)) ? (
+                ui_split_top(h4);
+                    ui_pad(1,2,2,2);
+                    its_Mod_Row(wcbl + its_Wrt_Mod1, 2, its_ModN_Wrt, 3, its_ModD_Wrt) ? (wcbl[its_Wrt_Check] = 0);
+                ui_pop();
+            );
+
             // Waveform of the line (all its channels), with the heads of the writers and readers of the line
             (lok && (h3 > 0)) ? (
                 w = min(h3, ui_height() - h2); // the sliders keep their place
@@ -10172,7 +10867,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                         ui_pad(1,2,1,2);
                         its_wave_marks(lcbl, -1);
                         ui_audio_wave(w, lcbl[its_Lin_ChCnt], lcbl + its_Lin_BF1ST, lcbl[its_Lin_ActBSize],
-                            lcbl[its_Lin_Start], lcbl[its_Lin_Last], ui_aud_Sep | ui_aud_Axis, its_LinWaveMax);
+                            lcbl[its_Lin_Start], lcbl[its_Lin_Last], its_Wave_Flags(WDBL + 6), its_LinWaveMax);
                     ui_pop();
                 );
             );
@@ -10200,6 +10895,9 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
                         wcbl[its_Wrt_Ovrdb] = zi;
                         (wcbl === Currwriter) ? (slWrOvrdbPrv = slWrOvrdb = zi);
                     );
+
+                    // the depths of the modulation inputs used, their attenuverters if shown
+                    its_Mod_Sliders(wcbl + its_Wrt_Mod1, 2, 3, p_wrModDepth1, p_wrModAtt1);
                 ui_pop();
             );
 
@@ -10210,6 +10908,82 @@ local (h1, h2, h3, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, C
 
 
 flagpr = 1;
+
+/*
+    The generic sliders (automatable by REAPER, -1 ... 1) : they write the control cells Ctl 1 ... NB_GSL (see @block),
+    that the modules take as sources (menu of the sources : "Controls").
+    The module : one line of 8 cells (0 "Controls", 1 ... the pages of 8 sliders : left clic), then the 8 sliders of the page
+    (right clic on a slider : 0)
+*/
+// set the generic slider "k" [0 ... NB_GSL-1] to "v", for REAPER too (automation)
+function its_Ctl_Set(k, v)
+(
+    <? i = 0; loop(NB_GSL, printf("(k === %d) ? (slCtl%d = v; slider_automate(slCtl%d);) :\n    ", i, i+1, i+1); i += 1;); ?>0;
+);
+
+function show_Controls_Pad(blockId)
+local (h1, h2, uix_jneed, zzmi, i, n, r, zz, zzmcl, pg, npg)
+(
+    npg = min(7, ceil(NB_GSL / 8)); // pages of 8 sliders
+    pg = ControlsStruct[0] = max(0, min(npg - 1, 0|ControlsStruct[0]));
+    h1 = uix_jpadHeight(1);
+    h2 = 8 * ui_jd_slidh + 6;
+    uix_jneed = h1+h2+ui_jd_ctgr;
+    (ui_height() >= uix_jneed) ? (
+        ui_split_top(uix_jneed);
+        ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
+            zzmi = ui_hover();
+            keepBlockInfos(blockId);
+            (zzmi) ? (
+                ui_push();
+                    // stack is now 2 levels deep
+                    ui_color(Col_Frame);
+                    ui_border(); // draws in purple
+                ui_pop();
+            );
+            control_group(blockDispNames[blockDispInverts[blockId]]);
+            ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+
+            ui_split_top(h1);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_Ctl_Labs, pad_Ctl_Siz);
+                i = 0; loop(pad_Ctl_Siz,
+                    pad_Ctl_Colrs[i] = Col_InfoA;
+                    strcpy(pad_Ctl_Labs[i],"");
+                    i += 1;);
+                strcpy(pad_Ctl_Labs[0],"Controls");
+                i = 0; loop(npg,
+                    sprintf(pad_Ctl_Labs[1 + i], "Ctl %d-%d", 8 * i + 1, min(NB_GSL, 8 * i + 8));
+                    pad_Ctl_Colrs[1 + i] = (i === pg) ? Color_Limegreen : CP1;
+                    i += 1;
+                );
+                zz = control_jpad(pad_Controls);
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4; ui_GFXReason = 35;
+                    zzmcl = pad_Controls[ui_jpad_last]-1;
+                    ((zz & ui_jpad_ev_lmc) && (zzmcl >= 1) && (zzmcl <= npg)) ? (
+                        ControlsStruct[0] = pg = zzmcl - 1; // the page shown
+                    );
+                );
+            ui_pop();
+
+            // the 8 sliders of the page
+            ui_split_top(h2);
+                ui_pad(1,3,1,0);
+                i = 0; loop(8,
+                    n = 8 * pg + i;
+                    (n < NB_GSL) ? (
+                        sprintf(#ctllab, "Ctl %d: %%.3f", n + 1);
+                        r = slider_ctl(#ctllab, slider(GSL_FIRST + n), -1, 1, 0, 0, 0.001);
+                        (r & 8) ? its_Ctl_Set(n, 0) : (r != 0) ? its_Ctl_Set(n, uix_jsl_val);
+                    );
+                    i += 1;
+                );
+            ui_pop();
+
+        ui_pop();
+    );
+);
 
 /*
     The globals of Interstys (they replace the last native sliders) : one line of 8 cells
@@ -11062,6 +11836,9 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in)
                 ) :
                 (igb === blockGlobal) ? (
                     show_Global_Pad(blockGlobal);
+                ) :
+                (igb === blockControls) ? (
+                    show_Controls_Pad(blockControls);
                 ) :
                 ((igb >= blockUsrFirst) && (igb <= blockUsrLast)) && (blockUsrChecks[blockUsrNum[igb - blockUsrFirst]]) ? (
                     show_UserModule(igb);

@@ -80,6 +80,7 @@ HANDLERS = {
     ('Interstys.jsfx-inc', 'show_Reader_Pad'): ('module', 'Reader'),
     ('Interstys.jsfx-inc', 'show_Line_Pad'): ('module', 'Line'),
     ('Interstys.jsfx-inc', 'show_Writer_Pad'): ('module', 'Writer'),
+    ('Interstys.jsfx-inc', 'its_Wave_Keys'): ('module', 'forme d\'onde (Line, Reader, Writer)'),
     ('GamePlayer.jsfx-inc', 'do_Generic_Commands'): ('tab', 'commandes d\'onglet'),
     ('GamePlayer.jsfx-inc', 'genericItemsPos'): ('pane', 'largeur des colonnes'),
     ('GamePlayer.jsfx-inc', 'show_Generator'): ('module', 'Generator'),
