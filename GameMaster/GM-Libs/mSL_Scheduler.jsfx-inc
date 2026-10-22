@@ -159,34 +159,53 @@ Sched_EvChkNext = 0; // next date of the check of the processes waiting for a me
     The token : exclusive access to the structures shared by @block and @gfx (scheduler lists, dynamic
     memory, strings, mSL evaluator, play state), when a plug-in uses them from both sections (GamePlayer).
     mSL_Tok : 0 free, 1 held by @block, 2 held by @gfx (or @serialize, in the same thread as @gfx).
-    @block has the priority : when it can't get the token, it notes its request (mSL_TokWant, with its
-    date) and skips its shared part until the next block ; when @block missed the token twice in a row
-    (mSL_TokMissRun), @gfx doesn't take it while this request is recent : @block waits two blocks at most.
+    @block has the priority : when the token is held by @gfx, @block asks for it (mSL_TokReq) and waits for
+    it at most mSL_TokBlkWait seconds ; @gfx doesn't take it while a request is pending, and the loop of the
+    mSL threads gives it back between two turns (mSL_gfxQuantum) ; after the wait, @block skips its shared
+    part until the next block (mSL_TokMiss). A long section of @gfx (GC, compilation) still makes @block wait.
     The owner may take the token again (nested uses) : mSL_TokDepth.
 */
 mSL_Tok = 0;
 mSL_TokDepth = 0;
-mSL_TokWant = 0; // date of the pending request of @block, or 0
+mSL_TokReq = 0; // 1 : @block is waiting for the token
+mSL_TokBlkWait = 0.002; // longest wait of @block (s) : a few % of a block (2048 samples : 43 ms at 48 kHz)
 mSL_TokMiss = 0; // number of blocks which could not get the token (statistics)
 mSL_TokMissRun = 0; // number of consecutive blocks which could not get the token
+mSL_TokWaitN = 0; // number of waits of @block which got the token (statistics)
+mSL_TokWaitT = 0; // their total duration (s)
+mSL_TokWaitMax = 0; // the longest one (s)
 
-// Take the token for "who" (1 : @block, 2 : @gfx) ; returns 1 if it is held, 0 otherwise. Never waits.
+// Take the token for "who" (1 : @block, 2 : @gfx) ; returns 1 if it is held, 0 otherwise.
+// @gfx never waits here (see mSL_tok_wait) ; @block waits at most mSL_TokBlkWait seconds.
 function mSL_tok_take(who)
+local (t0, lim, ok, d)
 (
     (atomic_get(mSL_Tok) === who) ? (
         mSL_TokDepth += 1; 1;
     ) :
-    ((who === 2) && (mSL_TokMissRun >= 2) && (time_precise() - mSL_TokWant < 0.05)) ? (
-        0; // @block missed the token twice in a row : let it take it first
+    ((who === 2) && atomic_get(mSL_TokReq)) ? (
+        0; // @block is waiting for the token : let it take it first
     ) :
     (atomic_setifequal(mSL_Tok, 0, who) === 0) ? (
         mSL_TokDepth = 1;
-        (who === 1) ? ( mSL_TokWant = 0; mSL_TokMissRun = 0; );
+        (who === 1) ? (mSL_TokMissRun = 0);
         1;
-    ) : (
-        (who === 1) ? ( (mSL_TokWant === 0) ? mSL_TokWant = time_precise(); mSL_TokMiss += 1; mSL_TokMissRun += 1; );
-        0;
-    );
+    ) :
+    (who === 1) ? (
+        // @block : ask for the token, and wait for it (@gfx gives it back between two turns of the threads)
+        atomic_set(mSL_TokReq, 1);
+        t0 = time_precise(); lim = t0 + mSL_TokBlkWait;
+        while (((ok = (atomic_setifequal(mSL_Tok, 0, 1) === 0)) === 0) && (time_precise() < lim)) ( 0; );
+        atomic_set(mSL_TokReq, 0);
+        ok ? (
+            mSL_TokDepth = 1; mSL_TokMissRun = 0;
+            d = time_precise() - t0;
+            mSL_TokWaitN += 1; mSL_TokWaitT += d; mSL_TokWaitMax = max(mSL_TokWaitMax, d);
+        ) : (
+            mSL_TokMiss += 1; mSL_TokMissRun += 1;
+        );
+        ok;
+    ) : 0;
 );
 
 // Release the token held by "who" (after the last nested take)

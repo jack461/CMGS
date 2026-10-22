@@ -33,6 +33,9 @@ CheckTime = 0;
 XDcount = 1;
 gc_count = 0;
 gfxMaxDur = 0.025; //
+// statistics of the @gfx frames, logged every 5 s while mSL code runs (see "STATISTICS" at the end of @gfx)
+mSL_gfxStat = 0; // 1 : log the statistics
+g__stLast = g__stN = g__stTot = g__stMsl = g__stIns = g__stPrev = g__stGap = 0;
 mSL_loc_tadd = 0.1;
 mSL_loc_tim = 4;
 gui_show_syslog = 1;
@@ -2251,6 +2254,7 @@ while (SchedListNonEmpty(SchedLockdPts) && (atomic_get(mSL_Lock) === 0)) (
 
 
 
+g__stT0 = time_precise(); // (statistics)
 XeSched = 1; // set to 1 to make sure we execute at least 1 task during each @block execution
 //============ GLOBAL Interpreter ==============
 while (SchedActive &&
@@ -2291,7 +2295,9 @@ while (SchedActive &&
                 mm_cyc_mm[mm_cyc_ptr] -=  mSL_ICount;
                 // Curr_Block_Alloc
                 AAAAAAAA_mSL_rpeat = mSL_rpeat = max(8192, min(16384, 0|(mSL_insts_per_s * TLeft * 0.35)));
+                g__stIns -= mSL_ICount;
                 mSL_evaluate();
+                g__stIns += mSL_ICount;
 
                 //GMW2("A2");
                 AAAAAAAA_mSL_evaluate_count += 1;
@@ -2368,6 +2374,7 @@ while (SchedActive &&
 
     SchX > 0 ? SchedFree(SchX);
 );
+g__stMsl += time_precise() - g__stT0;
 
 
 
@@ -2775,5 +2782,27 @@ must_do_gfx()
 */
 );
 GM_key_end(); // the key not used is dropped
+
+//============ STATISTICS ============
+// per frame : its duration (from gfxStrtT), the mSL threads, the rest (drawing...), the gap between frames ;
+// mSL instructions per second (as in the GamePlayer, to compare)
+mSL_gfxStat ? (
+    g__stEnd = time_precise();
+    g__stN += 1;
+    g__stTot += g__stEnd - (gfxStrtT - timeD);
+    (g__stPrev > 0) ? (g__stGap += (gfxStrtT - timeD) - g__stPrev);
+    g__stPrev = g__stEnd;
+    (g__stLast === 0) ? (g__stLast = g__stEnd);
+    (g__stEnd - g__stLast >= 5) ? (
+        g__stDur = g__stEnd - g__stLast;
+        (g__stIns > 0) ? (
+            sprintf(#g__stMsg, "Stat @gfx : %.1f frames/s ; per frame %.1f ms (mSL %.1f ; rest %.1f), gap %.1f ms ; %.2f M instr/s",
+                g__stN / g__stDur, 1000 * g__stTot / g__stN, 1000 * g__stMsl / g__stN,
+                1000 * (g__stTot - g__stMsl) / g__stN, 1000 * g__stGap / max(1, g__stN - 1), g__stIns / g__stDur / 1000000);
+            mSL_log(SysLogBox, #g__stMsg);
+        );
+        g__stLast = g__stEnd; g__stN = g__stTot = g__stMsl = g__stIns = g__stGap = 0;
+    );
+);
 
 

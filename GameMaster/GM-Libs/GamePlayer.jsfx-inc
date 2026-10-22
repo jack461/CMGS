@@ -182,11 +182,17 @@ mSL_insts_per_s = 32000000; // Mac Studio Pro
 
 // mSL threads in @gfx (see "mSL THREADS" in @gfx, and the code 10 of the interpreter of @block)
 mSL_inGfx = 1; // 1 : the mSL threads run in @gfx ; 0 : in @block (as before)
-mSL_gfxDur = 0.020; // max time given to the mSL threads in a @gfx frame (s)
+mSL_gfxDur = 0.025; // max time given to the mSL threads in a @gfx frame (s), as gfxMaxDur in the other plug-ins
 mSL_gfxSlice = 0.003; // a slice : the token is released between slices, @block having the priority
 mSL_gfxQuantum = 0.001; // max time given to a thread in a turn (fair sharing between the threads)
 mSL_gfxMfcMax = 3200; // "costful" operations (malloc, mfree) in a turn (see mfcmax, 320 in @block)
 mSL_gfxStale = 0.25; // @gfx not called for that time : @block runs the mSL threads
+// statistics of the @gfx frames, logged every 5 s while mSL code runs (see "STATISTICS" at the end of @gfx)
+mSL_gfxStat = 0; // 1 : log the statistics
+g__stLast = g__stN = g__stTot = g__stMsl = g__stWait = g__stPrev = g__stGap = 0;
+u__stIns = 0; // (u__ : counted in mSL_run_slice, also called by @block when @gfx stops)
+g__stGcN = g__stGcT = g__stLockF = 0;
+g__stMiss = mSL_TokMiss; g__stWN = mSL_TokWaitN; g__stWT = mSL_TokWaitT; mSL_TokWaitMax = 0;
 mSL_gfxBeat = 0; // last run of the mSL loop of @gfx (time_precise)
 
 
@@ -15798,7 +15804,9 @@ local (tstrt)
             mm_cyc_mm[mm_cyc_ptr] -=  mSL_ICount;
             // Curr_Block_Alloc
             AAAAAAAA_mSL_rpeat = mSL_rpeat = rpt; // instructions for this slice
+            u__stIns -= mSL_ICount; // (statistics : mSL_load_thread has set the count of the thread)
             mSL_evaluate();
+            u__stIns += mSL_ICount;
             AAAAAAAA_mSL_evaluate_count += 1;
             mSL_High_Stack = max(mSL_High_Stack, mSL_max_TOS - mSL_active_Thread[mSL_THR_basePhStack]);
             //sprintf(#uuu, "End of evaluation - CR: %d - XC: %d", mSL_CodeStop, AAAAAAAA_mSL_evaluate_count);
@@ -19145,6 +19153,7 @@ mSL_loc_tim = max(mSL_loc_tim - 1, 0);
                 mSL_log(SysLogBox, #gfxu);
             );
             mSL_gc_MaxDur = max(mSL_gc_end - mSL_gc_start, mSL_gc_MaxDur);
+            g__stGcN += 1; g__stGcT += mSL_gc_end - mSL_gc_start; // (statistics)
         );
     ) ;
     // If we have a func to compile, do it A.S.A.P.
@@ -19184,17 +19193,23 @@ mSL_loc_tim = max(mSL_loc_tim - 1, 0);
 // The mSL threads run here (also when the window is closed : options:gfx_idle), in slices of about
 // mSL_gfxSlice seconds, each one with the token (released between slices, @block has the priority),
 // for at most mSL_gfxDur seconds per frame. The system tasks met in the list are left to @block.
+// A slice ends early when @block asks for the token (mSL_TokReq, see mSL_tok_take) : it waits for it.
+g__stT0 = time_precise(); // (statistics)
 mSL_inGfx ? (
     mSL_gfxBeat = time_precise();
     gfxXlim = time_precise() + timeD + mSL_gfxDur;
     gfxXrun = 1;
     // until the end of the frame budget, or no more mSL thread to run (a refused token : try again)
     while (gfxXrun && ((gfxXnow = time_precise() + timeD) < gfxXlim)) (
-        mSL_tok_wait(2, gfxXlim - gfxXnow) ? (
+        g__stW0 = time_precise();
+        g__stOk = mSL_tok_wait(2, gfxXlim - gfxXnow);
+        g__stWait += time_precise() - g__stW0;
+        g__stOk ? (
             gfxXrun = 0;
             gfxXend = min(gfxXlim, time_precise() + timeD + mSL_gfxSlice);
             gfxXn = SchedListSize(SchedActivPts); // the system tasks are visited once at most
-            while ((gfxXn > 0) && (time_precise() + timeD < gfxXend)
+            // (a request of @block, mSL_TokReq : the token is given back at once, after this turn)
+            while ((gfxXn > 0) && (time_precise() + timeD < gfxXend) && (atomic_get(mSL_TokReq) === 0)
                 && ((gfxXent = SchedDetachHead(SchedActivPts)) != SchedNone)) (
                 (SchedCode[gfxXent] === KRun_mSL_Thread) ? (
                     gfxXrun = 1; // some mSL work : go on
@@ -19212,6 +19227,7 @@ mSL_inGfx ? (
         );
     );
 );
+g__stMsl += time_precise() - g__stT0;
 
 
 logTask ? (
@@ -27508,6 +27524,36 @@ ui_end_do_gfx();
         lastTgfx = tUnix + 60;
     );
     mSL_tok_give(2);
+);
+
+//============ STATISTICS ============
+// per frame : its duration (from gfxStartTime), the mSL threads (with the wait for the token), the rest (drawing...),
+// the gap between frames ; mSL instructions per second ; blocks that missed the token
+mSL_gfxStat ? (
+    g__stEnd = time_precise();
+    g__stN += 1;
+    (atomic_get(mSL_Lock) != 0) ? (g__stLockF += 1);
+    g__stTot += g__stEnd - (gfxStartTime - timeD);
+    (g__stPrev > 0) ? (g__stGap += (gfxStartTime - timeD) - g__stPrev);
+    g__stPrev = g__stEnd;
+    (g__stLast === 0) ? (g__stLast = g__stEnd);
+    (g__stEnd - g__stLast >= 5) ? (
+        g__stDur = g__stEnd - g__stLast;
+        (u__stIns > 0) ? (
+            sprintf(#g__stMsg, "Stat @gfx : %.1f frames/s ; per frame %.1f ms (mSL %.1f, of which token wait %.1f ; rest %.1f), gap %.1f ms ; %.2f M instr/s ; token missed by @block : %d",
+                g__stN / g__stDur, 1000 * g__stTot / g__stN, 1000 * g__stMsl / g__stN, 1000 * g__stWait / g__stN,
+                1000 * (g__stTot - g__stMsl) / g__stN, 1000 * g__stGap / max(1, g__stN - 1), u__stIns / g__stDur / 1000000,
+                mSL_TokMiss - g__stMiss);
+            mSL_log(SysLogBox, #g__stMsg);
+            sprintf(#g__stMsg, "Stat @gfx : %d GC (%.0f ms in all) ; mSL locked during %d frames of %d ; @block waited for the token %d times (mean %.3f ms, max %.3f ms)",
+                g__stGcN, 1000 * g__stGcT, g__stLockF, g__stN, mSL_TokWaitN - g__stWN,
+                1000 * (mSL_TokWaitT - g__stWT) / max(1, mSL_TokWaitN - g__stWN), 1000 * mSL_TokWaitMax);
+            mSL_log(SysLogBox, #g__stMsg);
+        );
+        g__stLast = g__stEnd; g__stN = g__stTot = g__stMsl = g__stWait = u__stIns = g__stGap = 0;
+        g__stGcN = g__stGcT = g__stLockF = 0;
+        g__stMiss = mSL_TokMiss; g__stWN = mSL_TokWaitN; g__stWT = mSL_TokWaitT; mSL_TokWaitMax = 0;
+    );
 );
 
 string_cst_last = "very last string constant used";
