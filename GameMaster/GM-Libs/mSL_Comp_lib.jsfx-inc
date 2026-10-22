@@ -1111,7 +1111,7 @@ function mSL_checkGId(name) local (pt, ent, cnt)
 //        type = typically, mSL_tyIdent, or mSL_tyKeywrd, or mSL_tyPrimFun, etc.
 //        value = the value to associate to the object
 
-function mSL_enterGCode(name, code, type, value) local (pt)
+function mSL_enterGCode(name, code, type, value) local (pt, xpt)
 (
     ((pt = mSL_findGId(name)) >= 0) ? (
         (mSL_GCCod[pt] === 0) ? (
@@ -1705,6 +1705,7 @@ function mSL_mvCell(dst, src)
 
 // Clear compiler work areas
 function mSL_cleanCPWA()
+local (bl, pp)
 (
     // The blocks used to contain code
     (mSL_CG_MainGen != 0) ? (
@@ -1824,7 +1825,7 @@ local (ty, v, nxt, prv, pos, cnt, nat, tn, pfl)
 
 
 function mSL_flatten_tree(tr)
-local (p, hd, tl, ty, ent, rpeat, restart, bz, ll, rl, tyl, tyr, lx, rx, v)
+local (p, hd, tl, ty, ent, rpeat, restart, bz, ll, rl, tyl, tyr, lx, rx, v, xp, prvp, prvty)
 (
     ty = mSL_tyun[tr];
     // (mSL_CP_Flags & 16) ?
@@ -3548,6 +3549,7 @@ function mSL_set_compiler(cpl)
 //    cleared at any new compilation
 
 function mSL_make_compiler(mem, size)
+local (u)
 (
     mSL_new_compiler = mSL_errC = 0;
     mSL_C_fH = -1;
@@ -3980,7 +3982,7 @@ function mSL_pushPseudo(ty, valu, pos)
 // Code generation
 function
 mSL_codGen(start, ndgen)
-local (ptr, nxp, flg, ty, valu, upos, q, qty, argc, ent, prev, pty, next, nnext, pos, r, rty, s, c, v, mkr, mkr2)
+local (ptr, nxp, flg, ty, valu, upos, q, qty, argc, ent, prev, pty, next, nnext, pos, r, rty, s, c, v, mkr, mkr2, bk)
 (
     // Allocate an array for the pointers to codes...
     (mSL_errC === 0) ? (
@@ -4799,7 +4801,7 @@ local (wa, ip, idx)
 
 
 function mSL_insert_file(fname)
-local (flg, p_start, p_end, p_HEAD)
+local (flg, p_start, p_end, p_HEAD, lex)
 (
     strcpy(#import, #directory);
     strcat(#import, fname);
@@ -5339,6 +5341,7 @@ local (addr, ty, siz)
 
 // Free (delayed) as much as we can of compiler structures
 function mSL_CP_Free_Structs()
+local (ic, ent)
 (
     (mSL_TreeMainStruc != 0) ? (
         ic = 2; loop(mSL_TreePgMax,
@@ -5364,9 +5367,11 @@ function mSL_CP_Free_Structs()
 
 //   Main entry -- compile the source code provided as an open file
 
+// (all the work variables are local : @block runs concurrently, and its loops use globals such as "i")
 function
 mSL_compile(fHandle, fname, srcstr, cpflgs)
-local (flg, lex, endgen, fptr, fn, sz, loc_baseAVars, loc_baseOVars, p)
+local (flg, lex, endgen, fptr, fn, sz, loc_baseAVars, loc_baseOVars, loc_cstStrings, p, q, r, s, t, v, i, ty,
+    pcnt, plev, dtstr, dtend, dt1st)
 (
     (mSL_C_fH >= 0) ? (file_close(mSL_C_fH); mSL_C_fH = -1;);
     //AA_tr = 0;
@@ -5774,11 +5779,11 @@ local (bl, stak, ldic)
 //   "Clean" a thread
 
 function mSL_clean_thread(thrd)
-local (stk)
+local (stk, ldic)
 (
     (thrd[-2] === mSL_THR_KeyStrt) ? ( // half verification
         stk = thrd[mSL_THR_basePhStack];
-        ldic = bl[mSL_THR_LDict];
+        ldic = thrd[mSL_THR_LDict]; // (was "bl", a global : a random valid block was cleared below)
         thrd[mSL_THR_State] = 0;
         thrd[mSL_THR_UTId] = 0;
         // mSL_THR_SchedEnt -- updated outside
@@ -5915,7 +5920,7 @@ function mSL_load_thread(thrd)
 //   Populate a mSL thread structure after a compilation
 
 function mSL_init_thread(ent)
-local (w, xcode, bcode, thrd, stk, ldic, lccnt, prcnt, ssiz, lsiz, p, r, bl, k, n)
+local (w, xcode, bcode, thrd, stk, stkb, ldic, lccnt, prcnt, ssiz, lsiz, p, r, bl, k, n)
 (
     (mSL_errX === 0) ? (
         ((ent < SchedFirstEnt) || (ent > SchedLastEnt)) ? (

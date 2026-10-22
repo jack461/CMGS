@@ -117,7 +117,7 @@ gvar = #gstring;
 #Def_HPConfigs = #D_HPConfigs = "config-HP.mSL";
 #Def_ClipSetConf = #D_ClipSetConf  = "config-ClSets.mSL";
 #Def_BanksDefs = #D_BanksDefs = "config-Banks.mSL";
-#Def_clDirectory = #D_clDirectory = "WAVES";
+#Def_clDirectory = #D_clDirectory = #D_clDirCfg = "WAVES"; // #D_clDirCfg : as given by the configuration (see clDirResolve)
 #Def_AudioDir = #D_GM_audioDir = "Audio";
 
 #Def_ClipsList = "Clips.txt";
@@ -235,7 +235,7 @@ showStates = 4;
 #afs = "";
 
 // some globals "little" variables
-dpa = dpi = efs = afs = efi = idx = gerr = kerr = 0;
+dpa = dpi = efs = afs = efi = idx = gerr = kerr = dpaAge = 0;
 delayLoad = 2;
 delayLdInt = 0.5;
 flagShowMemory = 1;
@@ -369,6 +369,39 @@ live_clock_init(); // clock box of the "live" display (needs mSL symbols)
 init_log_boxes();
 
 
+// The separators of the system, from MACHINE_Type (also when MACHINE_Type is read from a preset)
+function set_machine_seps()
+(
+    (MACHINE_Type === 'Mac') ? (
+        F_SEP = '/'; #DIR_SEP = "/";
+    ) :
+    (MACHINE_Type === 'PC') ? (
+        F_SEP = '\\'; #DIR_SEP = "\\";
+    ) : (
+        MACHINE_Type = 'Undf'; F_SEP = '?'; #DIR_SEP = "?";
+    );
+);
+
+// The clips directory : a relative name in the configuration (#D_clDirCfg, as "WAVES") is completed with the
+// "Data" folder of the project (file_open does not look there for a relative name). The result is in #clDirW ;
+// returns 1 if it differs from #D_clDirectory.
+function clDirResolve()
+local (c0, c1, n, ch)
+(
+    strcpy(#clDirW, #D_clDirCfg);
+    c0 = str_getchar(#D_clDirCfg, 0, 'cu'); c1 = str_getchar(#D_clDirCfg, 1, 'cu');
+    ((strlen(#D_clDirCfg) > 0) && (c0 != '/') && (c0 != '\\') && (c1 != ':')
+        && (MACHINE_Type != 'Undf') && ((n = strlen(#D_GM_Project_Path)) > 0)) ? (
+        strcpy(#clDirW, #D_GM_Project_Path);
+        // the path of the project ends with the separator ("?" if it was built before the system was known)
+        ch = str_getchar(#clDirW, n-1, 'cu');
+        (ch === '?') ? str_setchar(#clDirW, n-1, F_SEP, 'cu') :
+        (ch != F_SEP) ? strcat(#clDirW, #DIR_SEP);
+        strcat(#clDirW, "Data"); strcat(#clDirW, #DIR_SEP); strcat(#clDirW, #D_clDirCfg);
+    );
+    strcmp(#clDirW, #D_clDirectory) != 0;
+);
+
 function guess_machine_type()
 (    // Try to determine current machine type
     (MACHINE_Type === 'Undf') ? (
@@ -403,6 +436,14 @@ local (PathsStrings)
 // Starting now, "idx" is a relative index in the preset area.
 // Reserve some strings for the presets
 ii = 0; loop(K_savedStringsCnt, savedStrings[ii] = mSL_Str_Perm(); ii+=1;);
+// Dropped mSL files (see "Drop File" in @gfx) : the names of the group dropped in the frame (full paths),
+// then a ring of names waiting for their compilation (doMslCompile keeps a reference to the name)
+dropMslSiz = 16; dropMslCnt = 0;
+dropMslNames = make_array(dropMslSiz);
+ii = 0; loop(dropMslSiz, dropMslNames[ii] = mSL_Str_Perm(); ii+=1;);
+dropCmpSiz = 64; dropCmpPt = 0;
+dropCmpNames = make_array(dropCmpSiz);
+ii = 0; loop(dropCmpSiz, dropCmpNames[ii] = mSL_Str_Perm(); ii+=1;);
 // 0 to 15 are for tabulations names (if any)
 idx = 16;
 Pr7_Date = idx; // save date of the preset
@@ -1355,17 +1396,17 @@ local ()
     ((clNum >= 0) && (clNum < clTSize)) ? (
         // Preserve external references ?
         (gmem[clClAlias+clNum] != 0) ? (
-            gmem[clClVolumes+clnb] = clVolumeBias;
+            gmem[clClVolumes+clNum] = clVolumeBias;
         ) :
         (((gmem[clClInfos+clNum] === 0) &&
           ((gmem[clInfStart+clNum] === 0) || (gmem[clInfStart+clNum] === -404)) )
           || (flg & 1)
         ) ? (
-            gmem[clInfStart+clnb] = 0;
-            gmem[clClSizes+clnb] = 0;
-            gmem[clClInfos+clnb] = 0;
-            gmem[clClVolumes+clnb] = clVolumeBias;
-            gmem[clClDurations+clnb] = 0;
+            gmem[clInfStart+clNum] = 0;
+            gmem[clClSizes+clNum] = 0;
+            gmem[clClInfos+clNum] = 0;
+            gmem[clClVolumes+clNum] = clVolumeBias;
+            gmem[clClDurations+clNum] = 0;
 
             checkClip(clNum, 1);
         );
@@ -1415,7 +1456,7 @@ local (tmppath, fhd)
             #Def_GLib_Directory = "GM-Libs/";
             #Def_GM_Scripts = #D_GM_Scripts = "Scripts/";
             #Def_Str_GM = "GameMaster/";
-            #Def_clDirectory = #D_clDirectory = "WAVES";
+            #Def_clDirectory = #D_clDirCfg = "WAVES";
             strcpy(#D_GM_Project_Name, pth);
             strcpy(#D_GM_Project_Path, gvar);
             strcat(#D_GM_Project_Path, "/");
@@ -1449,6 +1490,7 @@ local (tmppath, fhd)
             (fhd >= 0) ? file_close(fhd);
             parSet(p_FODlay, p_FODlay_MAC);
             updatePaths();
+            clDirResolve(); strcpy(#D_clDirectory, #clDirW); // (WAVES in the Data folder of the project)
         );
     ) :
     (MACHINE_Type === 'PC') ? (
@@ -1457,7 +1499,7 @@ local (tmppath, fhd)
             #Def_GLib_Directory = "GM-Libs\\";
             #Def_GM_Scripts = #D_GM_Scripts = "Scripts\\";
             #Def_Str_GM = "GameMaster\\";
-            #Def_clDirectory = #D_clDirectory = "WAVES";
+            #Def_clDirectory = #D_clDirCfg = "WAVES";
             strcpy(#D_GM_Project_Name, pth);
             strcpy(#D_GM_Project_Path, gvar);
             strcat(#D_GM_Project_Path, "\\");
@@ -1491,6 +1533,7 @@ local (tmppath, fhd)
             (fhd >= 0) ? file_close(fhd);
             parSet(p_FODlay, p_FODlay_PC);
             updatePaths();
+            clDirResolve(); strcpy(#D_clDirectory, #clDirW); // (WAVES in the Data folder of the project)
         );
     );
 
@@ -3298,7 +3341,7 @@ local (blu, i, k)
 );
 
 function mkModuleMenu()
-local (i, tmp, bln, blu, blockStrSpace, blockThemeBlack, blockThemeTron, blockThemeLightCyan, blockThemeOrange, blockThemeBlue, blockThemeDarkCyan, blockThemeDarkGreen, blockThemeDarkRed, blockThemeLightAmber, blockThemeNeonGreen, blockThemeLightMagenta)
+local (j, i, tmp, bln, blu, blockStrSpace, blockThemeBlack, blockThemeTron, blockThemeLightCyan, blockThemeOrange, blockThemeBlue, blockThemeDarkCyan, blockThemeDarkGreen, blockThemeDarkRed, blockThemeLightAmber, blockThemeNeonGreen, blockThemeLightMagenta)
 (
 
     i = 0; loop(dcbNamesCnt,
@@ -3554,7 +3597,7 @@ PanIdt = 0;
 */
 function
 mSL_GUI_Generic(opr, bNumb, module, kit)
-local (i, j, u, v, flg, tbN, mblk, a, k)
+local (p, i, j, u, v, flg, tbN, mblk, a, k)
 (
     flg = 1;
     tbN = -1; // Tabulation number (in 0 .. 7)
@@ -3997,7 +4040,7 @@ padVlcVals[0] = 0; // default
 padVlclrs[1] = Col_ClVCl ;
 padVlclrs[VlpMsg] = Col_InfoC;
 padVlclrs[VlpRld] = Col_InfoC;
-padVllabs[VlpRld] = "Reload";
+padVllabs[VlpRld] = ""; // (no reload : a single initialisation file, see Settings)
 
 
 //====== UNITS ======
@@ -4051,7 +4094,7 @@ padPMVals[0] = 0; // default play mode
 padPMColrs[PMpVer] = Col_InfoC;
 padPMColrs[PMpMsg] = Col_InfoC;
 padPMColrs[PMpRld] = Col_InfoC;
-padPMLabs[PMpRld] = "Reload";
+padPMLabs[PMpRld] = ""; // (no reload : a single initialisation file, see Settings)
 
 //————————————————————————-
 // PMEsize = already defined; // size of a playmode entry
@@ -4202,7 +4245,7 @@ padHPLabs[1] = "Sequence";
 //
 padHPColrs[HPpMsg] = Col_InfoC;
 padHPColrs[HPpRld] = Col_InfoC;
-padHPLabs[HPpRld] = "Reload";
+padHPLabs[HPpRld] = ""; // (no reload : a single initialisation file, see Settings)
 
 // HP SET
 HPCDown = Color_Blaze_Orange; // HP du bas
@@ -4427,7 +4470,7 @@ local(ptc, ptin, val, state, ucnt, AHPmax)
 
 
 function HPConfCheck()
-local (ptin, cf, ct, val)
+local (pt, ptin, cf, ct, val)
 (
     ptin = ct = 0;
     HPInstCnt = HPCntDef = 0;
@@ -4518,7 +4561,7 @@ clearClipSets();
 
 function
 closeClipSet()
-local (ps, n, cw, pmax)
+local (cc, cp, lc, pts, sc, ps, n, cw, pmax)
 (
     ps = ClSetTab + ClSetTAPtr; // current set
     pmax = ClSetTab + ClSetDSize + 126; // last place for a sequence (ClSetTab has ClSetDSize + 128 words)
@@ -4560,7 +4603,7 @@ local (ps, n, cw, pmax)
 
 function
 resetClipSet(csn)
-local(lstcs, i)
+local(ps, lstcs, i)
 (
     (csn < 0) ? (csn = 0; lstcs=ClSetPSize-1;) : (lstcs = csn;);
     while (csn <= lstcs) (
@@ -4805,7 +4848,7 @@ padSMCells[0] = ui_jpad_ct_showval;
 padSMColrs[SMpVer] = Col_InfoC;
 padSMColrs[SMpMsg] = Col_InfoC;
 padSMColrs[SMpRld] = Col_InfoC;
-padSMLabs[SMpRld] = "Reload";
+padSMLabs[SMpRld] = ""; // (no reload : a single initialisation file, see Settings)
 // ————————————————————-
 SMESize = 12; // size of a spacemode entry
 SMEcnt = 1000; // Spacemode entry count
@@ -4897,7 +4940,7 @@ padBKVals[3] = 0; // default displayed entry
 padBKColrs[BKpVer] = Col_InfoC;
 padBKColrs[BKpMsg] = Col_InfoC;
 padBKColrs[BKpRld] = Col_InfoC;
-padBKLabs[PMpRld] = "Reload";
+padBKLabs[PMpRld] = ""; // (no reload : a single initialisation file, see Settings)
 //
 // ————————————————————-
 BKEsize = 12; // size of a bank entry
@@ -5489,7 +5532,7 @@ padDynFlgW = make_jpad(
     | ui_jpad_mk_rcells
     // | ui_jpad_mk_rrcells
     //| ui_jpad_mk_cclear
-    , padDynFlgNL, padDynFlgNC, padDynFlgW);
+    , padDynFlgNL, padDynFlgNC, padDynFlgSiz);
 
 padDynFlgLabs = padDynFlgW + padDynFlgW[ui_jpad_labs]; // addresses of labels
 padDynFlgColrs = padDynFlgW + padDynFlgW[ui_jpad_clrs]; // addresses of colors
@@ -5757,6 +5800,7 @@ function AddDummyMIDIIn(n)
 
 // get a "pushed" MIDI event
 function localMIDIget()
+local (res)
 (
     res = 0;
     (tmpMIDIptr != tmpMIDIptw) ? (
@@ -6180,7 +6224,7 @@ local(i, num, w, e, pcf, r)
 // Returns a pointer to an entry acceptable for configuration "xcf"
 function
 checkHPconfig(xcf, hpuse, winfo)
-local(ty, hb, ent, cnt, cf, i, j, c, k, kent, lerr, nch, pq, pt, rtc1, rtc2, bst, kbase, klsize, kpos, ksize)
+local(w, ty, hb, ent, cnt, cf, i, j, c, k, kent, lerr, nch, pq, pt, rtc1, rtc2, bst, kbase, klsize, kpos, ksize)
 (
     lerr = 0; // "local" error
     ent = cf = 0;
@@ -7003,7 +7047,7 @@ local(Xkmd, z, v1, v2, v3, part, bladd, klc, khc, newpart, primeX, k, p, pc, ic,
 // flgs = 1 : loop  flgs = 2 : mute
 function
 doPlayRItem(item, flgs)  // result not used - Unit passed in GXUnit
-local (z, r, ii, newitem)
+local (g, w, z, r, ii, newitem)
 (
     // allocate a player
     z = w = g = 0;
@@ -8899,7 +8943,8 @@ UClipPrime = gmem[somePrimes + (gmem[primeCurrent] = (gmem[primeCurrent]+1)%prim
 function setClDirectory(newDir, newFmt)
 local (ii)
 (
-    (newDir != 0) ? strcpy(#D_clDirectory, newDir);
+    (newDir != 0) ? strcpy(#D_clDirCfg, newDir); // as given (copied first : newDir may be #D_clDirectory)
+    clDirResolve(); strcpy(#D_clDirectory, #clDirW); // a relative name : in the "Data" folder of the project
     (newFmt != 0) ? strcpy(#D_clEdFormat, newFmt);
     strcpy(#D_clNameFormat, #D_clDirectory);
     strcat(#D_clNameFormat, #DIR_SEP);
@@ -9145,7 +9190,7 @@ function
 Set_Table(tbl)
 local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback, rd_err, pt, zpt, totsize, tout, pttr,
     Cl_n, Cl_dB, ii, s1, s2, s3, s4, s5, ty, n, ps, cp, cnt, kct, vmin, vmax, pos, stnext, kmax, cvl, LWA, LWAsiz,
-    xp1, xp2, AddT, flgneg, LWpt, err_pos)
+    xp1, xp2, xp3, AddT, flgneg, LWpt, err_pos)
 (
     xp1 = xp2 = cvl = ptr = flgneg = 0;
     LWA = 0; LWAsiz = 32000; // a large work area
@@ -14515,7 +14560,7 @@ local (pfid, ref, addr, res, flg, kod, size, s, ip, k, k2, pt, kid, pid)
 */
 function
 mSL_set(argc, argv)
-local (pfid, ref, value, force, addr, res, flg, kod, size, s, ip, k, k2, pt, kid)
+local (pid, pfid, ref, value, force, addr, res, flg, kod, size, s, ip, k, k2, pt, kid)
 (
 
     pfid = argv[0]; ref = argv[1]; value = argv[2]; force = argv[3];
@@ -15571,17 +15616,23 @@ sprintf(#dbg_trace2, "Ex-2:  %s  %s", #A3, #A4);
 
 
 
+// (a single initialisation file, the "Profile", run in @gfx ; then the check of the clips, in @block)
 function define_loaded()
 (
-    flagPMRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_PlMd;
-    flagSPRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_SpMd;
-    flagBKRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_Bnks;
-    flagHPCRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_HPC;
-    flagClVRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_Clips;
-    flagClSetload = FlagsTbVals[Flgs_TblUpd] & flag_ld_ClSets;
-    flagSnsrRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_Sensrs;
     flagClipsCheck = FlagsTbVals[Flgs_TblUpd] & flag_chk_clips;
     flagGM_mSL_ini = FlagsTbVals[Flgs_TblUpd] & flag_ld_Profile;
+);
+
+// All the tables to their default values (before the initialisation file, the "Profile")
+function resetAllTables()
+(
+    clearClipsCharacteristics(); // clips volumes
+    clearClipSets();
+    HPConfDefBuild();
+    defSMEntryDefault(); updSMEntries();
+    defPMEntryInit(); updPMEntries();
+    defBankInit();
+    SensorsClear();
 );
 
 // execute this after a preset load
@@ -16175,6 +16226,8 @@ timeFlag0 = timeFlag1 = timeFlag2 = timeFlag3 = 0;
         );
         */
         // as at init (see the paths of the project) : the separator of the system, #DIR_SEP
+        (str_getchar(#s, 0, 'cu') === '/') ? (MACHINE_Type = 'Mac'; set_machine_seps();) :
+        (str_getchar(#s, 1, 'cu') === ':') ? (MACHINE_Type = 'PC'; set_machine_seps(););
         strcpy(#D_GM_Project_Path, #s); strcat(#D_GM_Project_Path, #DIR_SEP);
         mSL_log(SysLogBox, #D_GM_Project_Path);
         strcpy(#D_GM_Project_Path_FX, #D_GM_Project_Path); strcat(#D_GM_Project_Path_FX, "Effects"); strcat(#D_GM_Project_Path_FX, #DIR_SEP);
@@ -16182,6 +16235,8 @@ timeFlag0 = timeFlag1 = timeFlag2 = timeFlag3 = 0;
         strcpy(#D_GM_Project_Path_SCR, #D_GM_Project_Path); strcat(#D_GM_Project_Path_SCR, "Data"); strcat(#D_GM_Project_Path_SCR, #DIR_SEP);
         strcat(#D_GM_Project_Path_SCR, "Scripts"); strcat(#D_GM_Project_Path_SCR, #DIR_SEP);
         strcpy(#D_GM_Project_Path_SCRplus, #D_GM_Project_Path_SCR); strcat(#D_GM_Project_Path_SCRplus, "+");
+        // a relative clips directory : now in the "Data" folder of this path
+        clDirResolve() ? setClDirectory(0, 0);
     );
 );
 
@@ -17095,189 +17150,13 @@ timeFlag2 ? (
         delayLoad -= 1;
     ) : (
 
-        (flagClVRload != 0) && (flagDoLoadScripts != 0) ? (
-            (FlagsTbVals[Flgs_Inits] & 1) ? (
-                sprintf(#s, "::About to load: \"%s\"", #D_ClipsModifiers); mSL_log(SysLogBox, #s);
-            );
-            flagClVRload = 0;
-            (FlagsTbVals[Flgs_ConfLd] & flag_ld_Clips) ? (
-                (match("*.mSL", #D_ClipsModifiers)) ? (
-                    doMslCompile(#D_ClipsModifiers);
-                    delayLoad += delayLdInt;
-                ) : (
-                    (strlen(#D_ClipsModifiers) != 0) ? (
-                        sprintf(#s, "Clips Modifiers: \"%s\" is not a loadable file", #D_ClipsModifiers);
-                        mSL_log(SysLogBox, #s);
-                    );
-                );
-            ) : (
-                clearClipsCharacteristics();
-                mSL_log(SysLogBox, "Clips Modifiers reinitialized");
-                flagRunClipsCheck = 60;
-            );
-        ) :
-
-        (flagClSetload != 0) && (flagDoLoadScripts != 0) ? (
-            (FlagsTbVals[Flgs_Inits] & 1) ? (
-                sprintf(#s, "::About to load: \"%s\"", #D_ClipSetConf); mSL_log(SysLogBox, #s);
-            );
-            flagClSetload = 0;
-            (FlagsTbVals[Flgs_ConfLd] & flag_ld_ClSets) ? (
-                (match("*.mSL", #D_ClipSetConf)) ? (
-                    // Impose de recharger les banques !
-                    flagBKRload = 1;
-                    0 ? mSL_log(SysLogBox, "Set flagBKRload in Configuration Loading");
-                    doMslCompile(#D_ClipSetConf);
-                    delayLoad += delayLdInt;
-                ) : (
-                    (strlen(#D_ClipSetConf) != 0) ? (
-                        sprintf(#s, "ClipSetConf: \"%s\" is not a loadable file", #D_ClipSetConf);
-                        mSL_log(SysLogBox, #s);
-                    );
-                );
-            ) : (
-                clearClipSets();
-                flagBKRload = 1; // we will have to reload the banks
-                0 ? mSL_log(SysLogBox, "Set flagBKRload in clearClipSets()");
-            );
-        ) :
-
-        (flagHPCRload != 0) && (flagDoLoadScripts != 0) ? (
-           (FlagsTbVals[Flgs_Inits] & 1) ? (
-                sprintf(#s, "::About to load: \"%s\"", #D_HPConfigs); mSL_log(SysLogBox, #s);
-            );
-            flagHPCRload = 0;
-            (FlagsTbVals[Flgs_ConfLd] & flag_ld_HPC) ? (
-                (match("*.mSL", #D_HPConfigs)) ? (
-                    //
-                    doMslCompile(#D_HPConfigs);
-                    delayLoad += delayLdInt;
-                ) : (
-                    (strlen(#D_HPConfigs) != 0) ? (
-                        sprintf(#s, "HP Configs: \"%s\" is not a loadable file", #D_HPConfigs);
-                        mSL_log(SysLogBox, #s);
-                    ) : (
-                        HPConfDefBuild();
-                    );
-                );
-            ) : (
-                HPConfDefBuild(); // HPConfInit();
-                mSL_log(SysLogBox, "HP Configs reinitialized");
-            );
-        ) :
-
-        (flagSPRload != 0) && (flagDoLoadScripts != 0)? (
-            (FlagsTbVals[Flgs_Inits] & 1) ? (
-                sprintf(#s, "::About to load: \"%s\"", #D_SpaceModes); mSL_log(SysLogBox, #s);
-            );
-            flagSPRload = 0;
-            (FlagsTbVals[Flgs_ConfLd] & flag_ld_SpMd) ? (
-                (match("*.mSL", #D_SpaceModes)) ? (
-                    doMslCompile(#D_SpaceModes);
-                    delayLoad += delayLdInt;
-                ) : (
-                    (strlen(#D_SpaceModes) != 0) ? (
-                        sprintf(#s, "Space Modes: \"%s\" is not a loadable file", #D_SpaceModes);
-                        mSL_log(SysLogBox, #s);
-                    );
-                );
-            ) : (
-                defSMEntryDefault(); updSMEntries();
-                mSL_log(SysLogBox, "Space Modes reinitialized");
-            );
-        ) :
-
-        (flagPMRload != 0) && (flagDoLoadScripts != 0) ? (
-            (FlagsTbVals[Flgs_Inits] & 1) ? (
-                sprintf(#s, "::About to load: \"%s\"", #D_PlayModes); mSL_log(SysLogBox, #s);
-            );
-            flagPMRload = 0;
-            (FlagsTbVals[Flgs_ConfLd] & flag_ld_PlMd) ? (
-                (match("*.mSL", #D_PlayModes)) ? (
-                    doMslCompile(#D_PlayModes);
-                    delayLoad += delayLdInt;
-                ) : (
-                    (strlen(#D_PlayModes) != 0) ? (
-                        sprintf(#s, "Play Modes: \"%s\" is not a loadable file", #D_PlayModes);
-                        mSL_log(SysLogBox, #s);
-                    );
-                );
-            ) : (
-                0 ? (mSL_log(SysLogBox, "::Flag not set"););
-                defPMEntryInit(); updPMEntries();
-                mSL_log(SysLogBox, "Play Modes reinitialized");
-            );
-        ) :
-
-        (flagBKRload != 0) && (flagDoLoadScripts != 0) ? (
-            (FlagsTbVals[Flgs_Inits] & 1) ? (
-                sprintf(#s, "::About to load: \"%s\"", #D_BanksDefs); mSL_log(SysLogBox, #s);
-            );
-            flagBKRload = 0;
-            0 ? (mSL_log(SysLogBox, "ReSet flagBKRload in Configuration Loading"););
-            (FlagsTbVals[Flgs_ConfLd] & flag_ld_Bnks) ? (
-                (match("*.mSL", #D_BanksDefs)) ? (
-                    doMslCompile(#D_BanksDefs);
-                    delayLoad += delayLdInt;
-                ) : (
-                    (strlen(#D_BanksDefs) != 0) ? (
-                    sprintf(#s, "BanksDefs: \"%s\" is not a loadable file", #D_BanksDefs);
-                    mSL_log(SysLogBox, #s);
-                    );
-                );
-            ) : (
-                defBankInit();
-                0 ? mSL_log(SysLogBox, "Banks reinitialized");
-            );
-        ) :
-
-        (flagSnsrRload != 0) && (flagDoLoadScripts != 0) ? (
-            (FlagsTbVals[Flgs_Inits] & 1) ? (
-                sprintf(#s, "::About to load: \"%s\"", #D_InSens_Name); mSL_log(SysLogBox, #s);
-            );
-            flagSnsrRload = 0;
-            (FlagsTbVals[Flgs_ConfLd] & flag_ld_Sensrs) ? (
-                (match("*.mSL", #D_InSens_Name)) ? (
-                    doMslCompile(#D_InSens_Name);
-                    delayLoad += delayLdInt;
-                ) : (
-                    (strlen(#D_InSens_Name) != 0) ? (
-                        sprintf(#s, "Sensors: \"%s\" is not a loadable file", #D_InSens_Name);
-                        mSL_log(SysLogBox, #s);
-                    );
-                );
-            ) : (
-                SensorsClear();
-            );
-        ) :
-
-        (flagGM_mSL_ini != 0) && (flagDoLoadScripts != 0) ? (
-           (FlagsTbVals[Flgs_Inits] & 1) ? (
-                sprintf(#s, "::About to load: \"%s\"", #D_GM_mSL_ini); mSL_log(SysLogBox, #s);
-            );
-            flagGM_mSL_ini = 0;
-            (FlagsTbVals[Flgs_ConfLd] & flag_ld_Profile) ? (
-                // Load the mSL profile
-                (match("*.mSL", #D_GM_mSL_ini)) ? (
-                    doMslCompile(#D_GM_mSL_ini);
-                    delayLoad += delayLdInt;
-                ) : (
-                    (strlen(#D_GM_mSL_ini) != 0) ? (
-                        sprintf(#s, "Profile: \"%s\" is not a loadable file", #D_GM_mSL_ini);
-                        mSL_log(SysLogBox, #s);
-                    );
-                );
-            );
-            delayLoad += 30;
-        ) :
-
-        (flagClipsCheck != 0) && (flagDoLoadScripts != 0) ? (
+        // the initialisation file (the "Profile") is run in @gfx : the check of the clips comes after it
+        (flagClipsCheck != 0) && (flagDoLoadScripts != 0) && (flagGM_mSL_ini === 0) ? (
             flagClipsCheck = 0;
             flagRunClipsCheck = 60;
         ) :
-
-        (
-            delayLoad += 60;
+        (flagGM_mSL_ini === 0) ? (
+            delayLoad += 60; // nothing to load for now
         );
     );
 
@@ -18445,20 +18324,21 @@ loadMode ? (
         padSensShowSiz = serialBlock[Pr7_SensorSize]; setSensorSize(padSensShowSiz);
         MIDI_Sens_mode = serialBlock[Pr7_SensorNum];
         MACHINE_Type = serialBlock[Pr7_MACHINE_Type];
+        set_machine_seps(); // #DIR_SEP, F_SEP (otherwise the paths built later use "?")
         // load partial zero
         memcpy(BKTab, serialBlock+Pr7_Partial0, BKEsize); // currently 12 values
         0 ? (
-            b = BKTab;
-            sprintf(#s2, "**PL  %d %d %d %d --- %d %d %d %d", b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
+            srz_b = BKTab; // (srz_ : not the work variables of @block, which runs concurrently)
+            sprintf(#s2, "**PL  %d %d %d %d --- %d %d %d %d", srz_b[0], srz_b[1], srz_b[2], srz_b[3], srz_b[4], srz_b[5], srz_b[6], srz_b[7]);
             mSL_log(SysLogBox, #s2);
         );
 
         ui_jstyle = (serialBlock[Pr7_UiStyle] != 0); // look of the GUI
         // Check pannels configurations
-        p = serialBlock + Pr7_StudConf;
-        ii = 0; loop(dcbTabsMax, p[ii] = max(1, min(4, 0|p[ii])); ii+= 1;);
-        p = serialBlock + Pr7_StudRat;
-        ii = 0; loop(dcbTabsMax*4, p[ii] = max(180, min(1800, 0|p[ii])); ii+= 1;);
+        srz_p = serialBlock + Pr7_StudConf;
+        srz_i = 0; loop(dcbTabsMax, srz_p[srz_i] = max(1, min(4, 0|srz_p[srz_i])); srz_i += 1;);
+        srz_p = serialBlock + Pr7_StudRat;
+        srz_i = 0; loop(dcbTabsMax*4, srz_p[srz_i] = max(180, min(1800, 0|srz_p[srz_i])); srz_i += 1;);
 
 
         define_loaded();
@@ -18528,7 +18408,7 @@ loadMode ? (
         (strlen(savedStrings[Pr7_Script_Name]) !== 0) ? strcpy(#D_Script_Name, savedStrings[Pr7_Script_Name]);
         (strlen(savedStrings[Pr7_clDirectory]) !== 0) ? (
             strcpy(#t, savedStrings[Pr7_clDirectory]);
-            strcmp(#D_clDirectory, #t) ? (
+            strcmp(#D_clDirCfg, #t) ? (
                 // directory change !
                 setClDirectory(#t, 0);
             );
@@ -18550,8 +18430,8 @@ loadMode ? (
         // Get aliases
         sj = K_fileAliases; si = 0; sk = 1;
         while (sk && (sj < K_savedStringsCnt) && (si < K_aclnAliasesCnt)) (
-            st = savedStrings[sj];
-            ((sk = strlen(st)) != 0) ? (
+            srz_st = savedStrings[sj];
+            ((sk = strlen(srz_st)) != 0) ? (
                 aclnAliases[si] = cs = mSL_Str_Alloc("");
                 strcpy(cs, savedStrings[sj]);
                 si += 1;
@@ -18628,7 +18508,7 @@ loadMode ? (
     strcpy(savedStrings[Pr7_InSens_Name], #D_InSens_Name);
     strcpy(savedStrings[Pr7_GM_mSL_ini], #D_GM_mSL_ini);
     strcpy(savedStrings[Pr7_Script_Name], #D_Script_Name);
-    strcpy(savedStrings[Pr7_clDirectory], #D_clDirectory);
+    strcpy(savedStrings[Pr7_clDirectory], #D_clDirCfg); // (as given : a relative name stays relative)
     strcpy(savedStrings[Pr7_Project_SCR], #D_GM_Project_Path_SCR);
     strcpy(savedStrings[Pr7_Project_SCRplus], #D_GM_Project_Path_SCRplus);
     strcpy(savedStrings[Pr7_Project_WAV], #D_GM_Project_Path_WAV);
@@ -18675,8 +18555,8 @@ loadMode ? (
 
     // Install aliases in strings to save
     sj = K_fileAliases; si = 0; loop(K_aclnAliasesCnt,
-        st = aclnAliases[si];
-        ((st != 0) && (strlen(st) > 0) && (sj < K_savedStringsCnt - 1)) ? ( // (the last saved string : the empty delimiter)
+        srz_st = aclnAliases[si];
+        ((srz_st != 0) && (strlen(srz_st) > 0) && (sj < K_savedStringsCnt - 1)) ? ( // (the last saved string : the empty delimiter)
             strcpy(savedStrings[sj], aclnAliases[si]);
             sj += 1;
         );
@@ -18984,7 +18864,13 @@ function ui_dropped_in() (
 );
 
 function doneDroppedFile() (
-    dpa = dpi = efs = afs = 0; dropped_x = dropped_y = -1;
+    dpa = efs = afs = 0; dropped_x = dropped_y = -1;
+);
+
+// The dropped mSL files have been used by a module (otherwise, they are compiled and run at the end of @gfx)
+function doneDroppedMsl() (
+    dpi = dropMslCnt = 0;
+    (dpa === 0) ? (efs = 0; dropped_x = dropped_y = -1;); // nothing more dropped
 );
 
 // Drop File (with the token : temporary strings, compile list ; otherwise, the files wait for the next frame)
@@ -19004,20 +18890,26 @@ while (efi) (
     ui_GFXdoNow |= 1; // Make sure we react as soon as possible
     // Is this an mSL script ?
     (match ("*mSL", efs)) ? (
-        //
-        1? (sprintf(#s, "*  Script: %s  (%d)  %d *", efs, strlen(efs), dropped_cap); mSL_log(SysLogBox, #s););
-        ((dropped_cap & altCap) || (dropped_y < 32)) ? (
-            doMslCompile(efs); // add to compile list
-        ) : (
-            // If the name is in current Sounds directory, simplify it
-            (strlen(#D_GM_Project_Path_SCRplus) > 0) && match(#D_GM_Project_Path_SCRplus, efs) ? (
-                strcpy_from(#s, efs, strlen(#D_GM_Project_Path_SCRplus)-1);
-                strcpy(efs, "./");
-                strcat(efs, #s);
-                1?(sprintf(#s, "*  Script2: %s  (%d)  %d *", efs, strlen(efs), dropped_cap); mSL_log(SysLogBox, #s););
+        // A group of mSL files : their names are kept (dropMslNames, full paths) ; a module may use them if they
+        // were dropped in its rectangle (ui_dropped_in, then doneDroppedMsl), otherwise they are compiled and run
+        // at the end of @gfx. #efs : the first one, in the scripts directory of the project ("./...") if possible.
+        (dropMslCnt < dropMslSiz) ? (
+            strcpy(dropMslNames[dropMslCnt], efs); dropMslCnt += 1;
+            (dropMslCnt === 1) ? (
+                (strlen(#D_GM_Project_Path_SCRplus) > 0) && match(#D_GM_Project_Path_SCRplus, efs) ? (
+                    strcpy_from(#s, efs, strlen(#D_GM_Project_Path_SCRplus)-1);
+                    strcpy(#efs, "./");
+                    strcat(#efs, #s);
+                ) : (
+                    strcpy(#efs, efs);
+                );
             );
-            strcpy(#efs, efs); // save in #efs
-            dpi = 1; // an mSL file is available
+            dpi = 1; // some mSL files are available
+        ) : (
+            sprintf(#s, "*  Too many mSL files dropped : \"%s\" ignored", efs); mSL_log(SysLogBox, #s);
+        );
+        (FlagsTbVals[Flgs_GFXTrcs] & 2) ? (
+            sprintf(#s, "*  Script: %s  (%d)  %d *", efs, dropMslCnt, dropped_cap); mSL_log(SysLogBox, #s);
         );
     ) :
     (match ("*.wav", efs) || match ("*.aif", efs) || match ("*.flac", efs) || match ("*.mp3", efs) || match ("*.aiff", efs) || match ("*.ogg", efs) || match ("*.wmv", efs) || match ("*.mp4", efs) || match ("*.mov", efs)) ? (
@@ -19029,7 +18921,7 @@ while (efi) (
             strcat(efs, #s);
         );
         strcpy(#efs, efs); // save in #efs
-        dpa = 1; // an audio file is available
+        dpa = 1; dpaAge = 0; // an audio file is available
         (afs === 0) ? (#afs = ""; afs = #afs; ); // use a perf string
         // accumulate in afs ; use a dummy clip number for now
         sprintf(#aw, " 10000 %d %s ", strlen(efs), efs);
@@ -19091,7 +18983,7 @@ local (fhd, lct, el, flg, i1, i2, l1, l2)
         while (flg && (lct < 300)) (
             file_string(fhd, #mSLine); flg = file_avail(fhd);
             mSL_log(SysLogBox, #mSLine);
-            (strlen(#mSLine) === 0) ? (el += 1; flg = 0);
+            (strlen(#mSLine) === 0) ? (el += 1); // (an empty line : go on, until the end of the file)
             lct += 1;
         );
         file_close(fhd);
@@ -19200,6 +19092,30 @@ local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_
 );
 
 mSL_loc_tim = max(mSL_loc_tim - 1, 0);
+
+
+//============ INITIALISATION FILE ============
+// The "Profile" (#D_GM_mSL_ini), the single initialisation file : all the tables to their default values, then
+// the file is compiled and run (at start, after a preset load, "Refresh"/"Profile" of the Settings module)
+(flagGM_mSL_ini && flagDoLoadScripts && (delayLoad <= 0) && mSL_tok_wait(2, 0.02)) ? (
+    flagGM_mSL_ini = 0;
+    resetAllTables();
+    (FlagsTbVals[Flgs_Inits] & 1) ? (
+        sprintf(#s, "::About to load: \"%s\"", #D_GM_mSL_ini); mSL_log(SysLogBox, #s);
+    );
+    (FlagsTbVals[Flgs_ConfLd] & flag_ld_Profile) ? (
+        (match("*.mSL", #D_GM_mSL_ini)) ? (
+            doMslCompile(#D_GM_mSL_ini);
+        ) : (
+            (strlen(#D_GM_mSL_ini) != 0) ? (
+                sprintf(#s, "Profile: \"%s\" is not a loadable file", #D_GM_mSL_ini);
+                mSL_log(SysLogBox, #s);
+            );
+        );
+    );
+    delayLoad = max(delayLoad, 2); // the check of the clips (@block) after the run of the file
+    mSL_tok_give(2);
+);
 
 
 //============ GC RUN ============
@@ -19732,7 +19648,9 @@ local (xx, k, p, m, flgm, pp, v, s1, s2)
             s1 = paramValues[p];
             s2 = pp[pp_Def];
             BAA_v0 = v = gmem[unit + k];
-            parSet(p, v); //
+            // the value of the unit, for the display only : not parSet, that would also change the shared copy
+            // read by all the players (gmem[paramGCopy+p]) and maybe some global values
+            paramValues[p] = v;
             // Should we modify the "default value ? "
         );
         ui_pcolor(ui_jcolor_text);
@@ -19746,8 +19664,8 @@ local (xx, k, p, m, flgm, pp, v, s1, s2)
                 gmem[unit + RCB_State_Changed] |= m;
                 gmem[unit + RCB_Item_Changed] = k;
             );
-            // Restore global parameters values
-            paramValues[p] = s1;
+            // Restore global parameters values (and the shared copy : parCtl uses parSet for a change)
+            gmem[paramGCopy+p] = paramValues[p] = s1;
             pp[pp_Def] = s2;
         );
     ) : (
@@ -19762,7 +19680,7 @@ local (xx, k, p, m, flgm, pp, v, s1, s2)
 function
 show_Generator(unitbkl, blockN)
 local(upla, WUAdd, id, u, uix_jneed, unitmod, uix_jmini, zzmi, h1, h2, h3, ix, v, k, n, d, e, inpl,
-    s, str0, str1, str2, str3, xx, zz, zzch, zzent, zzmcl, zzmmd, ktdsp, key)
+    s, str0, str1, str2, str3, xx, zz, zzch, zzent, zzmcl, zzmmd, ktdsp, key, cn, wok)
 (
     str0 = #; str1 = #; str2 = #; str3=#;
     // which unit should we show ?
@@ -19946,6 +19864,7 @@ local(upla, WUAdd, id, u, uix_jneed, unitmod, uix_jmini, zzmi, h1, h2, h3, ix, v
                             ) :
                             (zzmcl === 5) ? (
                                 xx = control_jmenu(bplSLMenu);
+                                wok = (gmem[WUAdd+cbType] === uPlayer); // the commands : only to a player
                                 ((xx >= bplCopy) && (xx <= bplCopyLast)) ? (
                                     // update one block from another
                                     s = (xx - bplCopy) >> 2; d = (xx - bplCopy) & 3;
@@ -19953,32 +19872,35 @@ local(upla, WUAdd, id, u, uix_jneed, unitmod, uix_jmini, zzmi, h1, h2, h3, ix, v
                                     // Execute "copy"
                                     memcpy(bplMenuAddrs[d],bplMenuAddrs[s],BCtrlInfoSize);
                                 ) :
-                                (xx === bplRestartPlay) ? (
+                                (wok && (xx === bplRestartPlay)) ? (
                                     gmem[WUAdd+RCB_Cl_Flgs] |= 1;
                                     gmem[WUAdd+RCB_Kmd] = KmdPlay;
                                 ) :
-                                (xx === bplRestartLoop) ? (
+                                (wok && (xx === bplRestartLoop)) ? (
                                     gmem[WUAdd+RCB_Cl_Flgs] |= 1;
                                     gmem[WUAdd+RCB_Kmd] = KmdLoop;
                                 ) :
-                                (xx === bplNewPlay) ? (
+                                (wok && ((xx === bplNewPlay) || (xx === bplNewLoop))) ? (
                                     gmem[WUAdd+RCB_Cl_Flgs] |= 1;
-                                    gmem[WUAdd+RCB_ClipNb] = gmem[WUAdd+RCB_ClipDup];
-                                    gmem[WUAdd+RCB_Kmd] = KmdPlay;
+                                    gmem[WUAdd+RCB_ClipNb] = cn = gmem[WUAdd+RCB_ClipDup];
+                                    // the name of the new clip, if it is an alias (as in doPlayClip), otherwise none :
+                                    // the File Player opens RCB_ClpName first
+                                    gmem[WUAdd+RCB_ClpName] = 0;
+                                    ((cn >= 0) && (cn < clTSize) && (gmem[clClAlias+cn] != 0)) ? (
+                                        getClipName(cn, aclnAliases);
+                                        gmem[WUAdd+RCB_ClpName] = WUAdd+RCB_Alias_Name;
+                                        mSL_g6packStr(WUAdd+RCB_Alias_Name, #fname, 0, 63, 0);
+                                    );
+                                    gmem[WUAdd+RCB_Kmd] = (xx === bplNewPlay) ? KmdPlay : KmdLoop;
                                 ) :
-                                (xx === bplNewLoop) ? (
-                                    gmem[WUAdd+RCB_Cl_Flgs] |= 1;
-                                    gmem[WUAdd+RCB_ClipNb] = gmem[WUAdd+RCB_ClipDup];
-                                    gmem[WUAdd+RCB_Kmd] = KmdLoop;
-                                ) :
-                                (xx === bplStop) ? (
+                                (wok && (xx === bplStop)) ? (
                                     gmem[WUAdd+RCB_Kmd] = KmdStop;
                                 ) :
-                                (xx === bplLock) ? (
+                                (wok && (xx === bplLock)) ? (
                                     // SchedAddTask(5, 3, upla, -1, 0, 0, 0);
                                     gmem[WUAdd+RCB_Cl_Flgs] |= 1;
                                 ) :
-                                (xx === bplDuplicate) ? (
+                                (wok && (xx === bplDuplicate)) ? (
                                     z = findPlayer();
                                     ((z >= UGAddr)) ? (
                                         gmem[WUAdd+RCB_Cl_Flgs] |= 1;
@@ -19991,10 +19913,11 @@ local(upla, WUAdd, id, u, uix_jneed, unitmod, uix_jmini, zzmi, h1, h2, h3, ix, v
                                         gmem[z+RCB_Kmd] = gmem[WUAdd+cbLKmd];
                                     );
                                 ) :
-                                (xx === bplHPConf) ? (
+                                (wok && (xx === bplHPConf)) ? (
                                     SMAddr = dSMAddr;
                                     GPlUnit = WUAdd;
                                     dSMAddr[idx_Sm_HPSet1] = gmem[WUAdd+RCB_Channels_cnfDup];
+                                    GvErr = 0; // (an error of the last play would prevent the installation)
                                     HPInstall();
                                     gmem[WUAdd+RCB_Kmd] = gmem[WUAdd+cbLKmd]; // rearm
                                 ) :
@@ -20149,12 +20072,6 @@ local (str, ij, h1, uix_jneed, uix_jmini, color, k, w, r, jmc, zz, zzch, zzent, 
                     ui_color(Col_Frame);
                     ui_border(); // draws in purple
                 ui_pop();
-                dpi ? (
-                    sprintf(#s, "Keeping %d #D_InSens_Name %s", efs, #efs);
-                    mSL_log(SysLogBox, #s);
-                    strcpy(#D_InSens_Name, #efs); // keep name
-                    doneDroppedFile();
-                );
             );
             control_group(blockDispNames[blockDispInverts[blockSensors]]);
             ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
@@ -20194,22 +20111,7 @@ local (str, ij, h1, uix_jneed, uix_jmini, color, k, w, r, jmc, zz, zzch, zzent, 
                     padSnsKColrs[4] = Col_InfoC;
                     sprintf(str, "%d/%d", MIDISeqPtr, MIDISeqSiz);
 
-                    (jmc & cmdCap) ? (
-                        padSnsKLabs[5] = "Remove";
-                        padSnsKColrs[5] = Color_Std_Orange;
-                    ) :
-                    (jmc & altCap) ? (
-                        padSnsKLabs[5] = "Reset";
-                        padSnsKColrs[5] = Color_Goldenrod;
-                    ) : (
-                        (strlen(#D_InSens_Name) === 0) ? (
-                            padSnsKLabs[5] = "Undefined";
-                            padSnsKColrs[5] = Color_Dark_Gray;
-                        ) : (
-                            padSnsKLabs[5] = "Reload";
-                            padSnsKColrs[5] = Col_InfoC;
-                        );
-                    );
+                    padSnsKLabs[5] = ""; padSnsKColrs[5] = Col_Inactive; // (no reload : a single initialisation file, see Settings)
                 );
                 padSnsKLabs[4] = str;
 
@@ -20243,23 +20145,6 @@ local (str, ij, h1, uix_jneed, uix_jmini, color, k, w, r, jmc, zz, zzch, zzent, 
                             MIDI_Sens_mode = (MIDI_Sens_mode+1) % MIDI_States_siz;
                             gmem[sensorsPadState] = MIDI_Sens_mode + 0x100;
                             AddDummyMIDIImm(EnterSens); // for executing "enter" operation
-                        ) :
-                        (zzmcl === 5) ? (
-                            (jmc & cmdCap) ? (
-                                // remove file
-                                strcpy(#D_InSens_Name, "");
-                            ) :
-                            (jmc & altCap) ? (
-                                // reset file to std name
-                                strcpy(#D_InSens_Name, #Def_InSens_Name);
-                            ) : (
-                                // choose a new file
-                                xx = control_jmenu(menu_Config);
-                                (xx != 0) ? (
-                                    strcpy(#D_InSens_Name, configs_tab[xx-1]); // keep name
-                                    FlagsTbVals[Flgs_ConfLd] |= flag_ld_Sensrs; // confirm we want to reload the file
-                                );
-                            );
                         );
                     );
 
@@ -20282,20 +20167,7 @@ local (str, ij, h1, uix_jneed, uix_jmini, color, k, w, r, jmc, zz, zzch, zzent, 
                             gmem[sensorsPadState] = MIDI_Sens_mode + 0x100;
                             AddDummyMIDIImm(EnterSens); // for executing "enter" operation
                         ) :
-                        (zzmcl === 5) ? (
-                            (jmc & cmdCap) ? (
-                                // remove file
-                                strcpy(#D_InSens_Name, "");
-                            ) :
-                            (jmc & altCap) ? (
-                                // reset file to std file
-                                strcpy(#D_InSens_Name, #Def_InSens_Name);
-                            ) : (
-                                (zzmmd & 8) ? (
-                                    FlagsTbVals[Flgs_ConfLd] &= 0xFFFFFF ~ flag_ld_Sensrs;
-                                ); // reset read flag
-                                flagSnsrRload = 1; // reload sensors Conf ASAP
-                            );
+                        (zzmcl === 5) ? (0; // (no reload : a single initialisation file, see Settings)
                         );
                     );
 
@@ -20492,6 +20364,7 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                 (u_ch === '7') ? (box[5] = 7;) :
                 (u_ch === '8') ? (box[5] = 8;) :
                 (u_ch === 'p') ? (sysout(SysLogBox);) :
+                (u_ch === 'P') ? (sysout(SysLogBox, 31);) : // the log in the console of GMAuxiliary.eel, to copy it
                 (u_ch = 0); // not a key of the log
                 GM_key_take(u_ch); // the key has been used
             );
@@ -20708,8 +20581,6 @@ local(uix_jneed, uix_jmini, h1, h2, v, w, r, jmc, zzmi)
                 ui_show("Loopers", BLpc, "%d");
 
                 ui_show("Allowed", playAllow, "%d");
-                ui_show("Stopped", stopped, "%d");
-                ui_show("Protected", protected, "%d");
                 ui_show("Loading", FlagsTbVals[Flgs_TblUpd], "%04X");
                 ui_show("Ld. Ready", FlagsTbVals[Flgs_ConfLd], "%04X");
 
@@ -20770,8 +20641,9 @@ local(uix_jneed, uix_jmini, h1, h2, v, w, r, jmc, zzmi)
 //====== PLAY MODES ======
 
 function showPModesDef(ent, h2)
-local(TT, co)
+local(TT, co, w, r, slr)
 (
+    slr = split_leftratio;
     ui_split_top(h2);
         ui_pad(0,ui_jd_padTBox1,2,ui_jd_padTBox1);
         TT = PMTab + PMEsize * (0|max(0, min(PMEcnt-1, ent)));
@@ -20834,6 +20706,7 @@ local(TT, co)
             ui_pop();
         );
     ui_pop();
+    split_leftratio = slr; // (restore the label ratio)
 );
 
 
@@ -20862,12 +20735,6 @@ local(str, str2, zz, zzch, zzent, zzmcl, zzc, zzmi, zzmmd, key, jmc, xx, co, TT,
                     ui_color(Col_Frame);
                     ui_border(); // draws in purple
                 ui_pop();
-                dpi ? (
-                    sprintf(#s, "Keeping %d #D_PlayModes %s", efs, #efs);
-                    mSL_log(SysLogBox, #s);
-                    strcpy(#D_PlayModes, #efs); // keep name
-                    doneDroppedFile();
-                );
             );
             control_group(blockDispNames[blockDispInverts[blockPlayModes]]);
             ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
@@ -20884,22 +20751,7 @@ local(str, str2, zz, zzch, zzent, zzmcl, zzc, zzmi, zzmmd, key, jmc, xx, co, TT,
                     padPMColrs[PMpVer] = padPMColrs[PMpMsg] = padPMColrs[PMpRld] = Col_InfoC;
                     sprintf(str, "%d/%d", PMDEcnt, PMEcnt);
                     sprintf(str2, "v-%d.%d.%d", 0|(PlayModesVersion/10000), (PlayModesVersion/100)%100, PlayModesVersion%100);
-                    (jmc & cmdCap) ? (
-                        padPMLabs[PMpRld] = "Remove";
-                        padPMColrs[PMpRld] = Color_Std_Orange;
-                    ) :
-                    (jmc & altCap) ? (
-                        padPMLabs[PMpRld] = "Reset";
-                        padPMColrs[PMpRld] = Color_Goldenrod;
-                    ) : (
-                        (strlen(#D_PlayModes) === 0) ? (
-                            padPMLabs[PMpRld] = "Undefined";
-                            padPMColrs[PMpRld] = Color_Dark_Gray;
-                        ) : (
-                            padPMLabs[PMpRld] = "Reload";
-                            padPMColrs[PMpRld] = Col_InfoC;
-                        );
-                    );
+                    padPMLabs[PMpRld] = ""; padPMColrs[PMpRld] = Col_Inactive; // (no reload : a single initialisation file, see Settings)
                 );
                 padPMLabs[PMpMsg] = str;
                 padPMLabs[PMpVer] = str2;
@@ -20935,23 +20787,6 @@ local(str, str2, zz, zzch, zzent, zzmcl, zzc, zzmi, zzmmd, key, jmc, xx, co, TT,
                                 );
                             // 32 is 'ctrl' key, 8 is 'shift' key
                             padPMVals[0] = updPlMdNumber(padPMVals[0], - key);
-                        ) :
-                        (zzmcl === 7) ? (
-                            (jmc & cmdCap) ? (
-                                // remove file
-                                strcpy(#D_PlayModes, "");
-                            ) :
-                            (jmc & altCap) ? (
-                                // reset file to std name
-                                strcpy(#D_PlayModes, #Def_PlayModes);
-                            ) : (
-                                // choose a new file
-                                xx = control_jmenu(menu_Config);
-                                (xx != 0) ? (
-                                    strcpy(#D_PlayModes, configs_tab[xx-1]); // keep name
-                                    FlagsTbVals[Flgs_ConfLd] |= flag_ld_PlMd; // confirm we want to reload the file
-                                );
-                            );
                         );
                     );
 
@@ -20967,20 +20802,7 @@ local(str, str2, zz, zzch, zzent, zzmcl, zzc, zzmi, zzmmd, key, jmc, xx, co, TT,
                             padPMVals[0] = updPlMdNumber(padPMVals[0], - key);
                         ) :
                         // Reload clicked ?
-                        (zzmcl === 7) ? (
-                            (jmc & cmdCap) ? (
-                                // remove file
-                                strcpy(#D_PlayModes, "");
-                            ) :
-                            (jmc & altCap) ? (
-                                // reset file to std file
-                                strcpy(#D_PlayModes, #Def_PlayModes);
-                            ) : (
-                                (zzmmd & 8) ? (
-                                    FlagsTbVals[Flgs_ConfLd] &= 0xFFFFFF ~ flag_ld_PlMd;
-                                ); // reset read flag
-                                flagPMRload = 1; // reload playmode Conf ASAP
-                            );
+                        (zzmcl === 7) ? (0; // (no reload : a single initialisation file, see Settings)
                         );
                     );
                 );
@@ -21021,12 +20843,6 @@ local(str, str2, uix_jneed, uix_jmini, key, jmc, val, zz, zzch, zzent, zzmcl, zz
                     ui_color(Col_Frame);
                     ui_border(); // draws in purple
                 ui_pop();
-                dpi ? (
-                    sprintf(#s, "Keeping %d #D_ClipsModifiers %s", efs, #efs);
-                    mSL_log(SysLogBox, #s);
-                    strcpy(#D_ClipsModifiers, #efs); // keep name
-                    doneDroppedFile();
-                );
             );
             control_group(blockDispNames[blockDispInverts[blockClipsSettings]]);
             ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
@@ -21045,22 +20861,7 @@ local(str, str2, uix_jneed, uix_jmini, key, jmc, val, zz, zzch, zzent, zzmcl, zz
                     padVlclrs[VlpVer] = padVlclrs[VlpMsg] = padVlclrs[VlpRld] = Col_InfoC;
                     sprintf(str, "%d/%d", ClMEntries, clTSize);
                     sprintf(str2, "v-%d.%d.%d", 0|(ClipConfigVersion/10000), (ClipConfigVersion/100)%100, ClipConfigVersion%100);
-                    (jmc & cmdCap) ? (
-                        padVllabs[VlpRld] = "Remove";
-                        padVlclrs[VlpRld] = Color_Std_Orange;
-                    ) :
-                    (jmc & altCap) ? (
-                        padVllabs[VlpRld] = "Reset";
-                        padVlclrs[VlpRld] = Color_Goldenrod;
-                    ) : (
-                        (strlen(#D_ClipsModifiers) === 0) ? (
-                            padVllabs[VlpRld] = "Undefined";
-                            padVlclrs[VlpRld] = Color_Dark_Gray;
-                        ) : (
-                            padVllabs[VlpRld] = "Reload";
-                            padVlclrs[VlpRld] = Col_InfoC;
-                        );
-                    );
+                    padVllabs[VlpRld] = ""; padVlclrs[VlpRld] = Col_Inactive; // (no reload : a single initialisation file, see Settings)
                 );
                 padVllabs[VlpMsg] = str;
                 padVllabs[VlpVer] = str2;
@@ -21115,33 +20916,6 @@ local(str, str2, uix_jneed, uix_jmini, key, jmc, val, zz, zzch, zzent, zzmcl, zz
                                 );
                             // 32 is 'ctrl' key, 8 is 'shift' key
                             padVlcVals[0] = updClipNumber(padVlcVals[0], - key, 1004);
-                        ) :
-                        (zzmcl === 4) ? (
-                            // Chose a new directory
-                            xx = control_jmenu(menu_Config);
-                            (xx != 0) ? (
-                                strcpy(#s2, configs_tab[xx-1]);
-                                strcmp(#D_clDirectory, #s2) ? (
-                                    setClDirectory(#s2, 0);
-                                );
-                            );
-                        ) :
-                        (zzmcl === 7) ? (
-                            (jmc & cmdCap) ? (
-                                // remove file
-                                strcpy(#D_ClipsModifiers, "");
-                            ) :
-                            (jmc & altCap) ? (
-                                // reset file to std file
-                                strcpy(#D_ClipsModifiers, #Def_ClipsModifiers);
-                            ) : (
-                                // choose a new file
-                                xx = control_jmenu(menu_Config);
-                                (xx != 0) ? (
-                                    strcpy(#D_ClipsModifiers, configs_tab[xx-1]); // keep name
-                                    FlagsTbVals[Flgs_ConfLd] |= flag_ld_Clips; // confirm we want to reload the file
-                                );
-                            );
                         );
                     );
 
@@ -21156,20 +20930,7 @@ local(str, str2, uix_jneed, uix_jmini, key, jmc, val, zz, zzch, zzent, zzmcl, zz
                             padVlcVals[0] = updClipNumber(padVlcVals[0], - key, 1005);
                         ) :
                         // Reload clicked ?
-                        (zzmcl === 7) ? (
-                            (jmc & cmdCap) ? (
-                                // remove file
-                                strcpy(#D_ClipsModifiers, "");
-                            ) :
-                            (jmc & altCap) ? (
-                                // reset file to std file
-                                strcpy(#D_ClipsModifiers, #Def_HPConfigs);
-                            ) : (
-                                (zzmmd & 8) ? (
-                                    FlagsTbVals[Flgs_ConfLd] &= 0xFFFFFF ~ flag_ld_Clips;
-                                ); // reset read flag
-                                flagClVRload = 1; // reload clips Conf ASAP
-                            )
+                        (zzmcl === 7) ? (0; // (no reload : a single initialisation file, see Settings)
                         );
                     );
                 );
@@ -21187,7 +20948,7 @@ local(str, str2, uix_jneed, uix_jmini, key, jmc, val, zz, zzch, zzent, zzmcl, zz
 
 
 function show_Clips_Selection()
-local(iw, ix, iy, iz, str, uv, uw, ux, zz, zzmi, m, mcc, r, cc, sr, ds, dm, curB, emin, emax, cnt, rerun,
+local(ic, iw, ix, iy, iz, str, uv, uw, ux, zz, zzmi, m, mcc, r, cc, sr, ds, dm, curB, emin, emax, cnt, rerun,
       nli, lx, cx, nc, jmc, ent, ezer, epos, eneg, elcnt, ehcnt, h1, h2, h3, j4, xcell, uix_jneed, restHfact, nA, ecnt, showSel)
 (
     // restHfact = 0.88;
@@ -21308,6 +21069,7 @@ local(iw, ix, iy, iz, str, uv, uw, ux, zz, zzmi, m, mcc, r, cc, sr, ds, dm, curB
             //  CLIPS
             //
             ui_split_top(h3);
+                curB = ((slBankset) * clBSSize + slGroupNum)*clInBank; // (before clpn below)
                 (zzicl = ui_hover()) ? (
                     ui_push();
                         ui_color(Col_SubFrame);
@@ -21320,7 +21082,6 @@ local(iw, ix, iy, iz, str, uv, uw, ux, zz, zzmi, m, mcc, r, cc, sr, ds, dm, curB
                     nc = cx + nco * lx; clpn = curB + nc;
                 );
                 ui_pad(2,2);
-                curB = ((slBankset) * clBSSize + slGroupNum)*clInBank;
                 // Are we dropping some sound files ?
                 (dpa && zzicl && ui_dropped_in()) ? (
                     nA = mSL_Str_Tmp();
@@ -21666,8 +21427,8 @@ local(iw, ix, iy, iz, str, uv, uw, ux, zz, zzmi, m, mcc, r, cc, sr, ds, dm, curB
                                     gmem[clInfStart+xcell] -= 20000;
                                 );
                             ) :
-                            (xx === csrcREntSeq) ? (
-                                // reset the aliases between here and previously selected one
+                            (xx === csrcRemAliasSeq) ? (
+                                // remove the aliases and clear the entries between here and previously selected one
                                 ((cellAlt >= 0) && (cellAlt < clTSize)) ? (
                                     ix = max(0, min(clTSize-1, min(cellAlt, xcell)));
                                     iy = max(0, min(clTSize-1, max(cellAlt, xcell)));
@@ -21680,8 +21441,8 @@ local(iw, ix, iy, iz, str, uv, uw, ux, zz, zzmi, m, mcc, r, cc, sr, ds, dm, curB
                                     );
                                 );
                             ) :
-                            (xx === csrcRemAliasSeq) ? (
-                                // reset all enties between here and previously selected one
+                            (xx === csrcREntSeq) ? (
+                                // reset all entries between here and previously selected one
                                 ((cellAlt >= 0) && (cellAlt < clTSize)) ? (
                                     ix = max(0, min(clTSize-1, min(cellAlt, xcell)));
                                     iy = max(0, min(clTSize-1, max(cellAlt, xcell)));
@@ -21939,7 +21700,7 @@ select_unit(Un)
 
 function
 show_Units(flg)
-local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h1, uix_jneed, uix_jmini, pm, cn, wg, jmc, zzmi, uAcnt, lqmode)
+local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h1, uix_jneed, uix_jmini, pm, cn, wg, jmc, zzmi, uAcnt)
 (
     str = #;
     h1 = uix_jpadHeight(padcNl_Units) ;
@@ -21966,7 +21727,7 @@ local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h
                 mSL_setStrArray(padUlabs, uCnt);
                 uid = 0; uAcnt = 0; loop (uCnt,
                     strcpy(padUlabs[uid], "");
-                    padUclrs[uid] = padUAclrs[uid] = U0; padUNAddr[uid] = 0;
+                    padUclrs[uid] = padUAclrs[uid] = Col_U0; padUNAddr[uid] = 0;
                     Un = UGAddr + UCBSize * uid;
                     ty = gmem[Un+cbType];
                     (ty != 0) ? uAcnt += 1;
@@ -22088,25 +21849,25 @@ local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h
                         // gmem[Un+cbPadUnitIdt] = pid; // keep associated PAD
                         // Show also other units
                         (ty === uMainMixer) ? (
-                            padUlabs[pid] = "Mixer"; padUclrs[pid] = U3;
+                            padUlabs[pid] = "Mixer"; padUclrs[pid] = Col_U3;
                         ) :
                         (ty === uMIDI_In) ? (
-                            padUlabs[pid] = "MIDI In"; padUclrs[pid] = U7;
+                            padUlabs[pid] = "MIDI In"; padUclrs[pid] = Col_U7;
                         ) :
                         (ty === uMIDI_Out) ? (
-                            padUlabs[pid] = "MIDI Out"; padUclrs[pid] = U7;
+                            padUlabs[pid] = "MIDI Out"; padUclrs[pid] = Col_U7;
                         ) :
                         (ty === uDetector) ? (
-                            padUlabs[pid] = "Sm. Detect."; padUclrs[pid] = U4;
+                            padUlabs[pid] = "Sm. Detect."; padUclrs[pid] = Col_U4;
                         ) :
                         (ty === uCalibrator) ? (
-                            padUlabs[pid] = "Callibr."; padUclrs[pid] = U5;
+                            padUlabs[pid] = "Callibr."; padUclrs[pid] = Col_U5;
                         ) :
                         (ty === uTracer) ? (
-                            padUlabs[pid] = "M. Tracer"; padUclrs[pid] = U6;
+                            padUlabs[pid] = "M. Tracer"; padUclrs[pid] = Col_U6;
                         ) :
                         (ty === uSoundGen) ? (
-                            padUlabs[pid] = "Generator"; padUclrs[pid] = U7;
+                            padUlabs[pid] = "Generator"; padUclrs[pid] = Col_U7;
                         ) :
                         (ty === uAPCmini_In) ? (
                             padUlabs[pid] = "APCmini In"; padUclrs[pid] = Color_Amethyst;
@@ -22123,7 +21884,7 @@ local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h
                         (ty != 0) ? (
                             sprintf(#str, "Ty: %i", ty);
                             padUlabs[pid] = #str;
-                            padUclrs[pid] = U8;
+                            padUclrs[pid] = Col_U8;
                         );
                         pid += 1;
                     );
@@ -22390,7 +22151,7 @@ local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h
                                     lmode = ! lmode ; // toggle player # / track #
                                 ) :
                                 (xx === sunShClUn) ? (
-                                    lqmode = ! qmode ; // toggle show clip # track #
+                                    qmode = ! qmode ; // toggle show clip # track #
                                 ) :
                                 (xx === sunAllLck) ? (
                                     SchedAddTask(5, 11|ActFlg1, -1, -1, 0, 0, 0); // Lock all
@@ -22507,12 +22268,6 @@ local(str, str2, zz, zzch, zzent, zzmcl, zzmi, zzmmd, nhp, pcf, pcfsiz, ig, ih, 
                     ui_color(Col_Frame);
                     ui_border(); // draws in purple
                 ui_pop();
-                dpi ? (
-                    sprintf(#s, "Keeping %d #D_HPConfigs %s", efs, #efs);
-                    mSL_log(SysLogBox, #s);
-                    strcpy(#D_HPConfigs, #efs); // keep name
-                    doneDroppedFile();
-                );
             );
             control_group(blockDispNames[blockDispInverts[blockHPConfig]]);
             ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
@@ -22526,7 +22281,7 @@ local(str, str2, zz, zzch, zzent, zzmcl, zzmi, zzmmd, nhp, pcf, pcfsiz, ig, ih, 
                 cn = padHPVals[0];
                 ((cn > 0) && (cn < HPPSize)) ? (
                     cp = HPPTab[cn]; // pointer in HPATab
-                    ((cp > HPATab) && (cp < HPPTab + HPASize)) ? (
+                    ((cp > HPATab) && (cp < HPATab + HPASize)) ? (
                         (Hty = (cp[-1] < 0)) ? (
                             padHPColrs[0] = Color_Medium_Spring_Green; // Color_Blaze_Orange;
                         ) : (
@@ -22543,22 +22298,7 @@ local(str, str2, zz, zzch, zzent, zzmcl, zzmi, zzmmd, nhp, pcf, pcfsiz, ig, ih, 
                     padHPColrs[HPpVer] = padHPColrs[HPpMsg] = Col_InfoC;
                     sprintf(str, "%d ➤ %d", HPInstCnt, HPCntDef);
                     sprintf(str2, "v-%d.%d.%d", 0|(HPConfigVersion/10000), (HPConfigVersion/100)%100, HPConfigVersion%100);
-                    (jmc & cmdCap) ? (
-                        padHPLabs[HPpRld] = "Remove";
-                        padHPColrs[HPpRld] = Color_Std_Orange;
-                    ) :
-                    (jmc & altCap) ? (
-                        padHPLabs[HPpRld] = "Reset";
-                        padHPColrs[HPpRld] = Color_Goldenrod;
-                    ) : (
-                        (strlen(#D_HPConfigs) === 0) ? (
-                            padHPLabs[HPpRld] = "Undefined";
-                            padHPColrs[HPpRld] = Color_Dark_Gray;
-                        ) : (
-                            padHPLabs[HPpRld] = "Reload";
-                            padHPColrs[HPpRld] = Col_InfoC;
-                        );
-                    );
+                    padHPLabs[HPpRld] = ""; padHPColrs[HPpRld] = Col_Inactive; // (no reload : a single initialisation file, see Settings)
                 );
                 padHPLabs[HPpMsg] = str;
                 padHPLabs[HPpVer] = str2;
@@ -22580,23 +22320,6 @@ local(str, str2, zz, zzch, zzent, zzmcl, zzmi, zzmmd, nhp, pcf, pcfsiz, ig, ih, 
                     (zz & ui_jpad_ev_rmc) ? (  // right mouse clic
                         (zzmcl === 0) ? (
                             padHPVals[0] = updHPSel( - buildKey(1, zzmmd), padHPVals[0]);
-                        ) :
-                        (zzmcl === 7) ? (
-                            (jmc & cmdCap) ? (
-                                // remove file
-                                strcpy(#D_HPConfigs, "");
-                            ) :
-                            (jmc & altCap) ? (
-                                // reset file to std name
-                                strcpy(#D_HPConfigs, #Def_HPConfigs);
-                            ) : (
-                                // choose a new file
-                                xx = control_jmenu(menu_Config);
-                                (xx != 0) ? (
-                                    strcpy(#D_HPConfigs, configs_tab[xx-1]); // keep name
-                                    FlagsTbVals[Flgs_ConfLd] |= flag_ld_HPC; // confirm we want to reload the file
-                                );
-                            );
                         );
                     );
 
@@ -22608,20 +22331,7 @@ local(str, str2, zz, zzch, zzent, zzmcl, zzmi, zzmmd, nhp, pcf, pcfsiz, ig, ih, 
                             swtHPDispMode();
                         ) :
                         // Reload clicked ?
-                        (zzmcl === 7) ? (
-                            (jmc & cmdCap) ? (
-                                // remove file
-                                strcpy(#D_HPConfigs, "");
-                            ) :
-                            (jmc & altCap) ? (
-                                // reset file to std file
-                                strcpy(#D_HPConfigs, #Def_HPConfigs);
-                            ) : (
-                                (zzmmd & 8) ? (
-                                    FlagsTbVals[Flgs_ConfLd] &= 0xFFFFFF ~ flag_ld_HPC;
-                                ); // reset read flag
-                                flagHPCRload = 1; // reload HP Conf ASAP
-                            );
+                        (zzmcl === 7) ? (0; // (no reload : a single initialisation file, see Settings)
                         );
                     );
                 );
@@ -22641,7 +22351,7 @@ local(str, str2, zz, zzch, zzent, zzmcl, zzmi, zzmmd, nhp, pcf, pcfsiz, ig, ih, 
                             padHPSColrs[ig] = Col_Inactive;
                             ig +=1;
                         );
-                        ig = 1; ih = 0; loop(pcfsiz,
+                        ig = 1; ih = 0; loop(min(pcfsiz, padHPSSiz), // (the pad has padHPSSiz cells)
                             nhp = pcf[ig];
                             padHPSCells[ih] = 0;
                             padHPSColrs[ih] = Hty ? Col_HPSel :
@@ -22710,8 +22420,9 @@ local(str, str2, zz, zzch, zzent, zzmcl, zzmi, zzmmd, nhp, pcf, pcfsiz, ig, ih, 
 
 //====== SPACE MODES ======
 
-function showSpacesCurr(ent, h2) local(k, TT, w, r)
+function showSpacesCurr(ent, h2) local(k, TT, w, r, slr)
 (
+    slr = split_leftratio;
     ui_split_top(h2);  // Second block, 2 lines
         ui_pad(0,ui_jd_padTBox1,2,ui_jd_padTBox1);
         TT = SMTab + SMEsize * (0|max(0, min(SMEcnt-1, ent)));
@@ -22755,12 +22466,13 @@ function showSpacesCurr(ent, h2) local(k, TT, w, r)
             ui_pop();
         );
     ui_pop();
+    split_leftratio = slr; // (restore the label ratio)
 );
 
 
 function
 show_Space_Modes()
-local(str, str2, key, val, xx, zz, cc, cq, cx, zzch, zzent, zzmcl, zzmi, jmc, TT, h1, h2, uix_jneed, uix_jmini)
+local(str, str2, key, val, xx, zz, cc, cq, cx, zzch, zzent, zzmcl, zzmmd, zzmi, jmc, TT, h1, h2, uix_jneed, uix_jmini)
 (
     // Height of the inner graphics items
     h1 = uix_jpadHeight(1); // first block height
@@ -22782,12 +22494,6 @@ local(str, str2, key, val, xx, zz, cc, cq, cx, zzch, zzent, zzmcl, zzmi, jmc, TT
                     ui_color(Col_Frame);
                     ui_border(); // draws in purple
                 ui_pop();
-                dpi ? (
-                    sprintf(#s, "Keeping %d #D_SpaceModes %s", efs, #efs);
-                    mSL_log(SysLogBox, #s);
-                    strcpy(#D_SpaceModes, #efs); // keep name
-                    doneDroppedFile();
-                );
             );
             control_group(blockDispNames[blockDispInverts[blockSpaceModes]]);
             ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
@@ -22805,22 +22511,7 @@ local(str, str2, key, val, xx, zz, cc, cq, cx, zzch, zzent, zzmcl, zzmi, jmc, TT
                     padSMColrs[SMpVer] = padSMColrs[SMpMsg] = padSMColrs[SMpRld] = Col_InfoC;
                     sprintf(str, "%d/%d", SMDEcnt, SMEcnt);
                     sprintf(str2, "v-%d.%d.%d", 0|(SpaceModesVersion/10000), (SpaceModesVersion/100)%100, SpaceModesVersion%100);
-                    (jmc & cmdCap) ? (
-                        padSMLabs[SMpRld] = "Remove";
-                        padSMColrs[SMpRld] = Color_Std_Orange;
-                    ) :
-                    (jmc & altCap) ? (
-                        padSMLabs[SMpRld] = "Reset";
-                        padSMColrs[SMpRld] = Color_Goldenrod;
-                    ) : (
-                        (strlen(#D_SpaceModes) === 0) ? (
-                            padSMLabs[SMpRld] = "Undefined";
-                            padSMColrs[SMpRld] = Color_Dark_Gray;
-                        ) : (
-                            padSMLabs[SMpRld] = "Reload";
-                            padSMColrs[SMpRld] = Col_InfoC;
-                        );
-                    );
+                    padSMLabs[SMpRld] = ""; padSMColrs[SMpRld] = Col_Inactive; // (no reload : a single initialisation file, see Settings)
                 );
                 padSMLabs[SMpMsg] = str;
                 padSMLabs[SMpVer] = str2;
@@ -22834,7 +22525,7 @@ local(str, str2, key, val, xx, zz, cc, cq, cx, zzch, zzent, zzmcl, zzmi, jmc, TT
                     zzch = padSModes[ui_jpad_lkey];
                     zzent = padSModes[ui_jpad_entkey]-1;
                     zzmcl = padSModes[ui_jpad_last]-1;
-                    zzmmd = padPModes[ui_jpad_lmods];
+                    zzmmd = padSModes[ui_jpad_lmods];
 
                     //        str3 = #;
                     //        sprintf(str3, "%x/%x/%x", zz, zzmmd, zzmcl); mSL_log(SysLogBox, str3);
@@ -22855,23 +22546,6 @@ local(str, str2, key, val, xx, zz, cc, cq, cx, zzch, zzent, zzmcl, zzmi, jmc, TT
                             // 32 is 'ctrl' key, 8 is 'shift' key
                             padSMVals[0] = updSpMdNumber(padSMVals[0], - key);
                         );
-                        (zzmcl === 7) ? (
-                            (jmc & cmdCap) ? (
-                                // remove file
-                                strcpy(#D_SpaceModes, "");
-                            ) :
-                            (jmc & altCap) ? (
-                                // reset file to std file
-                                strcpy(#D_SpaceModes, #Def_SpaceModes);
-                            ) : (
-                                // choose a new file
-                                xx = control_jmenu(menu_Config);
-                                (xx != 0) ? (
-                                    strcpy(#D_SpaceModes, configs_tab[xx-1]); // keep name
-                                    FlagsTbVals[Flgs_ConfLd] |= flag_ld_SpMd; // confirm we want to reload the file
-                                );
-                            );
-                        );
                     );
 
                     (zz & ui_jpad_ev_lmc) ? (  // left mouse clic
@@ -22885,20 +22559,7 @@ local(str, str2, key, val, xx, zz, cc, cq, cx, zzch, zzent, zzmcl, zzmi, jmc, TT
                             padSMVals[0] = updSpMdNumber(padSMVals[0], - key);
                         ) :
                         // Reload clicked ?
-                        (zzmcl === 7) ? (
-                            (jmc & cmdCap) ? (
-                                // remove file
-                                strcpy(#D_SpaceModes, "");
-                            ) :
-                            (jmc & altCap) ? (
-                                // reset file to std file
-                                strcpy(#D_SpaceModes, #Def_SpaceModes);
-                            ) : (
-                                (zzmmd & 8) ? (
-                                    FlagsTbVals[Flgs_ConfLd] &= 0xFFFFFF ~ flag_ld_SpMd;
-                                ); // reset read flag
-                                flagSPRload = 1; // reload spacemodes ASAP
-                            );
+                        (zzmcl === 7) ? (0; // (no reload : a single initialisation file, see Settings)
                         );
                     );
                 );
@@ -22947,7 +22608,7 @@ function doBanksInteract(inKey)
 function
 show_Banks_Definitions()
 local(str, str2, zz, key, val, xx, zz, zzch, zzent, zzmcl, zzmmd, ce, cc, cq, cl, ch, jmc,
- pmN, smN, h1, h2, h3, uix_jneed, uix_jmini, zzmi)
+ pmN, smN, h1, h2, h3, uix_jneed, uix_jmini, zzmi, ps)
 (
     h1 = uix_jpadHeight(2); // First block, a 2 line Pad
     h2 = uix_jBoxHeight(9) + 2; // play mode block height
@@ -22967,12 +22628,6 @@ local(str, str2, zz, key, val, xx, zz, zzch, zzent, zzmcl, zzmmd, ce, cc, cq, cl
                     ui_color(Col_Frame);
                     ui_border(); // draws in purple
                 ui_pop();
-                dpi ? (
-                    sprintf(#s, "Keeping %d #D_BanksDefs %s", efs, #efs);
-                    mSL_log(SysLogBox, #s);
-                    strcpy(#D_BanksDefs, #efs); // keep name
-                    doneDroppedFile();
-                );
             );
             control_group(blockDispNames[blockDispInverts[blockBanksDef]]);
             ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
@@ -22995,26 +22650,7 @@ local(str, str2, zz, key, val, xx, zz, zzch, zzent, zzmcl, zzmmd, ce, cc, cq, cl
                     sprintf(str, "%d/%d", BKDEcnt, BKEcnt);
                     sprintf(str2, "v-%d.%d.%d", 0|(BanksDefsVersion/10000), (BanksDefsVersion/100)%100, BanksDefsVersion%100);
 
-                    ((jmc & 0x30) === 0x20) ? (
-                        padBKLabs[BKpRld] = "Remove";
-                        padBKColrs[BKpRld] = Color_Std_Orange;
-                    ) :
-                    ((jmc & 0x30) === 0x30) ? (
-                        padBKLabs[BKpRld] = "Clear";
-                        padBKColrs[BKpRld] = Color_Std_Orange;
-                    ) :
-                    ((jmc & 0x30) === 0x10) ? (
-                        padBKLabs[BKpRld] = "Reset";
-                        padBKColrs[BKpRld] = Color_Goldenrod;
-                    ) : (
-                        (strlen(#D_BanksDefs) === 0) ? (
-                            padBKLabs[BKpRld] = "Undefined";
-                            padBKColrs[BKpRld] = Color_Dark_Gray;
-                        ) : (
-                            padBKLabs[BKpRld] = "Reload";
-                            padBKColrs[BKpRld] = Col_InfoC;
-                        );
-                    );
+                    padBKLabs[BKpRld] = ""; padBKColrs[BKpRld] = Col_Inactive; // (no reload : a single initialisation file, see Settings)
                 );
                 padBKLabs[BKpMsg] = str;
                 padBKLabs[BKpVer] = str2;
@@ -23057,7 +22693,7 @@ local(str, str2, zz, key, val, xx, zz, zzch, zzent, zzmcl, zzmmd, ce, cc, cq, cl
                         padBKLabs[9] = #strZ9;
                         //
                         // Count existing clips in the range
-                        cc=0; loop (ch-cl+1,
+                        cc=0; loop (min(ch, clTSize-1)-cl+1,
                             (gmem[clClInfos+cl] != 0) ? cc += 1;
                             cl += 1;
                         );
@@ -23065,9 +22701,13 @@ local(str, str2, zz, key, val, xx, zz, zzch, zzent, zzmcl, zzmmd, ce, cc, cq, cl
                         padBKColrs[8] = padBKColrs[9] = Color_Peach_Yellow;
                         sprintf(#strZ8, "Cl. Set: %d", ch);
                         padBKLabs[8] = #strZ8;
-                        ps = ClSetPtr[ch];
-                        cc = ps[ClSet_cnt];
-                        sprintf(#strZ9, "Set.Type: %03X", ps[ClSet_Algo]);
+                        ((ch >= 0) && (ch < ClSetPSize) && ((ps = ClSetPtr[ch]) != 0)) ? (
+                            cc = ps[ClSet_cnt];
+                            sprintf(#strZ9, "Set.Type: %03X", ps[ClSet_Algo]);
+                        ) : (
+                            cc = 0; // (undefined clips set)
+                            #strZ9 = "Set.Type: ?";
+                        );
                         padBKLabs[9] = #strZ9;
                     );
                     // Show clip count
@@ -23136,23 +22776,6 @@ local(str, str2, zz, key, val, xx, zz, zzch, zzent, zzmcl, zzmmd, ce, cc, cq, cl
                                 );
                             doBanksInteract(- key);
                         );
-                        (zzmcl === 7) ? (
-                            (jmc & cmdCap) ? (
-                                // remove file
-                                strcpy(#D_BanksDefs, "");
-                            ) :
-                            (jmc & altCap) ? (
-                                // reset file to std file
-                                strcpy(#D_BanksDefs, #Def_BanksDefs);
-                            ) : (
-                                // choose a new file
-                                xx = control_jmenu(menu_Config);
-                                (xx != 0) ? (
-                                    strcpy(#D_BanksDefs, configs_tab[xx-1]); // keep name
-                                    FlagsTbVals[Flgs_ConfLd] |= flag_ld_Bnks; // confirm we want to reload the file
-                                );
-                            );
-                        );
                     );
 
 
@@ -23166,32 +22789,14 @@ local(str, str2, zz, key, val, xx, zz, zzch, zzent, zzmcl, zzmmd, ce, cc, cq, cl
                                 );
                             doBanksInteract(- key);
                         ) :
-                        (zzmcl === 10) ? (
+                        ((zzmcl === 10) && (pmN >= 0)) ? (
                             padPMVals[0] = pmN;
                         ) :
-                        (zzmcl === 11) ? (
+                        ((zzmcl === 11) && (smN >= 0)) ? (
                             padSMVals[0] = smN;
                         ) :
                         // Reload clicked ?
-                        (zzmcl === 7) ? (
-                            ((jmc & 0x30) === 0x20) ? (
-                                // remove file
-                                strcpy(#D_BanksDefs, "");
-                            ) :
-                            ((jmc & 0x30) === 0x30) ? (
-                                // clear bank
-                                defBankInit();
-                            ) :
-                            ((jmc & 0x30) === 0x10) ? (
-                                // reset file to std file
-                                strcpy(#D_BanksDefs, #Def_BanksDefs);
-                            ) : (
-                                (zzmmd & 8) ? (
-                                    FlagsTbVals[Flgs_ConfLd] &= 0xFFFFFF ~ flag_ld_Bnks;
-                                ); // reset read flag
-                                flagBKRload = 1; // reload banks Conf ASAP
-                                0 ? mSL_log(SysLogBox, "Set flagBKRload in show_Banks_Definitions()");
-                            )
+                        (zzmcl === 7) ? (0; // (no reload : a single initialisation file, see Settings)
                         );
                     );
 
@@ -23255,11 +22860,12 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
             ui_split_top(h1);
                 //ui_pad(0,1,0,0);
 
-                (dpi && zzmi && ui_dropped_in()) ? (
+                (dpi && ui_dropped_in()) ? (
+                    // the first dropped file becomes the initialisation file (the "Profile")
                     sprintf(#s, "Keeping %d #D_GM_mSL_ini %s", efs, #efs);
                     mSL_log(SysLogBox, #s);
                     strcpy(#D_GM_mSL_ini, #efs); // keep name
-                    doneDroppedFile();
+                    doneDroppedMsl();
                 );
 
                 mSL_setStrArray(padSettingsLabs, padSettingsSiz);
@@ -23360,33 +22966,17 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
                     (zz & ui_jpad_ev_lmc) ? (  // left mouse clic
                         (zzmcl === 0) ? (
                             (jmc & cmdCap) ? (
-                                // Reset all files
+                                // Reset the initialisation file (the "Profile") to its standard name
                                 #D_GM_mSL_ini  = #Def_GM_mSL_ini;
-                                #D_BanksDefs = #Def_BanksDefs;
-                                #D_HPConfigs = #Def_HPConfigs;
-                                #D_SpaceModes = #Def_SpaceModes;
-                                #D_PlayModes = #Def_PlayModes;
-                                #D_ClipsModifiers = #Def_ClipsModifiers;
-                                #D_ClipSetConf = #Def_ClipSetConf;
-                                #D_InSens_Name = #Def_InSens_Name;
-                                FlagsTbVals[Flgs_ConfLd] |= flag_ld_PlMd | flag_ld_SpMd | flag_ld_Bnks | flag_ld_HPC
-                                        | flag_ld_Clips | flag_ld_ClSets | flag_ld_Sensrs | flag_chk_clips | flag_ld_Profile;
+                                FlagsTbVals[Flgs_ConfLd] |= flag_chk_clips | flag_ld_Profile;
                                 0 ? (
                                     sprintf(#gfxu, "::reset: %04x %04x", FlagsTbVals[Flgs_ConfLd] , FlagsTbVals[Flgs_TblUpd]);
                                     mSL_log(SysLogBox, #gfxu);
                                 );
                             ) : (
-                                // Reload all files
-                                flagHPCRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_HPC;
-                                flagPMRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_PlMd;
-                                flagSPRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_SpMd;
-                                flagBKRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_Bnks;
-                                0 ? mSL_log(SysLogBox, "Set flagBKRload in show_Scripts()");
-                                flagClVRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_Clips;
-                                flagClSetload = FlagsTbVals[Flgs_TblUpd] & flag_ld_ClSets;
-                                flagSnsrRload = FlagsTbVals[Flgs_TblUpd] & flag_ld_Sensrs;
+                                // Run again the initialisation file (all tables reset first), then check the clips
                                 flagClipsCheck = FlagsTbVals[Flgs_TblUpd] & flag_chk_clips;
-                                flagGM_mSL_ini = FlagsTbVals[Flgs_TblUpd] & flag_ld_Profile;
+                                flagGM_mSL_ini = 1;
                                 // Recheck all clips
                                 ig = 0;
                                 loop(clDataSize5,
@@ -23440,7 +23030,7 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
                     );
 
                     (zz & ui_jpad_ev_rmc) ? (  // right mouse clic
-                        ((zzmcl === 1) || (zzmcl === 3)) ? (
+                        (zzmcl === 1) ? (
                             xx = control_jmenu(menu_Scripts);
                             (xx != 0) ? (
                                 ifg = scripts_tab[xx-1];
@@ -23587,7 +23177,7 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
                     mSL_log(SysLogBox, #s);
                     doneDroppedFile();
                 );
-                (dpi && zzmi && ui_dropped_in()) ? (
+                (dpi && ui_dropped_in()) ? (
                     // locate mouse in pad.
                     nli = padSScriptsp[ui_jpad_nli]; nco = padSScriptsp[ui_jpad_nco];
                     lx = 0 | (nli * (dropped_y - ui_top_retina()) / (ui_bottom_retina() - ui_top_retina()));
@@ -23601,7 +23191,7 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
                         sprintf(#s, "** Dropped in files settings ** %d %d %d %d %d -> %d [%s]", nli, nco, lx, cx, nc, updScriptfiles, #efs);
                         mSL_log(SysLogBox, #s);
                     );
-                    doneDroppedFile();
+                    doneDroppedMsl();
                 );
 
                 zz = control_jpad(padSScriptsp);
@@ -23633,7 +23223,10 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
                                     strcat(#sname, #ws);
                                     sprintf(#s, "Script full name: %s", #sname); mSL_log(SysLogBox, #s);
                                 );
-                                doMslCompile(#sname);
+                                // (doMslCompile keeps the pointer : a copy in the ring of names, #sname is reused)
+                                strcpy(dropCmpNames[dropCmpPt], #sname);
+                                doMslCompile(dropCmpNames[dropCmpPt]);
+                                dropCmpPt = (dropCmpPt + 1) % dropCmpSiz;
                             );
                         );
                     );
@@ -23663,7 +23256,8 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
 
 function show_PlayLog()
 local (h1, h2, h3, h3min, uix_jneed, uix_jmini, da, dl, elc, flPl, ig, ij, is, it, jmc, pq, xx, r, td, u,
-    k, kit, val, inc, ivs, nv, alt, zz, zzch, zzent, zzmcl, zzmmd, zzmi, axion, xstoppl, alt1, alt2, y3)
+    k, kit, val, inc, ivs, nv, alt, zz, zzch, zzent, zzmcl, zzmmd, zzmi, axion, xstoppl, alt1, alt2, y3,
+    s, v, f, zzmx, ty, ix, i, ent, value, yy, y1, y2, xpos)
 (
     h1 = uix_jpadHeight(1); // height
     h2 = ui_jd_slidh * 2 + 4;
@@ -23838,7 +23432,7 @@ local (h1, h2, h3, h3min, uix_jneed, uix_jmini, da, dl, elc, flPl, ig, ij, is, i
                             ui_menu_tick(menu_plrepl, jmenu_item2res(menu_plrepl, plgReplAStop), playAutoStop);
                             ui_menu_tick(menu_plrepl, jmenu_item2res(menu_plrepl, plgReplLPause), playAndStop);
                             ui_menu_tick(menu_plrepl, jmenu_item2res(menu_plrepl, plgReplPLock), playAndLock);
-                            ui_menu_tick(menu_plrepl, jmenu_item2res(menu_plrepl, plgReplUnPLock), playAndUnLock);
+                            ui_menu_tick(menu_plrepl, jmenu_item2res(menu_plrepl, plgReplPUnLock), playAndUnLock);
                             ui_menu_tick(menu_plrepl, jmenu_item2res(menu_plrepl, plgReplMute), (1 - replayUnMute));
                             ui_menu_tick(menu_plrepl, jmenu_item2res(menu_plrepl, plgReplMIRC), recOptMarkReplay);
                             ui_menu_tick(menu_plrepl, jmenu_item2res(menu_plrepl, plgReplStep), playModeStep);
@@ -24053,7 +23647,6 @@ local (h1, h2, h3, h3min, uix_jneed, uix_jmini, da, dl, elc, flPl, ig, ij, is, i
                             padPlayStoreMod = zzent;
                             padPlayStoreMDate = pTBlockStart + 16; //
                             value = da[lppEDate];
-                            da[lppEFlgs] = (da[lppEFlgs] & 0x7FFFFFF0); // reset "mark date"
 
                             inc = 0;
                             GM_key_take('left') ? (
@@ -24128,7 +23721,10 @@ local (h1, h2, h3, h3min, uix_jneed, uix_jmini, da, dl, elc, flPl, ig, ij, is, i
                             (
                                 0; // not a key of the module : left to the next levels
                             );
-                            da[lppEDate] = max(0, min(value+inc, playTimeMax));
+                            ((inc != 0) || (value != da[lppEDate])) ? (
+                                da[lppEFlgs] = (da[lppEFlgs] & 0x7FFFFFF0); // reset "mark date" (the date changes)
+                                da[lppEDate] = max(0, min(value+inc, playTimeMax));
+                            );
                         ) : (
                             GM_key_take('v') ? (
                                 // paste ?
@@ -24350,7 +23946,7 @@ local (h1, h2, h3, h3min, uix_jneed, uix_jmini, da, dl, elc, flPl, ig, ij, is, i
                                     (kit === psmLOPst) ? (
                                         // paste ?
                                         (playMarkCopy > 0) ? (
-                                            (playMarkDelete > 0) ? (
+                                            ((playMarkDelete > 0) && (playMarkDelete != playMarkCopy)) ? ( // (not the block to copy)
                                                 freeLstBlock(playMarkDelete);
                                             );
                                             playMarkDelete = clTabE[zzmcl];
@@ -24439,7 +24035,7 @@ local (h1, h2, h3, h3min, uix_jneed, uix_jmini, da, dl, elc, flPl, ig, ij, is, i
                                     ) :
                                     (kit === psmEdit23) ? (
                                         ivs = 1800;
-                                    ) :
+                                    ) : (0);
                                     (alt1 >= 0) ? lppLoop1 = alt1;
                                     (alt2 >= 0) ? lppLoop2 = alt2;
                                     (inc != 0) ? (
@@ -24463,7 +24059,7 @@ local (h1, h2, h3, h3min, uix_jneed, uix_jmini, da, dl, elc, flPl, ig, ij, is, i
                                         ((ty > 1) && (ty <= 8)) ? (
                                             SchedAddTask(13, da, 1, gfxStartTime, 0, 0, zzmcl); // 1 is for "init"
                                         );
-                                        is += padPlayStoreNL;
+                                        is += padPlayStoreNC; // (next line)
                                         da = (is < clESize) ? clTabE[is] : 0;
                                     );
                                     (xpos > 0) ? (replayEntry = 0; pPlayTimeCurrent = markerDate(xpos); setPModePlay(););
@@ -24576,7 +24172,7 @@ local (h1, h2, h3, h3min, uix_jneed, uix_jmini, da, dl, elc, flPl, ig, ij, is, i
                             axion = zzch - '0' + 1; // 1 to 10
                         ) :
                         GM_key_take('left') ? (
-                            inc = (jmc === 0x00) ? -1 : (jmc === 0x04) ? -0.1 : (jmc === 0x10) ? -0.01 : (jmc === 0x14) ? -0.001 : -1 ;
+                            inc = (jmc === 0x00) ? -1 : (jmc === 0x04) ? -0.1 : (jmc === 0x10) ? -0.01 : (jmc === 0x14) ? -0.001 : 0;
                         ) :
                         GM_key_take('rght') ? (
                             inc = (jmc === 0x00) ? 1 : (jmc === 0x04) ? 0.1 : (jmc === 0x10) ? 0.01 : (jmc === 0x14) ? 0.001 : 0;
@@ -24623,7 +24219,7 @@ local (h1, h2, h3, h3min, uix_jneed, uix_jmini, da, dl, elc, flPl, ig, ij, is, i
                                 ((ty > 1) && (ty <= 8)) ? (
                                     SchedAddTask(13, da, 1, gfxStartTime, 0, 0, zzmcl); // 1 is for "init"
                                 );
-                                is += padPlayStoreNL;
+                                is += padPlayStoreNC; // (next line)
                                 da = (is < clESize) ? clTabE[is] : 0;
                             );
                             (xpos > 0) ? (replayEntry = 0; pPlayTimeCurrent = markerDate(xpos); setPModePlay(););
@@ -24729,16 +24325,17 @@ function dyn_set_par(pad, pn, val)
 function dyn_copy_set(dst, src)
 local (ig, ip)
 (
-    (currCpMode === 0) ? (
-        ig = 0;
-    ) : (
-        ig = 3;
-    ) ;
+    // the parameters associated to the flags bits (0 in paramDynNums : no parameter)
     ig = 0; while(ig < paramDynSiz) (
-        ip = paramDynNums[ig];
-        dyn_set_par(dst, ip, dyn_get_par(src, ip));
+        ((ip = paramDynNums[ig]) > 0) ? dyn_set_par(dst, ip, dyn_get_par(src, ip));
         ig += 1;
     );
+    (currCpMode === 0) ? (
+        // "Copy All" : also the type and the flags
+        dyn_set_par(dst, p_Dyn_Type, dyn_get_par(src, p_Dyn_Type));
+        dyn_set_par(dst, p_Dyn_Flgs1, dyn_get_par(src, p_Dyn_Flgs1));
+        dyn_set_par(dst, p_Dyn_Flgs2, dyn_get_par(src, p_Dyn_Flgs2));
+    ) :
     (currCpMode === 2) ? (
         dyn_set_par(dst, p_Dyn_Type, dyn_get_par(src, p_Dyn_Type));
         dyn_set_par(dst, p_Dyn_Flgs1, (dyn_get_par(src, p_Dyn_Flgs1) & dyn_And_Mask) | dyn_Or_Mask);
@@ -24750,7 +24347,7 @@ local (ig, ip)
 //====== Dynamic Parameters
 function
 show_Dyn_pars()
-local(h1, h2, h3, h4, h5, uix_jmini, uix_jneed, zzmi, zzch, zzmcl, zzmmd, zzent, pa, paty, jmc, ig,
+local(k, h1, h2, h3, h4, h5, uix_jmini, uix_jneed, zzmi, zzch, zzmcl, zzmmd, zzent, pa, paty, jmc, ig,
     ih, p, v, x, y, ik, psrc, f1, f2, flgm, chz, Col3, Col4, shcell, ColX)
 (
     h1 = uix_jpadHeight(padDynParNL); // height
@@ -24821,10 +24418,6 @@ local(h1, h2, h3, h4, h5, uix_jmini, uix_jneed, zzmi, zzch, zzmcl, zzmmd, zzent,
             ui_split_top(h1);
                 ui_pad(1,2,3,2);
                 mSL_setStrArray(padDynParLabs, padDynParSiz);
-                xtval = (ffshow == 1) ? ((ffmode === 0) ? f1 : ((f1 & dyn_And_Mask) | dyn_Or_Mask)) :
-                        (ffshow == 2) ? ((ffmode === 0) ? f2 : ((f2 & dyn_And_Mask) | dyn_Or_Mask)) :
-                        (ffshow == 3) ? dyn_And_Mask :
-                        (ffshow == 4) ? dyn_Or_Mask : 0;
                 ig = 0; loop(padDynParSiz,
                     padDynParColrs[ig] = Col_Inactive;
                     ig +=1;
@@ -24860,6 +24453,10 @@ local(h1, h2, h3, h4, h5, uix_jmini, uix_jneed, zzmi, zzch, zzmcl, zzmmd, zzent,
                 padDynParColrs[3] = Color_Dark_Orange;
 
                 f2 = dyn_get_par(currpad, p_Dyn_Flgs2);
+                xtval = (ffshow == 1) ? ((ffmode === 0) ? f1 : ((f1 & dyn_And_Mask) | dyn_Or_Mask)) :
+                        (ffshow == 2) ? ((ffmode === 0) ? f2 : ((f2 & dyn_And_Mask) | dyn_Or_Mask)) :
+                        (ffshow == 3) ? dyn_And_Mask :
+                        (ffshow == 4) ? dyn_Or_Mask : 0;
                 sprintf(padDynParLabs[4], "F2: %06X", f2);
                 padDynParColrs[4] = Color_Bright_Green ;
 
@@ -24922,9 +24519,6 @@ local(h1, h2, h3, h4, h5, uix_jmini, uix_jneed, zzmi, zzch, zzmcl, zzmmd, zzent,
                             ) :
                             GM_key_take('z') ? (
                                 currcell =  0;
-                            ) :
-                            GM_key_take('d') ? (
-                                currcell =  68;
                             ) :
                             GM_key_take('p') ? (
                                 currcell =  65;
@@ -25125,6 +24719,11 @@ local(h1, h2, h3, h4, h5, uix_jmini, uix_jneed, zzmi, zzch, zzmcl, zzmmd, zzent,
                         );
                     );
 
+                    ((zzmcl === 0) && (zz & (ui_jpad_ev_lmc | ui_jpad_ev_rmc))) ? (
+                        // the configuration number has changed (as with the keys)
+                        (currcell === 0) ? (currpad = 0) :
+                        ((currcell > 0) && (currcell < (padDynPrstSizT))) ? (currpad = arrDyns + (currcell - 1) * paramDynSiz);
+                    );
                     parSet(p_Interact, dyn_get_par(currpad, prn));
                 );
 
@@ -25609,7 +25208,7 @@ local (h1, h2, uix_jneed, uix_jmini, str, p, u, par_reduce, cty, col, ig, sic, t
                             sprintf(padLinksLabs[10], "n° %d", p);
                             padLinksLabs[11] = parGetPP(p, pp_Name) ;
                         ) :
-                        (ty = MIDI_LinkTY_SV) ? (
+                        (ty === MIDI_LinkTY_SV) ? (
                             col = Col_InfoC;
                             sprintf(padLinksLabs[10], "n° %d (%g)", p, Links_Par1[SysSourceUsed]);
                             padLinksLabs[11] = parGetPP(p, pp_Name) ;
@@ -26058,7 +25657,7 @@ local(h1, rc, str, zz, zzch, zzent, zzmcl, zzmi, zzmmd, rtc, part, select, u, u_
                     ) :
                     ((ty === padStDispErr) || (ty & padStFlErrbit)) ? (
                         // signal an error
-                        (u = padStErrors[ig]) ? (
+                        (u = padStErrors[kg]) ? ( // (indexed as the other arrays of the pad : kg = ig + padStOffset)
                             sprintf(padStLabs[ig], "Err. %d", u);
                             padStColrs[ig] = Col_Error;
                         ) : (
@@ -26113,7 +25712,7 @@ local(h1, rc, str, zz, zzch, zzent, zzmcl, zzmi, zzmmd, rtc, part, select, u, u_
                         ) :
                         (zzmmd & cmdCap) ? ( // ctrl-left-click
                             // reset err indication
-                            padStErrors[zzmcl] = 0;
+                            padStErrors[zzmcl + padStOffset] = 0;
                         ) :
                         (
                             (u & ui_jpad_ct_selec) ? (
@@ -26175,7 +25774,7 @@ local(h1, rc, str, zz, zzch, zzent, zzmcl, zzmi, zzmmd, rtc, part, select, u, u_
 
 function
 show_Play_Control()
-local (h1, pl, uix_jneed, zz, zzch, zzent, zzmcl, zx, zzmi, zzmmd, key, jmc, val, p, uix_jmini, mMod)
+local (h1, pl, uix_jneed, zz, zzch, zzent, zzmcl, zx, zzmi, zzmmd, key, jmc, val, p, uix_jmini, mMod, w, c, zzmc)
 (
     h1 = uix_jpadHeight(padcNl_PCtrl); // A 2 lines Pad
     uix_jneed = uix_jmini = h1+ui_jd_ctgr;
@@ -26341,9 +25940,11 @@ local (h1, pl, uix_jneed, zz, zzch, zzent, zzmcl, zx, zzmi, zzmmd, key, jmc, val
                                 p = padAcVals[7];
                                 GvPlaySM = padAcVals[7] = updSpMdNumber(p, zzch);
                                 mMod ? (GvPlayPartent[idx_Pa_SpM] = GvPlaySM;);
-                                sprintf(#u, "padAcVals[7]: ch:%d ent:%d [7]:%d => %d mc:%x mMod:%d",
+                                0 ? (
+                                    sprintf(#u, "padAcVals[7]: ch:%d ent:%d [7]:%d => %d mc:%x mMod:%d",
                                                           zzch,zzent,p,GvPlaySM,zzmc, mMod);
-                                mSL_log(SysLogBox, #u);
+                                    mSL_log(SysLogBox, #u);
+                                );
                             ) :
                             (zzent === 13) ? (
                                 // update the clip number entry
@@ -26391,7 +25992,7 @@ local (h1, pl, uix_jneed, zz, zzch, zzent, zzmcl, zx, zzmi, zzmmd, key, jmc, val
                         (zzmcl === 7) ? (
                             // update the space mode entry
                             key = buildKey(1, zzmmd);
-                            GvPlaySM = padAcVals[7] = updSpMdNumber(padAcVals[7], key);
+                            GvPlaySM = padAcVals[7] = updSpMdNumber(padAcVals[7], - key);
                             mMod ? (GvPlayPartent[idx_Pa_SpM] = GvPlaySM;);
                         ) :
                         (zzmcl === 8) ? (
@@ -26443,7 +26044,7 @@ local (h1, pl, uix_jneed, zz, zzch, zzent, zzmcl, zx, zzmi, zzmmd, key, jmc, val
                         ) :
                         (zzmcl === 7) ? (
                             // update the space mode entry
-                            GvPlaySM = padAcVals[7] = updSpMdNumber(padAcVals[7], key);
+                            GvPlaySM = padAcVals[7] = updSpMdNumber(padAcVals[7], - key);
                             mMod ? (GvPlayPartent[idx_Pa_SpM] = GvPlaySM;);
                         ) :
                         (zzmcl === 8) ? (
@@ -26489,7 +26090,7 @@ local (h1, pl, uix_jneed, zz, zzch, zzent, zzmcl, zx, zzmi, zzmmd, key, jmc, val
 
 
 function showCSlider(slb, num)
-local(xx, p, flgm)
+local(xx, p, flgm, k)
 (
     ui_hover() ? (
         xx = control_jmenu(menu_Param_mSL); // ubl
@@ -26693,7 +26294,8 @@ local (uix_jneed, uix_jmini, ig, zzmi)
 flagpr = 1;
 function
 show_UserModule(module)
-local(umid, chk, i, statn, recomp, modInst, modSrc, ucod, uent, err, ut, user_top, ul, user_left, user_width, uh, user_height, rptb, ptbl, prvstk, ptstk, anc, typanc, cbxrpt, cbxref, typtb, crptb, addb, rcnt, adds, reh, w3)
+local(umid, chk, i, statn, recomp, modInst, modSrc, ucod, uent, err, ut, user_top, ul, user_left, user_width, uh, user_height, rptb, ptbl, prvstk, ptstk, anc, typanc, cbxrpt, cbxref, typtb, crptb, addb, rcnt, adds, reh, w3,
+    thrd, state, stack, mode, h, txt, k, uw, w, ty, blk, cnt, wa, pnum, flgm, zzmi, h1, uix_jneed, uix_jmini)
 (
     // module is a module number
     // Lets check the existence of the object
@@ -27149,7 +26751,7 @@ local(umid, chk, i, statn, recomp, modInst, modSrc, ucod, uent, err, ut, user_to
 
 function
 genericItemsPos(bNumb)
-local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in)
+local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in, x, d, e)
 (
     blockMouseWasIn = 0;
     PanIdt = bNumb;
@@ -27245,9 +26847,10 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in)
                     wst = p[0]; k = blockDispIdts[kit]; // k is ok
 
                     (x = (str_getchar(wst, 1, 'cu') === '!')) ? (
-                        // We must add the new module at the end of the list
-                        i = 0; while (blockDesc[i] != 0) ( i+= 1;);
-                        blockDesc[i] = e = k; d = i;
+                        // We must add the new module at the end of the list (if the pane is not full :
+                        // blockDesc[dcbMax] stays 0, the end of the list)
+                        i = 0; while ((i < dcbMax) && (blockDesc[i] != 0)) ( i+= 1;);
+                        (i < dcbMax) ? (blockDesc[i] = e = k; d = i;);
                     ) : (
                         // the module was selected. We suppress it from the list
                         i = j = 0;
@@ -27539,7 +27142,7 @@ function genericLiveTab()
 
 function
 genericTabSet(tbNum)
-local (ww, t)
+local (ww, t, p)
 (
     do_GenericTabStart();
     //colMouseWasIn = -1;
@@ -27636,7 +27239,10 @@ local (k, m, kshrtct, sysEnt)
 (
     (!SysLinksActive && ((k = GM_key_peek()) != 0)) ? (
         m = GM_key_mods();
-        (k < 32) ? k += 64;
+        (k < 32) ? (
+            k += 64;
+            (m === 0) ? m |= 0x20; // (as when the shortcut is learned)
+        );
         kshrtct = (k * 256) + (m | 0x80); // codification of a key short cut
         ((sysEnt = getLinkEntry(kshrtct)) >= 0) ? (
             // Enter the action in the micro list
@@ -27748,7 +27354,7 @@ must_do_gfx() ? (
             sprintf(#gfxu, "Key '%c%c%c%c' (%d)", (zzzgx >> 24) & 0xff, (zzzgx >> 16) & 0xff, (zzzgx >> 8) & 0xff, zzzgx & 0xff, zzzmc);
         ) :
         (zzzgx > 0xffff) ? (
-            sprintf(#sgfxu, "Key '%c%c%c' (%d)", (zzzgx >> 16) & 0xff, (zzzgx >> 8) & 0xff, zzzgx & 0xff, zzzmc);
+            sprintf(#gfxu, "Key '%c%c%c' (%d)", (zzzgx >> 16) & 0xff, (zzzgx >> 8) & 0xff, zzzgx & 0xff, zzzmc);
         ) :
         (zzzgx > 0xff) ? (
             sprintf(#gfxu, "Key '%c%c' (%d)", (zzzgx >> 8) & 0xff, zzzgx & 0xff, zzzmc);
@@ -27761,10 +27367,10 @@ must_do_gfx() ? (
     //colMouseWasIn = -1;
 
     //SCREEN—TABS (Main, Studios, Lives)
-    tbFound = -1; ii = 0;
-    while ((tbFound < 0) && (ii < dcbTabsCount)) (
-        (currScreen === uix_jG_menuscr[ii]) ? tbFound = ii;
-        ii += 1;
+    tbFound = -1; tbIdx = 0; // (not "ii" : @block uses it, and runs concurrently)
+    while ((tbFound < 0) && (tbIdx < dcbTabsCount)) (
+        (currScreen === uix_jG_menuscr[tbIdx]) ? tbFound = tbIdx;
+        tbIdx += 1;
     );
     // with the token : the modules use the shared structures (tasks, threads, strings, blocks)
     mSL_tok_wait(2, 0.03);
@@ -27846,11 +27452,29 @@ must_do_gfx() ? (
 
 );
 
+// The dropped mSL files not used by a module : compiled and run (with the token ; otherwise at the next frame)
+(dpi && mSL_tok_take(2)) ? (
+    dmi = 0; loop(dropMslCnt,
+        strcpy(dropCmpNames[dropCmpPt], dropMslNames[dmi]);
+        doMslCompile(dropCmpNames[dropCmpPt]);
+        dropCmpPt = (dropCmpPt + 1) % dropCmpSiz;
+        dmi += 1;
+    );
+    doneDroppedMsl();
+    mSL_tok_give(2);
+);
+// The dropped sound files not used by the clips pad (dropped elsewhere, or module not shown) : ignored after one more frame
+(dpa && ((dpaAge += 1) >= 2)) ? (
+    mSL_log(SysLogBox, "*  Sound files dropped outside the clips pad : ignored");
+    doneDroppedFile();
+);
+
 GM_key_end(); // the key not used is dropped
 
 ui_end_do_gfx();
 
-(ClCheckAct && (tUnix > lastTgfx)) ? (
+// The check of the clips, with the token : checkClip uses #fname, as doPlayClip in @block (aliases)
+(ClCheckAct && (tUnix > lastTgfx) && mSL_tok_take(2)) ? (
     xCnt = min(40, xCnt += 5 * parV(p_FODlay));
     (ClCheckView) ? (
         while ((xCnt > 0) && (cBk4 <= clInBank)) (
@@ -27883,6 +27507,7 @@ ui_end_do_gfx();
     ) : (
         lastTgfx = tUnix + 60;
     );
+    mSL_tok_give(2);
 );
 
 string_cst_last = "very last string constant used";

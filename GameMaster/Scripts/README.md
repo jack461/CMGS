@@ -12,6 +12,16 @@ The scripts "Ex-NNNN.mSL" announce their expected output with lines such as
 
 (by default, the most recent "syslog-*.txt" of ~/Music/REAPER-Projects/*/).
 
+Numbering of the scripts:
+
+    Ex-0NNN   generic tests of the language : they must run correctly in every plugin
+    Ex-1NNN   functions or structures specific to Interstys
+    Ex-2NNN   specific to GamePlayer
+    Ex-3NNN   specific to Diffusion-3
+
+check_scripts.py takes the plugin from the name of the log ("syslog-Interstys-..."): it ignores the
+specific scripts of the other plugins, and reports one run in the wrong plugin as a failure.
+
 ## Keyboard keys table
 
     python3 -I keys_table.py [-raw] [-o output.md]

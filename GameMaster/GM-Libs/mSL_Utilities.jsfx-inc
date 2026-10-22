@@ -434,7 +434,7 @@ local (x)
 );
 
 //  The compacting algorithm
-function init_idents() local (mSL_W_CPrsV)
+function init_idents() local (idx, mSL_W_CPrsV)
 (
     mSL_W_sidt = 128;
     mSL_W_idt = make_array(mSL_W_sidt+2); // editing the identifier
@@ -531,7 +531,7 @@ local (p, q, lp, lq, k)
 
 // Extract in str a file name from a path in src
 function mSL_extractFile(str, src)
-local()
+local(l, p, i)
 (
     strcpy(str, src);
     l = strlen(src); p = 0;
@@ -647,7 +647,7 @@ local (hsize, hstep, h, nt, lp, ent, alt, cnt, res)
 // An identifier is coded as 8 (6 bits) chars in a number.
 // This is called only for identifiers longer than 8 chars
 function mSL_symbol2(str)
-local (lg, ch, pch, code, x, y, z, s, pa, del, p, cp, cg, alg, ik, jk, kk, cnt, fl16, fl17, rc, mf)
+local (lg, ch, pch, code, x, y, z, s, pa, del, p, cp, cg, alg, ik, jk, kk, cnt, fl16, fl17, rc, mf, krc)
 (
     #rez = ""; code = 0;
     ((lg = strlen(str)) > 0) ? (
@@ -1015,7 +1015,7 @@ local (lg, ch, pch, code, x, y, z, s)
 
 // Decode in a temporary result a codified identifier
 function mSL_id2Str(ident, strr)
-local(ip, A, B, c)
+local(ip, A, B, c, d)
 (
     A = 0 | (ident / 16777216) ; // 4 chars
     B = 0 | (ident - 16777216 * A) ; // 4 next chars
@@ -1331,19 +1331,19 @@ local (ty, s, l, ib, sz)
 
 // Inpload a string out of a block
 function mSL_str_implode(str, bl)
-local (ty, s, l, ib)
+local (ty, s, l, ib, ch)
 (
     ((bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min) && (ty <= mSL_MKey_max)
             && (s == bl[s]) && (bl[s+1] == (ty ~ mSL_CC_Chksum))) ? (
         // Create the empty string
         (str === 0) ? str = #local_mSL_str_implode;
         strcpy(str, "");
-        ib = 0;
+        ib = 0; l = s; // (l was never set : the string stayed empty)
         while (l > 0) (
             ch = bl[ib]; ib += 1; l -= 1;
             (ch > 0) ? str_setchar(str, -0.25, ch, 'cu') : l=0;
         );
-        src;
+        str; // (was "src", an unrelated global)
     ) : (
         0;
     );
@@ -1352,17 +1352,19 @@ local (ty, s, l, ib)
 function mSL_search_elt(bl, item, pos)
 local (ty, s, re, ib)
 (
-    res = -1;
+    // the result in "re" (local), returned (it was in the global "res", and not returned)
+    re = -1;
     pos = 0|max(0, pos);
     ((bl > 2) && ((s = bl[-1]) >= 0) && ((ty = bl[-2]) >= mSL_MKey_min) && (ty <= mSL_MKey_max)
             && (s === bl[s]) && (bl[s+1] === (ty ~ mSL_CC_Chksum))) ? (
         // search the entry equal to item, starting at pos.
         ib = pos;
-        while ((ib < s) && (res === -1)) (
-            (item == bl[ib]) ? res = ib;
+        while ((ib < s) && (re === -1)) (
+            (item == bl[ib]) ? re = ib;
             ib += 1;
         );
     );
+    re;
 );
 
 
@@ -1559,6 +1561,7 @@ local (sze, szt, rz, rp, ip)
 
 
 function mSL_fwdChain(targ, extt)
+local (sz)
 (
     sz = targ[-1];
     (sz >= 4) ? (

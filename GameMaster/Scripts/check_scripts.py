@@ -31,7 +31,15 @@ end, and make the check fail.
 FilePlayer writes "*  Compile: .../Ex-0001.mSL" instead of the "Using" line ; the GamePlayer
 writes both. Some plug-ins (ScriptMaster) write none of them : a script is then considered as
 run from the first log line which begins with its name (e.g. "Ex-0005."), and its output is
-the rest of the log.
+the rest of the log. A script which did not compile starts at its "ERR: NNNN can't compile" line.
+
+The first digit of the number of a script tells the plug-ins it runs in : Ex-0NNN (generic
+tests of the language) in all of them, Ex-1NNN in Interstys, Ex-2NNN in the GamePlayer, Ex-3NNN in
+Diffusion-3. When the plug-in is known from the name of the log, the specific scripts of the other
+plug-ins are ignored, and one run in this log is reported as a failure (not checked).
+
+A script run several times : its expected texts are checked in its last run, its expected errors are
+expected at each run.
 
 -a : also list the scripts with expectations which were not run in this log.
 Exit status : 0 if all the run scripts are correct, 1 otherwise.
@@ -45,6 +53,11 @@ USING = re.compile(r'^(?:::-> Using "(.*)"\s*$|\*\s+(?:Compile|Script):\s+(.*?\.
 SEPARATOR = '_' * 17
 EXPECTED = re.compile(r'//\s*Expect(?:ed)?\s*"([^"]*)"')
 EXPECTED_ERR = re.compile(r'//\s*Expect(?:ed)?\s+error\s+(\d+)')
+# the plug-in specific series of scripts (first digit of the number), named as in "syslog-<Plugin>-<date>.txt"
+SERIES = {'1': 'Interstys', '2': 'GamePlayer', '3': 'Diffusion3'}
+SERIES_NAME = re.compile(r'^Ex-(\d)\d{3}\.mSL$')
+LOG_PLUGIN = re.compile(r'^syslog-(.+?)-\d{4}-')
+COMPILE_FAIL = re.compile(r'^ERR:\s*\d+\s+can.t compile "(.*)"')
 ERROR_LINE = re.compile(r'^(?:ERR:\s*(\d+)|\*\*\* ERR:.*?Error:\s*(-?\d+))')
 
 
@@ -83,6 +96,13 @@ def pattern(e):
     return re.compile(r + re.escape(e[pos:]) + r'(?!\w)(?!\.\d)')
 
 
+def other_plugin(name, plugin):
+    """The plug-in of a specific script, if it is not the plug-in of the log (None otherwise)."""
+    m = SERIES_NAME.match(name)
+    owner = SERIES.get(m.group(1)) if m else None
+    return owner if plugin and owner and owner != plugin else None
+
+
 def newest_log(d):
     logs = glob.glob(os.path.join(d, 'syslog-*.txt'))
     return max(logs, key=os.path.getmtime) if logs else None
@@ -109,6 +129,8 @@ def main():
     log = find_log(args[0] if args else None)
     if not log:
         sys.exit('No syslog-*.txt found.')
+    m = LOG_PLUGIN.match(os.path.basename(log))
+    plugin = m.group(1) if m else None
     print('Log :', log)
     lines = open(log, encoding='utf-8', errors='replace').read().splitlines()
     # a full log (a ring) exported from its start : the newest lines come first, up to the separator ;
@@ -119,11 +141,15 @@ def main():
         print('(full log : lines put back in chronological order ; the oldest lines are lost)')
 
     # the output of each run script : from its last "Using" line to the end of the log
-    runs, first = {}, None
+    # nruns : how many times each script was run ; firsts : the start of its first run
+    runs, first, nruns, firsts = {}, None, {}, {}
     for i, l in enumerate(lines):
         m = USING.match(l)
         if m:
-            runs[os.path.basename(m.group(1) or m.group(2))] = lines[i + 1:]
+            name = os.path.basename(m.group(1) or m.group(2))
+            runs[name] = lines[i + 1:]
+            nruns[name] = nruns.get(name, 0) + 1
+            firsts.setdefault(name, i)
             first = i if first is None else first
     # without "Using" line : a script starts at the first line beginning with its name
     for path in glob.glob(os.path.join(scripts, '*.mSL')):
@@ -133,7 +159,17 @@ def main():
             k = next((i for i, l in enumerate(lines) if l.startswith(stem)), None)
             if k is not None:
                 runs[name] = lines[k:]
+                nruns[name] = lines.count(lines[k]) # its first line (its title) at each run
+                firsts[name] = k
                 first = k if first is None else min(first, k)
+    # a script which did not compile has no "Using" line : it starts at its "can't compile" line
+    for i, l in enumerate(lines):
+        m = COMPILE_FAIL.match(l)
+        if m and os.path.basename(m.group(1)) not in runs:
+            runs[os.path.basename(m.group(1))] = lines[i:]
+            nruns[os.path.basename(m.group(1))] = 1
+            firsts[os.path.basename(m.group(1))] = i
+            first = i if first is None else min(first, i)
     # the error lines : [index, code, used] (all of them, if no script was found)
     errors = []
     first = 0 if first is None else first
@@ -149,6 +185,12 @@ def main():
         name = os.path.basename(path)
         src = open(path, encoding='utf-8', errors='replace').read()
         expected, experr = EXPECTED.findall(src), [int(c) for c in EXPECTED_ERR.findall(src)]
+        owner = other_plugin(name, plugin)
+        if owner:
+            if name in runs:
+                nfail += 1
+                print('  ÉCHEC  %s : specific to %s, run in %s (not checked)' % (name, owner, plugin))
+            continue
         if name not in runs:
             if show_all and (expected or experr):
                 print('  ---    %s : not run' % name)
@@ -168,6 +210,12 @@ def main():
                 errmiss.append(c)
             else:
                 e[2] = True
+        # the errors of the previous runs (the texts are checked in the last run only)
+        for _ in range(nruns.get(name, 1) - 1):
+            for c in experr:
+                e = next((e for e in errors if e[1] == c and not e[2] and e[0] > firsts[name]), None)
+                if e is not None:
+                    e[2] = True
         if not expected and not experr:
             print('  ???    %s : no "// Expected" line' % name)
             continue
@@ -180,7 +228,8 @@ def main():
                 print('           missing error : %04d' % c)
         else:
             nok += 1
-            print('  OK     %s (%d%s)' % (name, len(expected), ', %d error(s)' % len(experr) if experr else ''))
+            print('  OK     %s (%d%s%s)' % (name, len(expected), ', %d error(s)' % len(experr) if experr else '',
+                                         ', %d runs' % nruns[name] if nruns.get(name, 1) > 1 else ''))
     for name in sorted(set(runs) - {os.path.basename(p) for p in glob.glob(os.path.join(scripts, '*.mSL'))}):
         print('  ???    %s : run, but not found in %s' % (name, scripts))
     unexp = [e for e in errors if not e[2]]

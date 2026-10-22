@@ -325,6 +325,8 @@ its_WrtFlg_init = 0x0001; //  si writer initialisé
 // Modes (its_Wrt_Mode) : how the overdub (its_Wrt_Ovrdb, x %) mixes the previous content of the line with the input
 its_WrtMode_XFade = 0; // x % of the previous content + (100 - x) % of the input, then the record gain
 its_WrtMode_Sum = 1; // x % of the previous content (feedback) + the input with the record gain
+// x in [-150, 150] : x < 0 inverts the previous content ; a loop gain above 1 (|x| > 100, or the record gain in X-fade)
+// is regenerative : the written value then goes through a tanh (see exec_writer)
 // Etats
 its_WrtStat_UnDef = 0;
 its_WrtStat_Created = 1;
@@ -364,6 +366,8 @@ its_Efx_OutAdd = idx; idx += 1; //  sortie : 1 pour un bus (addition), 0 pour le
 its_Efx_OutDirty = idx; idx += 1; //  le câble propre a été écrit (il est effacé quand l'effet s'arrête)
 its_Efx_Owner = idx; idx += 1; //  propriétaire : 0 le patch utilisateur, sinon une instance d'algorithme
 its_Efx_Rank = idx; idx += 1; //  rang d'exécution (futur : algorithmes)
+its_Efx_Lim = idx; idx += 1; //  1 : l'auto-limiteur de la sortie est en service (pas le LFO), avant le gain de sortie
+its_Efx_LimEnv = idx; idx += 1; //  l'enveloppe crête de l'auto-limiteur (toutes les voies), son gain est 1 / max(1, env)
 // zone de travail (KW_fxwk, non sauvée) : allouée par @gfx (its_Patch_Update), mise en place par @block (its_Fx_WorkSwitch)
 its_Efx_Work = idx; idx += 1; //  la zone utilisée par exec_fx (0 : aucune)
 its_Efx_WkNew = idx; idx += 1; //  la zone préparée par @gfx (-1 : plus de zone), prise par @block
@@ -371,11 +375,14 @@ its_Efx_WkOld = idx; idx += 1; //  la zone remplacée par @block, libérée par 
 // paramètres et états propres à un type (LFO : Par1 fréquence (Hz), Par2 forme, Par3 amplitude, Par4 décalage,
 // Par5 déphasage entre les canaux (en tours) ; St1 phase [0, 1[ ; Filter : Par1 fréquence de coupure (Hz), Par2 Q,
 // Par3 mode, Par4 pente (2^Par4 étages) ; Saturation : Par1 drive (dB), Par2 mode, Par3 biais, Par4 mix [0, 1],
-// Par5 suréchantillonnage (2^Par5 fois), Par6 gain de sortie (dB))
-its_Efx_Par1 = idx; idx += 8;
+// Par5 suréchantillonnage (2^Par5 fois), Par6 gain de sortie (dB), Par7 ordre (x - A sin, Chebyshev), Par8 étirement (Cheb. sum),
+// Par9 amplitude A du sinus (x - A sin))
+its_Efx_Par1 = idx; idx += 12;
 its_Efx_St1 = idx; idx += 4;
-// 2 entrées de modulation (Filter : 0 la fréquence de coupure (octaves), 1 la résonance (octaves))
-its_Efx_Mod1 = idx; idx += 2 * its_ModDist;
+its_Efx_Harm1 = idx; idx += 16; // Saturation, mode Cheb. sum : les poids des harmoniques 1 ... 16 (its_SatHarm), dans [-1, 1]
+// 3 entrées de modulation (Filter : 0 la fréquence de coupure (octaves), 1 la résonance (octaves) ; Saturation : 0 le drive (dB),
+// 1 le biais, 2 l'ordre, ou l'étirement en mode Cheb. sum)
+its_Efx_Mod1 = idx; idx += 3 * its_ModDist;
 // 8 entrées : source (kind * ITS_KMul + number), premier canal, gain (dB), gain, première cellule (calculée par exec_fx)
 its_Efx_Src1 = idx; idx += 1; //  Source n°1
 its_Efx_Off1 = idx; idx += 1; //  Premier canal de la source n°1
@@ -451,9 +458,20 @@ its_SatSoft = 0; // tanh
 its_SatHard = 1; // hard clip
 its_SatFold = 2; // triangular wavefolder
 its_SatSine = 3; // sine wavefolder
+its_SatXSin = 4; // 0.5 * (x - A * sin(n * x * pi / 2)), n : the order (its_Efx_Par7), A : its_Efx_Par9
+its_SatCheb = 5; // Chebyshev polynomial T_n (n real : cos(n * acos(x))), x folded back into [-1, 1]
+its_SatChebSum = 6; // weighted sum of the T_k (k in [1 ... its_SatHarm], weights its_Efx_Harm1), stretched by its_Efx_Par8
+its_SatModeCnt = 7; // count of modes
+its_SatHarm = 16; // count of the weights of the mode Cheb. sum (its_Efx_Harm1)
+its_HarmH = 90; // height of the editor of the weights (pixels)
 its_SatOSCnt = 4; // oversampling (its_Efx_Par5) : 1, 2, 4 or 8 times
 its_SatChW = 12; // words per channel in the work area : previous input, DC blocker (2), anti-aliasing biquads (4 x 2)
 its_SatDcK = 1 - 2 * $pi * 10 / srate; // DC blocker : pole
+its_LimAtt = 1 - exp(-1 / (0.005 * srate)); // auto-limiter of the effects : attack about 5 ms
+its_LimRel = 1 - exp(-1 / (1.5 * srate)); // release about 1.5 s
+its_FinMax = 10^30; // above (or NaN) : a value is not finite, the state that produced it is reset (see its_NaNCnt)
+its_NaNCnt = 0; // non-finite values found and reset by @sample (filter, saturation, writer), logged by @gfx
+its_NaNSeen = 0; // its_NaNCnt already logged
 // Work area of an effect (KW_fxwk, see its_Fx_WorkSize) ; Filter : the header, then 5 coefficients
 // [b0, b1, b2, a1, a2] per stage, then the states (2 per stage and per channel) ; Saturation : the header (its_FxW_Md :
 // the oversampling of the coefficients), the coefficients of the 4 anti-aliasing biquads, then its_SatChW words per channel
@@ -790,8 +808,6 @@ PF_Const = 0.00001;
 dirChangeNum = 0;
 xind = 0; // effects index level 1
 pflg = 0; // some flag
-ph = 0; // temporary phase
-iph = 0; // temporary phase
 ipos = 0; // temp. index
 XPND = 0;
 mdtb = 0; // temp ref. modulation table
@@ -914,10 +930,10 @@ Pr7_UiTheme = Pr7_UiStyle + 1; // uix_jtheme (theme of the GUI) - saved with the
 Pr7_Free = Pr7_UiTheme + 1;
 
 // Update tabulations width
-tbN = 0; loop (8,
-    p = serialBlock + Pr7_StudRat + 4 * tbN;
-    p[0] = p[1] = p[2] = p[3] = 600;
-    tbN += 1;
+i__tab = 0; loop (8,
+    i__p = serialBlock + Pr7_StudRat + 4 * i__tab;
+    i__p[0] = i__p[1] = i__p[2] = i__p[3] = 600;
+    i__tab += 1;
 );
 
 idx = serialBlock + 128; // dcbBlocksAll stays at serialBlock+3072 (was overlapping the structures and parameters below)
@@ -935,7 +951,7 @@ ReadersStructH = idx; idx += ReadersBlockSize;
 // Display of a reader : RDBL[8] = waveform height, RDBL[9] = waveform zoom [1 .. 100], RDBL[10] = waveform flags (its_Wave_...)
 its_RdrWaveH = 100; // default waveform height
 its_RdrWaveMin = 24; // smaller : no waveform
-ii = 0; loop(8, p = ReadersStructA + ii * ReadersBlockSize; p[8] = its_RdrWaveH; p[9] = 1; ii += 1;);
+i__ii = 0; loop(8, i__p = ReadersStructA + i__ii * ReadersBlockSize; i__p[8] = its_RdrWaveH; i__p[9] = 1; i__ii += 1;);
 
 LinesBlockSize = 8;
 LinesStructA = idx; idx += LinesBlockSize;
@@ -974,7 +990,7 @@ PatchStruct = idx; idx += 8; // the module "Patch" : [0] the view (its_PchV...),
 DispStructsSize = idx - ReadersStructA;
 
 // Parameters
-paramCount = 64;
+paramCount = 128;
 paramNMax = paramCount - 1; // (GP_Parameters, included before, computed it with paramCount = 0 at the first @init)
 paramEntSize = 20;
 paramValues = idx; idx += paramCount;
@@ -1016,8 +1032,12 @@ p_fxSatDrive = idx; idx += 1; // Saturation : drive (dB)
 p_fxSatBias = idx; idx += 1; // Saturation : bias
 p_fxSatMix = idx; idx += 1; // Saturation : mix (%)
 p_fxSatOut = idx; idx += 1; // Saturation : output gain (dB)
-p_fxSatModD1 = idx; idx += 2; // depths of the 2 modulation inputs of a saturation : drive (dB), bias
-p_fxSatModA1 = idx; idx += 2; // their attenuverters [-10 ... 10]
+p_fxSatModD1 = idx; idx += 3; // depths of the 3 modulation inputs of a saturation : drive (dB), bias, order (or stretch)
+p_fxSatModA1 = idx; idx += 3; // their attenuverters [-10 ... 10]
+p_fxSatOrder = idx; idx += 1; // Saturation : order n (modes x - sin, Chebyshev)
+p_fxSatStretch = idx; idx += 1; // Saturation : stretch (mode Cheb. sum)
+p_fxSatAmp = idx; idx += 1; // Saturation : amount A of the sine (mode x - A sin)
+its_ParLast = idx - 1; // the last parameter of Interstys : below p_PlayStart (81, mSL_clip_map), see the error 2716
 
 // Global variables
 blockDesc = 0;  // description of the current block
@@ -1038,7 +1058,7 @@ mSL_Str_TInit(#wstrFirst, #wstrLast); // allocate strings for temporary strings
 mSL_Str_PInit(#xstrFirst, #xstrLast); // allocate strings for permanent strings
 mSL_Str_MkStructs(); // Build string management structures
 // Reserve some strings for the presets : needs the string manager built just above
-ii = 0; loop(K_savedStringsCnt, savedStrings[ii] = mSL_Str_Perm(); ii+=1;);
+i__ii = 0; loop(K_savedStringsCnt, savedStrings[i__ii] = mSL_Str_Perm(); i__ii+=1;);
 // see mm_highblocks
 //====== GLOBALS ======
 init_idents();
@@ -1180,16 +1200,16 @@ function its_wave_colors()
 // Some global variables
 
 // Update the default menu screen
-uix_jG_menuscr[ii=0] = "Main";
-uix_jG_menuscr[ii+=1] = "Logs";
-uix_jG_menuscr[ii+=1] = "Dump";
-uix_jG_menuscr[ii+=1] = "Settings";
-uix_jG_menuscr[ii+=1] = "Live 1";
-uix_jG_menuscr[ii+=1] = "Live 2";
-uix_jG_menuscr[ii+=1] = "Live 3";
-uix_jG_menuscr[ii+=1] = "Live 4";
-uix_jG_menuscr[ii+=1] = -1;
-dcbTabsCount = ii; // menu bar max -- number of tabs
+uix_jG_menuscr[i__ii=0] = "Main";
+uix_jG_menuscr[i__ii+=1] = "Logs";
+uix_jG_menuscr[i__ii+=1] = "Dump";
+uix_jG_menuscr[i__ii+=1] = "Settings";
+uix_jG_menuscr[i__ii+=1] = "Live 1";
+uix_jG_menuscr[i__ii+=1] = "Live 2";
+uix_jG_menuscr[i__ii+=1] = "Live 3";
+uix_jG_menuscr[i__ii+=1] = "Live 4";
+uix_jG_menuscr[i__ii+=1] = -1;
+dcbTabsCount = i__ii; // menu bar max -- number of tabs
 uix_jG_menuscrSz = dcbTabsCount + 2; // add some size to display sound indicator
 
 
@@ -1376,7 +1396,7 @@ mm_bl_medium = 0;
 mm_bl_mini = 0;
 
 
-paramHSiz = 101; // prime, > paramCount
+paramHSiz = 257; // prime, > paramCount
 paramHStep = 13; // a prime
 mSL_JSFX_var_count = 38;
 
@@ -1445,10 +1465,10 @@ padDebug1Colrs = padDebug1p + padDebug1p[ui_jpad_clrs]; // addresses of colors
 padDebug1Cells = padDebug1p + padDebug1p[ui_jpad_cells]; // addresses of cells desc.
 padDebug1Vals = padDebug1p + padDebug1p[ui_jpad_values]; // addresses of values
 //
-ii = 0; loop(padDebugSiz,
-            padDebug1Colrs[ii] = Col_Inactive;
-            padDebug1Labs[ii] = "";
-            ii+=1;
+i__ii = 0; loop(padDebugSiz,
+            padDebug1Colrs[i__ii] = Col_Inactive;
+            padDebug1Labs[i__ii] = "";
+            i__ii+=1;
 );
 
 padDebug2p = make_jpad(
@@ -1460,10 +1480,10 @@ padDebug2Colrs = padDebug2p + padDebug2p[ui_jpad_clrs]; // addresses of colors
 padDebug2Cells = padDebug2p + padDebug2p[ui_jpad_cells]; // addresses of cells desc.
 padDebug2Vals = padDebug2p + padDebug2p[ui_jpad_values]; // addresses of values
 //
-ii = 0; loop(padDebugSiz,
-            padDebug2Colrs[ii] = Col_Inactive;
-            padDebug2Labs[ii] = "";
-            ii+=1;
+i__ii = 0; loop(padDebugSiz,
+            padDebug2Colrs[i__ii] = Col_Inactive;
+            padDebug2Labs[i__ii] = "";
+            i__ii+=1;
 );
 
 memoryBoxAdd = 0; // shared address between boxes
@@ -1554,9 +1574,9 @@ memoryBox2[12] = make_array(debugDSize);
 // Preselect "Memory"
 // Look for the "Memory" entry.
 dbg_curr_sel = -1;
-ii = 0; while ((dbg_curr_sel < 0) && (ii < DebugCount)) (
-    (DebugTbNames[ii] == "Memory") ? dbg_curr_sel = ii;
-    ii += 1;
+i__ii = 0; while ((dbg_curr_sel < 0) && (i__ii < DebugCount)) (
+    (DebugTbNames[i__ii] == "Memory") ? dbg_curr_sel = i__ii;
+    i__ii += 1;
 );
 memoryBox1[6] = memoryBox2[6] = dbg_curr_sel;
 memoryBox1[8] = memoryBox2[8] = 0;
@@ -1626,10 +1646,6 @@ function mSL_error_analysis(thrd)
 
 
 
-// The values to send in each sample
-TPL = tplZ = make_array(64); // always 0 samples
-tplA = make_array(64); // the channels values
-
 // The formats array
 fFormats = make_array(16);
 setFileFormats(fFormats);
@@ -1672,24 +1688,24 @@ sinc_table = make_array(SINC_TABLE_SIZE+2); // // valeurs d'une fonction "sinc"
 sinus_table = make_array(SINUS_TABLE_SIZE+2); // Fonction sinus in [0 .. pi/2]
 
 // Remplissage de la table SInc
-i = 0;
+i__i = 0;
 loop(SINC_TABLE_SIZE,
   // On mappe l'index de la table sur la plage [-SINC_RADIUS, SINC_RADIUS]
-  x = (i / SINC_TABLE_SIZE) * 2 * SINC_RADIUS - SINC_RADIUS;
+  i__x = (i__i / SINC_TABLE_SIZE) * 2 * SINC_RADIUS - SINC_RADIUS;
   // Calcul de la fonction SInc
-  z = 1;
-  x != 0 ? (w = $pi * x; z = sin(w) / (w););
-  sinc_table[i] = z;
-  i += 1;
+  i__z = 1;
+  i__x != 0 ? (i__w = $pi * i__x; i__z = sin(i__w) / (i__w););
+  sinc_table[i__i] = i__z;
+  i__i += 1;
 );
 
 // Remplissage de la table SInus in [0 .. pi/2]
-i = w = 0; x = $pi / 2 / SINUS_TABLE_SIZE;
+i__i = i__w = 0; i__x = $pi / 2 / SINUS_TABLE_SIZE;
 loop(SINUS_TABLE_SIZE + 1,
-    sinus_table[i] = sin(w);
-    i += 1; w += x;
+    sinus_table[i__i] = sin(i__w);
+    i__i += 1; i__w += i__x;
 );
-sinus_table[i] = 1;
+sinus_table[i__i] = 1;
 
 
 // Load/Save Area
@@ -1845,6 +1861,12 @@ function its_Mod_Used(mp, j, okm)
     (mp[j * its_ModDist + its_Mod_Src] !== 0) && ((okm & (1 << j)) !== 0);
 );
 
+// Saturation : the modulation inputs meaningful (drive, bias ; the order or the stretch in the modes x - sin, Chebyshev, Cheb. sum)
+function its_Sat_ModOk(fx)
+(
+    3 | ((fx[its_Efx_Par1 + 1] >= its_SatXSin) ? 4 : 0);
+);
+
 // Filter : count of stages (biquads, or one pole filters)
 function its_Flt_Stages(fx)
 (
@@ -1872,12 +1894,35 @@ function its_Fx_NSrc(ty)
     (ty === its_Efx_TyLFO) ? 0 : -1;
 );
 
-// Saturation : the curve of the mode "md" (in [-1, 1])
-function its_Sat_Shape(u, md)
+/*
+    Saturation, mode Cheb. sum : sum of hw[k-1] * cos(k * s * acos(fold(u))), k in [1 ... its_SatHarm] ; s = 1 : the sum of
+    the Chebyshev polynomials T_k(fold(u)) weighted by hw ; the cosines by the recurrence cos((k+1)p) = 2 cos(p) cos(kp) - cos((k-1)p)
+*/
+function its_Cheb_Sum(u, s, hw)
+local (c1, c0, ck, y, w)
+(
+    u = 0.25 * (u + 1);
+    c1 = max(-1, min(1, 1 - 4 * abs(u - floor(u) - 0.5))); // fold(u)
+    (s !== 1) ? (c1 = cos(s * acos(c1)));
+    c0 = 1; ck = c1; y = 0;
+    loop(its_SatHarm,
+        y += hw[0] * ck;
+        w = 2 * c1 * ck - c0; c0 = ck; ck = w;
+        hw += 1;
+    );
+    y;
+);
+
+// Saturation : the curve of the mode "md" (in [-1, 1], except x - A sin : about 0.5 * u, Cheb. sum : the sum of the |weights|) ;
+// n : the order (x - A sin, Chebyshev) or the stretch (Cheb. sum) ; fx : the effect (A, the weights of Cheb. sum)
+function its_Sat_Shape(u, md, n, fx)
 (
     (md === its_SatSoft) ? (u = max(-20, min(20, u)); 1 - 2 / (exp(2 * u) + 1)) : // tanh
     (md === its_SatHard) ? max(-1, min(1, u)) :
     (md === its_SatFold) ? (u = 0.25 * (u + 1); 1 - 4 * abs(u - floor(u) - 0.5)) : // folds back at -1 and 1
+    (md === its_SatXSin) ? 0.5 * (u - fx[its_Efx_Par1 + 8] * sin(0.5 * $pi * n * u)) :
+    (md === its_SatCheb) ? (u = 0.25 * (u + 1); cos(n * acos(max(-1, min(1, 1 - 4 * abs(u - floor(u) - 0.5)))))) : // T_n(fold(u))
+    (md === its_SatChebSum) ? its_Cheb_Sum(u, n, fx + its_Efx_Harm1) :
     sin(0.5 * $pi * u);
 );
 
@@ -2013,7 +2058,7 @@ local (i, b, w, f, n, ty, p)
                 n += 1; p += its_EfxDist;
             );
             (ty === its_Efx_TyFilter) ? its_Pch_Mods(b + its_Efx_Mod1, 2, its_ModN_Flt, 3, "Effect", i) :
-            (ty === its_Efx_TySat) ? its_Pch_Mods(b + its_Efx_Mod1, 2, its_ModN_Sat, 3, "Effect", i);
+            (ty === its_Efx_TySat) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Sat, its_Sat_ModOk(b), "Effect", i);
         );
         i += 1;
     );
@@ -2153,15 +2198,15 @@ void_pointer[1] = 0;
 // Provide an independent main symbol table for the compiler - "var" declarations
 aprime = 3313;
 size = 4 * (aprime + 1);
-mem = make_array(size + 4);
-A_mSL_GCTab = mSL_buildGVTab(mem, size, aprime);
+i__mem = make_array(size + 4);
+A_mSL_GCTab = mSL_buildGVTab(i__mem, size, aprime);
 
 
 // Try to provide an independent local symbol table for the compiler - "loc" declarations
 aprime = 191;
 size = 4 * (aprime + 1);
-mem = make_array(size + 4);
-A_mSL_LCTab = mSL_buildLCTab(mem, size, aprime);
+i__mem = make_array(size + 4);
+A_mSL_LCTab = mSL_buildLCTab(i__mem, size, aprime);
 
 
 // Provide a common external symbol table for the compiler - "ext" declarations
@@ -2603,14 +2648,7 @@ function Simple_Action(code, seq)
     Simple_Action(Simple_temp);
 );
 
-function
-Set_Table(tbl)
-local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback, rd_err, pt, zpt, totsize, tout, pttr,
-    Cl_n, Cl_dB, ii, s1, s2, s3, s4, s5, ty, n, ps, cp, cnt, kct, vmin, vmax, pos, stnext, kmax, cvl, LWA, LWAsiz,
-    AddT)
-(
-    cvl = ptr = 0;
-);
+// Set_Table (the mSL "table" operation) : see "mSL table", before the evaluator
 
 
 function mSL_call_ops(argc, argv)
@@ -2824,48 +2862,48 @@ menu_Dst_Ids = make_jmenu(
 
 
 /*  Tests for dtds et dstd */
-N1 = $pi;
-N1L = N1H = 0;
-double_to_double_single(N1, N1H, N1L);
-N1R = double_single_to_double(N1H, N1L);
-N1Z = N1 === N1R;
+dtds_N1 = $pi;
+dtds_N1L = dtds_N1H = 0;
+double_to_double_single(dtds_N1, dtds_N1H, dtds_N1L);
+dtds_N1R = double_single_to_double(dtds_N1H, dtds_N1L);
+dtds_N1Z = dtds_N1 === dtds_N1R;
 
-N2 = 'stwa';
-N2L = N2H = 0;
-double_to_double_single(N2, N2H, N2L);
-N2R = double_single_to_double(N2H, N2L);
-N2Z = N2 === N2R;
+dtds_N2 = 'stwa';
+dtds_N2L = dtds_N2H = 0;
+double_to_double_single(dtds_N2, dtds_N2H, dtds_N2L);
+dtds_N2R = double_single_to_double(dtds_N2H, dtds_N2L);
+dtds_N2Z = dtds_N2 === dtds_N2R;
 
-N3 = SECURE_BL;
-N3L = N3H = 0;
-double_to_double_single(N3, N3H, N3L);
-N3R = double_single_to_double(N3H, N3L);
-N3Z = N3 === N3R;
+dtds_N3 = SECURE_BL;
+dtds_N3L = dtds_N3H = 0;
+double_to_double_single(dtds_N3, dtds_N3H, dtds_N3L);
+dtds_N3R = double_single_to_double(dtds_N3H, dtds_N3L);
+dtds_N3Z = dtds_N3 === dtds_N3R;
 
-N4 = 225;
-N4L = N4H = 0;
-double_to_double_single(N4, N4H, N4L);
-N4R = double_single_to_double(N4H, N4L);
-N4Z = N4 === N4R;
+dtds_N4 = 225;
+dtds_N4L = dtds_N4H = 0;
+double_to_double_single(dtds_N4, dtds_N4H, dtds_N4L);
+dtds_N4R = double_single_to_double(dtds_N4H, dtds_N4L);
+dtds_N4Z = dtds_N4 === dtds_N4R;
 
-N5 = $e;
-N5L = N5H = 0;
-double_to_double_single(N5, N5H, N5L);
-N5R = double_single_to_double(N5H, N5L);
-N5Z = N5 === N5R;
+dtds_N5 = $e;
+dtds_N5L = dtds_N5H = 0;
+double_to_double_single(dtds_N5, dtds_N5H, dtds_N5L);
+dtds_N5R = double_single_to_double(dtds_N5H, dtds_N5L);
+dtds_N5Z = dtds_N5 === dtds_N5R;
 
-N6 = 0;
-N6L = N6H = 0;
-double_to_double_single(N6, N6H, N6L);
-N6R = double_single_to_double(N6H, N6L);
-N6Z = N6 === N6R;
+dtds_N6 = 0;
+dtds_N6L = dtds_N6H = 0;
+double_to_double_single(dtds_N6, dtds_N6H, dtds_N6L);
+dtds_N6R = double_single_to_double(dtds_N6H, dtds_N6L);
+dtds_N6Z = dtds_N6 === dtds_N6R;
 
-N7A = 10^-12;
-N7B = 0.000000000001;
+dtds_N7A = 10^-12;
+dtds_N7B = 0.000000000001;
 
-N8A = 10^-16;
-N8B = 0.0000000000000001;
-N9 = 3.3219280948873623478703194294893901758648;
+dtds_N8A = 10^-16;
+dtds_N8B = 0.0000000000000001;
+dtds_N9 = 3.3219280948873623478703194294893901758648;
 /* */
 
 
@@ -2954,10 +2992,10 @@ pad_Rdr_Colrs = pad_Reader + pad_Reader[ui_jpad_clrs]; // addresses of colors
 pad_Rdr_Cells = pad_Reader + pad_Reader[ui_jpad_cells]; // addresses of cells desc.
 pad_Rdr_Vals = pad_Reader + pad_Reader[ui_jpad_values]; // addresses of cells desc.
 //
-ii = 0; loop(pad_Rdr_Siz,
-            pad_Rdr_Colrs[ii] = Col_Inactive;
-            pad_Rdr_Labs[ii] = "";
-            ii+=1;
+i__ii = 0; loop(pad_Rdr_Siz,
+            pad_Rdr_Colrs[i__ii] = Col_Inactive;
+            pad_Rdr_Labs[i__ii] = "";
+            i__ii+=1;
 );
 // Pad of the modulation inputs of a reader or a writer (see its_Mod_Row) : one line
 pad_RdM_Siz = 8;
@@ -2966,10 +3004,10 @@ pad_RdMod = make_jpad(
     1, pad_RdM_Siz, pad_RdM_Siz);
 pad_RdM_Labs = pad_RdMod + pad_RdMod[ui_jpad_labs]; // addresses of labels
 pad_RdM_Colrs = pad_RdMod + pad_RdMod[ui_jpad_clrs]; // addresses of colors
-ii = 0; loop(pad_RdM_Siz,
-            pad_RdM_Colrs[ii] = Col_Inactive;
-            pad_RdM_Labs[ii] = "";
-            ii+=1;
+i__ii = 0; loop(pad_RdM_Siz,
+            pad_RdM_Colrs[i__ii] = Col_Inactive;
+            pad_RdM_Labs[i__ii] = "";
+            i__ii+=1;
 );
 
 // Menu 1 for READERS : their names, in sub-menus of 32 readers (the ">" headers are not counted in the results)
@@ -3029,16 +3067,18 @@ menu_Rdr_Loop = make_jmenu(
             "reader-loop", its_RdrLoopTypeCnt, menu_Rdr_Loop_N);
 
 // Menu 6 For readers : speed control
-menu_Rdr_Speed_N = make_array(6);
+menu_Rdr_Speed_N = make_array(8);
 menu_Rdr_Speed_N[0] = "[-4 ... 4]";
 menu_Rdr_Speed_N[1] = "[0 ... 4]";
 menu_Rdr_Speed_N[2] = "[0 ... 1]";
 menu_Rdr_Speed_N[3] = "[-4 ... 0]";
 menu_Rdr_Speed_N[4] = "[-1 ... 0]";
 menu_Rdr_Speed_N[5] = "[-1 ... 1]";
+menu_Rdr_Speed_N[6] = "[-32 ... 32]";
+menu_Rdr_Speed_N[7] = "[0 ... 32]";
 menu_Rdr_Speed = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-            "reader-speed", 6, menu_Rdr_Speed_N);
+            "reader-speed", 8, menu_Rdr_Speed_N);
 
 // Menu 7 For readers : region length
 menu_Rdr_RegLen_N = make_array(3);
@@ -3054,6 +3094,7 @@ menu_Rdr_RegLen = make_jmenu(
 // Writers_set[WR_CNT]
 
 function Wr_Clear(wnum)
+local (wcb)
 (
     ((wnum >= 0) && (wnum <= WR_CNT) && ((wcb = Writers_set[wnum]) > BASE_MEMORY) && (wcb[-2] === KW_writ)) ? (
         memset(wcb, 0, its_Wrt_BlkSize);
@@ -3148,10 +3189,10 @@ pad_Wrt_Colrs = pad_Writer + pad_Writer[ui_jpad_clrs]; // addresses of colors
 pad_Wrt_Cells = pad_Writer + pad_Writer[ui_jpad_cells]; // addresses of cells desc.
 pad_Wrt_Vals = pad_Writer + pad_Writer[ui_jpad_values]; // addresses of cells desc.
 //
-ii = 0; loop(pad_Wrt_Siz,
-            pad_Wrt_Colrs[ii] = Col_Inactive;
-            pad_Wrt_Labs[ii] = "";
-            ii+=1;
+i__ii = 0; loop(pad_Wrt_Siz,
+            pad_Wrt_Colrs[i__ii] = Col_Inactive;
+            pad_Wrt_Labs[i__ii] = "";
+            i__ii+=1;
 );
 
 // Menus for the globals : the global action (entry n is the action its_GlAct_... n, as the slider slGlAct)
@@ -3183,10 +3224,10 @@ pad_Controls = make_jpad(
     1, pad_Ctl_Siz, pad_Ctl_Siz);
 pad_Ctl_Labs = pad_Controls + pad_Controls[ui_jpad_labs]; // addresses of labels
 pad_Ctl_Colrs = pad_Controls + pad_Controls[ui_jpad_clrs]; // addresses of colors
-ii = 0; loop(pad_Ctl_Siz,
-            pad_Ctl_Colrs[ii] = Col_Inactive;
-            pad_Ctl_Labs[ii] = "";
-            ii+=1;
+i__ii = 0; loop(pad_Ctl_Siz,
+            pad_Ctl_Colrs[i__ii] = Col_Inactive;
+            pad_Ctl_Labs[i__ii] = "";
+            i__ii+=1;
 );
 
 // Pads of the module "Patch" (see show_Patch_Pad) : the views, then the cells (8 x 16)
@@ -3203,8 +3244,8 @@ pad_PatchG = make_jpad(
     pad_PchG_NL, 8, pad_PchG_Siz);
 pad_PchG_Labs = pad_PatchG + pad_PatchG[ui_jpad_labs];
 pad_PchG_Colrs = pad_PatchG + pad_PatchG[ui_jpad_clrs];
-ii = 0; loop(pad_Pch_Siz, pad_Pch_Colrs[ii] = Col_Inactive; pad_Pch_Labs[ii] = ""; ii += 1;);
-ii = 0; loop(pad_PchG_Siz, pad_PchG_Colrs[ii] = Col_Inactive; pad_PchG_Labs[ii] = ""; ii += 1;);
+i__ii = 0; loop(pad_Pch_Siz, pad_Pch_Colrs[i__ii] = Col_Inactive; pad_Pch_Labs[i__ii] = ""; i__ii += 1;);
+i__ii = 0; loop(pad_PchG_Siz, pad_PchG_Colrs[i__ii] = Col_Inactive; pad_PchG_Labs[i__ii] = ""; i__ii += 1;);
 // the views of the module "Patch"
 its_PchV_In = 0;
 its_PchV_Out = 1;
@@ -3222,10 +3263,10 @@ pad_Global = make_jpad(
     pad_Glb_NL, pad_Glb_NC, pad_Glb_Siz);
 pad_Glb_Labs = pad_Global + pad_Global[ui_jpad_labs]; // addresses of labels
 pad_Glb_Colrs = pad_Global + pad_Global[ui_jpad_clrs]; // addresses of colors
-ii = 0; loop(pad_Glb_Siz,
-            pad_Glb_Colrs[ii] = Col_Inactive;
-            pad_Glb_Labs[ii] = "";
-            ii+=1;
+i__ii = 0; loop(pad_Glb_Siz,
+            pad_Glb_Colrs[i__ii] = Col_Inactive;
+            pad_Glb_Labs[i__ii] = "";
+            i__ii+=1;
 );
 //==========================================================
 //===== EFFECTS Handling
@@ -3243,7 +3284,7 @@ local (fxcb, w0, w1, w2)
         fxcb[its_Efx_Phase] = its_Efx_PhaseStd;
         fxcb[its_Efx_Numb] = enum;
         fxcb[its_Efx_CCnt] = 1;
-        its_Mod_Init(fxcb + its_Efx_Mod1, 2); // modulation attenuverters
+        its_Mod_Init(fxcb + its_Efx_Mod1, 3); // modulation attenuverters
         fxcb[its_Efx_Unuz1] = fxcb[its_Efx_Unuz2] = SECURE_BL;
     );
 );
@@ -3316,14 +3357,31 @@ menu_Efx_FltMode = make_jmenu(
             "filter-mode", 6, menu_Efx_FltMode_N);
 
 // Menu 7 for Effects : the modes of the Saturation (entry n is the mode n)
-menu_Efx_SatMode_N = make_array(4);
+menu_Efx_SatMode_N = make_array(its_SatModeCnt);
 menu_Efx_SatMode_N[0] = "Soft (tanh)";
 menu_Efx_SatMode_N[1] = "Hard clip";
 menu_Efx_SatMode_N[2] = "Fold";
 menu_Efx_SatMode_N[3] = "Sine fold";
+menu_Efx_SatMode_N[4] = "x - A sin(nx)";
+menu_Efx_SatMode_N[5] = "Chebyshev";
+menu_Efx_SatMode_N[6] = "Cheb. sum";
 menu_Efx_SatMode = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-            "saturation-mode", 4, menu_Efx_SatMode_N);
+            "saturation-mode", its_SatModeCnt, menu_Efx_SatMode_N);
+
+// Menu 8 for Effects : the weights of the harmonics of the Saturation, mode Cheb. sum (see its_Harm_Preset)
+menu_Efx_Harm_N = make_array(8);
+menu_Efx_Harm_N[0] = "Fundamental only";
+menu_Efx_Harm_N[1] = "Odd 1/k";
+menu_Efx_Harm_N[2] = "All 1/k";
+menu_Efx_Harm_N[3] = "Odd 1/k2";
+menu_Efx_Harm_N[4] = "Even 1/k";
+menu_Efx_Harm_N[5] = "Random";
+menu_Efx_Harm_N[6] = "Normalize";
+menu_Efx_Harm_N[7] = "Clear";
+menu_Efx_Harm = make_jmenu(
+    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "harmonics", 8, menu_Efx_Harm_N);
 
 // The modulation inputs of the modules : their names, and their first depths (when first connected)
 its_ModN_Rdr = make_array(3); its_ModN_Rdr[0] = "Offset"; its_ModN_Rdr[1] = "Speed"; its_ModN_Rdr[2] = "Volume";
@@ -3332,8 +3390,9 @@ its_ModN_Wrt = make_array(2); its_ModN_Wrt[0] = "Gain"; its_ModN_Wrt[1] = "Overd
 its_ModD_Wrt = make_array(2); its_ModD_Wrt[0] = 6; its_ModD_Wrt[1] = 20;
 its_ModN_Flt = make_array(2); its_ModN_Flt[0] = "Cutoff"; its_ModN_Flt[1] = "Reso";
 its_ModD_Flt = make_array(2); its_ModD_Flt[0] = 2; its_ModD_Flt[1] = 1;
-its_ModN_Sat = make_array(2); its_ModN_Sat[0] = "Drive"; its_ModN_Sat[1] = "Bias";
-its_ModD_Sat = make_array(2); its_ModD_Sat[0] = 12; its_ModD_Sat[1] = 0.5;
+its_ModN_Sat = make_array(3); its_ModN_Sat[0] = "Drive"; its_ModN_Sat[1] = "Bias"; its_ModN_Sat[2] = "Order"; // "Stretch" : Cheb. sum
+its_FxTmp = make_array(128); // the output of an effect before its auto-limiter (@sample, see exec_fx)
+its_ModD_Sat = make_array(3); its_ModD_Sat[0] = 12; its_ModD_Sat[1] = 0.5; its_ModD_Sat[2] = 2;
 
 // Menu 5 for Effects : the shapes of the LFO (entry n is the shape n)
 menu_Efx_LfoShape_N = make_array(5);
@@ -3387,10 +3446,10 @@ pad_Efx_Colrs = pad_Effect + pad_Effect[ui_jpad_clrs]; // addresses of colors
 pad_Efx_Cells = pad_Effect + pad_Effect[ui_jpad_cells]; // addresses of cells desc.
 pad_Efx_Vals = pad_Effect + pad_Effect[ui_jpad_values]; // addresses of cells desc.
 //
-ii = 0; loop(pad_Efx_Siz,
-            pad_Efx_Colrs[ii] = Col_Inactive;
-            pad_Efx_Labs[ii] = "";
-            ii+=1;
+i__ii = 0; loop(pad_Efx_Siz,
+            pad_Efx_Colrs[i__ii] = Col_Inactive;
+            pad_Efx_Labs[i__ii] = "";
+            i__ii+=1;
 );
 
 //==========================================================
@@ -3436,6 +3495,55 @@ local (lnb, i)
 );
 
 
+/*
+    A line replaced by Ln_Make : @sample may still be reading or writing it (@gfx runs concurrently).
+    Its memory is freed later by Ln_Trash_Run (@gfx), 2 @block after, or 1 s after without audio processing.
+*/
+Ln_TrashSz = 2 * LN_CNT;
+Ln_TrashP = make_array(Ln_TrashSz); // the line blocks waiting
+Ln_TrashB = make_array(Ln_TrashSz); // its_BlkCnt when they were put there
+Ln_TrashT = make_array(Ln_TrashSz); // time_precise() when they were put there
+
+// free the buffers and the control block of a line
+function Ln_Free(lcbl)
+local (i, j)
+(
+    ((lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) ? (
+        i = 0; loop (128,
+            j = lcbl[i+its_Lin_BF1ST];
+            (j != 0) ? (mSL_Dyn_Free(j));
+            i += 1;
+        );
+        mSL_Dyn_Free(lcbl);
+    );
+);
+
+function Ln_Defer_Free(lcbl)
+local (i, k)
+(
+    k = -1; i = 0;
+    while ((k < 0) && (i < Ln_TrashSz)) ( (Ln_TrashP[i] === 0) ? (k = i); i += 1; );
+    (k < 0) ? (
+        Ln_Free(lcbl); // no room left (should not arrive)
+    ) : (
+        Ln_TrashB[k] = its_BlkCnt; Ln_TrashT[k] = time_precise();
+        Ln_TrashP[k] = lcbl;
+    );
+);
+
+function Ln_Trash_Run()
+local (i)
+(
+    i = 0; loop(Ln_TrashSz,
+        ((Ln_TrashP[i] !== 0) && ((its_BlkCnt - Ln_TrashB[i] >= 2) || (time_precise() - Ln_TrashT[i] > 1))) ? (
+            Ln_Free(Ln_TrashP[i]);
+            Ln_TrashP[i] = 0;
+        );
+        i += 1;
+    );
+);
+
+
 function Ln_Make(lnum, freq, size, channels)
 local (lcbl, buff, bsz, i, j, R, lng)
 (
@@ -3471,7 +3579,8 @@ local (lcbl, buff, bsz, i, j, R, lng)
         );
         (R === 0) ? (
             // Replace previous line if any
-            (Lines_Set[lnum] > BASE_MEMORY) ? (mSL_Dyn_Free(Lines_Set[lnum]));
+            // (with its buffers, when @sample no longer uses it : Ln_Defer_Free)
+            (Lines_Set[lnum] > BASE_MEMORY) ? Ln_Defer_Free(Lines_Set[lnum]);
             Lines_Set[lnum] = lcbl;
             Ln_MemErr[lnum] = 0;
             Ln_Clear(lnum);
@@ -3494,8 +3603,8 @@ local (lcbl, buff, bsz, i, j, R, lng)
     lcbl;
 );
 
-// delete buffer "lnum" from Lines_Set
-function Ln_Delete(lnum)
+// delete buffer "lnum" from Lines_Set ; "defer" : 1 in @gfx (the memory is freed by Ln_Trash_Run)
+function Ln_Delete(lnum, defer)
 local (lcbl, i, j, cb)
 (
     ((lnum >= 0) && (lnum <= LN_CNT)) ? (
@@ -3530,17 +3639,14 @@ local (lcbl, i, j, cb)
                 );
                 i += 1;
             );
-            i = 0; loop (128,
-                j = lcbl[i+its_Lin_BF1ST];
-                (j != 0) ? (mSL_Dyn_Free(j));
-                i += 1;
-            );
-            mSL_Dyn_Free(lcbl);
+            Lines_Set[lnum] = 0;
+            defer ? Ln_Defer_Free(lcbl) : Ln_Free(lcbl);
             lnupdt = 1;
         );
         Lines_Set[lnum] = 0;
     );
 );
+function Ln_Delete(lnum) ( Ln_Delete(lnum, 0); );
 
 function Ln_Action(lnb, act, tmp)
 local (lcbl, err)
@@ -3563,7 +3669,7 @@ local (lcbl, err)
         Ln_Clear(lnb);
     ) :
     (act === its_LinAct_Delete) ? (
-        Ln_Delete(lnb);
+        Ln_Delete(lnb, 1); // (@gfx : the pad of the line)
     ) :
     (
         err = 2609; // unknown action (or "Create" on an existing line)
@@ -3594,10 +3700,10 @@ pad_Lin_Colrs = pad_Line + pad_Line[ui_jpad_clrs]; // addresses of colors
 pad_Lin_Cells = pad_Line + pad_Line[ui_jpad_cells]; // addresses of cells desc.
 pad_Lin_Vals = pad_Line + pad_Line[ui_jpad_values]; // addresses of cells desc.
 //
-ii = 0; loop(pad_Lin_Siz,
-            pad_Lin_Colrs[ii] = Col_Inactive;
-            pad_Lin_Labs[ii] = "ZZZ";
-            ii+=1;
+i__ii = 0; loop(pad_Lin_Siz,
+            pad_Lin_Colrs[i__ii] = Col_Inactive;
+            pad_Lin_Labs[i__ii] = "ZZZ";
+            i__ii+=1;
 );
 
 // Menu 1 for LINES : their names, in sub-menus of 32 lines (the ">" headers are not counted in the results)
@@ -3681,7 +3787,7 @@ local (rcb, mem_0_ACT, mem_0_CCR)
 
 
 function Rd_Update(rdrn)
-local (reader, L, P, S, X, Q, V, T, W, u, flg, A1, B1, A2, B2, S_In, S_Out, E_In, E_Out)
+local (reader, L, P, S, X, Q, V, T, W, u, flg, A1, B1, A2, B2, S_In, S_Out, E_In, E_Out, err)
 (
     flg = err = 0;
     ((rdrn < 0) || (rdrn >= RD_CNT)) ? (
@@ -4030,7 +4136,7 @@ local (i, r)
 
 
 function Rd_Set_Status(rdrn, nstat)
-local (reader, md, rdst)
+local (reader, md, rdst, err, lcbl, wcbl, ns)
 (
     err = 0;
     // The reader must be defined
@@ -4106,15 +4212,15 @@ local (reader, md, rdst)
 
 
 function Rd_Set_Speed(rdrn, nspeed, f1)
-local (reader)
+local (reader, err)
 (
     err = 0;
+    // (the bounds were a branch of the test below : out of bounds, the reader was not read, and the speed was
+    // written in mem[its_Rdr_Speed])
+    nspeed = max(-SPDMAX, min(SPDMAX, nspeed));
     // The reader must be defined
     ((rdrn < 0) || (rdrn >= RD_CNT)) ? (
         err = 112; // erreur
-    ) :
-    ((nspeed < -SPDMAX) || (nspeed > SPDMAX)) ? (
-        nspeed = max(-SPDMAX, min(SPDMAX, nspeed));
     ) :
     (((reader = Readers_set[rdrn]) <= BASE_MEMORY) || (reader[-2] !== KW_read)) ? (
         err = 103;
@@ -4501,7 +4607,7 @@ local (cb, lcbl, cpy)
 
 
 function mkModuleMenu()
-local (i, g, it, fid, ttl, gl0, gl1, gl2, gl3, othFirst, tmp, bln, blu, itdsp, MM2, blockStrSpace, blockThemeBlack, blockThemeTron, blockThemeLightCyan, blockThemeOrange, blockThemeBlue, blockThemeDarkCyan, blockThemeDarkGreen, blockThemeDarkRed, blockThemeLightAmber, blockThemeNeonGreen, blockThemeLightMagenta)
+local (i, j, g, it, fid, ttl, gl0, gl1, gl2, gl3, othFirst, tmp, bln, blu, itdsp, MM2, blockStrSpace, blockThemeBlack, blockThemeTron, blockThemeLightCyan, blockThemeOrange, blockThemeBlue, blockThemeDarkCyan, blockThemeDarkGreen, blockThemeDarkRed, blockThemeLightAmber, blockThemeNeonGreen, blockThemeLightMagenta)
 (
 
     i = 0; loop(dcbNamesCnt,
@@ -4783,7 +4889,7 @@ mkModuleMenu();
 */
 function
 mSL_GUI_Generic(opr, bNumb, module, kit)
-local (i, j, u, v, flg, tbN, mblk, a, k)
+local (p, i, j, u, v, flg, tbN, mblk, a, k)
 (
     flg = 1;
     tbN = -1; // Tabulation number (in 0 .. 7)
@@ -5082,10 +5188,11 @@ local (i, j, u, v, flg, tbN, mblk, a, k)
 */
 
 
-// paramCount is 64   ; paramEntSize = 20
+// paramCount is 128   ; paramEntSize = 20
 
 (pp_EntSize > paramEntSize) ? err_sys_ini = 9936; // paramEntSize error
 (p_ActSize > paramCount) ? err_sys_ini = 9937; // paramCount error
+(its_ParLast >= p_PlayStart) ? err_sys_ini = 2716; // the parameters of Interstys overlap those of mSL_clip_map
 
 paramBlock = make_array(paramCount * paramEntSize);
 // protect the sliders blocks (pp_mSL_Ref) from the garbage collector
@@ -5241,7 +5348,7 @@ local ()
 
 // Affiche sur les sliders les caractéristiques du reader courant
 function display_Reader()
-local (bfr, flg, ds, slRdModePrev)
+local (bfr, flg, ds, slRdModePrev, zz)
 (
     // Montrer au moins les sliders de base
     slider_show(slReader,gui_show_sliders);
@@ -6113,7 +6220,7 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
 
     parDcl(p_playSpeed, "Play Speed", "PlaySpd", i_UB|i_SP, "%.3f",  "Play Speed: %.3f", -SPDMAX, SPDMAX, 1, 0.001, 0);
 
-    parDcl(p_playVol, "Play Volume",  "PlayVol",  i_UB|i_SP, "%.1f dB", "Play Volume: %.1f dB",   -120,   20,    0,  0.1, -3);
+    parDcl(p_playVol, "Play Volume",  "PlayVol",  i_UB|i_SP, "%.1f dB", "Play Volume: %.1f dB",   -120,   40,    0,  0.1, -2);
 
     parDcl(p_lineSize, "Line size",  "LineSize",  i_UB|i_SP, "%.3f s", "Line Size: %.3f s",   1,   3600,    1,  0.001, 3);
 
@@ -6126,10 +6233,10 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_play_Zoom, "Zoom", "WaveZoom", i_UB|i_SP, "%.0f", "Zoom : %.0f", 1, 100, 1, 1, 0);
     // strong exponential curve (slope 8) and 10 µs step : very fine choice of the small offsets
     parDcl(p_rdOffset, "Delay Offset", "RdOffset", i_UB|i_SP, "%.5f s", "Delay Offset: %.5f s", 0, 3600, 1, 0.00001, 8);
-    parDcl(p_wrGain, "Record Gain",  "WrGain",  i_UB|i_SP, "%.1f dB", "Record Gain: %.1f dB",   -120,   20,    0,  0.1, -3);
-    parDcl(p_wrOvrdb, "Overdub",  "WrOvrdb",  i_UB|i_SP, "%.1f %%", "Overdub: %.1f %%",   0,   100,    0,  0.1, 0);
-    parDcl(p_glInGain, "Input Gain",  "GlInGain",  i_UB|i_SP, "%.1f dB", "Input Gain: %.1f dB",   -120,   20,    0,  0.1, -3);
-    parDcl(p_glOutVol, "Output Volume",  "GlOutVol",  i_UB|i_SP, "%.1f dB", "Output Volume: %.1f dB",   -120,   20,    0,  0.1, -3);
+    parDcl(p_wrGain, "Record Gain",  "WrGain",  i_UB|i_SP, "%.1f dB", "Record Gain: %.1f dB",   -120,   40,    0,  0.1, -2);
+    parDcl(p_wrOvrdb, "Overdub",  "WrOvrdb",  i_UB|i_SP, "%.1f %%", "Overdub: %.1f %%",   -150,   150,    0,  0.1, 0);
+    parDcl(p_glInGain, "Input Gain",  "GlInGain",  i_UB|i_SP, "%.1f dB", "Input Gain: %.1f dB",   -120,   40,    0,  0.1, -2);
+    parDcl(p_glOutVol, "Output Volume",  "GlOutVol",  i_UB|i_SP, "%.1f dB", "Output Volume: %.1f dB",   -120,   40,    0,  0.1, -2);
     parDcl(p_fxGain1, "Gain 1",  "FxGain1",  i_UB|i_SP, "%.1f dB", "Gain 1: %.1f dB",   -120,   20,    0,  0.1, -3);
     parDcl(p_fxGain1+1, "Gain 2",  "FxGain2",  i_UB|i_SP, "%.1f dB", "Gain 2: %.1f dB",   -120,   20,    0,  0.1, -3);
     parDcl(p_fxGain1+2, "Gain 3",  "FxGain3",  i_UB|i_SP, "%.1f dB", "Gain 3: %.1f dB",   -120,   20,    0,  0.1, -3);
@@ -6140,7 +6247,7 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_fxGain1+7, "Gain 8",  "FxGain8",  i_UB|i_SP, "%.1f dB", "Gain 8: %.1f dB",   -120,   20,    0,  0.1, -3);
     // very fine choice of the small depths (flanger, chorus : 50 % of the slider is about 5 ms) up to 5 s
     parDcl(p_rdModDepth1, "Offset depth",  "RdModOff",  i_UB|i_SP, "%.4f ms", "Offset depth: %.4f ms",   0,   5000,    2,  0.0001, 14);
-    parDcl(p_rdModDepth1+1, "Speed depth",  "RdModSpd",  i_UB|i_SP, "%.4f", "Speed depth: %.4f",   0,   4,    0.1,  0.0001, 3);
+    parDcl(p_rdModDepth1+1, "Speed depth",  "RdModSpd",  i_UB|i_SP, "%.4f", "Speed depth: %.4f",   0,   32,    0.1,  0.0001, 5);
     parDcl(p_rdModDepth1+2, "Volume depth",  "RdModVol",  i_UB|i_SP, "%.3f", "Volume depth: %.3f",   0,   2,    0.5,  0.001, 0);
     parDcl(p_rdModAtt1, "Offset atten.",  "RdAttOff",  i_UB|i_SP, "%.3f", "Offset atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_rdModAtt1+1, "Speed atten.",  "RdAttSpd",  i_UB|i_SP, "%.3f", "Speed atten.: %.3f",   -10,   10,    1,  0.001, 0);
@@ -6150,24 +6257,29 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_fxLfoDC, "LFO Offset",  "LfoDC",  i_UB|i_SP, "%.3f", "LFO Offset: %.3f",   -10,   10,    0,  0.001, 0);
     parDcl(p_fxLfoSpread, "LFO Phase spread",  "LfoSprd",  i_UB|i_SP, "%.3f", "LFO Phase spread: %.3f",   0,   1,    0,  0.001, 0);
     parDcl(p_wrModDepth1, "Gain depth",  "WrModGn",  i_UB|i_SP, "%.1f dB", "Gain depth: %.1f dB",   0,   60,    6,  0.1, 2);
-    parDcl(p_wrModDepth1+1, "Overdub depth",  "WrModOv",  i_UB|i_SP, "%.1f %%", "Overdub depth: %.1f %%",   0,   100,    20,  0.1, 0);
+    parDcl(p_wrModDepth1+1, "Overdub depth",  "WrModOv",  i_UB|i_SP, "%.1f %%", "Overdub depth: %.1f %%",   0,   150,    20,  0.1, 0);
     parDcl(p_wrModAtt1, "Gain atten.",  "WrAttGn",  i_UB|i_SP, "%.3f", "Gain atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_wrModAtt1+1, "Overdub atten.",  "WrAttOv",  i_UB|i_SP, "%.3f", "Overdub atten.: %.3f",   -10,   10,    1,  0.001, 0);
     // exponential : about 600 Hz in the middle of the slider
-    parDcl(p_fxFltFreq, "Cutoff",  "FltFreq",  i_UB|i_SP, "%.1f Hz", "Cutoff: %.1f Hz",   10,   20000,    1000,  0.1, 7);
-    parDcl(p_fxFltQ, "Resonance",  "FltQ",  i_UB|i_SP, "%.3f", "Resonance (Q): %.3f",   0.1,   30,    0.707,  0.001, 4);
+    parDcl(p_fxFltFreq, "Cutoff",  "FltFreq",  i_UB|i_SP, "%.1f Hz", "Cutoff: %.1f Hz",   1,   20000,    1000,  0.1, 7);
+    parDcl(p_fxFltQ, "Resonance",  "FltQ",  i_UB|i_SP, "%.3f", "Resonance (Q): %.3f",   0.1,   1000,    0.707,  0.001, 9);
     parDcl(p_fxFltModD1, "Cutoff depth",  "FltModF",  i_UB|i_SP, "%.3f oct", "Cutoff depth: %.3f oct",   0,   10,    2,  0.001, 2);
     parDcl(p_fxFltModD1+1, "Resonance depth",  "FltModQ",  i_UB|i_SP, "%.3f oct", "Resonance depth: %.3f oct",   0,   4,    1,  0.001, 2);
     parDcl(p_fxFltModA1, "Cutoff atten.",  "FltAttF",  i_UB|i_SP, "%.3f", "Cutoff atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_fxFltModA1+1, "Resonance atten.",  "FltAttQ",  i_UB|i_SP, "%.3f", "Resonance atten.: %.3f",   -10,   10,    1,  0.001, 0);
-    parDcl(p_fxSatDrive, "Drive",  "SatDrive",  i_UB|i_SP, "%.1f dB", "Drive: %.1f dB",   0,   48,    12,  0.1, 0);
-    parDcl(p_fxSatBias, "Bias",  "SatBias",  i_UB|i_SP, "%.3f", "Bias: %.3f",   -1,   1,    0,  0.001, 0);
+    parDcl(p_fxSatDrive, "Drive",  "SatDrive",  i_UB|i_SP, "%.1f dB", "Drive: %.1f dB",   0,   96,    12,  0.1, 0);
+    parDcl(p_fxSatBias, "Bias",  "SatBias",  i_UB|i_SP, "%.3f", "Bias: %.3f",   -4,   4,    0,  0.001, 0);
     parDcl(p_fxSatMix, "Mix",  "SatMix",  i_UB|i_SP, "%.1f %%", "Mix: %.1f %%",   0,   100,    100,  0.1, 0);
-    parDcl(p_fxSatOut, "Output",  "SatOut",  i_UB|i_SP, "%.1f dB", "Output: %.1f dB",   -24,   12,    0,  0.1, 0);
-    parDcl(p_fxSatModD1, "Drive depth",  "SatModD",  i_UB|i_SP, "%.1f dB", "Drive depth: %.1f dB",   0,   48,    12,  0.1, 0);
-    parDcl(p_fxSatModD1+1, "Bias depth",  "SatModB",  i_UB|i_SP, "%.3f", "Bias depth: %.3f",   0,   2,    0.5,  0.001, 0);
+    parDcl(p_fxSatOut, "Output",  "SatOut",  i_UB|i_SP, "%.1f dB", "Output: %.1f dB",   -48,   24,    0,  0.1, 0);
+    parDcl(p_fxSatOrder, "Order",  "SatOrder",  i_UB|i_SP, "%.3f", "Order (n): %.3f",   0,   32,    3,  0.001, 2);
+    parDcl(p_fxSatAmp, "Sine amount",  "SatAmp",  i_UB|i_SP, "%.3f", "Sine amount (A): %.3f",   -8,   8,    1,  0.001, 0);
+    parDcl(p_fxSatStretch, "Stretch",  "SatStrch",  i_UB|i_SP, "%.3f", "Stretch: %.3f",   0,   16,    1,  0.001, 2);
+    parDcl(p_fxSatModD1, "Drive depth",  "SatModD",  i_UB|i_SP, "%.1f dB", "Drive depth: %.1f dB",   0,   96,    12,  0.1, 0);
+    parDcl(p_fxSatModD1+1, "Bias depth",  "SatModB",  i_UB|i_SP, "%.3f", "Bias depth: %.3f",   0,   4,    0.5,  0.001, 0);
     parDcl(p_fxSatModA1, "Drive atten.",  "SatAttD",  i_UB|i_SP, "%.3f", "Drive atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_fxSatModA1+1, "Bias atten.",  "SatAttB",  i_UB|i_SP, "%.3f", "Bias atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxSatModD1+2, "Order depth",  "SatModO",  i_UB|i_SP, "%.3f", "Order depth: %.3f",   0,   32,    2,  0.001, 2);
+    parDcl(p_fxSatModA1+2, "Order atten.",  "SatAttO",  i_UB|i_SP, "%.3f", "Order atten.: %.3f",   -10,   10,    1,  0.001, 0);
 );
 
 
@@ -6401,6 +6513,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
         (mdr === its_RdrMode_Read) ? (
             // Mode reader
             inc = (reader[its_Rdr_AbsInc] + its_Mod_Val(reader + its_Rdr_Mod1 + its_ModDist)) * reader[its_Rdr_AdjInc]; // speed, modulated
+            inc = max(-256, min(256, inc)); // the reads stay in the guard samples (B_FADESIZ + BF_LIM)
             loc = reader[its_Rdr_Abspos]; // loc is the index to read
             it = (loc === floor(loc)); // true if reading at integer positions
             ty = reader[its_Rdr_LoopType];
@@ -6483,7 +6596,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                     // This becomes the new read position
                     reader[its_Rdr_Abspos] = reader[its_Rdr_Start] + floor(w * srate);
                     reader[its_Rdr_NxtPosSec] = -1;
-                    F = reader[its_Rdr_XFadeCntNxt];
+                    f = reader[its_Rdr_XFadeCntNxt];
                     s = 1;
                 ) ;
 
@@ -6491,20 +6604,20 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
 
                 k = reader[its_Rdr_Abspos];
                 v = reader[its_Rdr_AbsInc];
-                F = reader[its_Rdr_BFadeCntNxt];
+                f = reader[its_Rdr_BFadeCntNxt];
 
                 (ty === its_RdrLoopTypeCatch) ? (
                     // Normal read, is catched by a loop
                     ((k >= reader[its_Rdr_RegEIn]) && (k < reader[its_Rdr_RegEOut]) && (v >= 0)) ? (
                         // Time to start a cross fade
                         reader[its_Rdr_Abspos] = reader[its_Rdr_RegSOut]; // will X-fade with this
-                        F = reader[its_Rdr_XFadeCntNxt];
+                        f = reader[its_Rdr_XFadeCntNxt];
                         s = 1;
                     ) :
-                    ((k < reader[its_Rdr_RegSIn]) && (k >= reader[its_Rdr_RegSout]) && (v < 0)) ? (
+                    ((k < reader[its_Rdr_RegSIn]) && (k >= reader[its_Rdr_RegSOut]) && (v < 0)) ? (
                         // Time to start a cross fade
                         reader[its_Rdr_Abspos] = reader[its_Rdr_RegEOut]; // will X-fade with this
-                        F = reader[its_Rdr_XFadeCntNxt];
+                        f = reader[its_Rdr_XFadeCntNxt];
                         s = 1;
                     );
                 ) :
@@ -6514,13 +6627,13 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                     (((k >= reader[its_Rdr_RegEIn]) || (k < reader[its_Rdr_RegSOut])) && (v >= 0)) ? (
                         // Time to start a cross fade
                         reader[its_Rdr_Abspos] = reader[its_Rdr_RegSOut]; // will X-fade with this
-                        F = reader[its_Rdr_XFadeCntNxt];
+                        f = reader[its_Rdr_XFadeCntNxt];
                         s = 1;
                     ) :
                     (((k < reader[its_Rdr_RegSIn]) || (k > reader[its_Rdr_RegEOut])) && (v < 0)) ? (
                         // Time to start a cross fade
                         reader[its_Rdr_Abspos] = reader[its_Rdr_RegEOut]; // will X-fade with this
-                        F = reader[its_Rdr_XFadeCntNxt];
+                        f = reader[its_Rdr_XFadeCntNxt];
                         s = 1;
                     );
                 ) :
@@ -6530,20 +6643,20 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                     ((k >= reader[its_Rdr_RegEIn]) && (v >= 0)) ? (
                         // Time to start the end cross fade
                         reader[its_Rdr_Abspos] = LOW_VALUE; // will X-fade with this
-                        F = reader[its_Rdr_XFadeCntNxt];
+                        f = reader[its_Rdr_XFadeCntNxt];
                         s = 1;
                     ) :
                     ((k < reader[its_Rdr_RegSIn]) && (v < 0)) ? (
                         // Time to start a cross fade
                         reader[its_Rdr_Abspos] = LOW_VALUE; // will X-fade with this
-                        F = reader[its_Rdr_XFadeCntNxt];
+                        f = reader[its_Rdr_XFadeCntNxt];
                         s = 1;
                     );
                 ) :
 
                 (ty === its_RdrLoopTypeStop) ? (
                     reader[its_Rdr_Abspos] = LOW_VALUE; // will X-fade with this
-                    F = reader[its_Rdr_XFadeCntNxt];
+                    f = reader[its_Rdr_XFadeCntNxt];
                     s = 1;
                 );
 
@@ -6552,13 +6665,13 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                     (ty !== its_RdrLoopTypeOnce) ? (
                         // loop at the end
                         ((k >= reader[its_Rdr_Last] - B_FADESIZ) && (v >= 0)) ? (
-                            F = reader[its_Rdr_BFadeCntNxt];
+                            f = reader[its_Rdr_BFadeCntNxt];
                             // start cross fading
                             reader[its_Rdr_Abspos] = k - reader[its_Rdr_SmplCnt];
                             s = 1;
                         ) :
                         ((k < reader[its_Rdr_Start] + B_FADESIZ) && (v < 0)) ? (
-                            F = reader[its_Rdr_BFadeCntNxt];
+                            f = reader[its_Rdr_BFadeCntNxt];
                             // start cross fading
                             reader[its_Rdr_Abspos] = k + reader[its_Rdr_SmplCnt];
                             s = 1;
@@ -6567,14 +6680,14 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                     (
                         // Stop at the end
                         ((k >= reader[its_Rdr_Last] - B_FADESIZ) && (v >= 0)) ? (
-                            F = reader[its_Rdr_BFadeCntNxt];
+                            f = reader[its_Rdr_BFadeCntNxt];
                             // start fading, stop at the end
                             reader[its_Rdr_Abspos] = LOW_VALUE;
                             reader[its_Rdr_Tmp3] += 1;
                             s = 1;
                         ) :
                         ((k < reader[its_Rdr_Start] + B_FADESIZ) && (v < 0)) ? (
-                            F = reader[its_Rdr_BFadeCntNxt];
+                            f = reader[its_Rdr_BFadeCntNxt];
                             // start fading, stop at the end
                             reader[its_Rdr_Abspos] = LOW_VALUE;
                             reader[its_Rdr_Tmp3] += 1;
@@ -6586,7 +6699,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                 (s) ? (
                     reader[its_Rdr_Tmp4] += 1;
                     reader[its_Rdr_AbsAuxpos] = k; // previous read position becomes the new aux
-                    reader[its_Rdr_XFadeCnt] = F; // start counting
+                    reader[its_Rdr_XFadeCnt] = f; // start counting
                     reader[its_Rdr_XFadeIncr] = SINUS_TABLE_SIZE / reader[its_Rdr_XFadeCnt];
                     reader[its_Rdr_XFadeIdxPos] = 0;
                 );
@@ -6676,7 +6789,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
 );
 
 function exec_writer(writer, nbr)
-local (lcbl, k, s, x, bp, val, vol, f, n, md, ic, mp)
+local (lcbl, k, s, x, bp, val, vol, f, n, md, ic, mp, lg)
 (
     its_WrtErrXe = (writer[its_Wrt_Check] !== BLOCK_CHECK);
     (its_WrtErrXe) ? (
@@ -6740,7 +6853,9 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md, ic, mp)
         // the modulations : record gain (depth in dB), overdub (depth in %)
         mp = writer + its_Wrt_Mod1;
         (mp[its_Mod_Src] !== 0) ? (vol *= 10^(its_Mod_Val(mp) / 20));
-        (mp[its_ModDist + its_Mod_Src] !== 0) ? (x = max(0, min(100, x + its_Mod_Val(mp + its_ModDist))));
+        (mp[its_ModDist + its_Mod_Src] !== 0) ? (x = max(-150, min(150, x + its_Mod_Val(mp + its_ModDist))));
+        // gain of the loop (the previous content) : above 1 (regenerative feedback), the written value goes through a tanh
+        lg = abs(0.01 * x) * ((md === its_WrtMode_Sum) ? 1 : abs(vol));
         // Sample read
         lcbl = writer[its_Wrt_Lcbl];
         // the cells [Cell ... Cell+n-1] go to the channels [f ... f+n-1] of the line
@@ -6752,13 +6867,16 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md, ic, mp)
             ((bp = lcbl[its_Lin_BF1ST + f + s]) !== 0) ? (
                 val = smpl_tab[ic + s];
                 (md === its_WrtMode_Sum) ? (
-                    k[bp] = val = 0.01 * x * k[bp] + vol * val;
+                    val = 0.01 * x * k[bp] + vol * val;
                 ) : (
-                    (x > 0) ? (
-                        val = 0.01 * (x * k[bp] + (100 - x) * val);
+                    (x !== 0) ? (
+                        val = 0.01 * (x * k[bp] + (100 - min(100, abs(x))) * val); // x < 0 : the previous content inverted
                     );
-                    k[bp] = val = vol * val;
+                    val = vol * val;
                 );
+                (lg > 1) ? (val = its_Sat_Shape(val, its_SatSoft, 0, 0));
+                !(abs(val) < its_FinMax) ? (val = 0; its_NaNCnt += 1;);
+                k[bp] = val;
                 // when at start/end of buffer, duplicate samples in guard area
                 (k < writer[its_Wrt_Start] + BF_LIM) ? (
                     k[bp + writer[its_Wrt_SmplCnt]] = val;
@@ -6818,12 +6936,16 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md, ic, mp)
     Saturation : Out = Par6 * ((1 - Par4) * x + Par4 * (shape(Par1 * x + Par3) - shape(Par3))), x = Vol_1 * Src_1, with the drive
         (Par1, dB) and the bias (Par3) modulated ; computed 2^Par5 times per sample (linear interpolation of x, then an
         anti-aliasing low pass, 8th order Butterworth at 0.45 * srate), then a DC blocker ; in its work area
+        the shape : mode Par2 (tanh, hard clip, fold, sine fold, x - A sin(n x), Chebyshev T_n, Cheb. sum), the order n in Par7,
+        A in Par9,
+        the stretch in Par8 (Cheb. sum), each one modulated by the third input ; the weights of Cheb. sum in its_Efx_Harm1
     Bypass (its_EfxStat_Bypass) : Out = the first source not null, unchanged (an LFO : nothing)
+    Auto-limiter (its_Efx_Lim, not the LFO) : the output of the type, divided by max(1, its smoothed peak), then the output gain
     the structure is checked again after each modification (its_Efx_Check reset to 0) ; the error is kept in its_Efx_Error
 */
 function exec_fx(fx, nbr)
 local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, mbad, mp, f, q, md, cf, st, w, cw, sw, al, a0, b0, b1, b2, y,
-       wk, ns, k, qk, s, os, gd, bi, shb, mix, og, u, p, yd)
+       wk, ns, k, qk, s, os, gd, bi, shb, mix, og, u, p, yd, on, lim, out, go, m, e)
 (
     (fx[its_Efx_Check] !== BLOCK_CHECK) ? (
         err = mbad = 0;
@@ -6864,7 +6986,7 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                 );
             );
             // the modulation inputs : an error is not fatal (no modulation, the error is shown)
-            ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat)) ? (mbad = its_Mod_Resolve(fx + its_Efx_Mod1, 2));
+            ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat)) ? (mbad = its_Mod_Resolve(fx + its_Efx_Mod1, (ty === its_Efx_TySat) ? 3 : 2));
         );
         fx[its_Efx_Error] = (err === 0) && mbad ? 2715 : err; // 2715 : a modulation input is not valid
         (err === 0) ? (
@@ -6878,6 +7000,11 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
             memset(dst, 0, ccnt); // own cable : this effect is its only source
             fx[its_Efx_OutDirty] = 1;
         );
+        // the auto-limiter (not the LFO, not in Bypass) : the effect writes into its_FxTmp, then the limiter adds it to dst
+        lim = fx[its_Efx_Lim] && (fx[its_Efx_Type] !== its_Efx_TyLFO) && (fx[its_Efx_Status] !== its_EfxStat_Bypass);
+        out = lim ? its_FxTmp : dst;
+        lim ? memset(out, 0, ccnt);
+        go = 1; // the output gain, after the limiter (Saturation : Par6)
         (fx[its_Efx_Status] === its_EfxStat_Bypass) ? (
             (its_Fx_NSrc(fx[its_Efx_Type]) > 0) ? (
                 c = 0; ptsrc = fx + its_Efx_Src1;
@@ -6922,8 +7049,8 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                 src = smpl_tab + fx[its_Efx_Cell1];
                 g = fx[its_Efx_Vol1];
                 mp = fx + its_Efx_Mod1;
-                f = max(10, min(0.45 * srate, fx[its_Efx_Par1] * 2^its_Mod_Val(mp)));
-                q = max(0.1, min(100, fx[its_Efx_Par1 + 1] * 2^its_Mod_Val(mp + its_ModDist)));
+                f = max(1, min(0.45 * srate, fx[its_Efx_Par1] * 2^its_Mod_Val(mp)));
+                q = max(0.05, min(2000, fx[its_Efx_Par1 + 1] * 2^its_Mod_Val(mp + its_ModDist)));
                 md = fx[its_Efx_Par1 + 2];
                 ns = its_Flt_Stages(fx);
                 cf = wk + its_FxW_Hdr;
@@ -6962,7 +7089,8 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                             x = (md === its_FltLP1) ? s[0] : x - s[0];
                             s += 2;
                         );
-                        dst[i] += x;
+                        !(abs(x) < its_FinMax) ? (memset(st + 2 * ns * i, 0, 2 * ns); x = 0; its_NaNCnt += 1;);
+                        out[i] += x;
                         i += 1;
                     );
                 ) : (
@@ -6978,7 +7106,8 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                             x = y;
                             s += 2; c += 5;
                         );
-                        dst[i] += x;
+                        !(abs(x) < its_FinMax) ? (memset(st + 2 * ns * i, 0, 2 * ns); x = 0; its_NaNCnt += 1;);
+                        out[i] += x;
                         i += 1;
                     );
                 );
@@ -6990,13 +7119,16 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                 src = smpl_tab + fx[its_Efx_Cell1];
                 g = fx[its_Efx_Vol1];
                 mp = fx + its_Efx_Mod1;
-                gd = 10^(max(-24, min(72, fx[its_Efx_Par1] + its_Mod_Val(mp))) / 20); // drive
-                bi = max(-2, min(2, fx[its_Efx_Par1 + 2] + its_Mod_Val(mp + its_ModDist))); // bias
+                gd = 10^(max(-48, min(144, fx[its_Efx_Par1] + its_Mod_Val(mp))) / 20); // drive
+                bi = max(-8, min(8, fx[its_Efx_Par1 + 2] + its_Mod_Val(mp + its_ModDist))); // bias
                 md = fx[its_Efx_Par1 + 1];
                 mix = max(0, min(1, fx[its_Efx_Par1 + 3]));
                 og = 10^(fx[its_Efx_Par1 + 5] / 20);
+                lim ? (go = og; og = 1;); // the limiter, then the output gain
                 os = 2^max(0, min(its_SatOSCnt - 1, floor(fx[its_Efx_Par1 + 4])));
-                shb = its_Sat_Shape(bi, md); // the output for a null input : removed
+                // the order (Par7), or the stretch (Par8) in the mode Cheb. sum, modulated
+                on = max(-64, min(64, fx[its_Efx_Par1 + ((md === its_SatChebSum) ? 7 : 6)] + its_Mod_Val(mp + 2 * its_ModDist)));
+                shb = its_Sat_Shape(bi, md, on, fx); // the output for a null input : removed
                 cf = wk + its_FxW_Hdr;
                 st = cf + 5 * 4;
                 (os !== wk[its_FxW_Md]) ? (
@@ -7015,11 +7147,11 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                     x = g * src[i];
                     s = st + its_SatChW * i;
                     (os === 1) ? (
-                        y = its_Sat_Shape(gd * x + bi, md) - shb;
+                        y = its_Sat_Shape(gd * x + bi, md, on, fx) - shb;
                     ) : (
                         k = 1; loop(os,
                             u = s[0] + (x - s[0]) * k / os; // linear interpolation from the previous input
-                            v = its_Sat_Shape(gd * u + bi, md) - shb;
+                            v = its_Sat_Shape(gd * u + bi, md, on, fx) - shb;
                             c = cf; p = s + 3;
                             loop(4,
                                 y = c[0] * v + p[0];
@@ -7035,7 +7167,8 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                     );
                     yd = y - s[1] + its_SatDcK * s[2]; // DC blocker (about 10 Hz)
                     s[1] = y; s[2] = yd;
-                    dst[i] += og * ((1 - mix) * x + mix * yd);
+                    !(abs(yd) < its_FinMax) ? (memset(s, 0, its_SatChW); yd = 0; its_NaNCnt += 1;);
+                    out[i] += og * ((1 - mix) * x + mix * yd);
                     i += 1;
                 );
             );
@@ -7047,12 +7180,23 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                     src = smpl_tab + c;
                     g = ptsrc[its_Efx_Vol1 - its_Efx_Src1];
                     i = 0; loop(ccnt,
-                        dst[i] += g * src[i];
+                        out[i] += g * src[i];
                         i += 1;
                     );
                 );
                 ptsrc += its_EfxDist;
             );
+        );
+        (lim) ? (
+            // auto-limiter : peak envelope of all the channels (attack 5 ms, release 1.5 s), gain 1 / max(1, env) ;
+            // short overshoots are possible (no look-ahead), at the attacks and when a setting changes
+            m = 0; i = 0; loop(ccnt, m = max(m, abs(out[i])); i += 1;);
+            e = fx[its_Efx_LimEnv];
+            e += ((m > e) ? its_LimAtt : its_LimRel) * (m - e);
+            !(abs(e) < its_FinMax) ? (e = 1; its_NaNCnt += 1;);
+            fx[its_Efx_LimEnv] = e;
+            g = go / max(1, e);
+            i = 0; loop(ccnt, dst[i] += g * out[i]; i += 1;);
         );
         exec_effect += 1;
     ) :
@@ -7141,7 +7285,7 @@ sprintf(#A008,"buff-r  %d {%d  ch=%d  bf=%d}", ln, nlcbl, i, nlcbl[i]);
             );
             nlcbl[its_Lin_Check] = 0; // for future fast check
 sprintf(#A006,"nlcbl %d {%d  ch=%d  sz=%d}", ln, nlcbl, nlcbl[its_Lin_ChCnt], nlcbl[its_Lin_SmplCnt]);
-            dbg_show_2(mem,66)
+            dbg_show_2(i__mem,66)
         );
         ln += 1;
     );
@@ -7732,6 +7876,919 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
 );//mSL_gui_ops
 
 
+//============== mSL "table" : the description of a patch ===============
+/*
+    table(data( [Interstys] block block ... ))     (tests : Scripts/Ex-1NNN.mSL)
+    A flat stream of words ; a block starts with its header and ends at the next header :
+        Clear                           deletes all the lines, readers, writers and effects
+        Line id [length s] [chan n] [spls n]
+                                        creates the line ; keeps it if it is the same, replaces it otherwise
+                                        (its writers and readers follow, Ln_Rebind) ; "status" and "freq" are
+                                        accepted and ignored, so that a Dump can be read again
+        Writer id  line L  source S  status Ready|Paused|Writing  gain dB  overdub %  mode XFade|Sum  first n  used n
+        Reader id  line L | writer W  delay s  speed x  status Ready|Paused|Reading  out D  vol dB  first n  used n
+                   loop once|repeat|catch|loop|exit|stop
+                                        "line" : reader mode, "writer" : delay mode ; the status is set last
+        Dump Line|Writer|Reader id      logs the module in the same syntax ; Dump All : all the modules
+        Check Line|Writer|Reader id key value ...
+                                        logs "Check Writer n OK", or an error 2759 for each difference
+        Free Line|Writer|Reader id      deletes the module
+    id : a number 1 ... LN_CNT (WR_CNT, RD_CNT), or a name (not a reserved word) valid in this table only ;
+    a new name gets a free module, that no number of the table designates.
+    Sources S : In:c  Out:c  Bus n[:c]  Ctl n  Reader id[:c]  Effect n[:c] ; outputs D : Own  Out:c  Bus n[:c]
+    (channels from 0, modules from 1, as in the pads).
+    An omitted key keeps the value of the module, or takes its default (a line : 1 s, 2 channels).
+    Four passes on the words, nothing is modified before the last one :
+        0 marks the modules designated by a number, 1 gives a module to the names of the headers,
+        2 checks everything on a simulation (lines, channels...), 3 executes.
+    Errors 2750 ... 2766 ; the result of "table" is 0, or the first error.
+    It runs in @gfx (the mSL threads of Interstys) : the state of the analysis is global.
+*/
+its_TK_Cnt = 0;
+its_TK_List = make_array(64); // the reserved words (they can't be names)
+function its_TK(name) local(s) ( s = mSL_symbol(name); its_TK_List[its_TK_Cnt] = s; its_TK_Cnt += 1; s; );
+its_TK_Interstys = its_TK("Interstys");
+its_TK_End = its_TK("End");
+its_TK_EofMark = its_TK("EofMark");
+its_TK_Clear = its_TK("Clear");
+its_TK_Line = its_TK("Line");
+its_TK_Writer = its_TK("Writer");
+its_TK_Reader = its_TK("Reader");
+its_TK_Effect = its_TK("Effect");
+its_TK_Global = its_TK("Global");
+its_TK_Dump = its_TK("Dump");
+its_TK_Check = its_TK("Check");
+its_TK_Free = its_TK("Free");
+its_TK_All = its_TK("All");
+its_TK_In = its_TK("In");
+its_TK_Out = its_TK("Out");
+its_TK_Bus = its_TK("Bus");
+its_TK_Ctl = its_TK("Ctl");
+its_TK_Own = its_TK("Own");
+its_TK_length = its_TK("length");
+its_TK_chan = its_TK("chan");
+its_TK_spls = its_TK("spls");
+its_TK_freq = its_TK("freq");
+its_TK_status = its_TK("status");
+its_TK_Ready = its_TK("Ready");
+its_TK_Undefined = its_TK("Undefined");
+its_TK_Colon = ':' + mSL_CharConst; // as mSL_cstComma
+// reserved for the next blocks
+its_TK("mod"); its_TK("depth"); its_TK("att"); its_TK("file");
+
+// the keys of the writers and of the readers : their symbol, their name ; values (enumerations : the symbol of each value)
+its_TbWNk = 8;
+its_TbWKey = make_array(its_TbWNk); its_TbWNam = make_array(its_TbWNk);
+its_TbRNk = 10;
+its_TbRKey = make_array(its_TbRNk); its_TbRNam = make_array(its_TbRNk);
+function its_TbKey(keys, nams, i, name) ( nams[i] = name; keys[i] = its_TK(name); );
+its_TbKey(its_TbWKey, its_TbWNam, 0, "line"); its_TbKey(its_TbWKey, its_TbWNam, 1, "source");
+its_TbKey(its_TbWKey, its_TbWNam, 2, "status"); its_TbKey(its_TbWKey, its_TbWNam, 3, "gain");
+its_TbKey(its_TbWKey, its_TbWNam, 4, "overdub"); its_TbKey(its_TbWKey, its_TbWNam, 5, "mode");
+its_TbKey(its_TbWKey, its_TbWNam, 6, "first"); its_TbKey(its_TbWKey, its_TbWNam, 7, "used");
+its_TbKey(its_TbRKey, its_TbRNam, 0, "line"); its_TbKey(its_TbRKey, its_TbRNam, 1, "writer");
+its_TbKey(its_TbRKey, its_TbRNam, 2, "delay"); its_TbKey(its_TbRKey, its_TbRNam, 3, "speed");
+its_TbKey(its_TbRKey, its_TbRNam, 4, "status"); its_TbKey(its_TbRKey, its_TbRNam, 5, "out");
+its_TbKey(its_TbRKey, its_TbRNam, 6, "vol"); its_TbKey(its_TbRKey, its_TbRNam, 7, "first");
+its_TbKey(its_TbRKey, its_TbRNam, 8, "used"); its_TbKey(its_TbRKey, its_TbRNam, 9, "loop");
+// statuses (its_WrtStat_..., its_RdrStat_... : 0 ... 4), modes of the writer, loops of the reader (its_RdrLoopType...)
+its_TbWSt = make_array(5); its_TbRSt = make_array(5);
+its_TbWSt[0] = its_TbRSt[0] = its_TK_Undefined; its_TbWSt[1] = its_TbRSt[1] = its_TK("Created");
+its_TbWSt[2] = its_TbRSt[2] = its_TK_Ready; its_TbWSt[3] = its_TbRSt[3] = its_TK("Paused");
+its_TbWSt[4] = its_TK("Writing"); its_TbRSt[4] = its_TK("Reading");
+its_TbWMd = make_array(2); its_TbWMd[its_WrtMode_XFade] = mSL_symbol("XFade"); its_TbWMd[its_WrtMode_Sum] = mSL_symbol("Sum");
+its_TbRLp = make_array(6);
+i__ii = 0; loop(6, its_TbRLp[i__ii] = mSL_symbol(menu_Rdr_Loop_N[i__ii]); i__ii += 1;);
+
+its_TbNSz = 256; // the names of a table
+its_TbNSym = make_array(its_TbNSz);
+its_TbNTyp = make_array(its_TbNSz);
+its_TbNIdx = make_array(its_TbNSz);
+its_TbResv = make_array(LN_CNT + WR_CNT + RD_CNT); // 1 : a module designated by a number, or given to a name
+its_TbSimSp = make_array(LN_CNT + 1); // the simulation of pass 2 : the lines (samples, 0 : no line)
+its_TbSimCh = make_array(LN_CNT + 1); // and their channels
+its_TbSimWE = make_array(WR_CNT + 1); // the writers : 1 if they exist
+its_TbSimWL = make_array(WR_CNT + 1); // their line (-1 : none)
+its_TbSimRE = make_array(RD_CNT + 1); // the readers : 1 if they exist
+its_TbKS = make_array(16); // the keys of a block : 1 if given
+its_TbK1 = make_array(16); // their value
+its_TbK2 = make_array(16); // their second value (first channel of a source, of an output)
+
+// the next word (the commas are skipped), its_TK_End after the last one
+function its_Tb_Peek() local(w)
+(
+    w = its_TK_End;
+    while ((its_Tb_ptr < its_Tb_itc) && ((w = its_Tb_tbl[its_Tb_ptr]) === mSL_cstComma)) (
+        its_Tb_ptr += 1; w = its_TK_End;
+    );
+    w;
+);
+
+function its_Tb_Next() local(w)
+(
+    w = its_Tb_Peek();
+    (its_Tb_ptr < its_Tb_itc) ? (its_Tb_ptr += 1);
+    w;
+);
+
+// the first error stops the analysis
+function its_Tb_Err(code, msg)
+(
+    (its_Tb_error === 0) ? (
+        its_Tb_error = code;
+        sprintf(#its_TbMsg, "ERR: %04d    Interstys table (word %d) : %s", code, its_Tb_ptr, msg);
+        mSL_log(SysLogBox, #its_TbMsg);
+    );
+);
+
+function its_Tb_IsName(w) local(i, r)
+(
+    r = (w > mSL_Sym_Low) && (w < mSL_Sym_High);
+    i = 0; while (r && (i < its_TK_Cnt)) ( (its_TK_List[i] === w) ? (r = 0); i += 1; );
+    r;
+);
+
+// a header ends the current block
+function its_Tb_IsHead(w)
+(
+    (w === its_TK_Clear) || (w === its_TK_Line) || (w === its_TK_Writer) || (w === its_TK_Reader)
+        || (w === its_TK_Effect) || (w === its_TK_Global) || (w === its_TK_Dump) || (w === its_TK_Check)
+        || (w === its_TK_Free) || (w === its_TK_End) || (w === its_TK_EofMark);
+);
+
+// a number in [vmin, vmax] (a "-" word before it changes its sign) ; Undef and an error otherwise
+function its_Tb_Num(key, vmin, vmax) local(w, s)
+(
+    s = 1;
+    ((w = its_Tb_Next()) === mSL_cstMinus) ? ( s = -1; w = its_Tb_Next(); );
+    (abs(w) < mSL_CharConst) ? (w *= s);
+    ((abs(w) < mSL_CharConst) && (w >= vmin) && (w <= vmax)) ? w : (
+        sprintf(#its_TbW, "%s : %s is not a value in [%g, %g]", key, mSL_edit_value(#its_TbV, w), vmin, vmax);
+        its_Tb_Err(2754, #its_TbW);
+        Undef;
+    );
+);
+
+function its_Tb_Int(key, vmin, vmax) local(v)
+(
+    v = its_Tb_Num(key, vmin, vmax);
+    ((its_Tb_error === 0) && (v !== floor(v))) ? (
+        sprintf(#its_TbW, "%s : %g is not an integer", key, v);
+        its_Tb_Err(2754, #its_TbW);
+    );
+    v;
+);
+
+// one of the "n" symbols of "syms" : its index
+function its_Tb_Enum(key, syms, n) local(w, i, k)
+(
+    w = its_Tb_Next();
+    k = -1; i = 0; while ((k < 0) && (i < n)) ( (syms[i] === w) ? (k = i); i += 1; );
+    (k < 0) ? (
+        sprintf(#its_TbW, "%s : %s is not a possible value", key, mSL_edit_value(#its_TbV, w));
+        its_Tb_Err(2754, #its_TbW);
+    );
+    k;
+);
+
+function its_Tb_KeyErr(w, blk)
+(
+    sprintf(#its_TbW, "%s : unknown key %s", blk, mSL_edit_value(#its_TbV, w));
+    its_Tb_Err(2753, #its_TbW);
+);
+
+function its_Tb_TyName(ty)
+(
+    (ty === its_TK_Line) ? "Line" : (ty === its_TK_Writer) ? "Writer" : (ty === its_TK_Reader) ? "Reader" : "Effect";
+);
+
+function its_Tb_Count(ty)
+(
+    (ty === its_TK_Line) ? LN_CNT : (ty === its_TK_Writer) ? WR_CNT : RD_CNT;
+);
+
+// the first entry of the type "ty" in its_TbResv
+function its_Tb_RBase(ty)
+(
+    (ty === its_TK_Line) ? 0 : (ty === its_TK_Writer) ? LN_CNT : LN_CNT + WR_CNT;
+);
+
+// the module "i" of the type "ty" exists in the simulation
+function its_Tb_SimEx(ty, i)
+(
+    (ty === its_TK_Line) ? (its_TbSimSp[i] > 0) : (ty === its_TK_Writer) ? its_TbSimWE[i] : its_TbSimRE[i];
+);
+
+function its_Tb_Find(w) local(i, k)
+(
+    k = -1; i = 0;
+    while ((k < 0) && (i < its_TbNCnt)) ( (its_TbNSym[i] === w) ? (k = i); i += 1; );
+    k;
+);
+
+/*
+    the module of type "ty" designated by the word "w" : 0 ... count-1 ; -1 after an error ;
+    -2 for a name which has no module yet (passes 0 and 1) ; "head" : 1 in the header of a block
+*/
+function its_Tb_Id(ty, w, head) local(k, i, n, rb)
+(
+    k = -1;
+    n = its_Tb_Count(ty);
+    ((w === floor(w)) && (w >= 1) && (w <= n)) ? (
+        k = w - 1;
+    ) :
+    its_Tb_IsName(w) ? (
+        ((i = its_Tb_Find(w)) >= 0) ? (
+            (its_TbNTyp[i] === ty) ? (
+                k = its_TbNIdx[i];
+            ) : (
+                sprintf(#its_TbW, "%s is not a %s", mSL_edit_value(#its_TbV, w), its_Tb_TyName(ty));
+                its_Tb_Err(2756, #its_TbW);
+            );
+        ) :
+        ((its_Tb_mode === 0) || ((its_Tb_mode === 1) && !head)) ? (
+            k = -2;
+        ) :
+        (its_Tb_mode === 1) ? (
+            // a free module, that no number of the table designates
+            rb = its_Tb_RBase(ty);
+            i = 0; while ((k < 0) && (i < n)) ( ((its_Tb_SimEx(ty, i) == 0) && (its_TbResv[rb + i] === 0)) ? (k = i); i += 1; );
+            (k < 0) ? (
+                sprintf(#its_TbW, "no free %s for %s", its_Tb_TyName(ty), mSL_edit_value(#its_TbV, w));
+                its_Tb_Err(2755, #its_TbW);
+            ) :
+            (its_TbNCnt >= its_TbNSz) ? (
+                k = -1;
+                its_Tb_Err(2762, "too many names");
+            ) : (
+                its_TbNSym[its_TbNCnt] = w; its_TbNTyp[its_TbNCnt] = ty; its_TbNIdx[its_TbNCnt] = k;
+                its_TbNCnt += 1;
+                its_TbResv[rb + k] = 1;
+                sprintf(#its_TbW, "Interstys table : %s = %s %d", mSL_edit_value(#its_TbV, w), its_Tb_TyName(ty), k + 1);
+                mSL_log(SysLogBox, #its_TbW);
+            );
+        ) : (
+            sprintf(#its_TbW, "unknown name %s", mSL_edit_value(#its_TbV, w));
+            its_Tb_Err(2757, #its_TbW);
+        );
+    ) : (
+        sprintf(#its_TbW, "%s : bad identifier %s (1 ... %d, or a name)", its_Tb_TyName(ty), mSL_edit_value(#its_TbV, w), n);
+        its_Tb_Err(2752, #its_TbW);
+    );
+    k;
+);
+
+// the type of module named by the word "w" (Line, Writer, Reader), or 0 and an error
+function its_Tb_Type(w, what)
+(
+    ((w === its_TK_Line) || (w === its_TK_Writer) || (w === its_TK_Reader)) ? w : (
+        sprintf(#its_TbW, "%s : %s is not Line, Writer or Reader", what, mSL_edit_value(#its_TbV, w));
+        its_Tb_Err(2751, #its_TbW);
+        0;
+    );
+);
+
+// the modules as they are now, for the simulation
+function its_Tb_SimInit() local(i, b)
+(
+    i = 0; loop(LN_CNT,
+        b = Lines_Set[i];
+        ((b > BASE_MEMORY) && (b[-2] === KW_lcbl)) ? (
+            its_TbSimSp[i] = b[its_Lin_SmplCnt]; its_TbSimCh[i] = b[its_Lin_ChCnt];
+        ) : (
+            its_TbSimSp[i] = its_TbSimCh[i] = 0;
+        );
+        i += 1;
+    );
+    i = 0; loop(WR_CNT,
+        b = Writers_set[i];
+        (its_TbSimWE[i] = ((b > BASE_MEMORY) && (b[-2] === KW_writ))) ? (
+            its_TbSimWL[i] = b[its_Wrt_LineNb];
+        ) : (
+            its_TbSimWL[i] = -1;
+        );
+        i += 1;
+    );
+    i = 0; loop(RD_CNT,
+        b = Readers_set[i];
+        its_TbSimRE[i] = (b > BASE_MEMORY) && (b[-2] === KW_read);
+        i += 1;
+    );
+);
+
+// a reader of line "k" which uses channels beyond "nch" : its number + 1, or 0
+function its_Tb_ChUser(k, nch) local(i, r, u)
+(
+    u = 0; i = 0;
+    while ((u === 0) && (i < RD_CNT)) (
+        (((r = Readers_set[i]) > BASE_MEMORY) && (r[-2] === KW_read) && (r[its_Rdr_LineNb] === k)
+            && (r[its_Rdr_Bf1stChan] + r[its_Rdr_BfChanUsed] > nch)) ? (u = i + 1);
+        i += 1;
+    );
+    u;
+);
+
+// the line "lnum" was replaced by Ln_Make : its writers and readers take the new line and keep their settings
+function Ln_Rebind(lnum)
+local (lcbl, i, j, r, w, d)
+(
+    lcbl = Lines_Set[lnum];
+    i = 0; loop(WR_CNT,
+        (((w = Writers_set[i]) > BASE_MEMORY) && (w[-2] === KW_writ) && (w[its_Wrt_LineNb] === lnum)) ? (
+            Wr_Set_Line(i, lnum); // (the delay readers follow : Wr_Followers)
+        );
+        i += 1;
+    );
+    i = 0; loop(RD_CNT,
+        (((r = Readers_set[i]) > BASE_MEMORY) && (r[-2] === KW_read) && (r[its_Rdr_LineNb] === lnum)
+            && (r[its_Rdr_Mode] === its_RdrMode_Read)) ? (
+            r[its_Rdr_Check] = 0; // first : @sample checks the reader again (exec_reader)
+            r[its_Rdr_Lcbl] = lcbl;
+            r[its_Rdr_SmplCnt] = lcbl[its_Lin_SmplCnt];
+            r[its_Rdr_SmplCntSec] = d = lcbl[its_Lin_SmplCntSec];
+            r[its_Rdr_ChNbr] = lcbl[its_Lin_ChCnt];
+            r[its_Rdr_Start] = lcbl[its_Lin_Start];
+            r[its_Rdr_Low] = r[its_Rdr_Start] - B_FADESIZ;
+            r[its_Rdr_Last] = lcbl[its_Lin_Last];
+            r[its_Rdr_High] = r[its_Rdr_Last] + B_FADESIZ;
+            r[its_Rdr_LinSfreq] = lcbl[its_Lin_RecFreq];
+            r[its_Rdr_AdjInc] = lcbl[its_Lin_RecFreq] / srate;
+            j = 0; loop(its_RdrMaxMulti,
+                r[its_Rdr_Abspos + j] = min(max(r[its_Rdr_Abspos + j], r[its_Rdr_Start]), r[its_Rdr_Last] - 1);
+                j += 1;
+            );
+            // the region in the new length, recomputed by Rd_Update
+            r[its_Rdr_RegSizeSec] = min(r[its_Rdr_RegSizeSec], d);
+            r[its_Rdr_RegPosSec] = min(r[its_Rdr_RegPosSec], d);
+            r[its_Rdr_RegSizeSecPrv] = r[its_Rdr_RegPosSecPrv] = -1;
+            Rd_Update(i);
+            r[its_Rdr_Check] = 0;
+        );
+        i += 1;
+    );
+    (slLine === lnum) ? (CurrLine = lcbl);
+    wrupdt = rdupdt = lnupdt = 1;
+);
+
+function its_Tb_Clear()
+(
+    (its_Tb_mode === 3) ? (
+        its_actions(its_GlAct_DelAll);
+    ) : (
+        memset(its_TbSimSp, 0, LN_CNT); memset(its_TbSimCh, 0, LN_CNT);
+        memset(its_TbSimWE, 0, WR_CNT); memset(its_TbSimRE, 0, RD_CNT);
+        its_Tb_clr = 1; // no more readers
+    );
+);
+
+//—— Lines
+function its_Tb_Line() local(w, k, len, ch, spl, sp, cc, nsp, nch, lcbl, u, r)
+(
+    k = its_Tb_Id(its_TK_Line, its_Tb_Next(), 1);
+    len = ch = spl = -1;
+    while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Tb_Peek())) (
+        its_Tb_Next();
+        (w === its_TK_length) ? ( len = its_Tb_Num("length", 0.001, 67108864 / srate); ) :
+        (w === its_TK_chan) ? ( ch = its_Tb_Int("chan", 1, 128); ) :
+        (w === its_TK_spls) ? ( spl = its_Tb_Int("spls", 48, 67108864); ) :
+        (w === its_TK_freq) ? ( its_Tb_Num("freq", 2400, 384000); ) :
+        (w === its_TK_status) ? ( its_Tb_Next(); ) :
+        its_Tb_KeyErr(w, "Line");
+    );
+    ((its_Tb_error === 0) && (k >= 0)) ? (
+        (its_Tb_mode === 0) ? (
+            its_TbResv[k] = 1;
+        ) :
+        (its_Tb_mode >= 2) ? (
+            (its_Tb_mode === 2) ? (
+                sp = its_TbSimSp[k]; cc = its_TbSimCh[k];
+            ) : (
+                lcbl = Lines_Set[k];
+                ((lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) ? (
+                    sp = lcbl[its_Lin_SmplCnt]; cc = lcbl[its_Lin_ChCnt];
+                ) : (
+                    sp = cc = 0;
+                );
+            );
+            // the new size, as Ln_Make computes it
+            nsp = (spl > 0) ? spl : (len > 0) ? max(48, min(67108864, ceil(len * srate))) : (sp > 0) ? sp : srate;
+            nch = (ch > 0) ? ch : (cc > 0) ? cc : 2;
+            (its_Tb_mode === 2) ? (
+                ((sp > 0) && (its_Tb_clr === 0) && ((nsp !== sp) || (nch !== cc)) && ((u = its_Tb_ChUser(k, nch)) > 0)) ? (
+                    r = Readers_set[u - 1];
+                    sprintf(#its_TbW, "Line %d chan %d : Reader %d uses its channels %d-%d", k + 1, nch, u,
+                        r[its_Rdr_Bf1stChan], r[its_Rdr_Bf1stChan] + r[its_Rdr_BfChanUsed] - 1);
+                    its_Tb_Err(2758, #its_TbW);
+                );
+                its_TbSimSp[k] = nsp; its_TbSimCh[k] = nch;
+            ) :
+            ((nsp !== sp) || (nch !== cc)) ? (
+                // create, or replace by a different line ; (nsp - 0.5) / srate gives nsp samples in Ln_Make
+                (Ln_Make(k, srate, (nsp - 0.5) / srate, nch) > BASE_MEMORY) ? (
+                    (sp > 0) ? Ln_Rebind(k);
+                    lnupdt = 1;
+                ) : (
+                    its_Tb_error = 2610; // (logged by Ln_Make)
+                );
+            );
+        );
+    );
+);
+
+function its_Tb_DumpLine(k) local(lcbl)
+(
+    lcbl = Lines_Set[k];
+    ((lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) ? (
+        sprintf(#its_TbW, "Line %d status Ready length %.3f chan %d spls %d freq %d", k + 1,
+            lcbl[its_Lin_SmplCntSec], lcbl[its_Lin_ChCnt], lcbl[its_Lin_SmplCnt], lcbl[its_Lin_RecFreq]);
+    ) : (
+        sprintf(#its_TbW, "Line %d status Undefined", k + 1);
+    );
+    mSL_log(SysLogBox, #its_TbW);
+);
+
+// a difference found by Check : logged as an error, the analysis goes on
+function its_Tb_Diff(k, key, v, x)
+(
+    sprintf(#its_TbMsg, "ERR: 2759    Interstys table : Check Line %d : %s %.10g (expected %.10g)", k + 1, key, v, x);
+    mSL_log(SysLogBox, #its_TbMsg);
+    (its_Tb_res === 0) ? (its_Tb_res = 2759);
+);
+
+function its_Tb_CheckLine(k) local(w, lcbl, ex, ok, v)
+(
+    lcbl = (k >= 0) ? Lines_Set[k] : 0;
+    ex = (lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl);
+    ok = (its_Tb_mode === 3) && (k >= 0);
+    while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Tb_Peek())) (
+        its_Tb_Next();
+        (w === its_TK_status) ? (
+            v = its_Tb_Next();
+            ((v !== its_TK_Ready) && (v !== its_TK_Undefined)) ? (
+                sprintf(#its_TbW, "Check : status %s is not Ready or Undefined", mSL_edit_value(#its_TbV, v));
+                its_Tb_Err(2754, #its_TbW);
+            ) :
+            (ok && (ex !== (v === its_TK_Ready))) ? (
+                sprintf(#its_TbMsg, "ERR: 2759    Interstys table : Check Line %d : status %s (expected %s)",
+                    k + 1, ex ? "Ready" : "Undefined", ex ? "Undefined" : "Ready");
+                mSL_log(SysLogBox, #its_TbMsg);
+                (its_Tb_res === 0) ? (its_Tb_res = 2759);
+                ok = -1;
+            );
+        ) :
+        (w === its_TK_length) ? (
+            v = its_Tb_Num("length", 0, 67108864 / srate);
+            (ok && (its_Tb_error === 0) && (!ex || (abs(lcbl[its_Lin_SmplCntSec] - v) >= 0.0005))) ? (
+                its_Tb_Diff(k, "length", ex ? lcbl[its_Lin_SmplCntSec] : 0, v); ok = -1;
+            );
+        ) :
+        (w === its_TK_chan) ? (
+            v = its_Tb_Int("chan", 0, 128);
+            (ok && (its_Tb_error === 0) && ((ex ? lcbl[its_Lin_ChCnt] : 0) !== v)) ? (
+                its_Tb_Diff(k, "chan", ex ? lcbl[its_Lin_ChCnt] : 0, v); ok = -1;
+            );
+        ) :
+        (w === its_TK_spls) ? (
+            v = its_Tb_Int("spls", 0, 67108864);
+            (ok && (its_Tb_error === 0) && ((ex ? lcbl[its_Lin_SmplCnt] : 0) !== v)) ? (
+                its_Tb_Diff(k, "spls", ex ? lcbl[its_Lin_SmplCnt] : 0, v); ok = -1;
+            );
+        ) :
+        (w === its_TK_freq) ? (
+            v = its_Tb_Num("freq", 0, 384000);
+            (ok && (its_Tb_error === 0) && ((ex ? lcbl[its_Lin_RecFreq] : 0) !== v)) ? (
+                its_Tb_Diff(k, "freq", ex ? lcbl[its_Lin_RecFreq] : 0, v); ok = -1;
+            );
+        ) :
+        its_Tb_KeyErr(w, "Check Line");
+    );
+    ((ok === 1) && (its_Tb_error === 0)) ? (
+        sprintf(#its_TbW, "Check Line %d OK", k + 1);
+        mSL_log(SysLogBox, #its_TbW);
+    );
+);
+
+//—— Writers and readers
+
+// the first channel after an optional ":" (0 without it)
+function its_Tb_ChOpt(key)
+(
+    (its_Tb_Peek() === its_TK_Colon) ? ( its_Tb_Next(); its_Tb_Int(key, 0, 127); ) : 0;
+);
+
+// a source (dst = 0) or the destination of an output (dst = 1) : its_Tb_v1 (kind * ITS_KMul + number, 0 : none or own
+// cable), its_Tb_v2 (first channel)
+function its_Tb_Src(key, dst) local(w, n)
+(
+    its_Tb_v1 = its_Tb_v2 = 0;
+    w = its_Tb_Next();
+    (dst && (w === its_TK_Own)) ? (
+        0;
+    ) :
+    ((!dst && (w === its_TK_In)) || (w === its_TK_Out)) ? (
+        (its_Tb_Next() !== its_TK_Colon) ? (
+            sprintf(#its_TbW, "%s : %s:channel expected", key, (w === its_TK_In) ? "In" : "Out");
+            its_Tb_Err(2754, #its_TbW);
+        ) : (
+            its_Tb_v2 = its_Tb_Int(key, 0, CH_NB - 1);
+            its_Tb_v1 = ((w === its_TK_In) ? ITS_KIn : ITS_KOut) * ITS_KMul;
+        );
+    ) :
+    (w === its_TK_Bus) ? (
+        n = its_Tb_Int(key, 1, NB_BUS);
+        its_Tb_v1 = ITS_KBus * ITS_KMul + n - 1;
+        its_Tb_v2 = its_Tb_ChOpt(key);
+    ) :
+    (!dst && (w === its_TK_Ctl)) ? (
+        n = its_Tb_Int(key, 1, NB_CTL);
+        its_Tb_v1 = ITS_KCtl * ITS_KMul + n - 1;
+    ) :
+    (!dst && (w === its_TK_Reader)) ? (
+        n = its_Tb_Id(its_TK_Reader, its_Tb_Next(), 0);
+        its_Tb_v1 = ITS_KRdr * ITS_KMul + max(0, n);
+        its_Tb_v2 = its_Tb_ChOpt(key);
+    ) :
+    (!dst && (w === its_TK_Effect)) ? (
+        n = its_Tb_Int(key, 1, FX_CNT);
+        its_Tb_v1 = ITS_KFx * ITS_KMul + n - 1;
+        its_Tb_v2 = its_Tb_ChOpt(key);
+    ) : (
+        sprintf(#its_TbW, "%s : %s is not a %s", key, mSL_edit_value(#its_TbV, w), dst ? "destination" : "source");
+        its_Tb_Err(2754, #its_TbW);
+    );
+);
+
+// the text of a source or a destination (as read by its_Tb_Src)
+function its_Tb_SrcText(str, src, off)
+local (k, n)
+(
+    k = floor(src / ITS_KMul);
+    n = src - k * ITS_KMul;
+    (src === 0) ? strcpy(str, "none") :
+    (k === ITS_KIn) ? sprintf(str, "In:%d", off) :
+    (k === ITS_KOut) ? sprintf(str, "Out:%d", off) :
+    (k === ITS_KBus) ? sprintf(str, "Bus %d:%d", n + 1, off) :
+    (k === ITS_KCtl) ? sprintf(str, "Ctl %d", n + 1 + off) :
+    (k === ITS_KRdr) ? ((off > 0) ? sprintf(str, "Reader %d:%d", n + 1, off) : sprintf(str, "Reader %d", n + 1)) :
+    (k === ITS_KFx) ? ((off > 0) ? sprintf(str, "Effect %d:%d", n + 1, off) : sprintf(str, "Effect %d", n + 1)) :
+    strcpy(str, "???");
+);
+
+// the key "w" of a writer or a reader (type "ty") : its index (its value in its_Tb_v1, its_Tb_v2), -1 if unknown
+function its_Tb_Key(ty, w) local(keys, nk, ki, i, nm)
+(
+    (ty === its_TK_Writer) ? ( keys = its_TbWKey; nk = its_TbWNk; ) : ( keys = its_TbRKey; nk = its_TbRNk; );
+    ki = -1; i = 0; while ((ki < 0) && (i < nk)) ( (keys[i] === w) ? (ki = i); i += 1; );
+    its_Tb_v2 = 0;
+    (ki >= 0) ? (
+        nm = (ty === its_TK_Writer) ? its_TbWNam[ki] : its_TbRNam[ki];
+        (ty === its_TK_Writer) ? (
+            (ki === 0) ? ( its_Tb_v1 = its_Tb_Id(its_TK_Line, its_Tb_Next(), 0); ) :
+            (ki === 1) ? ( its_Tb_Src(nm, 0); ) :
+            (ki === 2) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbWSt, 5); ) :
+            (ki === 3) ? ( its_Tb_v1 = its_Tb_Num(nm, -120, 40); ) :
+            (ki === 4) ? ( its_Tb_v1 = its_Tb_Num(nm, -150, 150); ) :
+            (ki === 5) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbWMd, 2); ) :
+            (ki === 6) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 127); ) :
+            ( its_Tb_v1 = its_Tb_Int(nm, 0, 128); );
+        ) : (
+            (ki === 0) ? ( its_Tb_v1 = its_Tb_Id(its_TK_Line, its_Tb_Next(), 0); ) :
+            (ki === 1) ? ( its_Tb_v1 = its_Tb_Id(its_TK_Writer, its_Tb_Next(), 0); ) :
+            (ki === 2) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 67108864 / srate); ) :
+            (ki === 3) ? ( its_Tb_v1 = its_Tb_Num(nm, -SPDMAX, SPDMAX); ) :
+            (ki === 4) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbRSt, 5); ) :
+            (ki === 5) ? ( its_Tb_Src(nm, 1); ) :
+            (ki === 6) ? ( its_Tb_v1 = its_Tb_Num(nm, -120, 40); ) :
+            (ki === 7) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 127); ) :
+            (ki === 8) ? ( its_Tb_v1 = its_Tb_Int(nm, 1, 128); ) :
+            ( its_Tb_v1 = its_Tb_Enum(nm, its_TbRLp, 6); );
+        );
+    );
+    ki;
+);
+
+// the keys of the block, until the next header : its_TbKS, its_TbK1, its_TbK2
+function its_Tb_Keys(ty) local(w, ki)
+(
+    memset(its_TbKS, 0, 16);
+    while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Tb_Peek())) (
+        its_Tb_Next();
+        ((ki = its_Tb_Key(ty, w)) >= 0) ? (
+            its_TbKS[ki] = 1; its_TbK1[ki] = its_Tb_v1; its_TbK2[ki] = its_Tb_v2;
+        ) :
+        its_Tb_KeyErr(w, its_Tb_TyName(ty));
+    );
+);
+
+// the value of the key "ki" of the module "b" (type "ty") : its_Tb_g1, its_Tb_g2 ; b === 0 : no module
+function its_Tb_Get(ty, ki, b)
+(
+    its_Tb_g2 = 0;
+    its_Tb_g1 = (b === 0) ? (((ty === its_TK_Writer) ? (ki === 2) : (ki === 4)) ? its_WrtStat_UnDef : -1) :
+    (ty === its_TK_Writer) ? (
+        (ki === 0) ? b[its_Wrt_LineNb] :
+        (ki === 1) ? ( its_Tb_g2 = b[its_Wrt_SrcOff]; b[its_Wrt_Src]; ) :
+        (ki === 2) ? b[its_Wrt_Status] :
+        (ki === 3) ? b[its_Wrt_InGaindB] :
+        (ki === 4) ? b[its_Wrt_Ovrdb] :
+        (ki === 5) ? b[its_Wrt_Mode] :
+        (ki === 6) ? b[its_Wrt_Bf1stChan] : b[its_Wrt_BfChanUsed];
+    ) : (
+        (ki === 0) ? ((b[its_Rdr_Mode] === its_RdrMode_Read) ? b[its_Rdr_LineNb] : -1) :
+        (ki === 1) ? ((b[its_Rdr_Mode] === its_RdrMode_Delay) ? b[its_Rdr_WrSrc] : -1) :
+        (ki === 2) ? b[its_Rdr_WOffset] :
+        (ki === 3) ? b[its_Rdr_Speed] :
+        (ki === 4) ? ((b[its_Rdr_Status] > its_RdrStat_Reading) ? its_RdrStat_Reading : b[its_Rdr_Status]) : // (stopping, starting)
+        (ki === 5) ? ( its_Tb_g2 = b[its_Rdr_OutOff]; b[its_Rdr_OutK]; ) :
+        (ki === 6) ? b[its_Rdr_OutVoldB] :
+        (ki === 7) ? b[its_Rdr_Bf1stChan] :
+        (ki === 8) ? b[its_Rdr_BfChanUsed] : b[its_Rdr_LoopType];
+    );
+);
+
+// the text of the value "v1", "v2" of the key "ki" (type "ty")
+function its_Tb_ValText(str, ty, ki, v1, v2)
+(
+    (ty === its_TK_Writer) ? (
+        (ki === 0) ? ((v1 < 0) ? strcpy(str, "none") : sprintf(str, "%d", v1 + 1)) :
+        (ki === 1) ? its_Tb_SrcText(str, v1, v2) :
+        (ki === 2) ? strcpy(str, menu_Wrt_Status_N[max(0, min(4, v1))]) :
+        (ki === 5) ? strcpy(str, (v1 === its_WrtMode_Sum) ? "Sum" : "XFade") :
+        ((ki === 6) || (ki === 7)) ? sprintf(str, "%d", v1) :
+        sprintf(str, "%.10g", v1);
+    ) : (
+        ((ki === 0) || (ki === 1)) ? ((v1 < 0) ? strcpy(str, "none") : sprintf(str, "%d", v1 + 1)) :
+        (ki === 4) ? strcpy(str, menu_Rdr_Status_N[(v1 > 4) ? 4 : max(0, v1)]) : // (stopping, starting : Reading)
+        (ki === 5) ? ((v1 === 0) ? strcpy(str, "Own") : its_Tb_SrcText(str, v1, v2)) :
+        ((ki === 7) || (ki === 8)) ? sprintf(str, "%d", v1) :
+        (ki === 9) ? strcpy(str, menu_Rdr_Loop_N[max(0, min(5, v1))]) :
+        sprintf(str, "%.10g", v1);
+    );
+    str;
+);
+
+// add " key value" to #its_TbW
+function its_Tb_Cat(ty, ki, b)
+(
+    its_Tb_Get(ty, ki, b);
+    strcat(#its_TbW, " ");
+    strcat(#its_TbW, (ty === its_TK_Writer) ? its_TbWNam[ki] : its_TbRNam[ki]);
+    strcat(#its_TbW, " ");
+    strcat(#its_TbW, its_Tb_ValText(#its_TbV1, ty, ki, its_Tb_g1, its_Tb_g2));
+);
+
+// the block of the writer or the reader "k" (0 : none)
+function its_Tb_Blk(ty, k) local(b)
+(
+    (ty === its_TK_Writer) ? (
+        b = Writers_set[k];
+        ((b > BASE_MEMORY) && (b[-2] === KW_writ)) ? b : 0;
+    ) : (
+        b = Readers_set[k];
+        ((b > BASE_MEMORY) && (b[-2] === KW_read)) ? b : 0;
+    );
+);
+
+function its_Tb_DumpMod(ty, k) local(b, i)
+(
+    sprintf(#its_TbW, "%s %d", its_Tb_TyName(ty), k + 1);
+    ((b = its_Tb_Blk(ty, k)) === 0) ? (
+        strcat(#its_TbW, " status Undefined");
+    ) :
+    (ty === its_TK_Writer) ? (
+        its_Tb_Cat(ty, 2, b);
+        (b[its_Wrt_LineNb] >= 0) ? its_Tb_Cat(ty, 0, b);
+        (b[its_Wrt_Src] !== 0) ? its_Tb_Cat(ty, 1, b);
+        i = 3; loop(5, its_Tb_Cat(ty, i, b); i += 1;);
+    ) : (
+        its_Tb_Cat(ty, 4, b);
+        (b[its_Rdr_Mode] === its_RdrMode_Read) ? (
+            (b[its_Rdr_LineNb] >= 0) ? its_Tb_Cat(ty, 0, b);
+        ) : (
+            (b[its_Rdr_WrSrc] >= 0) ? its_Tb_Cat(ty, 1, b);
+            its_Tb_Cat(ty, 2, b);
+        );
+        its_Tb_Cat(ty, 3, b);
+        i = 5; loop(5, its_Tb_Cat(ty, i, b); i += 1;);
+    );
+    mSL_log(SysLogBox, #its_TbW);
+);
+
+// pass 2 : the line (-1 : unknown) of the keys of the block, checked
+function its_Tb_SimMod(ty, k) local(l, w, sp, ch)
+(
+    l = -1;
+    (ty === its_TK_Writer) ? (
+        its_TbSimWE[k] = 1;
+        its_TbKS[0] ? (
+            l = its_TbK1[0];
+            (its_TbSimSp[l] === 0) ? (
+                sprintf(#its_TbW, "Writer %d : Line %d is not defined", k + 1, l + 1);
+                its_Tb_Err(2763, #its_TbW);
+            );
+            its_TbSimWL[k] = l;
+        );
+        l = its_TbSimWL[k];
+        ((l >= 0) && its_TbKS[6] && (its_TbK1[6] >= its_TbSimCh[l])) ? (
+            sprintf(#its_TbW, "Writer %d : first %d, Line %d has %d channels", k + 1, its_TbK1[6], l + 1, its_TbSimCh[l]);
+            its_Tb_Err(2764, #its_TbW);
+        );
+    ) : (
+        its_TbSimRE[k] = 1;
+        its_TbKS[0] ? (
+            l = its_TbK1[0];
+            (its_TbSimSp[l] === 0) ? (
+                sprintf(#its_TbW, "Reader %d : Line %d is not defined", k + 1, l + 1);
+                its_Tb_Err(2763, #its_TbW);
+            );
+        ) :
+        its_TbKS[1] ? (
+            w = its_TbK1[1];
+            ((its_TbSimWE[w] == 0) || ((l = its_TbSimWL[w]) < 0)) ? (
+                sprintf(#its_TbW, "Reader %d : Writer %d is not defined, or has no line", k + 1, w + 1);
+                its_Tb_Err(2763, #its_TbW);
+            );
+        );
+        ((its_Tb_error === 0) && (l >= 0)) ? (
+            sp = its_TbSimSp[l]; ch = its_TbSimCh[l];
+            ((its_TbKS[7] ? its_TbK1[7] : 0) + (its_TbKS[8] ? its_TbK1[8] : 1) > ch) ? (
+                sprintf(#its_TbW, "Reader %d : first %d used %d, Line %d has %d channels", k + 1,
+                    its_TbKS[7] ? its_TbK1[7] : 0, its_TbKS[8] ? its_TbK1[8] : 1, l + 1, ch);
+                its_Tb_Err(2764, #its_TbW);
+            ) :
+            (its_TbKS[2] && (its_TbK1[2] * srate > sp)) ? (
+                sprintf(#its_TbW, "Reader %d : delay %g s, Line %d lasts %.3f s", k + 1, its_TbK1[2], l + 1, sp / srate);
+                its_Tb_Err(2765, #its_TbW);
+            );
+        );
+    );
+);
+
+// pass 3 : the writer or the reader "k" is created if needed, then set (the status last)
+function its_Tb_SetMod(ty, k) local(b, v)
+(
+    b = (ty === its_TK_Writer) ? Wr_Make(k) : (Readers_set[k] === 0) ? Rd_Make(k) : Readers_set[k];
+    (b <= BASE_MEMORY) ? (
+        sprintf(#its_TbW, "%s %d : not enough memory", its_Tb_TyName(ty), k + 1);
+        its_Tb_Err(2766, #its_TbW);
+    ) :
+    (ty === its_TK_Writer) ? (
+        (its_TbKS[0] && (b[its_Wrt_LineNb] !== its_TbK1[0])) ? Wr_Set_Line(k, its_TbK1[0]);
+        its_TbKS[1] ? ( b[its_Wrt_Src] = its_TbK1[1]; b[its_Wrt_SrcOff] = its_TbK2[1]; b[its_Wrt_Check] = 0; );
+        its_TbKS[3] ? ( b[its_Wrt_InGaindB] = v = its_TbK1[3]; b[its_Wrt_InGain] = (v <= -120) ? 0 : 10^(v/20); );
+        its_TbKS[4] ? ( b[its_Wrt_Ovrdb] = its_TbK1[4]; );
+        its_TbKS[5] ? ( b[its_Wrt_Mode] = its_TbK1[5]; );
+        its_TbKS[6] ? ( b[its_Wrt_Bf1stChan] = its_TbK1[6]; b[its_Wrt_Check] = 0; );
+        its_TbKS[7] ? ( b[its_Wrt_BfChanUsed] = its_TbK1[7]; b[its_Wrt_Check] = 0; );
+        Wr_Set_Status(k, its_TbKS[2] ? its_TbK1[2] : b[its_Wrt_Status]); // no line or no source : "Created"
+        (k === slWriter) ? (Currwriter = b);
+        wrupdt = 1;
+    ) : (
+        // reader mode on a line, or delay mode following a writer : kept if it is the same
+        (its_TbKS[0] && ((b[its_Rdr_Mode] !== its_RdrMode_Read) || (b[its_Rdr_LineNb] !== its_TbK1[0]))) ? (
+            b[its_Rdr_Mode] = its_RdrMode_Read;
+            b[its_Rdr_WrBPtr] = 0;
+            Rd_Set_Line(k, its_TbK1[0] + 1);
+        );
+        (its_TbKS[1] && ((b[its_Rdr_Mode] !== its_RdrMode_Delay) || (b[its_Rdr_WrSrc] !== its_TbK1[1]))) ? (
+            b[its_Rdr_Mode] = its_RdrMode_Delay;
+            Rd_Set_Writer(k, its_TbK1[1] + 1);
+        );
+        its_TbKS[5] ? ( b[its_Rdr_OutK] = its_TbK1[5]; b[its_Rdr_OutOff] = its_TbK2[5]; b[its_Rdr_Check] = 0; );
+        its_TbKS[6] ? ( b[its_Rdr_OutVoldB] = v = its_TbK1[6]; b[its_Rdr_OutVol] = (v <= -120) ? 0 : 10^(v/20); );
+        its_TbKS[7] ? ( b[its_Rdr_Bf1stChan] = its_TbK1[7]; b[its_Rdr_Check] = 0; );
+        its_TbKS[8] ? ( b[its_Rdr_BfChanUsed] = its_TbK1[8]; b[its_Rdr_Check] = 0; );
+        its_TbKS[9] ? ( b[its_Rdr_LoopType] = its_TbK1[9]; );
+        its_TbKS[3] ? Rd_Set_Speed(k, its_TbK1[3], 1);
+        its_TbKS[2] ? Rd_Set_Offset(b, its_TbK1[2] * srate);
+        its_TbKS[4] ? Rd_Set_Status(k, its_TbK1[4]);
+        b[its_Rdr_StFlgs] |= its_RdrFlg_Mod; // (Rd_Update in @block)
+        (k === slReader) ? (Currreader = b);
+        rdupdt = 1;
+    );
+);
+
+function its_Tb_Module(ty) local(k)
+(
+    k = its_Tb_Id(ty, its_Tb_Next(), 1);
+    its_Tb_Keys(ty);
+    ((its_Tb_error === 0) && (k >= 0)) ? (
+        (its_Tb_mode === 0) ? ( its_TbResv[its_Tb_RBase(ty) + k] = 1; ) :
+        (its_Tb_mode === 2) ? ( its_Tb_SimMod(ty, k); ) :
+        (its_Tb_mode === 3) ? ( its_Tb_SetMod(ty, k); );
+    );
+);
+
+function its_Tb_CheckMod(ty, k) local(b, ki, ok, nk, same)
+(
+    its_Tb_Keys(ty);
+    ((its_Tb_error === 0) && (its_Tb_mode === 3) && (k >= 0)) ? (
+        b = its_Tb_Blk(ty, k);
+        ok = 1;
+        nk = (ty === its_TK_Writer) ? its_TbWNk : its_TbRNk;
+        ki = 0; loop(nk,
+            its_TbKS[ki] ? (
+                its_Tb_Get(ty, ki, b);
+                same = ((ty === its_TK_Reader) && (ki === 2)) ? (abs(its_Tb_g1 - its_TbK1[ki]) < 0.6 / srate) :
+                    (abs(its_Tb_g1 - its_TbK1[ki]) < 0.0000001) && (its_Tb_g2 === its_TbK2[ki]);
+                (!same) ? (
+                    sprintf(#its_TbMsg, "ERR: 2759    Interstys table : Check %s %d : %s %s (expected %s)",
+                        its_Tb_TyName(ty), k + 1, (ty === its_TK_Writer) ? its_TbWNam[ki] : its_TbRNam[ki],
+                        its_Tb_ValText(#its_TbV1, ty, ki, its_Tb_g1, its_Tb_g2),
+                        its_Tb_ValText(#its_TbV2, ty, ki, its_TbK1[ki], its_TbK2[ki]));
+                    mSL_log(SysLogBox, #its_TbMsg);
+                    (its_Tb_res === 0) ? (its_Tb_res = 2759);
+                    ok = 0;
+                );
+            );
+            ki += 1;
+        );
+        ok ? (
+            sprintf(#its_TbW, "Check %s %d OK", its_Tb_TyName(ty), k + 1);
+            mSL_log(SysLogBox, #its_TbW);
+        );
+    );
+);
+
+//—— Dump, Check, Free
+function its_Tb_Dump() local(w, ty, k)
+(
+    w = its_Tb_Next();
+    (w === its_TK_All) ? (
+        (its_Tb_mode === 3) ? (
+            k = 0; loop(LN_CNT, (Lines_Set[k] !== 0) ? its_Tb_DumpLine(k); k += 1;);
+            k = 0; loop(WR_CNT, (Writers_set[k] !== 0) ? its_Tb_DumpMod(its_TK_Writer, k); k += 1;);
+            k = 0; loop(RD_CNT, (Readers_set[k] !== 0) ? its_Tb_DumpMod(its_TK_Reader, k); k += 1;);
+        );
+    ) :
+    ((ty = its_Tb_Type(w, "Dump")) !== 0) ? (
+        k = its_Tb_Id(ty, its_Tb_Next(), 0);
+        ((its_Tb_mode === 3) && (k >= 0)) ? (
+            (ty === its_TK_Line) ? its_Tb_DumpLine(k) : its_Tb_DumpMod(ty, k);
+        );
+    );
+);
+
+function its_Tb_Check() local(ty, k)
+(
+    ((ty = its_Tb_Type(its_Tb_Next(), "Check")) !== 0) ? (
+        k = its_Tb_Id(ty, its_Tb_Next(), 0);
+        (ty === its_TK_Line) ? its_Tb_CheckLine(k) : its_Tb_CheckMod(ty, k);
+    );
+);
+
+function its_Tb_Free() local(ty, k)
+(
+    ((ty = its_Tb_Type(its_Tb_Next(), "Free")) !== 0) ? (
+        k = its_Tb_Id(ty, its_Tb_Next(), 0);
+        (k >= 0) ? (
+            (its_Tb_mode === 2) ? (
+                (ty === its_TK_Line) ? ( its_TbSimSp[k] = its_TbSimCh[k] = 0; ) :
+                (ty === its_TK_Writer) ? ( its_TbSimWE[k] = 0; its_TbSimWL[k] = -1; ) :
+                ( its_TbSimRE[k] = 0; );
+            ) :
+            (its_Tb_mode === 3) ? (
+                (ty === its_TK_Line) ? Ln_Delete(k, 1) :
+                (ty === its_TK_Writer) ? Wr_Action(its_WrtAct_Delete, k, 0) :
+                Rd_Action(k, its_RdrAct_Delete, 0);
+            );
+        );
+    );
+);
+
+// Implementation of the mSL "table" operation
+function Set_Table(tbl) local(m, w)
+(
+    its_Tb_tbl = tbl; its_Tb_itc = tbl[-1];
+    its_Tb_error = its_Tb_res = its_TbNCnt = 0;
+    memset(its_TbResv, 0, LN_CNT + WR_CNT + RD_CNT);
+    m = 0;
+    while ((m <= 3) && (its_Tb_error === 0)) (
+        its_Tb_mode = m; its_Tb_ptr = its_Tb_clr = 0;
+        its_Tb_SimInit();
+        (its_Tb_Peek() === its_TK_Interstys) ? its_Tb_Next();
+        while ((its_Tb_error === 0) && ((w = its_Tb_Next()) !== its_TK_End) && (w !== its_TK_EofMark)) (
+            (w === its_TK_Clear) ? its_Tb_Clear() :
+            (w === its_TK_Line) ? its_Tb_Line() :
+            ((w === its_TK_Writer) || (w === its_TK_Reader)) ? its_Tb_Module(w) :
+            (w === its_TK_Dump) ? its_Tb_Dump() :
+            (w === its_TK_Check) ? its_Tb_Check() :
+            (w === its_TK_Free) ? its_Tb_Free() :
+            ((w === its_TK_Effect) || (w === its_TK_Global)) ? (
+                sprintf(#its_TbW, "%s : not implemented yet", mSL_edit_value(#its_TbV, w));
+                its_Tb_Err(2751, #its_TbW);
+            ) : (
+                sprintf(#its_TbW, "%s : a block (Line, Writer, Reader, Dump, Check, Free, Clear) is expected", mSL_edit_value(#its_TbV, w));
+                its_Tb_Err(2750, #its_TbW);
+            );
+        );
+        m += 1;
+    );
+    (m === 4) ? (its_PatchForce = 1); // the cables of all the modules (see its_Patch_Update)
+    (its_Tb_error !== 0) ? its_Tb_error : its_Tb_res;
+);
+
+
 // Insert here the mSL interpreter
 <? include("GM-Libs/mSL_Evaluator.jsfx-inc"); ?>
 
@@ -7799,31 +8856,31 @@ loadMode ? (
         slz2 = load_mem(0, savtmp, TMPSIZ);
         ldtotal += slz2;
         (savtmp[0] === 'stwa') ? (
-            si = savtmp[1];
+            z__si = savtmp[1];
             sbty = savtmp[2];
             sbsz = savtmp[3];
-            ((si < 0) || (si >= StaticWASize)) ? (
+            ((z__si < 0) || (z__si >= StaticWASize)) ? (
                 ldok = 0;
                 lderr = 180
             ) : (
                 // Create a memory area for the block
-                sbl = mSL_Dyn_Alloc(sbsz, sbty, 0); // allocate memory
-                (sbl === 0) ? (
+                z__sbl = mSL_Dyn_Alloc(sbsz, sbty, 0); // allocate memory
+                (z__sbl === 0) ? (
                     ldok = 0; // can't allocate
                     lderr = 170;
                 ) : (
-                    rdsz = load_mem(0, sbl, sbsz); // Read the block
+                    rdsz = load_mem(0, z__sbl, sbsz); // Read the block
                     ldtotal += rdsz;
                     (rdsz !== sbsz) ? (
                         ldok = 0;
                         lderr = 160;
                     ) :
-                    (check_its_block(sbl)) ? (
+                    (check_its_block(z__sbl)) ? (
                         ldok = 0;
                         lderr = 156;
                     ) : (
-                        (sbty === KW_effx) ? (sbl[its_Efx_Work] = sbl[its_Efx_WkNew] = sbl[its_Efx_WkOld] = 0);
-                        DuplWA[si] = sbl;
+                        (sbty === KW_effx) ? (z__sbl[its_Efx_Work] = z__sbl[its_Efx_WkNew] = z__sbl[its_Efx_WkOld] = 0);
+                        DuplWA[z__si] = z__sbl;
                         lditmc += 1;
                     );
                 );
@@ -7844,26 +8901,26 @@ loadMode ? (
         ) :
         (savtmp[0] === 'disp') ? (
             // display blocks of the modules (absent from the older presets : the modules then show the objects 1)
-            si = min(savtmp[1], DispStructsSize); // another size (other version) : read up to the smallest one
-            ldtotal += load_mem(0, ReadersStructA, si);
-            loop(2 * (savtmp[1] - si), file_var(0, zzz_dskip)); // each value is saved in 2 words (see save_mem)
+            z__si = min(savtmp[1], DispStructsSize); // another size (other version) : read up to the smallest one
+            ldtotal += load_mem(0, ReadersStructA, z__si);
+            loop(2 * (savtmp[1] - z__si), file_var(0, zzz_dskip)); // each value is saved in 2 words (see save_mem)
             // the numbers of the objects shown must stay in their sets
-            si = 0; loop(8,
-                sp = ReadersStructA + si * ReadersBlockSize; sp[0] = max(0, min(RD_CNT - 1, 0|sp[0]));
-                sp = LinesStructA + si * LinesBlockSize; sp[0] = max(0, min(LN_CNT - 1, 0|sp[0]));
-                sp = WriterStructA + si * WriterBlockSize; sp[0] = max(0, min(WR_CNT - 1, 0|sp[0]));
-                si += 1;
+            z__si = 0; loop(8,
+                z__sp = ReadersStructA + z__si * ReadersBlockSize; z__sp[0] = max(0, min(RD_CNT - 1, 0|z__sp[0]));
+                z__sp = LinesStructA + z__si * LinesBlockSize; z__sp[0] = max(0, min(LN_CNT - 1, 0|z__sp[0]));
+                z__sp = WriterStructA + z__si * WriterBlockSize; z__sp[0] = max(0, min(WR_CNT - 1, 0|z__sp[0]));
+                z__si += 1;
             );
-            si = 0; loop(10,
-                sp = EffectsStructA + si * LinesBlockSize; sp[0] = max(0, min(FX_CNT - 1, 0|sp[0]));
-                si += 1;
+            z__si = 0; loop(10,
+                z__sp = EffectsStructA + z__si * LinesBlockSize; z__sp[0] = max(0, min(FX_CNT - 1, 0|z__sp[0]));
+                z__si += 1;
             );
         ) :
         (savtmp[0] === 'tnam') ? (
             ldtnam = savtmp[1]; // alternate tabs names (see "Rename tab...")
-            si = 0; loop(savtmp[1],
-                (si < dcbTabsCount) ? file_string(0, altTabsNames[si]) : file_string(0, #tnam_skip);
-                si += 1;
+            z__si = 0; loop(savtmp[1],
+                (z__si < dcbTabsCount) ? file_string(0, altTabsNames[z__si]) : file_string(0, #tnam_skip);
+                z__si += 1;
             );
         ) :
         (
@@ -7905,7 +8962,7 @@ loadMode ? (
     // Save the alternate tabs names (see "Rename tab...") : first, before the blocks
     savtmp[0] = 'tnam'; savtmp[1] = dcbTabsCount; savtmp[2] = savtmp[3] = 0;
     svtotal += save_mem(0, savtmp, TMPSIZ);
-    si = 0; loop(dcbTabsCount, file_string(0, altTabsNames[si]); si += 1;);
+    z__si = 0; loop(dcbTabsCount, file_string(0, altTabsNames[z__si]); z__si += 1;);
     // Save the studio : tabs config (Pr7_* : panes count and widths, live display) and modules of each pane
     savtmp[0] = 'stud'; savtmp[1] = 128; savtmp[2] = dcbBSize; savtmp[3] = 0;
     svtotal += save_mem(0, savtmp, TMPSIZ);
@@ -7918,19 +8975,19 @@ loadMode ? (
 
     // siz4 = 0;
     // Save all objects, except lines set pointers and contents
-    si = 0; loop(PtrsInWA,
-        (((sbl = StaticWA[si]) > BASE_MEMORY) && (mSL_bl_check(sbl))) ? (
+    z__si = 0; loop(PtrsInWA,
+        (((z__sbl = StaticWA[z__si]) > BASE_MEMORY) && (mSL_bl_check(z__sbl))) ? (
             // A block to save
             savtmp[0] = 'stwa'; // the type of save
-            savtmp[1] = si; // the entry in the area
-            savtmp[2] = sbl[-2]; // the type of the block to be recreated
-            savtmp[3] = sbsz = sbl[-1]; // the length of the block
+            savtmp[1] = z__si; // the entry in the area
+            savtmp[2] = z__sbl[-2]; // the type of the block to be recreated
+            savtmp[3] = sbsz = z__sbl[-1]; // the length of the block
             siz2 = save_mem(0, savtmp, TMPSIZ);
-            siz3 = save_mem(0, sbl, sbsz);
+            siz3 = save_mem(0, z__sbl, sbsz);
             svtotal += siz2 + siz3;
             svitmc += 1;
         );
-        si += 1;
+        z__si += 1;
     );
 
     (
@@ -7967,15 +9024,15 @@ its_Fx_WorkSwitch();
 
 
 // Count Solo Readers
-i = j = 0;
+b__i = b__j = 0;
 loop(RD_CNT,
-    ((r = Readers_set[i]) !== 0)  ? (
-        (r[its_Rdr_StFlgs] & its_RdrFlg_solo) ? j += 1;
-        (r[its_Rdr_StFlgs] & its_RdrFlg_Mod) ? Rd_Update(i);
+    ((b__r = Readers_set[b__i]) !== 0)  ? (
+        (b__r[its_Rdr_StFlgs] & its_RdrFlg_solo) ? b__j += 1;
+        (b__r[its_Rdr_StFlgs] & its_RdrFlg_Mod) ? Rd_Update(b__i);
     );
-    i += 1;
+    b__i += 1;
 );
-its_RdrSolos = j; // count of readers in solo mode
+its_RdrSolos = b__j; // count of readers in solo mode
 
 // Check users modules every minute (as in GamePlayer)
 ((0|(time() / 60)) !== usrModMn) ? (
@@ -8039,33 +9096,33 @@ its_RdrSolos = j; // count of readers in solo mode
     memset(smpl_tab + OUT_P, 0, CH_NB);
     bus_i = 0; loop(BusActN, bus_k = BusAct[bus_i]; memset(smpl_tab + BusStart[bus_k], 0, BusWidth[bus_k]); bus_i += 1;);
     // get input samples ;
-    i = 0; j = smpl_tab + IN_P; loop (chcnt,
-        j[0] = vol_inp * spl(i);
-        spl(i) = 0;
-        i += 1; j += 1;
+    s__i = 0; s__j = smpl_tab + IN_P; loop (chcnt,
+        s__j[0] = vol_inp * spl(s__i);
+        spl(s__i) = 0;
+        s__i += 1; s__j += 1;
     );
 
     // Phase 2 -- Pre READERS Effects
-    fxn = 0; loop(FX_CNT,
-        (((fx = Effects_set[fxn]) != 0) && (fx[its_Efx_Status] != 0)
-            && (fx[its_Efx_Phase] === its_Efx_PhasePre)) ? (
-            exec_fx(fx, fxn);
+    s__fxn = 0; loop(FX_CNT,
+        (((s__fx = Effects_set[s__fxn]) != 0) && (s__fx[its_Efx_Status] != 0)
+            && (s__fx[its_Efx_Phase] === its_Efx_PhasePre)) ? (
+            exec_fx(s__fx, s__fxn);
         );
-        fxn += 1;
+        s__fxn += 1;
     );
 
     // Phase 3 -- Run READERS
-    rdn = 0; loop(RD_CNT,
-        (((X_rd = Readers_set[rdn]) !== 0) && (X_rd[its_Rdr_Flgs] !== 0) && (X_rd[its_Rdr_Status] === its_RdrStat_Reading)) ? (
+    s__rdn = 0; loop(RD_CNT,
+        (((X_rd = Readers_set[s__rdn]) !== 0) && (X_rd[its_Rdr_Flgs] !== 0) && (X_rd[its_Rdr_Status] === its_RdrStat_Reading)) ? (
             Trace_X_exec_reader = X_rd;
-            exec_reader(X_rd, rdn);
+            exec_reader(X_rd, s__rdn);
         ) :
         ((X_rd !== 0) && X_rd[its_Rdr_OutDirty]) ? (
             // a reader stopped : its own cable is silent
-            (CblRdStart[rdn] > 0) ? memset(smpl_tab + CblRdStart[rdn], 0, CblRdWidth[rdn]);
+            (CblRdStart[s__rdn] > 0) ? memset(smpl_tab + CblRdStart[s__rdn], 0, CblRdWidth[s__rdn]);
             X_rd[its_Rdr_OutDirty] = 0;
         );
-        rdn += 1;
+        s__rdn += 1;
     );
 
 Trace_D_Readers_addr_0 = X_rdz = Readers_set[0];
@@ -8073,26 +9130,26 @@ Trace_D_Readers_flg_0 = X_rdz[its_Rdr_Flgs];
 Trace_D_Readers_stat_0 = X_rdz[its_Rdr_Status];
 
     // Phase 4 -- Run Standard effects
-    fxn = 0; loop(FX_CNT,
-        (((fx = Effects_set[fxn]) != 0) && (fx[its_Efx_Status] != 0)
-            && (fx[its_Efx_Phase] === its_Efx_PhaseStd)) ? (
-            exec_fx(fx, fxn);
+    s__fxn = 0; loop(FX_CNT,
+        (((s__fx = Effects_set[s__fxn]) != 0) && (s__fx[its_Efx_Status] != 0)
+            && (s__fx[its_Efx_Phase] === its_Efx_PhaseStd)) ? (
+            exec_fx(s__fx, s__fxn);
         ) :
-        ((fx != 0) && (fx[its_Efx_Status] == 0) && fx[its_Efx_OutDirty]) ? (
+        ((s__fx != 0) && (s__fx[its_Efx_Status] == 0) && s__fx[its_Efx_OutDirty]) ? (
             // an effect turned off : its own cable is silent
-            (CblFxStart[fxn] > 0) ? memset(smpl_tab + CblFxStart[fxn], 0, CblFxWidth[fxn]);
-            fx[its_Efx_OutDirty] = 0;
+            (CblFxStart[s__fxn] > 0) ? memset(smpl_tab + CblFxStart[s__fxn], 0, CblFxWidth[s__fxn]);
+            s__fx[its_Efx_OutDirty] = 0;
         );
-        fxn += 1;
+        s__fxn += 1;
     );
 
     // Phase 5 -- Run Writers
-    wrn = 0; loop(WR_CNT,
-        (((X_wr = Writers_set[wrn]) != 0) && (X_wr[its_Wrt_Flgs] != 0) && (X_wr[its_Wrt_Status] == its_WrtStat_Writing)) ? (
+    s__wrn = 0; loop(WR_CNT,
+        (((X_wr = Writers_set[s__wrn]) != 0) && (X_wr[its_Wrt_Flgs] != 0) && (X_wr[its_Wrt_Status] == its_WrtStat_Writing)) ? (
             Trace_X_exec_writer = X_wr;
-            exec_writer(X_wr, wrn);
+            exec_writer(X_wr, s__wrn);
         );
-        wrn += 1;
+        s__wrn += 1;
     );
 
 Trace_D_Writers_addr_0 = X_wr = Writers_set[0];
@@ -8101,16 +9158,16 @@ Trace_D_writers_stat_0 = X_wr[its_Wrt_Status];
 Trace_D_writers_count_0 += 1;
 
     // Phase 6 -- Post Writers Effects
-    fxn = 0; loop(FX_CNT,
-        (((fx = Effects_set[fxn]) != 0) && (fx[its_Efx_Status] != 0)
-            && (fx[its_Efx_Phase] === its_Efx_PhasePost)) ? (
-            exec_fx(fx, fxn);
+    s__fxn = 0; loop(FX_CNT,
+        (((s__fx = Effects_set[s__fxn]) != 0) && (s__fx[its_Efx_Status] != 0)
+            && (s__fx[its_Efx_Phase] === its_Efx_PhasePost)) ? (
+            exec_fx(s__fx, s__fxn);
         );
-        fxn += 1;
+        s__fxn += 1;
     );
 
     // generate output samples
-    i = 0; j = smpl_tab + OUT_P; loop (chcnt, spl(i) += vol_out * j[0]; i += 1; j+= 1;);
+    s__i = 0; s__j = smpl_tab + OUT_P; loop (chcnt, spl(s__i) += vol_out * s__j[0]; s__i += 1; s__j+= 1;);
 
 );
 
@@ -8164,6 +9221,16 @@ gfxStrtT = time_precise() + timeD;
     its_LdSeen = 0;
 );
 
+
+// the replaced lines, when @sample no longer uses them
+Ln_Trash_Run();
+
+// non-finite values reset by @sample (filter, saturation, writer)
+(its_NaNCnt !== its_NaNSeen) ? (
+    sprintf(#its_NaNMsg, "Interstys : %d non-finite values reset (total %d)", its_NaNCnt - its_NaNSeen, its_NaNCnt);
+    mSL_log(SysLogBox, #its_NaNMsg);
+    its_NaNSeen = its_NaNCnt;
+);
 
 // The tab commands : the keys left by the modules of the tab (see mSL_ui_LibJJ, Keyboard)
 // (none in Interstys)
@@ -8220,8 +9287,8 @@ function do_GenericTabEnd()
     );
 );
 
-mcp = mouse_cap;
-(mcp & 2) ? (
+g__mcp = mouse_cap;
+(g__mcp & 2) ? (
     mcp_indic = 20; // right clic in the graphic area
 );
 
@@ -8264,34 +9331,34 @@ function do_Plugin_Keys()
 
 
 
-efi = 1; idx = efs = 0;
-while (efi) (
-  (efi = gfx_getdropfile(idx, #s)) ? (
-    msx = mouse_x; msy = mouse_y; msc = mouse_cap;
-    efs = mSL_Str_Tmp();
-    strcpy(efs, #s);
+g__efi = 1; g__idx = g__efs = 0;
+while (g__efi) (
+  (g__efi = gfx_getdropfile(g__idx, #s)) ? (
+    g__msx = mouse_x; g__msy = mouse_y; g__msc = mouse_cap;
+    g__efs = mSL_Str_Tmp();
+    strcpy(g__efs, #s);
 
-    (match ("*.mSL", efs)) ? (
+    (match ("*.mSL", g__efs)) ? (
         //sprintf(#s, "*  Compile: %s  (%d)  *", efs, strlen(#efs)); mSL_log(SysLogBox, #s);
-        doMslCompile(efs); // add to compile list
+        doMslCompile(g__efs); // add to compile list
     ) :
-    (match ("*wav", efs) || match ("*aif", efs) || match ("*flac", efs) || match ("*mp3", efs) || match ("*aiff", efs) || match ("*ogg", efs) || match ("*wmv", efs)) ? (
-        strcpy(#efs, efs); // save in #efs
-        dpa = 1; // an audio file is available
+    (match ("*wav", g__efs) || match ("*aif", g__efs) || match ("*flac", g__efs) || match ("*mp3", g__efs) || match ("*aiff", g__efs) || match ("*ogg", g__efs) || match ("*wmv", g__efs)) ? (
+        strcpy(#efs, g__efs); // save in #efs
+        g__dpa = 1; // an audio file is available
         /*
         sprintf(#s, "::drop file : \"%s\" - %d, %d, %d", efs, msx, msy, msc);
         mSL_log(SysLogBox, #s);
         */
     ) : (
-        sprintf(#s, "::unknown file type : \"%s\"", efs);
+        sprintf(#s, "::unknown file type : \"%s\"", g__efs);
         mSL_log(SysLogBox, #s);
     );
     ui_GFXdoNow |= 1; // Make sure we react as soon as possible
-    idx += 1;
+    g__idx += 1;
   );
 );
 
-(idx != 0) ? gfx_getdropfile(-1);
+(g__idx != 0) ? gfx_getdropfile(-1);
 
 
 
@@ -8339,11 +9406,11 @@ mSL_loc_tim = max(mSL_loc_tim - 1, 0);
                     // and none can be started yet...
                     // look for a file to compile
                     uuuMslFname = 0;
-                    ig = 0; while ((uuuMslFname === 0) && (ig < uuuMslTSiz)) (
-                        (uuuMslFname = uuuMslTabs[ig]) ? (
-                            uuuMslTabs[ig] = 0;
+                    g__ig = 0; while ((uuuMslFname === 0) && (g__ig < uuuMslTSiz)) (
+                        (uuuMslFname = uuuMslTabs[g__ig]) ? (
+                            uuuMslTabs[g__ig] = 0;
                         );
-                        ig += 1;
+                        g__ig += 1;
                     );
                     (uuuMslFname === 0) ? ( // no file found to compile
                         uuuMslTPt = uuuMslFent = uuuMslFn = 0; // reset indicators
@@ -8393,19 +9460,19 @@ mSL_loc_tim = max(mSL_loc_tim - 1, 0);
 
 
 //====== Scheduler management ======
-while (ent = Scheduler()) (
-    AAAA_Sch_code = code = SchedCode[ent];
-    AAAA_Sch_par1 = par1 = SchedPar1[ent];
-    AAAA_Sch_par2 = par2 = SchedPar2[ent];
-    AAAA_Sch_par3 = par3 = SchedPar3[ent];
-    AAAA_Sch_par3 = par4 = SchedPar4[ent];
+while (g__ent = Scheduler()) (
+    AAAA_Sch_code = code = SchedCode[g__ent];
+    AAAA_Sch_par1 = par1 = SchedPar1[g__ent];
+    AAAA_Sch_par2 = par2 = SchedPar2[g__ent];
+    AAAA_Sch_par3 = par3 = SchedPar3[g__ent];
+    AAAA_Sch_par3 = par4 = SchedPar4[g__ent];
 
     // do some work...
 
     (code & SchedWBit) ? (
-        SchedCode[ent] &= SchedWBMask ; // suppress wait bit
-        SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
-        ent = 0;
+        SchedCode[g__ent] &= SchedWBMask ; // suppress wait bit
+        SchedInsertTail(SchedActivPts, g__ent, SchETypeThrd);
+        g__ent = 0;
     ) :
     (code === 1) ? (
         // A defered action to perform
@@ -8420,7 +9487,7 @@ while (ent = Scheduler()) (
                 // This refers to an entry to execute
                 SchedInsertTail(SchedActivPts, zact, SchETypeThrd);
             );
-            SchedPar2[ent] = 0; // ok
+            SchedPar2[g__ent] = 0; // ok
         ) :
         (par1 === 'smsg') ? (
             // send a message to some task.
@@ -8429,28 +9496,28 @@ while (ent = Scheduler()) (
                 SchevDateSent[par2] = 0; // clear send date
                 event_send_msg(par2);
             );
-            SchedPar2[ent] = 0; // message has been transmitted
+            SchedPar2[g__ent] = 0; // message has been transmitted
         );
     ) :
     (code === 8) ? (
         // Run entry "0" of tasks
-        k = 0; // should refer to a compiled code
+        tsk8_cod = 0; // should refer to a compiled code (not "k" : a work variable of @block / @sample)
         mSL_errX = 0;
-        ((mSL_bl_check(k, Undef, 9793) === 0) && (k[mSL_CC_Key] === mSL_CC_KeyCKod)) ? (
+        ((mSL_bl_check(tsk8_cod, Undef, 9793) === 0) && (tsk8_cod[mSL_CC_Key] === mSL_CC_KeyCKod)) ? (
             // try to execute the gizmo
-            (ent = getNewThread()) ? (
-                SchedPar1[ent] = k; // keep the code to execute
-                SchedPar4[ent] = 0; // use current own variables
-                SchedCode[ent] = KRun_mSL_Thread; // ready to start running a thread
-                mSL_init_thread(ent);
+            (g__ent = getNewThread()) ? (
+                SchedPar1[g__ent] = tsk8_cod; // keep the code to execute
+                SchedPar4[g__ent] = 0; // use current own variables
+                SchedCode[g__ent] = KRun_mSL_Thread; // ready to start running a thread
+                mSL_init_thread(g__ent);
             ) : (
                 err_sys_rtm = 9606;
             );
             (mSL_errX === 0) ? (
-                SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
-                ent = 0;
+                SchedInsertTail(SchedActivPts, g__ent, SchETypeThrd);
+                g__ent = 0;
             ) : (
-                sprintf(#u, "Code 8: Ent: %d - Err: %04d", ent, mSL_errX);
+                sprintf(#u, "Code 8: Ent: %d - Err: %04d", g__ent, mSL_errX);
                 mSL_log(SysLogBox, #u);
                 // ADump(k);
             );
@@ -8463,13 +9530,13 @@ while (ent = Scheduler()) (
     (code === KRun_mSL_Thread)? ( // 10
         // A delayed mSL Thread
         // reintroduce the thread in the queue
-        SchedInsertTail(SchedActivPts, ent, SchETypeThrd);
+        SchedInsertTail(SchedActivPts, g__ent, SchETypeThrd);
 
         // GMW2("E"); // *DBG*
-        ent = 0;
+        g__ent = 0;
     );
     // possibly free the entry
-    ent ? SchedFree(ent); // appropriate free operation
+    g__ent ? SchedFree(g__ent); // appropriate free operation
 );
 
 
@@ -8490,13 +9557,13 @@ while (SchedActive &&
     // Get some parameters
     // Execute the action
     XeSched = 0;
-    xop = SchedCode[SchX];   // actually, only 1 to 13 are being used
+    g__xop = SchedCode[SchX];   // actually, only 1 to 13 are being used
     curr_Proc_PID = SchedPid[SchX]; // current process ident
     curr_Proc_Name = SchedThrName[SchX]; // current process name
     mSL_xop_cnt = (mSL_xop_cnt + 1) % 1000000;
 
 
-    (xop === 10) ? (
+    (g__xop === 10) ? (
         //++++10++++//
         //====== mSL EXECUTION ======
         // mSL_errX=10;
@@ -8562,7 +9629,7 @@ while (SchedActive &&
                         mSL_log(SysLogBox, #s);
                     );
                     AAAAA__Schx = Schx;
-                    AAAAA__SchxNum = ent[SchedPid] & SchedNMask;
+                    AAAAA__SchxNum = g__ent[SchedPid] & SchedNMask;
                     SchX = -1;
                 ) :
                 (mSL_CodeStop === mSL_RC_WAITGC) ? (
@@ -8854,6 +9921,7 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                     (u_ch === '7') ? (box[5] = 7;) :
                     (u_ch === '8') ? (box[5] = 8;) :
                     (u_ch === 'p') ? (sysout(box);) : // log in a text file (see mSL_show_Utilities)
+                    (u_ch === 'P') ? (sysout(box, 31);) : // the log in the console of GMAuxiliary.eel, to copy it
                     (u_ch = 0); // not a key of the log
                     GM_key_take(u_ch); // the key has been used
                 );
@@ -9115,7 +10183,7 @@ local (j, p)
         ) : (
             sprintf(labs[c0 + j], "%s: %s", names[j], #modsrc);
         );
-        colrs[c0 + j] = ((okm & (1 << j)) === 0) ? Col_Inactive : (p[its_Mod_Src] !== 0) ? CP3 : CP1;
+        colrs[c0 + j] = ((okm & (1 << j)) === 0) ? Col_Inactive : (p[its_Mod_Src] !== 0) ? Col_P3 : Col_P1;
         j += 1;
     );
 );
@@ -9219,7 +10287,7 @@ local (j, p, r)
    RDBL[10] = waveform flags (its_WaveHide, its_WaveOver ; keys 'w', '+', '-', 'v' : see its_Wave_Keys)
 */
 function show_Reader_Pad(RDBL, blockId)
-local (h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi, i, xx, w, k, r, jmc,
+local (x, h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi, i, xx, w, k, r, jmc,
         rp, zi, zz, zzch, zzent, zzmcl, zzmmd, p1, p2, newlnb, rerr, spd, d1, clen, mvl, rgh, rsc, p)
 (
     h2 = (RDBL[5] > 0) ? ui_jd_slidh * RDBL[5] + 6 : 0;
@@ -9251,11 +10319,11 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, z
                     ui_color(Col_Frame);
                     ui_border(); // draws in purple
                 ui_pop();
-                (dpa != 0) ? (
+                (g__dpa != 0) ? (
                     // audio file droped here
-                    sprintf(#s, "Reader::drop file : \"%s\" - %d, %d, %d", efs, msx, msy, msc);
+                    sprintf(#s, "Reader::drop file : \"%s\" - %d, %d, %d", g__efs, g__msx, g__msy, g__msc);
                     mSL_log(SysLogBox, #s);
-                    dpa = 0;
+                    g__dpa = 0;
                     // should we create the reader ?
                     (!rok) ? (
                         // Create the reader
@@ -9269,7 +10337,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, z
                             && (lcbl[-2] === KW_lcbl)) ? (
                             p1 = lnb; p2 = lcbl;
                         );
-                        newlnb = File_Handle(efs, p1, p2);
+                        newlnb = File_Handle(g__efs, p1, p2);
                         ((newlnb >= 0)) ? (
                             // Update reader
                             Rd_Set_Line(rdr, newlnb+1);
@@ -9318,22 +10386,22 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, z
                     // Mute
                     (rcbl[its_Rdr_StFlgs] & its_RdrFlg_mute) ? (
                         strcpy(pad_Rdr_Labs[8],"** Mute **");
-                        pad_Rdr_Colrs[8] = CP6;
+                        pad_Rdr_Colrs[8] = Col_P6;
                     ) : (
                         strcpy(pad_Rdr_Labs[8],"Mute");
-                        pad_Rdr_Colrs[8] = CP1;
+                        pad_Rdr_Colrs[8] = Col_P1;
                     );
                     // Solo
                     (rcbl[its_Rdr_StFlgs] & its_RdrFlg_solo) ? (
                         strcpy(pad_Rdr_Labs[9],"** Solo **");
-                        pad_Rdr_Colrs[9] = CP7;
+                        pad_Rdr_Colrs[9] = Col_P7;
                     ) : (
                         strcpy(pad_Rdr_Labs[9],"Solo");
-                        pad_Rdr_Colrs[9] = CP1;
+                        pad_Rdr_Colrs[9] = Col_P1;
                     );
-                    pad_Rdr_Colrs[10] = CP3;
+                    pad_Rdr_Colrs[10] = Col_P3;
                     pad_Rdr_Colrs[11] = pad_Rdr_Colrs[12] = CL1;
-                    pad_Rdr_Colrs[13] = pad_Rdr_Colrs[14] = pad_Rdr_Colrs[15] = CP1;
+                    pad_Rdr_Colrs[13] = pad_Rdr_Colrs[14] = pad_Rdr_Colrs[15] = Col_P1;
                     // Delay mode : the writer to follow (right clic : menu)
                     (rcbl[its_Rdr_Mode] === its_RdrMode_Delay) ? (
                         (rcbl[its_Rdr_WrSrc] >= 0) ? (
@@ -9380,7 +10448,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, z
                     // delay mode : the writer to follow can be chosen at once (right clic : menu ; this creates the reader)
                     (RDBL[1] === its_RdrMode_Delay) ? (
                         strcpy(pad_Rdr_Labs[13], "Writer: None");
-                        pad_Rdr_Colrs[13] = CP1;
+                        pad_Rdr_Colrs[13] = Col_P1;
                     );
                     rerr = RDBL[2];
                 );
@@ -9388,7 +10456,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, z
                 (rok) ? (
                     (rerr) ? (
                         sprintf(pad_Rdr_Labs[14],"Err: %d", rerr);
-                        pad_Rdr_Colrs[14] = CP6;
+                        pad_Rdr_Colrs[14] = Col_P6;
                     );
                 );
                 strcpy(pad_Rdr_Labs[15],"Action");
@@ -9880,6 +10948,16 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, z
                             parSetPP(p_playSpeed, pp_Max, 1);
                             parSetPP(p_playSpeed, pp_Min, -1);
                             parSetPP(p_playSpeed, pp_Slope, 0);
+                        ) :
+                        (k === 6) ? (
+                            parSetPP(p_playSpeed, pp_Max, SPDMAX);
+                            parSetPP(p_playSpeed, pp_Min, -SPDMAX);
+                            parSetPP(p_playSpeed, pp_Slope, 0);
+                        ) :
+                        (k === 7) ? (
+                            parSetPP(p_playSpeed, pp_Max, SPDMAX);
+                            parSetPP(p_playSpeed, pp_Min, 0);
+                            parSetPP(p_playSpeed, pp_Slope, 5);
                         );
                         paramValues[p_playSpeed] = zi = rcbl[its_Rdr_Speed];
                         r = parCtl(p_playSpeed);
@@ -10118,17 +11196,17 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
                     ui_color(Col_Frame);
                     ui_border(); // draws in purple
                 ui_pop();
-                (dpa != 0) ? (
+                (g__dpa != 0) ? (
                     // audio file droped here
-                    sprintf(#s, "Line::drop file : \"%s\" - %d, %d, %d", efs, msx, msy, msc);
+                    sprintf(#s, "Line::drop file : \"%s\" - %d, %d, %d", g__efs, g__msx, g__msy, g__msc);
                     mSL_log(SysLogBox, #s);
-                    dpa = 0;
+                    g__dpa = 0;
                     (!lok) ? (
                         p1 = p2 = -1;
                     ) : (
                         p1 = lnr; p2 = lcbl;
                     );
-                    nlnr = File_Handle(efs, p1, p2);
+                    nlnr = File_Handle(g__efs, p1, p2);
                     (nlnr >= 0) ? (
                         lnr = LDBL[0] = nlnr;
                         lcbl = Lines_Set[lnr];
@@ -10305,12 +11383,76 @@ local (n, g, p)
         FXP_Fill : labels and colors of the cells of the lines 1 ... RDBL[3]-1 (cells 8 ...)
         FXP_Click : event "ev" (ui_jpad_ev_...) on the cell "cell" (8 ...)
         FXP_Sliders : draw and handle the sliders
+        FXP_Graph : draw and handle the graphic area (its height in RDBL[6], set by FXP_Dims ; 0 : none)
     After a modification, the function resets fx[its_Efx_Check] (the effect is checked again by exec_fx)
 */
 FXP_Dims = 0;
 FXP_Fill = 1;
 FXP_Click = 2;
 FXP_Sliders = 3;
+FXP_Graph = 4;
+
+// the weights "hw" of the mode Cheb. sum : a preset "k" (menu_Efx_Harm)
+function its_Harm_Preset(hw, k)
+local (i, m)
+(
+    (k === 6) ? (
+        // normalize : the largest |weight| becomes 1
+        m = 0; i = 0; loop(its_SatHarm, m = max(m, abs(hw[i])); i += 1;);
+        (m > 0) ? (i = 0; loop(its_SatHarm, hw[i] /= m; i += 1;));
+    ) : (
+        i = 0; loop(its_SatHarm,
+            // i + 1 : the rank of the harmonic
+            hw[i] = (k === 0) ? (i === 0) :
+                    (k === 1) ? ((i & 1) === 0) / (i + 1) :
+                    (k === 2) ? 1 / (i + 1) :
+                    (k === 3) ? ((i & 1) === 0) / sqr(i + 1) :
+                    (k === 4) ? ((i === 0) ? 1 : ((i & 1) === 1) / (i + 1)) :
+                    (k === 5) ? rand(2) - 1 : 0;
+            i += 1;
+        );
+    );
+);
+
+/*
+    the editor of the weights "hw" of the mode Cheb. sum, in the current rect : a bar per harmonic, in [-1, 1]
+    left clic / drag : the weight at the height of the mouse (near 0 : 0) ; right clic / drag : 0 ; the bar under the mouse : its value
+*/
+function its_Harm_Edit(hw)
+local (x0, y0, w, h, bw, hh, ym, k, v, b, act)
+(
+    ui_push();
+        ui_pad(4, 2, 4, 2);
+        x0 = ui_left(); y0 = ui_top(); w = ui_width(); h = ui_height();
+        bw = w / its_SatHarm; hh = max(1, floor(h / 2) - 1); ym = y0 + floor(h / 2);
+        // the mouse
+        act = ((mouse_cap & 1) && uix_clickwasinside(1)) ? 1 : ((mouse_cap & 2) && uix_clickwasinside(2)) ? 2 : 0;
+        (act) ? (
+            k = max(0, min(its_SatHarm - 1, floor((uix_mouse_x - x0) / bw)));
+            v = max(-1, min(1, (ym - uix_mouse_y) / hh));
+            hw[k] = ((act === 2) || (abs(v) < 0.03)) ? 0 : v;
+            ui_GFXdoNow |= 4; ui_GFXReason = 37;
+        );
+        // the bars
+        ui_pcolor(0x808080, 0.15);
+        gfx_rect(x0, y0, w, h);
+        ui_pcolor(0x808080, 0.6);
+        gfx_line(x0, ym, x0 + w - 1, ym);
+        ui_pcolor(uix_theme_accent(), 0.85);
+        k = 0; loop(its_SatHarm,
+            b = floor(abs(hw[k]) * hh + 0.5);
+            (b > 0) ? gfx_rect(x0 + floor(k * bw) + 1, (hw[k] > 0) ? ym - b : ym + 1, max(1, floor(bw) - 2), b);
+            k += 1;
+        );
+        // the rank and the weight of the bar under the mouse
+        ui_hover() ? (
+            k = max(0, min(its_SatHarm - 1, floor((uix_mouse_x - x0) / bw)));
+            ui_pcolor(0x909090, 1);
+            gfx_x = x0 + 3; gfx_y = y0 + 2;
+            gfx_drawstr(sprintf(#its_HarmTxt, "H%d : %.3f", k + 1, hw[k]));
+        );
+    ui_pop();
+);
 
 // Mixer and Auto Mixer : line 1 = the 8 sources (right clic : the source ; left clic : its first channel) ; the gains of the Mixer as sliders
 function FX_Mixer_Pad(RDBL, fx, fxn, what, cell, ev)
@@ -10318,7 +11460,7 @@ local (i, k, p, r, zi, mix)
 (
     mix = (fx[its_Efx_Type] === its_Efx_TyMixer); // the Auto Mixer computes its gains
     (what === FXP_Dims) ? (
-        RDBL[3] = 2;
+        RDBL[3] = 3; // line 2 : the auto-limiter only (cell 23, see show_Effect_Pad)
         k = 0; p = fx + its_Efx_Src1;
         loop(8, (p[0] > 0) ? (k += 1); p += its_EfxDist;);
         RDBL[5] = mix ? k : 0;
@@ -10329,10 +11471,10 @@ local (i, k, p, r, zi, mix)
             k = p[0];
             (k > 0) ? (
                 its_Src_Label(pad_Efx_Labs[8 + i], k, p[its_Efx_Off1 - its_Efx_Src1]);
-                pad_Efx_Colrs[8 + i] = CP3;
+                pad_Efx_Colrs[8 + i] = Col_P3;
             ) : (
                 sprintf(pad_Efx_Labs[8 + i], "Src %d", i + 1);
-                pad_Efx_Colrs[8 + i] = CP1;
+                pad_Efx_Colrs[8 + i] = Col_P1;
             );
             i += 1; p += its_EfxDist;
         );
@@ -10385,7 +11527,7 @@ local (k, r, xx, pw)
     ) :
     (what === FXP_Fill) ? (
         strcpy(pad_Efx_Labs[8], menu_Efx_LfoShape_N[max(0, min(4, fx[its_Efx_Par1 + 1]))]);
-        pad_Efx_Colrs[8] = CP3;
+        pad_Efx_Colrs[8] = Col_P3;
     ) :
     (what === FXP_Click) ? (
         (cell === 8) ? (
@@ -10428,18 +11570,18 @@ local (k, r, xx, zi, ns, md)
     (what === FXP_Fill) ? (
         (fx[its_Efx_Src1] !== 0) ? (
             its_Src_Label(pad_Efx_Labs[8], fx[its_Efx_Src1], fx[its_Efx_Off1]);
-            pad_Efx_Colrs[8] = CP3;
+            pad_Efx_Colrs[8] = Col_P3;
         ) : (
             strcpy(pad_Efx_Labs[8], "Source");
-            pad_Efx_Colrs[8] = CP1;
+            pad_Efx_Colrs[8] = Col_P1;
         );
         strcpy(pad_Efx_Labs[9], menu_Efx_FltMode_N[max(0, min(5, fx[its_Efx_Par1 + 2]))]);
-        pad_Efx_Colrs[9] = CP3;
+        pad_Efx_Colrs[9] = Col_P3;
         ns = its_Flt_Stages(fx);
         md = fx[its_Efx_Par1 + 2];
         (md === its_FltNotch) ? sprintf(pad_Efx_Labs[10], "%d stage%s", ns, (ns > 1) ? "s" : "") :
             sprintf(pad_Efx_Labs[10], "%d dB/oct", ((md === its_FltLP) || (md === its_FltHP)) ? 12 * ns : 6 * ns);
-        pad_Efx_Colrs[10] = CP3;
+        pad_Efx_Colrs[10] = Col_P3;
         strcpy(pad_Efx_Labs[16], "Modulation");
         its_Mod_Fill(pad_Efx_Labs, pad_Efx_Colrs, 17, fx + its_Efx_Mod1, 2, its_ModN_Flt, 3);
     ) :
@@ -10501,28 +11643,36 @@ local (k, r, xx, zi, ns, md)
 
 // Saturation : line 1, cell 8 = the source (right clic : menu ; left clic : its first channel), cell 9 = the mode (left clic :
 // the next one ; right clic : menu), cell 10 = the oversampling (left clic : the next one ; right clic : the previous one) ;
-// line 2 : the modulation inputs (drive, bias) ; sliders : drive, bias, mix, output, input gain, and the modulations used
+// cell 11 (mode Cheb. sum) = the presets of the weights (menu) ; line 2 : the modulation inputs (drive, bias, order or stretch) ;
+// sliders : drive, bias, mix, output, order (modes x - A sin, Chebyshev) and A (x - A sin) or stretch (Cheb. sum), input gain, and the modulations
+// used ; the graphic area (Cheb. sum) : the editor of the weights of the harmonics
 function FX_Sat_Pad(RDBL, fx, fxn, what, cell, ev)
 local (k, r, xx)
 (
     (what === FXP_Dims) ? (
         RDBL[3] = 3;
-        RDBL[5] = 5 + its_Mod_SlCount(fx + its_Efx_Mod1, 2, 3);
+        RDBL[5] = 5 + (fx[its_Efx_Par1 + 1] >= its_SatXSin) + (fx[its_Efx_Par1 + 1] === its_SatXSin) + its_Mod_SlCount(fx + its_Efx_Mod1, 3, its_Sat_ModOk(fx));
+        RDBL[6] = (fx[its_Efx_Par1 + 1] === its_SatChebSum) ? its_HarmH : 0;
     ) :
     (what === FXP_Fill) ? (
         (fx[its_Efx_Src1] !== 0) ? (
             its_Src_Label(pad_Efx_Labs[8], fx[its_Efx_Src1], fx[its_Efx_Off1]);
-            pad_Efx_Colrs[8] = CP3;
+            pad_Efx_Colrs[8] = Col_P3;
         ) : (
             strcpy(pad_Efx_Labs[8], "Source");
-            pad_Efx_Colrs[8] = CP1;
+            pad_Efx_Colrs[8] = Col_P1;
         );
-        strcpy(pad_Efx_Labs[9], menu_Efx_SatMode_N[max(0, min(3, fx[its_Efx_Par1 + 1]))]);
-        pad_Efx_Colrs[9] = CP3;
+        strcpy(pad_Efx_Labs[9], menu_Efx_SatMode_N[max(0, min(its_SatModeCnt - 1, fx[its_Efx_Par1 + 1]))]);
+        pad_Efx_Colrs[9] = Col_P3;
         sprintf(pad_Efx_Labs[10], "Oversampling %dx", 2^max(0, min(its_SatOSCnt - 1, floor(fx[its_Efx_Par1 + 4]))));
-        pad_Efx_Colrs[10] = CP3;
+        pad_Efx_Colrs[10] = Col_P3;
+        (fx[its_Efx_Par1 + 1] === its_SatChebSum) ? (
+            strcpy(pad_Efx_Labs[11], "Harmonics");
+            pad_Efx_Colrs[11] = Col_P3;
+        );
         strcpy(pad_Efx_Labs[16], "Modulation");
-        its_Mod_Fill(pad_Efx_Labs, pad_Efx_Colrs, 17, fx + its_Efx_Mod1, 2, its_ModN_Sat, 3);
+        its_ModN_Sat[2] = (fx[its_Efx_Par1 + 1] === its_SatChebSum) ? "Stretch" : "Order";
+        its_Mod_Fill(pad_Efx_Labs, pad_Efx_Colrs, 17, fx + its_Efx_Mod1, 3, its_ModN_Sat, its_Sat_ModOk(fx));
     ) :
     (what === FXP_Click) ? (
         (cell === 8) ? (
@@ -10549,7 +11699,7 @@ local (k, r, xx)
                 ui_menu_tick(menu_Efx_SatMode, -1, 0);
             ) :
             (ev & ui_jpad_ev_lmc) ? (
-                fx[its_Efx_Par1 + 1] = (fx[its_Efx_Par1 + 1] + 1) % 4;
+                fx[its_Efx_Par1 + 1] = (fx[its_Efx_Par1 + 1] + 1) % its_SatModeCnt;
             );
         ) :
         (cell === 10) ? (
@@ -10557,7 +11707,11 @@ local (k, r, xx)
             (ev & ui_jpad_ev_rmc) ? (fx[its_Efx_Par1 + 4] = (k + its_SatOSCnt - 1) % its_SatOSCnt) :
             (ev & ui_jpad_ev_lmc) ? (fx[its_Efx_Par1 + 4] = (k + 1) % its_SatOSCnt);
         ) :
-        ((cell === 17) || (cell === 18)) ? (
+        ((cell === 11) && (fx[its_Efx_Par1 + 1] === its_SatChebSum)) ? (
+            xx = control_jmenu(menu_Efx_Harm);
+            (xx != 0) ? its_Harm_Preset(fx + its_Efx_Harm1, xx - 1);
+        ) :
+        ((cell >= 17) && (cell <= 19)) ? (
             its_Mod_Click(fx + its_Efx_Mod1, cell - 17, ev, its_PadJmc, its_ModD_Sat) ? (fx[its_Efx_Check] = 0);
         );
     ) :
@@ -10575,6 +11729,21 @@ local (k, r, xx)
         paramValues[p_fxSatOut] = fx[its_Efx_Par1 + 5];
         r = parCtl(p_fxSatOut);
         (r != 0) ? (fx[its_Efx_Par1 + 5] = (r === 8) ? 0 : parV(p_fxSatOut));
+        (fx[its_Efx_Par1 + 1] === its_SatChebSum) ? (
+            paramValues[p_fxSatStretch] = fx[its_Efx_Par1 + 7];
+            r = parCtl(p_fxSatStretch);
+            (r != 0) ? (fx[its_Efx_Par1 + 7] = (r === 8) ? 1 : parV(p_fxSatStretch));
+        ) :
+        (fx[its_Efx_Par1 + 1] >= its_SatXSin) ? (
+            paramValues[p_fxSatOrder] = fx[its_Efx_Par1 + 6];
+            r = parCtl(p_fxSatOrder);
+            (r != 0) ? (fx[its_Efx_Par1 + 6] = (r === 8) ? 3 : parV(p_fxSatOrder));
+            (fx[its_Efx_Par1 + 1] === its_SatXSin) ? (
+                paramValues[p_fxSatAmp] = fx[its_Efx_Par1 + 8];
+                r = parCtl(p_fxSatAmp);
+                (r != 0) ? (fx[its_Efx_Par1 + 8] = (r === 8) ? 1 : parV(p_fxSatAmp));
+            );
+        );
         // input gain : its linear value is computed by the check
         paramValues[p_fxGain1] = fx[its_Efx_VoldB1];
         r = parCtl(p_fxGain1);
@@ -10582,7 +11751,10 @@ local (k, r, xx)
             fx[its_Efx_VoldB1] = (r === 8) ? 0 : parV(p_fxGain1);
             fx[its_Efx_Check] = 0;
         );
-        its_Mod_Sliders(fx + its_Efx_Mod1, 2, 3, p_fxSatModD1, p_fxSatModA1);
+        its_Mod_Sliders(fx + its_Efx_Mod1, 3, its_Sat_ModOk(fx), p_fxSatModD1, p_fxSatModA1);
+    ) :
+    (what === FXP_Graph) ? (
+        (fx[its_Efx_Par1 + 1] === its_SatChebSum) ? its_Harm_Edit(fx + its_Efx_Harm1);
     );
 );
 
@@ -10620,19 +11792,22 @@ local (ty)
         5 output : own cable, Out or a bus (right clic : menu ; left clic : first channel in the bus)
         6 error (last error of exec_fx)
         7 actions (right clic : menu)
-    Lines 1 ... 3 and the sliders : the function of the type (FX_Type_Pad)
+    Lines 1 ... 3 and the sliders : the function of the type (FX_Type_Pad) ; cell 23 (not the LFO) : the auto-limiter
+        (clic : On / Off ; On : the gain reduction in dB)
     Key 'd' : dump of the effect in the log
 */
 function show_Effect_Pad(RDBL, blockId)
-local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh, zz, zzmcl, act)
+local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh, zz, zzmcl, act)
 (
     fxn = RDBL[0]; // number of the effect to be displayed
     fx = Effects_set[fxn];
     fok = (fx > BASE_MEMORY) && (fx[-2] === KW_effx);
+    RDBL[6] = 0; // graphic area : set by the type
     fok ? FX_Type_Pad(RDBL, fx, fxn, FXP_Dims, 0, 0) : (RDBL[3] = 1; RDBL[5] = 0;);
     h1 = uix_jpadHeight(RDBL[3]);
     h2 = (RDBL[5] > 0) ? ui_jd_slidh * RDBL[5] + 6 : 0;
-    uix_jneed = h1+h2+ui_jd_ctgr;
+    h3 = RDBL[6];
+    uix_jneed = h1+h2+h3+ui_jd_ctgr;
     (ui_height() >= uix_jneed) ? (
         ui_split_top(uix_jneed);
             ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
@@ -10647,11 +11822,11 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                     ui_color(Col_Frame);
                     ui_border(); // draws in purple
                 ui_pop();
-                (dpa != 0) ? (
+                (g__dpa != 0) ? (
                     // audio file droped here : ignored (but consumed)
-                    sprintf(#s, "Effect::drop file : \"%s\" - %d, %d, %d", efs, msx, msy, msc);
+                    sprintf(#s, "Effect::drop file : \"%s\" - %d, %d, %d", g__efs, g__msx, g__msy, g__msc);
                     mSL_log(SysLogBox, #s);
-                    dpa = 0;
+                    g__dpa = 0;
                 );
             );
             control_group(blockDispNames[blockDispInverts[blockId]]);
@@ -10669,7 +11844,7 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                 sprintf(pad_Efx_Labs[0],"Effect %d", fxn+1);
                 (fok) ? (
                     strcpy(pad_Efx_Labs[1], menu_Efx_Type_N[max(0, min(its_Efx_TyCnt - 1, fx[its_Efx_Type]))]);
-                    pad_Efx_Colrs[1] = CP3;
+                    pad_Efx_Colrs[1] = Col_P3;
                     strcpy(pad_Efx_Labs[2], menu_Efx_PhShort_N[max(0, min(2, fx[its_Efx_Phase]))]);
                     pad_Efx_Colrs[2] = CL1;
                     (fx[its_Efx_Status] === its_EfxStat_Bypass) ? (
@@ -10686,13 +11861,13 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                     sprintf(pad_Efx_Labs[4], "Channels %d", fx[its_Efx_CCnt]);
                     pad_Efx_Colrs[4] = Color_Heliotrope;
                     its_Out_Label(pad_Efx_Labs[5], fx[its_Efx_OutK], fx[its_Efx_OutOff]);
-                    pad_Efx_Colrs[5] = CP3;
+                    pad_Efx_Colrs[5] = Col_P3;
                     (fx[its_Efx_Status] === its_EfxStat_Off) ? (
                         strcpy(pad_Efx_Labs[6], "---");
                     ) :
                     ((k = fx[its_Efx_Error]) !== 0) ? (
                         sprintf(pad_Efx_Labs[6], "Err: %04d", k);
-                        pad_Efx_Colrs[6] = CP6;
+                        pad_Efx_Colrs[6] = Col_P6;
                     ) :
                     (fx[its_Efx_Check] === BLOCK_CHECK) ? (
                         strcpy(pad_Efx_Labs[6], "OK");
@@ -10701,12 +11876,21 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                         strcpy(pad_Efx_Labs[6], "...");
                     );
                     FX_Type_Pad(RDBL, fx, fxn, FXP_Fill, 0, 0);
+                    (fx[its_Efx_Type] !== its_Efx_TyLFO) ? (
+                        (fx[its_Efx_Lim]) ? (
+                            sprintf(pad_Efx_Labs[23], "Limiter %.1f dB", -20 * log10(max(1, fx[its_Efx_LimEnv])));
+                            pad_Efx_Colrs[23] = (fx[its_Efx_LimEnv] > 1.012) ? Color_Goldenrod : Color_Limegreen; // > 0.1 dB
+                        ) : (
+                            strcpy(pad_Efx_Labs[23], "Limiter Off");
+                            pad_Efx_Colrs[23] = Col_P1;
+                        );
+                    );
                 ) : (
                     strcpy(pad_Efx_Labs[1], menu_Efx_Type_N[0]);
-                    pad_Efx_Colrs[1] = CP1;
+                    pad_Efx_Colrs[1] = Col_P1;
                 );
                 strcpy(pad_Efx_Labs[7],"Action");
-                pad_Efx_Colrs[7] = CP1;
+                pad_Efx_Colrs[7] = Col_P1;
 
                 its_PadJmc = jmc; // mouse modifiers, for the functions of the types (see its_Mod_Click)
                 zz = control_jpad(pad_Effect, RDBL[3], -1, 1);
@@ -10758,6 +11942,11 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                                     fx[its_Efx_Par1 + 3] = 1; // mix : 100 %
                                     fx[its_Efx_Par1 + 4] = 2; // oversampling 4x
                                     fx[its_Efx_Par1 + 5] = -6; // output (dB)
+                                    fx[its_Efx_Par1 + 6] = 3; // order (x - sin, Chebyshev)
+                                    fx[its_Efx_Par1 + 7] = 1; // stretch (Cheb. sum)
+                                    fx[its_Efx_Par1 + 8] = 1; // A (x - A sin)
+                                    fx[its_Efx_Lim] = 1; // the auto-limiter in service
+                                    its_Harm_Preset(fx + its_Efx_Harm1, 0); // the fundamental only
                                 );
                             );
                             ui_menu_tick(menu_Efx_Type, -1, 0);
@@ -10828,6 +12017,11 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                                 fok = 0;
                             );
                         ) :
+                        ((zzmcl === 23) && fok && (fx[its_Efx_Type] !== its_Efx_TyLFO)) ? (
+                            // the auto-limiter : On / Off
+                            fx[its_Efx_Lim] = !fx[its_Efx_Lim];
+                            fx[its_Efx_LimEnv] = 0;
+                        ) :
                         ((zzmcl >= 8) && fok) ? (
                             FX_Type_Pad(RDBL, fx, fxn, FXP_Click, zzmcl, zz);
                         );
@@ -10850,12 +12044,25 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
                                 fx[its_Efx_Check] = 0;
                             );
                         ) :
+                        ((zzmcl === 23) && fok && (fx[its_Efx_Type] !== its_Efx_TyLFO)) ? (
+                            // the auto-limiter : On / Off
+                            fx[its_Efx_Lim] = !fx[its_Efx_Lim];
+                            fx[its_Efx_LimEnv] = 0;
+                        ) :
                         ((zzmcl >= 8) && fok) ? (
                             FX_Type_Pad(RDBL, fx, fxn, FXP_Click, zzmcl, zz);
                         );
                     );
                 );
             ui_pop();
+
+            // Graphic area of the type (the pad may have changed the effect)
+            fx = Effects_set[RDBL[0]];
+            ((h3 > 0) && (RDBL[0] === fxn) && (fx > BASE_MEMORY) && (fx[-2] === KW_effx)) ? (
+                ui_split_top(h3);
+                    FX_Type_Pad(RDBL, fx, fxn, FXP_Graph, 0, 0);
+                ui_pop();
+            );
 
             // Sliders of the type (the pad may have changed the effect)
             fx = Effects_set[RDBL[0]];
@@ -10879,7 +12086,7 @@ local (h1, h2, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh,
             10 source (right clic : menu ; left clic : first channel taken), 11 write position (s), 12 overdub mode (left clic : X-fade / Sum),
             15 actions (right clic : menus)
 */
-function show_Writer_Pad(WDBL, blockID)
+function show_Writer_Pad(WDBL, blockId)
 local (h1, h2, h3, h4, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, CL1, dfCol, i, k, r, w, x, xx, zi, zz, zzch,
         zzent, zzmcl, zzmmd, wgh, f, n)
 (
@@ -10949,7 +12156,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lo
                         strcpy(pad_Wrt_Labs[3],"Line: None");
                     );
                     its_Src_Label(pad_Wrt_Labs[10], wcbl[its_Wrt_Src], wcbl[its_Wrt_SrcOff]);
-                    pad_Wrt_Colrs[10] = CP3;
+                    pad_Wrt_Colrs[10] = Col_P3;
                     strcpy(pad_Wrt_Labs[12], (wcbl[its_Wrt_Mode] === its_WrtMode_Sum) ? "Overdub Sum" : "Overdub X-fade");
                     pad_Wrt_Colrs[12] = CL1;
                 ) : (
@@ -10957,7 +12164,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lo
                     strcpy(pad_Wrt_Labs[3],"Line: None");
                 );
                 strcpy(pad_Wrt_Labs[15],"Action");
-                pad_Wrt_Colrs[15] = CP1;
+                pad_Wrt_Colrs[15] = Col_P1;
 
                 zz = control_jpad(pad_Writer);
                 (zz > 0) ? (
@@ -11140,7 +12347,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lo
                     paramValues[p_wrOvrdb] = wcbl[its_Wrt_Ovrdb];
                     r = parCtl(p_wrOvrdb);
                     (r != 0) ? (
-                        zi = (r === 8) ? 0 : max(0, min(100, parV(p_wrOvrdb))); // right clic : no overdub
+                        zi = (r === 8) ? 0 : max(-150, min(150, parV(p_wrOvrdb))); // right clic : no overdub
                         wcbl[its_Wrt_Ovrdb] = zi;
                         (wcbl === Currwriter) ? (slWrOvrdbPrv = slWrOvrdb = zi);
                     );
@@ -11203,7 +12410,7 @@ local (h1, h2, uix_jneed, zzmi, i, n, r, zz, zzmcl, pg, npg)
                 strcpy(pad_Ctl_Labs[0],"Controls");
                 i = 0; loop(npg,
                     sprintf(pad_Ctl_Labs[1 + i], "Ctl %d-%d", 8 * i + 1, min(NB_GSL, 8 * i + 8));
-                    pad_Ctl_Colrs[1 + i] = (i === pg) ? Color_Limegreen : CP1;
+                    pad_Ctl_Colrs[1 + i] = (i === pg) ? Color_Limegreen : Col_P1;
                     i += 1;
                 );
                 zz = control_jpad(pad_Controls);
@@ -11336,12 +12543,12 @@ local (h1, h2, h3, uix_jneed, zzmi, i, k, c, w, v, pg, npg, ncel, nl, zz, zzmcl,
                 strcpy(pad_Pch_Labs[3], "Buses");
                 strcpy(pad_Pch_Labs[4], "Controls");
                 strcpy(pad_Pch_Labs[5], "Cables");
-                i = 0; loop(its_PchV_Cnt, pad_Pch_Colrs[1 + i] = (i === v) ? Color_Limegreen : CP1; i += 1;);
+                i = 0; loop(its_PchV_Cnt, pad_Pch_Colrs[1 + i] = (i === v) ? Color_Limegreen : Col_P1; i += 1;);
                 sprintf(pad_Pch_Labs[6], "Page %d / %d", pg + 1, npg);
-                pad_Pch_Colrs[6] = (npg > 1) ? CP3 : Col_Inactive;
+                pad_Pch_Colrs[6] = (npg > 1) ? Col_P3 : Col_Inactive;
                 (nbad > 0) ? (
                     sprintf(pad_Pch_Labs[7], "Problems %d", nbad);
-                    pad_Pch_Colrs[7] = CP6;
+                    pad_Pch_Colrs[7] = Col_P6;
                 ) : (
                     strcpy(pad_Pch_Labs[7], "No problem");
                     pad_Pch_Colrs[7] = Color_Limegreen;
@@ -11385,7 +12592,7 @@ local (h1, h2, h3, uix_jneed, zzmi, i, k, c, w, v, pg, npg, ncel, nl, zz, zzmcl,
                             kw = kr = 0; w = c; loop(BusWidth[ch], kw += its_PchW[w]; kr += its_PchR[w]; w += 1;);
                             sprintf(pad_PchG_Labs[i], "Bus %d [%d]", ch + 1, BusWidth[ch]);
                             pad_PchG_Colrs[i] = ((kw > 0) && (kr > 0)) ? Color_Limegreen :
-                                (kw > 0) ? Color_Dark_Orange : (kr > 0) ? CP6 : Col_Inactive;
+                                (kw > 0) ? Color_Dark_Orange : (kr > 0) ? Col_P6 : Col_Inactive;
                         ) : (
                             kw = its_PchW[c]; kr = its_PchR[c];
                             (v === its_PchV_In) ? sprintf(pad_PchG_Labs[i], "In:%d", k) :
@@ -11394,7 +12601,7 @@ local (h1, h2, h3, uix_jneed, zzmi, i, k, c, w, v, pg, npg, ncel, nl, zz, zzmcl,
                             // In and the controls are written by REAPER (the track, the sliders), Out is read by REAPER
                             ((v === its_PchV_In) || (v === its_PchV_Ctl)) ? (kw = 1) : (v === its_PchV_Out) ? (kr += (kw > 0));
                             pad_PchG_Colrs[i] = ((kw > 0) && (kr > 0)) ? Color_Limegreen :
-                                (kw > 0) ? Color_Dark_Orange : (kr > 0) ? CP6 : Col_Inactive;
+                                (kw > 0) ? Color_Dark_Orange : (kr > 0) ? Col_P6 : Col_Inactive;
                             (((v === its_PchV_In) || (v === its_PchV_Ctl)) && (kr === 0)) ? (pad_PchG_Colrs[i] = Col_Inactive);
                         );
                     );
@@ -11503,7 +12710,7 @@ local (h1, h2, uix_jneed, zzmi, jmc, i, k, r, xx, zi, zz, zzmcl, nLn, nRd, nWr, 
                 sprintf(pad_Glb_Labs[6],"Effects %d", nFx);
                 pad_Glb_Colrs[3] = pad_Glb_Colrs[4] = pad_Glb_Colrs[5] = pad_Glb_Colrs[6] = Color_Heliotrope;
                 strcpy(pad_Glb_Labs[7],"Action");
-                pad_Glb_Colrs[7] = CP1;
+                pad_Glb_Colrs[7] = Col_P1;
 
                 zz = control_jpad(pad_Global);
                 (zz > 0) ? (
@@ -11570,7 +12777,7 @@ local (h1, h2, uix_jneed, zzmi, jmc, i, k, r, xx, zi, zz, zzmcl, nLn, nRd, nWr, 
 );
 
 function show_UserModule(module)
-local(umid, chk, i, statn, recomp, modInst, modSrc, ucod, uent, err, ut, user_top, ul, user_left, uw, user_width, uh, user_height, rptb, ptbl, prvstk, ptstk, anc, typanc, cbxrpt, cbxref, typtb, crptb, addb, rcnt, adds, flgm, reh, w3)
+local(w, umid, chk, i, statn, recomp, modInst, modSrc, ucod, uent, err, ut, user_top, ul, user_left, uw, user_width, uh, user_height, rptb, ptbl, prvstk, ptstk, anc, typanc, cbxrpt, cbxref, typtb, crptb, addb, rcnt, adds, flgm, reh, w3)
 (
     // module is a module number
     // Lets check the existence of the object
@@ -12026,7 +13233,7 @@ local(umid, chk, i, statn, recomp, modInst, modSrc, ucod, uent, err, ut, user_to
 
 
 function genericItemsPos(bNumb)
-local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in)
+local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in)
 (
     blockMouseWasIn = 0;
     PanIdt = bNumb;
@@ -12429,7 +13636,7 @@ function genericLiveTab()
 
 
 function genericTabSet(tbNum)
-local (ww, t, BankLink)
+local (p, ww, t, BankLink)
 (
     do_GenericTabStart();
     //colMouseWasIn = -1;
