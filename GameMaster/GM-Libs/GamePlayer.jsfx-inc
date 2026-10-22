@@ -444,7 +444,7 @@ local (PathsStrings)
 i__ii = 0; loop(K_savedStringsCnt, savedStrings[i__ii] = mSL_Str_Perm(); i__ii+=1;);
 // Dropped mSL files (see "Drop File" in @gfx) : the names of the group dropped in the frame (full paths),
 // then a ring of names waiting for their compilation (doMslCompile keeps a reference to the name)
-dropMslSiz = 16; dropMslCnt = 0;
+dropMslSiz = 64; dropMslCnt = 0; // (as many as the compile list, uuuMslTSiz ; it was 16)
 dropMslNames = make_array(dropMslSiz);
 i__ii = 0; loop(dropMslSiz, dropMslNames[i__ii] = mSL_Str_Perm(); i__ii+=1;);
 dropCmpSiz = 64; dropCmpPt = 0;
@@ -5614,6 +5614,19 @@ function doMslCompile(fname)
             uuuMslFn = 1; // set flag
         );
     )
+);
+
+// doMslCompile of a copy of "name" in the ring of names (doMslCompile keeps the pointer : the name may be reused) ;
+// the copy is made only if the compile list has room, so that a refused file never overwrites a name still waiting
+function doMslCompileCopy(name)
+(
+    (uuuMslTabs[uuuMslTPt] === 0) ? (
+        strcpy(dropCmpNames[dropCmpPt], name);
+        doMslCompile(dropCmpNames[dropCmpPt]);
+        dropCmpPt = (dropCmpPt + 1) % dropCmpSiz;
+    ) : (
+        doMslCompile(name); // the list is full : refused (error 2407)
+    );
 );
 
 /* After a compilation attempt (successful or not) : free the compiler's structures,
@@ -23238,10 +23251,7 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
                                     strcat(#sname, #ws);
                                     sprintf(#s, "Script full name: %s", #sname); mSL_log(SysLogBox, #s);
                                 );
-                                // (doMslCompile keeps the pointer : a copy in the ring of names, #sname is reused)
-                                strcpy(dropCmpNames[dropCmpPt], #sname);
-                                doMslCompile(dropCmpNames[dropCmpPt]);
-                                dropCmpPt = (dropCmpPt + 1) % dropCmpSiz;
+                                doMslCompileCopy(#sname); // (#sname is reused)
                             );
                         );
                     );
@@ -27470,9 +27480,7 @@ must_do_gfx() ? (
 // The dropped mSL files not used by a module : compiled and run (with the token ; otherwise at the next frame)
 (g__dpi && mSL_tok_take(2)) ? (
     g__dmi = 0; loop(dropMslCnt,
-        strcpy(dropCmpNames[dropCmpPt], dropMslNames[g__dmi]);
-        doMslCompile(dropCmpNames[dropCmpPt]);
-        dropCmpPt = (dropCmpPt + 1) % dropCmpSiz;
+        doMslCompileCopy(dropMslNames[g__dmi]);
         g__dmi += 1;
     );
     doneDroppedMsl();
