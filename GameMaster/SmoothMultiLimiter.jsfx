@@ -54,9 +54,9 @@ tops = freemem; freemem += ndmax; // displayed channels, loudest first
 // half cosine table : hctab[k] = 0.5 + 0.5*cos(k*$pi/HCN), k = 0..HCN (+ 1 guard)
 HCN = 8192;
 hctab = freemem; freemem += HCN + 2;
-bn = 0;
+i__bn = 0;
 loop (HCN + 1,
-    hctab[bn] = 0.5 + 0.5*cos(bn*$pi/HCN); bn += 1;
+    hctab[i__bn] = 0.5 + 0.5*cos(i__bn*$pi/HCN); i__bn += 1;
 );
 hctab[HCN + 1] = hctab[HCN];
 // pointers to buffers
@@ -75,9 +75,9 @@ databeg = freemem;
 // buffer for peaks
 bufferpeak = freemem; freemem += bufferlength;
 // allocate buffers
-bn = 0;
+i__bn = 0;
 loop (buffcnt,
-    buffers[bn] = freemem; freemem += bufferlength; bn += 1;
+    buffers[i__bn] = freemem; freemem += bufferlength; i__bn += 1;
 );
 histmin = freemem; freemem += buffcnt*HN; // channel c : histmin[c*HN + bucket]
 histmax = freemem; freemem += buffcnt*HN;
@@ -85,9 +85,9 @@ histpk = freemem; freemem += HN; // max of the peak envelope
 memset(databeg, 0, freemem - databeg);
 
 memset(xnrg, 0, buffcnt); xnrg[buffcnt] = -0.1; // sentinel for ordchnls
-bn = 0;
+i__bn = 0;
 loop (buffcnt,
-    curmin[bn] = hugeval; curmax[bn] = -hugeval; bn += 1;
+    curmin[i__bn] = hugeval; curmax[i__bn] = -hugeval; i__bn += 1;
 );
 hpos = 0; // next bucket to write (= the oldest one)
 hcnt = 0; // samples in the current bucket
@@ -155,23 +155,23 @@ pdc_delay = delaysamples - 1;
 @sample
 
 
-truepeak = is = 0;
+truepeak = s__is = 0;
 loop (actchn,
-    xspl[is] = v = spl(is) * pregain_factor;
-    xnrg[is] += epsnrg * (v*v - xnrg[is]);
-    v = abs(v);
-    truepeak = max(truepeak, v);
-    is += 1;
+    xspl[s__is] = s__v = spl(s__is) * pregain_factor;
+    xnrg[s__is] += epsnrg * (s__v*s__v - xnrg[s__is]);
+    s__v = abs(s__v);
+    truepeak = max(truepeak, s__v);
+    s__is += 1;
 );
 
 
 releasepeak = limit;
 releaseindex < releasesamples ? (
   // 0.5 + 0.5*cos(x*$pi), read in hctab with linear interpolation
-  hp = releaseindex*relstep; hk = hp|0;
+  s__hp = releaseindex*relstep; s__hk = s__hp|0;
   releasepeak = limit + (releasestartvalue - limit) *
       /// (0.5 + 0.5 * cos( (releaseindex/releasesamples) * $pi));
-      (hctab[hk] + (hp - hk)*(hctab[hk+1] - hctab[hk]));
+      (hctab[s__hk] + (s__hp - s__hk)*(hctab[s__hk+1] - hctab[s__hk]));
   releaseindex += 1;
 );
 peak = max(releasepeak, truepeak);
@@ -190,7 +190,7 @@ peak < limit ? (
   releasestartvalue = peak;
   releaseindex = 0;
   // Attempt to extend an existing attack
-  i = 1;
+  s__i = 1;
   startpeak = limit;
   foundabove = 0;
   foundintersection = 0;
@@ -199,12 +199,12 @@ peak < limit ? (
   bestcorrection = -1;
   bestindex = delaysamples - 1;
   beststartpeak = limit;
-  while (i < attacksamples && !foundintersection) (
+  while (s__i < attacksamples && !foundintersection) (
     /// window = 0.5 - 0.5 * cos( (1 - i/attacksamples) * $pi );
-    hp = HCN - i*attstep; hk = hp|0;
-    window = 1 - (hctab[hk] + (hp - hk)*(hctab[hk+1] - hctab[hk]));
+    s__hp = HCN - s__i*attstep; s__hk = s__hp|0;
+    window = 1 - (hctab[s__hk] + (s__hp - s__hk)*(hctab[s__hk+1] - hctab[s__hk]));
 
-    readpos = writepos - i;
+    readpos = writepos - s__i;
     readpos < 0 ? readpos += bufferlength;
     oldpeak = bufferpeak[readpos];
 
@@ -215,55 +215,55 @@ peak < limit ? (
       diff = (newstartpeak - startpeak)*(1 - window);
       (bestcorrection < 0 || diff < bestcorrection) ? (
         bestcorrection = diff;
-        bestindex = i;
+        bestindex = s__i;
         beststartpeak = newstartpeak;
       );
 
       startpeak = newstartpeak;
-      intersectionindex = i;
+      intersectionindex = s__i;
       foundabove = 1;
     ) : (foundabove) ? (
       foundintersection = 1;
     );
-    i += 1;
+    s__i += 1;
   );
 
   foundintersection ? (
-    i = 0;
-    while (i < intersectionindex) (
-      hp = HCN - i*attstep; hk = hp|0;
-      window = 1 - (hctab[hk] + (hp - hk)*(hctab[hk+1] - hctab[hk]));
+    s__i = 0;
+    while (s__i < intersectionindex) (
+      s__hp = HCN - s__i*attstep; s__hk = s__hp|0;
+      window = 1 - (hctab[s__hk] + (s__hp - s__hk)*(hctab[s__hk+1] - hctab[s__hk]));
 
-      readpos = writepos - i;
+      readpos = writepos - s__i;
       readpos < 0 ? readpos += bufferlength;
       newpeak = startpeak + (peak - startpeak)*window;
       bufferpeak[readpos] = newpeak;
-      i += 1;
+      s__i += 1;
     );
   ) : (
-    i = 0;
+    s__i = 0;
     invbest = 1/bestindex;
-    while (i < bestindex) (
-      hp = HCN - i*attstep; hk = hp|0;
-      window = 1 - (hctab[hk] + (hp - hk)*(hctab[hk+1] - hctab[hk]));
+    while (s__i < bestindex) (
+      s__hp = HCN - s__i*attstep; s__hk = s__hp|0;
+      window = 1 - (hctab[s__hk] + (s__hp - s__hk)*(hctab[s__hk+1] - hctab[s__hk]));
 
-      readpos = writepos - i;
+      readpos = writepos - s__i;
       readpos < 0 ? readpos += bufferlength;
       newpeak = beststartpeak + (peak - beststartpeak)*window;
 
-      faderatio = 1 - i*invbest;
+      faderatio = 1 - s__i*invbest;
       fadewindow = 1 - (1 - faderatio)*(1 - faderatio);
       bufferpeak[readpos] += (newpeak - bufferpeak[readpos])*fadewindow;
-      i += 1;
+      s__i += 1;
     );
   );
 );
 
-is = 0;
+s__is = 0;
 loop (actchn,
-    ptb = buffers[is];
-    ptb[writepos] = xspl[is] ;
-    is += 1;
+    s__ptb = buffers[s__is];
+    s__ptb[writepos] = xspl[s__is] ;
+    s__is += 1;
 );
 
 bufferpeak[writepos] = peak;
@@ -289,25 +289,25 @@ oldpeak > limit ? (
   B = 1; A = 0;
 );
 
-is = 0;
+s__is = 0;
 loop (actchn,
-    ptb = buffers[is];
+    s__ptb = buffers[s__is];
     // soft clipper, dist(u) = B*u/(A*abs(u) + 1)
-    u = ptb[readpos]; spl(is) = xvol * (B*u/(A*abs(u) + 1));
+    s__u = s__ptb[readpos]; spl(s__is) = xvol * (B*s__u/(A*abs(s__u) + 1));
     // display history (input, aligned with the output)
-    curmin[is] = min(curmin[is], u);
-    curmax[is] = max(curmax[is], u);
-    is += 1;
+    curmin[s__is] = min(curmin[s__is], s__u);
+    curmax[s__is] = max(curmax[s__is], s__u);
+    s__is += 1;
 );
 curpk = max(curpk, oldpeak);
 
 (hcnt += 1) >= hstep ? (
   // close the bucket, for all channels (stale values for inactive ones)
-  is = 0; ih = hpos;
+  s__is = 0; s__ih = hpos;
   loop (buffcnt,
-      histmin[ih] = curmin[is]; histmax[ih] = curmax[is];
-      curmin[is] = hugeval; curmax[is] = -hugeval;
-      ih += HN; is += 1;
+      histmin[s__ih] = curmin[s__is]; histmax[s__ih] = curmax[s__is];
+      curmin[s__is] = hugeval; curmax[s__is] = -hugeval;
+      s__ih += HN; s__is += 1;
   );
   histpk[hpos] = curpk; curpk = 0;
   hpos += 1; hpos >= HN ? hpos = 0;
@@ -457,9 +457,9 @@ control_start("main", "tron");
 
 ui_screen() == "main" ? (
   control_navbar("Multichannel Smooth Limiter  ---  v1.18", -1, -1);
-  flg = gfx_w > 320;
+  g__flg = gfx_w > 320;
   // ui_split_left(max(ui_width()*0.4, 200));
-  flg ? (
+  g__flg ? (
     ui_split_left(260);
   );
     (zzz1 = ui_height()) > (ui_jd_slidh*slc+20) ? (
@@ -469,31 +469,31 @@ ui_screen() == "main" ? (
       ui_pop();
     );
     ui_split_topratio(1/slc);
-      r = slider_ctl("limit: %0.1fdB", slider1, -40, -0.0, -3.5, -3, 0.1);
-      r ? (slider1 = uix_jsl_val; uix_interacted = 1;);
+      g__r = slider_ctl("limit: %0.1fdB", slider1, -40, -0.0, -3.5, -3, 0.1);
+      g__r ? (slider1 = uix_jsl_val; uix_interacted = 1;);
     ui_split_next();
-      r = slider_ctl("pre-gain: %0.1fdB", slider5 + (slider5 >= 0 ? 0.002 : -0.002), -12, 24, 0, 0, 0.1);
-      r ? (slider5 = uix_jsl_val; uix_interacted = 1;);
+      g__r = slider_ctl("pre-gain: %0.1fdB", slider5 + (slider5 >= 0 ? 0.002 : -0.002), -12, 24, 0, 0, 0.1);
+      g__r ? (slider5 = uix_jsl_val; uix_interacted = 1;);
     ui_split_next();
-      r = slider_ctl("volume %.1fdB", slider8, -12, 24, 0, 0, 0.1);
-      r ? (slider8 = uix_jsl_val; uix_interacted = 1;);
+      g__r = slider_ctl("volume %.1fdB", slider8, -12, 24, 0, 0, 0.1);
+      g__r ? (slider8 = uix_jsl_val; uix_interacted = 1;);
     ui_split_next();
-      r = slider_ctl("attack: %0.1fms", slider2, 0.1, maxattack, 4, 10, 0.1);
-      r ? (slider2 = uix_jsl_val; uix_interacted = 1;);
+      g__r = slider_ctl("attack: %0.1fms", slider2, 0.1, maxattack, 4, 10, 0.1);
+      g__r ? (slider2 = uix_jsl_val; uix_interacted = 1;);
     ui_split_next();
-      r = slider_ctl("release: %ims", slider3, 1, 1000, 4, 100, 1);
-      r ? (slider3 = uix_jsl_val; uix_interacted = 1;);
+      g__r = slider_ctl("release: %ims", slider3, 1, 1000, 4, 100, 1);
+      g__r ? (slider3 = uix_jsl_val; uix_interacted = 1;);
     ui_split_next();
-      r = slider_ctl("distortion: %i%%", slider4, 0, 100, 0, 0, 1);
-      r ? (slider4 = uix_jsl_val; uix_interacted = 1;);
+      g__r = slider_ctl("distortion: %i%%", slider4, 0, 100, 0, 0, 1);
+      g__r ? (slider4 = uix_jsl_val; uix_interacted = 1;);
     ui_split_next();
-      r = slider_ctl("zoom: %0.2f", slider7, 0.1, 10, 5, 1, 0.01);
-      r ? (slider7 = uix_jsl_val; uix_interacted = 1;);
+      g__r = slider_ctl("zoom: %0.2f", slider7, 0.1, 10, 5, 1, 0.01);
+      g__r ? (slider7 = uix_jsl_val; uix_interacted = 1;);
     ui_split_next();
-      r = slider_ctl("display: %i ch.", slider6, 1, ndmax, 0, 4, 1);
-      r ? (slider6 = uix_jsl_val; uix_interacted = 1;);
+      g__r = slider_ctl("display: %i ch.", slider6, 1, ndmax, 0, 4, 1);
+      g__r ? (slider6 = uix_jsl_val; uix_interacted = 1;);
     ui_pop();
-  flg ? (
+  g__flg ? (
     ui_pop();
     draw_peaks(0.5 * zoom);
   );
