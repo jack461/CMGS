@@ -1,0 +1,41 @@
+print("Ex-1012. Interstys table : effet Saturation.");
+
+/*
+  Un nouvel effet Saturation prend les valeurs par defaut du pad (drive 12 dB, Soft, mix 100 %, os 4, output -6 dB,
+  limiteur en service). Le Dump ne montre que les cles du mode : order et amount en XSin, stretch et harm en ChebSum.
+  "harm" prend de 1 a 16 poids ; les poids non donnes valent 0 (le Dump s'arrete au dernier poids non nul).
+  Erreurs (rien n'est modifie) : r2 : os 3 (2754) ; r3 : 17 poids (2754) ; r4 : poids hors de [-1, 1] (2754) ;
+  r5 : "q" n'a pas de sens pour une Saturation (2767). Les numeros des effets dependent du projet (%d).
+*/
+
+var r1 = table(data(
+    Interstys
+    Effect sn  type Saturation  chan 2
+    Dump Effect sn
+    Effect sx  type Saturation  chan 2  source In:0  gain -3  mode XSin  drive 24  bias 0.25  mix 50  os 2  output -12
+               order 5  amount 0.75  stretch 2  mod Drive Effect sn depth 6  mod Order Ctl 3 att -0.5
+    Dump Effect sx
+    Check Effect sx  mode XSin  drive 24  bias 0.25  mix 50  os 2  output -12  order 5  amount 0.75  stretch 2
+                     mod Drive Effect sn depth 6 att 1  mod Order Ctl 3 depth 2 att -0.5  mod Bias none
+    Effect sx  mode ChebSum  harm 1 0 0.5 - 0.25
+    Dump Effect sx
+    Check Effect sx  harm 1 0 0.5 - 0.25  stretch 2  order 5
+    Free Effect sx
+    Free Effect sn
+));
+var r2 = table(data( Effect x type Saturation os 3 ));
+var r3 = table(data( Effect x type Saturation harm 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 ));
+var r4 = table(data( Effect x type Saturation harm 0.5 2 ));
+var r5 = table(data( Effect x type Saturation q 2 ));
+print(sprintf(0, "Ex-1012. resultats : %d %d %d %d %d", r1, r2, r3, r4, r5));
+
+// Expected "Effect %d status On type Saturation phase Std chan 2 out Own limiter On mode Soft drive 12 bias 0 mix 100 os 4 output -6"
+// Expected "Effect %d status On type Saturation phase Std chan 2 out Own limiter On source In:0 gain -3 mode XSin drive 24 bias 0.25 mix 50 os 2 output -12 order 5 amount 0.75 mod Drive Effect %d depth 6 att 1 mod Order Ctl 3 depth 2 att -0.5"
+// Expected "Check Effect %d OK"
+// Expected "Effect %d status On type Saturation phase Std chan 2 out Own limiter On source In:0 gain -3 mode ChebSum drive 24 bias 0.25 mix 50 os 2 output -12 stretch 2 harm 1 0 0.5 -0.25 mod Drive Effect %d depth 6 att 1 mod Order Ctl 3 depth 2 att -0.5"
+// Expected "Check Effect %d OK"
+// Expected error 2754
+// Expected error 2754
+// Expected error 2754
+// Expected error 2767
+// Expected "Ex-1012. resultats : 0 2754 2754 2754 2767"
