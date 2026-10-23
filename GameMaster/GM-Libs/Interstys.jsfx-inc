@@ -3711,6 +3711,7 @@ local (lcbl, i, j, cb)
             lnupdt = 1;
         );
         Lines_Set[lnum] = 0;
+        ((its_LnFile !== 0) && !its_LnKeep) ? strcpy(its_LnFile[lnum], ""); // (no file any more ; its_Load_Install : kept)
     );
 );
 function Ln_Delete(lnum) ( Ln_Delete(lnum, 0); );
@@ -3734,6 +3735,7 @@ local (lcbl, err)
     ) :
     (act === its_LinAct_Clear) ? (
         Ln_Clear(lnb);
+        strcpy(its_LnFile[lnb], ""); // (the samples of the file are lost)
     ) :
     (act === its_LinAct_Delete) ? (
         Ln_Delete(lnb, 1); // (@gfx : the pad of the line)
@@ -3754,6 +3756,23 @@ local (lcbl, err)
 
 // Ln_MemErr[line] : 1 when the last creation of the line failed for lack of memory, error 2610 (see Ln_Make, show_Line_Pad)
 Ln_MemErr = make_array(LN_CNT+1);
+
+// its_LnFile[line] : the string of the sound file read into the line (full path ; "" : none), see Ln_Load_File, File_Handle ;
+// cleared when the line is deleted, replaced or cleared ; saved in the preset ('lfil' blocks)
+its_LnFile = make_array(LN_CNT+1);
+<? i = 0; loop(LN_CNT + 1, printf("its_LnFile[%d] = #its_LnF%d; ", i, i); ((i % 8) == 7) ? printf("\n"); i += 1;); ?>
+its_LnFShow = -1; // the line whose full path is shown in its file pad (left clic), until its_LnFShowT
+its_LnFShowT = 0;
+its_LnFShowDur = 20; // (seconds)
+
+// the name of the file "path" without its folder, in "str"
+function its_Ln_BaseName(str, path)
+local (i, c)
+(
+    i = strlen(path) - 1;
+    while ((i >= 0) && ((c = str_getchar(path, i, 'cu')) !== '/') && (c !== '\\')) ( i -= 1; );
+    strcpy_from(str, path, i + 1);
+);
 
 // Pad for the Lines
 pad_Lin_NL = 1;
@@ -3810,6 +3829,21 @@ menu_Lin_Action_N[4] = "Delete";
 menu_Lin_Action = make_jmenu(
     ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "line-action", 5, menu_Lin_Action_N);
+
+// Pad of the file of a line (one cell, the whole width) and its menu (right clic)
+pad_LnF = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    1, 1, 1);
+pad_LnF_Labs = pad_LnF + pad_LnF[ui_jpad_labs]; // addresses of labels
+pad_LnF_Colrs = pad_LnF + pad_LnF[ui_jpad_clrs]; // addresses of colors
+pad_LnF_Colrs[0] = Col_Inactive; pad_LnF_Labs[0] = "ZZZ";
+menu_LnF_Action_N = make_array(3);
+menu_LnF_Action_N[0] = "Reload";
+menu_LnF_Action_N[1] = "Forget the name";
+menu_LnF_Action_N[2] = "Path in the log";
+menu_LnF_Action = make_jmenu(
+    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "line-file", 3, menu_LnF_Action_N);
 
 //==========================================================
 
@@ -6451,6 +6485,7 @@ local (FFrRate, FlCC, Fhandle, Fformat, FFSize, cbfsiz, bread, ptbuf, bcnt, addb
         lnb = -1;
     );
 
+    (lnb >= 0) ? strcpy(its_LnFile[lnb], fname); // the file of the line
     sprintf(#s, "File-2  %d  %d; lin=%d  %f  ptb=%d", its_FilErr, Fhandle, lnb, ends, ptbuf);
     mSL_log(SysLogBox, #s);
 
@@ -7482,12 +7517,15 @@ its_BlkCnt = its_LdBlk = its_LdTime = its_LdSeen = its_Hold = 0;
 function its_Load_Install()
 (
     perform_loading = 0;
+    its_LnKeep = 1; // the old lines are deleted, the names of the files just loaded are kept (its_LnFile, 'lfil')
     recreate_structures(); // also update tables
+    its_LnKeep = 0;
     load_loadarea();
     its_PatchForce = 1; // the cables and the cells of all the modules (see its_Patch_Update)
     // force sliders update
     lnupdt = slupdt = wrupdt = rdupdt = fxupdt = 1;
     handling_load = 0;
+    its_LnRldPend = 1; its_LnRldIdx = its_LnRldOk = its_LnRldErr = 0; // the files of the lines are read again (@gfx)
 );
 
 
@@ -7948,8 +7986,10 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
     table(data( [Interstys] block block ... ))     (tests : Scripts/Ex-1NNN.mSL)
     A flat stream of words ; a block starts with its header and ends at the next header :
         Clear                           deletes all the lines, readers, writers and effects
-        Line id [length s] [chan n] [spls n]
-                                        creates the line ; keeps it if it is the same, replaces it otherwise
+        Line id [length s] [chan n] [spls n] [file "name"]
+                                        creates the line ; keeps it if it is the same, replaces it otherwise ;
+                                        file : reads the sound file into the line (its size and channels : length, chan,
+                                        spls are then ignored) ; a relative name is in the folder of the project
                                         (its writers and readers follow, Ln_Rebind) ; "status" and "freq" are
                                         accepted and ignored, so that a Dump can be read again
         Writer id  line L  source S  status Ready|Paused|Writing  gain dB  overdub %  mode XFade|Sum  first n  used n
@@ -7985,7 +8025,7 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
     Four passes on the words, nothing is modified before the last one :
         0 marks the modules designated by a number, 1 gives a module to the names of the headers,
         2 checks everything on a simulation (lines, channels...), 3 executes.
-    Errors 2750 ... 2768 ; the result of "table" is 0, or the first error.
+    Errors 2750 ... 2773 ; the result of "table" is 0, or the first error.
     It runs in @gfx (the mSL threads of Interstys) : the state of the analysis is global.
 */
 its_TK_Cnt = 0;
@@ -8023,8 +8063,7 @@ its_TK_gain = its_TK("gain");
 its_TK_mod = its_TK("mod");
 its_TK_depth = its_TK("depth");
 its_TK_att = its_TK("att");
-// reserved for the next blocks
-its_TK("file");
+its_TK_file = its_TK("file");
 
 // the keys of the writers and of the readers : their symbol, their name ; values (enumerations : the symbol of each value)
 its_TbWNk = 8;
@@ -8413,6 +8452,157 @@ local (lcbl, i, j, r, w, d)
     wrupdt = rdupdt = lnupdt = 1;
 );
 
+/*
+    Read the sound file "fname" into the line "lnb" : the line is created, or replaced if its size or its channels differ
+    (its writers and readers follow, Ln_Rebind) ; it keeps the name of the file (its_LnFile) ; runs in @gfx
+    Result : 0, or an error (logged) : 2771 the file can't be opened, 2772 not a sound file for a line (channels not in
+    [1, 128], frequency not in [2400, 384000], too short, more than 67108864 samples), 2773 read error (the line is then
+    not the file : its name is cleared), 2610 not enough memory (logged by Ln_Make) ; except for 2773, the line is unchanged
+*/
+function Ln_Load_File(lnb, fname)
+local (fh, cc, fr, fsz, nfr, lcbl, err, wasold, bread, ptbuf, bcnt, rdcnt, i, c, pb, addbuffs)
+(
+    err = cc = fr = nfr = 0;
+    ((fh = file_open(fname)) < 0) ? (
+        err = 2771;
+    ) : (
+        file_riff(fh, cc, fr);
+        ((cc < 1) || (cc > 128) || (fr < 2400) || (fr > 384000)) ? (err = 2772) : (
+            fsz = file_avail(fh);
+            nfr = floor(fsz / cc);
+            ((fsz <= 480) || (nfr > 67108864)) ? (err = 2772);
+        );
+    );
+    (err === 0) ? (
+        lcbl = Lines_Set[lnb];
+        wasold = (lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl);
+        // the same size and channels : the line is kept ; otherwise, a new one ((nfr - 0.5) / srate gives nfr samples)
+        (!wasold || (lcbl[its_Lin_SmplCnt] !== nfr) || (lcbl[its_Lin_ChCnt] !== cc)) ? (
+            ((lcbl = Ln_Make(lnb, srate, (nfr - 0.5) / srate, cc)) <= BASE_MEMORY) ? (err = 2610); // (logged by Ln_Make)
+        );
+    );
+    (err === 0) ? (
+        // read by blocks of BFFSIZ samples, dispatched in the channels buffers
+        bread = 0; ptbuf = BF_LIM; bcnt = cc * floor(BFFSIZ / cc);
+        addbuffs = lcbl + its_Lin_BF1ST;
+        fsz = nfr * cc;
+        while (bread < fsz) (
+            rdcnt = min(bcnt, fsz - bread);
+            (file_mem(fh, savwrk, rdcnt) != rdcnt) ? (
+                err = 2773;
+                bread = fsz;
+            ) : (
+                i = 0; while (i < rdcnt) (
+                    c = 0; loop(cc, pb = addbuffs[c]; pb[ptbuf] = savwrk[i + c]; c += 1;);
+                    i += cc; ptbuf += 1;
+                );
+                bread += rdcnt;
+            );
+        );
+    );
+    (err === 0) ? (
+        lcbl[its_Lin_RecFreq] = lcbl[its_Lin_Tmp2] = fr;
+        lcbl[its_Lin_Used] = nfr + BF_LIM;
+        // duplicate the start and the end samples around the buffers (as File_Handle)
+        c = 0; loop(cc,
+            pb = addbuffs[c];
+            memcpy(pb, pb + nfr, BF_LIM);
+            memcpy(pb + nfr + BF_LIM, pb + BF_LIM, BF_LIM);
+            c += 1;
+        );
+        strcpy(its_LnFile[lnb], fname);
+        wasold ? Ln_Rebind(lnb); // (the frequency of the file, a new block)
+        lnupdt = 1;
+    ) :
+    (err !== 2610) ? (
+        (err === 2773) ? strcpy(its_LnFile[lnb], ""); // (the line is not the file)
+        sprintf(#its_LnFMsg, "ERR: %04d    Line %d : %s \"%s\"", err, lnb + 1,
+            (err === 2771) ? "can't open" : (err === 2772) ? "not a sound file for a line :" : "read error in", fname);
+        mSL_log(SysLogBox, #its_LnFMsg);
+    );
+    (fh >= 0) ? file_close(fh);
+    err;
+);
+
+/*
+    The folder of the project (#its_PrjDir, its_PrjSt = 2 when it is known) : asked to GMAuxiliary.eel (command 21), the answer
+    is in the exploded gmem string (getexpldstr) ; its_PrjDir_Poll runs at each frame of @gfx ; its_PrjSt : 0 to ask, 1 asked
+    (at its_PrjRq), 2 known, 3 GMAuxiliary.eel absent or busy (asked again 2 s later)
+*/
+its_PrjSt = 0; its_PrjRq = 0; #its_PrjDir = "";
+function its_PrjDir_Poll()
+local (t)
+(
+    t = time_precise() + timeD;
+    (its_PrjSt === 0) ? (
+        ((gmem[versionGMScript] != 0) && (gmem[dateDone] >= gmem[dateCfrm])) ? (
+            gmem[cmndKode] = 21;
+            gmem[dateRqst] = gmem[dateCfrm] = its_PrjRq = t; // (the dates last : the script starts on them)
+            its_PrjSt = 1;
+        ) : (
+            its_PrjSt = 3; its_PrjRq = t;
+        );
+    ) :
+    (its_PrjSt === 1) ? (
+        (gmem[dateDone] > its_PrjRq) ? (
+            getexpldstr(#its_PrjDir, 0);
+            (strlen(#its_PrjDir) > 0) ? (
+                its_PrjSt = 2;
+                sprintf(#its_LnFMsg, "Project folder : %s", #its_PrjDir);
+                mSL_log(SysLogBox, #its_LnFMsg);
+            ) : (
+                its_PrjSt = 3; its_PrjRq = t;
+            );
+        ) :
+        (t - its_PrjRq > 5) ? (
+            its_PrjSt = 3; its_PrjRq = t;
+        );
+    ) :
+    ((its_PrjSt === 3) && (t - its_PrjRq > 2)) ? (
+        its_PrjSt = 0;
+    );
+);
+
+/*
+    After a load (its_Load_Install : the lines are saved without their samples), the lines which had a file read it again :
+    one line per frame of @gfx ; an error is logged (Ln_Load_File) and the line keeps the name of its file ("Reload")
+*/
+its_LnRldPend = its_LnRldIdx = its_LnRldOk = its_LnRldErr = 0;
+function its_Ln_AutoReload()
+local (k)
+(
+    (its_LnRldPend) ? (
+        k = its_LnRldIdx;
+        while ((k < LN_CNT) && (strlen(its_LnFile[k]) === 0)) ( k += 1; );
+        (k < LN_CNT) ? (
+            strcpy(#its_LnFTmp, its_LnFile[k]); // (Ln_Load_File writes its_LnFile)
+            (Ln_Load_File(k, #its_LnFTmp) === 0) ? (its_LnRldOk += 1) : (its_LnRldErr += 1);
+            its_LnRldIdx = k + 1;
+        ) : (
+            its_LnRldPend = 0;
+            ((its_LnRldOk + its_LnRldErr) > 0) ? (
+                sprintf(#its_LnFMsg, "Lines : %d file(s) read again, %d error(s)", its_LnRldOk, its_LnRldErr);
+                mSL_log(SysLogBox, #its_LnFMsg);
+            );
+        );
+    );
+);
+
+// the file "name" in "str" : as is if it is absolute, otherwise in the folder of the project ; 0 if this folder is unknown
+function its_Path(str, name)
+local (c0)
+(
+    c0 = str_getchar(name, 0, 'cu');
+    ((c0 === '/') || (c0 === '\\') || (str_getchar(name, 1, 'cu') === ':')) ? (
+        strcpy(str, name);
+    ) :
+    (its_PrjSt === 2) ? (
+        strcpy(str, #its_PrjDir);
+        strcat(str, (str_getchar(#its_PrjDir, 1, 'cu') === ':') ? "\\" : "/");
+        strcat(str, name);
+    ) : 0;
+);
+
 function its_Tb_Clear()
 (
     (its_Tb_mode === 3) ? (
@@ -8426,10 +8616,42 @@ function its_Tb_Clear()
 );
 
 //—— Lines
-function its_Tb_Line() local(w, k, len, ch, spl, sp, cc, nsp, nch, lcbl, u, r)
+// "file" : the path of the file in #its_TbFile (its_Path), its channels and its samples in its_Tb_fcc, its_Tb_fnfr ;
+// 0 and an error if it can't be read
+function its_Tb_File(name) local(fh, cc, fr, ok)
+(
+    ok = 0;
+    !mSL_isString(name) ? (
+        sprintf(#its_TbW, "file : %s is not a string", mSL_edit_value(#its_TbV, name));
+        its_Tb_Err(2754, #its_TbW);
+    ) :
+    (its_Path(#its_TbFile, name) === 0) ? (
+        (its_PrjSt === 3) ? (its_PrjSt = 0); // (asked again)
+        sprintf(#its_TbW, "file \"%s\" : the folder of the project is unknown (GMAuxiliary.eel)", name);
+        its_Tb_Err(2769, #its_TbW);
+    ) :
+    ((fh = file_open(#its_TbFile)) < 0) ? (
+        sprintf(#its_TbW, "file \"%s\" : can't be opened", #its_TbFile);
+        its_Tb_Err(2770, #its_TbW);
+    ) : (
+        cc = fr = 0;
+        file_riff(fh, cc, fr);
+        its_Tb_fcc = cc; its_Tb_fnfr = floor(file_avail(fh) / max(1, cc));
+        file_close(fh);
+        ((cc < 1) || (cc > 128) || (fr < 2400) || (fr > 384000) || (its_Tb_fnfr * cc <= 480) || (its_Tb_fnfr > 67108864)) ? (
+            sprintf(#its_TbW, "file \"%s\" : %d channels, %d Hz, %d samples : not a sound file for a line", #its_TbFile, cc, fr, its_Tb_fnfr);
+            its_Tb_Err(2770, #its_TbW);
+        ) : (
+            ok = 1;
+        );
+    );
+    ok;
+);
+
+function its_Tb_Line() local(w, k, len, ch, spl, sp, cc, nsp, nch, lcbl, u, r, fil, err)
 (
     k = its_Tb_Id(its_TK_Line, its_Tb_Next(), 1);
-    len = ch = spl = -1;
+    len = ch = spl = -1; fil = 0;
     while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Tb_Peek())) (
         its_Tb_Next();
         (w === its_TK_length) ? ( len = its_Tb_Num("length", 0.001, 67108864 / srate); ) :
@@ -8437,7 +8659,12 @@ function its_Tb_Line() local(w, k, len, ch, spl, sp, cc, nsp, nch, lcbl, u, r)
         (w === its_TK_spls) ? ( spl = its_Tb_Int("spls", 48, 67108864); ) :
         (w === its_TK_freq) ? ( its_Tb_Num("freq", 2400, 384000); ) :
         (w === its_TK_status) ? ( its_Tb_Next(); ) :
+        (w === its_TK_file) ? ( fil = its_Tb_Next(); ) :
         its_Tb_KeyErr(w, "Line");
+    );
+    // a file : its size and its channels (length, chan, spls are then ignored : a Dump can be read again)
+    ((its_Tb_error === 0) && (k >= 0) && (fil !== 0) && (its_Tb_mode >= 2) && its_Tb_File(fil)) ? (
+        spl = its_Tb_fnfr; ch = its_Tb_fcc;
     );
     ((its_Tb_error === 0) && (k >= 0)) ? (
         (its_Tb_mode === 0) ? (
@@ -8466,10 +8693,21 @@ function its_Tb_Line() local(w, k, len, ch, spl, sp, cc, nsp, nch, lcbl, u, r)
                 );
                 its_TbSimSp[k] = nsp; its_TbSimCh[k] = nch;
             ) :
+            (fil !== 0) ? (
+                // read the file into the line (created, or replaced if it differs)
+                ((err = Ln_Load_File(k, #its_TbFile)) === 2610) ? (
+                    its_Tb_error = 2610; // (logged by Ln_Make)
+                ) :
+                (err !== 0) ? (
+                    sprintf(#its_TbW, "file \"%s\" : error %04d", #its_TbFile, err);
+                    its_Tb_Err(err, #its_TbW);
+                );
+            ) :
             ((nsp !== sp) || (nch !== cc)) ? (
                 // create, or replace by a different line ; (nsp - 0.5) / srate gives nsp samples in Ln_Make
                 (Ln_Make(k, srate, (nsp - 0.5) / srate, nch) > BASE_MEMORY) ? (
                     (sp > 0) ? Ln_Rebind(k);
+                    strcpy(its_LnFile[k], ""); // (no file any more)
                     lnupdt = 1;
                 ) : (
                     its_Tb_error = 2610; // (logged by Ln_Make)
@@ -8485,6 +8723,7 @@ function its_Tb_DumpLine(k) local(lcbl)
     ((lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) ? (
         sprintf(#its_TbW, "Line %d status Ready length %.3f chan %d spls %d freq %d", k + 1,
             lcbl[its_Lin_SmplCntSec], lcbl[its_Lin_ChCnt], lcbl[its_Lin_SmplCnt], lcbl[its_Lin_RecFreq]);
+        (strlen(its_LnFile[k]) > 0) ? strcat(#its_TbW, sprintf(#its_TbV1, " file \"%s\"", its_LnFile[k]));
     ) : (
         sprintf(#its_TbW, "Line %d status Undefined", k + 1);
     );
@@ -8542,6 +8781,21 @@ function its_Tb_CheckLine(k) local(w, lcbl, ex, ok, v)
             v = its_Tb_Num("freq", 0, 384000);
             (ok && (its_Tb_error === 0) && ((ex ? lcbl[its_Lin_RecFreq] : 0) !== v)) ? (
                 its_Tb_Diff(k, "freq", ex ? lcbl[its_Lin_RecFreq] : 0, v); ok = -1;
+            );
+        ) :
+        (w === its_TK_file) ? (
+            // the file (its path, as the key "file" of a line)
+            v = its_Tb_Next();
+            (!mSL_isString(v)) ? (
+                sprintf(#its_TbW, "Check : file %s is not a string", mSL_edit_value(#its_TbV, v));
+                its_Tb_Err(2754, #its_TbW);
+            ) :
+            (ok && (its_Path(#its_TbFile, v) !== 0) && (strcmp(#its_TbFile, its_LnFile[k]) !== 0)) ? (
+                sprintf(#its_TbMsg, "ERR: 2759    Interstys table : Check Line %d : file \"%s\" (expected \"%s\")", k + 1,
+                    its_LnFile[k], #its_TbFile);
+                mSL_log(SysLogBox, #its_TbMsg);
+                (its_Tb_res === 0) ? (its_Tb_res = 2759);
+                ok = -1;
             );
         ) :
         its_Tb_KeyErr(w, "Check Line");
@@ -9476,6 +9730,7 @@ loadMode ? (
     ldtotal = 0;
     lderr = 0;
     memset(DuplWA, 0, StaticWASize); // clean the load area pointer
+    z__si = 0; loop(LN_CNT, strcpy(its_LnFile[z__si], ""); z__si += 1;); // (the files of the lines : 'lfil' blocks)
     // First, load the block
     slz1 = load_mem(0, lodarea, SVASIZ);
     ldtotal += slz1;
@@ -9544,6 +9799,10 @@ loadMode ? (
                 z__si += 1;
             );
         ) :
+        (savtmp[0] === 'lfil') ? (
+            // the file of a line (the lines are saved without their samples : "Reload" in the file pad of the line)
+            ((savtmp[1] >= 0) && (savtmp[1] < LN_CNT)) ? file_string(0, its_LnFile[savtmp[1]]) : file_string(0, #tnam_skip);
+        ) :
         (savtmp[0] === 'tnam') ? (
             ldtnam = savtmp[1]; // alternate tabs names (see "Rename tab...")
             z__si = 0; loop(savtmp[1],
@@ -9600,6 +9859,15 @@ loadMode ? (
     savtmp[0] = 'disp'; savtmp[1] = DispStructsSize; savtmp[2] = savtmp[3] = 0;
     svtotal += save_mem(0, savtmp, TMPSIZ);
     svtotal += save_mem(0, ReadersStructA, DispStructsSize);
+    // Save the files of the lines (their names)
+    z__si = 0; loop(LN_CNT,
+        (strlen(its_LnFile[z__si]) > 0) ? (
+            savtmp[0] = 'lfil'; savtmp[1] = z__si; savtmp[2] = savtmp[3] = 0;
+            svtotal += save_mem(0, savtmp, TMPSIZ);
+            file_string(0, its_LnFile[z__si]);
+        );
+        z__si += 1;
+    );
 
     // siz4 = 0;
     // Save all objects, except lines set pointers and contents
@@ -9987,6 +10255,9 @@ while (g__efi) (
 );
 
 (g__idx != 0) ? gfx_getdropfile(-1);
+
+its_PrjDir_Poll(); // the folder of the project, asked to GMAuxiliary.eel (relative files of the tables)
+(perform_loading === 0) ? its_Ln_AutoReload(); // the files of the lines, after a load
 
 
 
@@ -11796,16 +12067,17 @@ local (x, h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol
    LDBL[6] = waveform flags (its_WaveHide, its_WaveOver ; keys 'w', '+', '-', 'v' : see its_Wave_Keys)
 */
 function show_Line_Pad(LDBL, blockId)
-local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, dfCol, zzch, zzent, zzmcl,
-        zzmmd, p1, p2, nlnr, lgh)
+local (h1, h2, h3, h4, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, dfCol, zzch, zzent, zzmcl,
+        zzmmd, p1, p2, nlnr, lgh, fsh)
 (
     h1 = uix_jpadHeight(pad_Lin_NL); // height
+    h4 = uix_jpadHeight(1); // the file of the line
     h2 = ui_jd_slidh * 1 + 4;
     // waveform, if the line exists (see mSL_ui_audio.jsfx-inc)
     lcbl = Lines_Set[LDBL[0]];
     h3 = ((lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) ? its_Wave_H(LDBL + 5, LDBL + 6, its_LinWaveH) : 0;
-    uix_jneed = h1+h2+h3+ui_jd_ctgr;
-    uix_jmini = h1+h2+ui_jd_ctgr;
+    uix_jneed = h1+h4+h2+h3+ui_jd_ctgr;
+    uix_jmini = h1+h4+h2+ui_jd_ctgr;
     (ui_height() >= uix_jmini) ? (
         ui_split_top(uix_jneed);
             ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
@@ -11824,23 +12096,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
                     ui_color(Col_Frame);
                     ui_border(); // draws in purple
                 ui_pop();
-                (g__dpa != 0) ? (
-                    // audio file droped here
-                    sprintf(#s, "Line::drop file : \"%s\" - %d, %d, %d", g__efs, g__msx, g__msy, g__msc);
-                    mSL_log(SysLogBox, #s);
-                    g__dpa = 0;
-                    (!lok) ? (
-                        p1 = p2 = -1;
-                    ) : (
-                        p1 = lnr; p2 = lcbl;
-                    );
-                    nlnr = File_Handle(g__efs, p1, p2);
-                    (nlnr >= 0) ? (
-                        lnr = LDBL[0] = nlnr;
-                        lcbl = Lines_Set[lnr];
-                        lok = (lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl);
-                    );
-                );
             );
             control_group(blockDispNames[blockDispInverts[blockId]]);
             ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
@@ -11953,6 +12208,72 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
                 );
 
             ui_pop();
+
+            // The file of the line : a sound file dropped here is read into this line (Ln_Load_File) ; left clic : the full
+            // path for its_LnFShowDur s (a second clic : the name again) ; right clic : menu (Reload, Forget the name, Path in the log)
+            ui_split_top(h4);
+                ui_pad(1,0,2,2);
+                ((g__dpa != 0) && (g__msx >= ui_left()) && (g__msx < ui_left() + ui_width())
+                    && (g__msy >= ui_top()) && (g__msy < ui_top() + ui_height())) ? (
+                    g__dpa = 0;
+                    sprintf(#s, "Line %d : file \"%s\"", lnr+1, g__efs);
+                    mSL_log(SysLogBox, #s);
+                    Ln_Load_File(lnr, g__efs); // (an error is logged)
+                    lcbl = Lines_Set[lnr];
+                    lok = (lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl);
+                );
+                mSL_setStrArray(pad_LnF_Labs, 1);
+                fsh = (its_LnFShow === lnr) && (time_precise() < its_LnFShowT);
+                (strlen(its_LnFile[lnr]) > 0) ? (
+                    fsh ? strcpy(pad_LnF_Labs[0], its_LnFile[lnr]) : its_Ln_BaseName(pad_LnF_Labs[0], its_LnFile[lnr]);
+                    pad_LnF_Colrs[0] = fsh ? Color_Goldenrod : Col_P3;
+                ) : (
+                    strcpy(pad_LnF_Labs[0], "No file");
+                    pad_LnF_Colrs[0] = Col_P1;
+                );
+                fsh ? (ui_GFXdoNow |= 4); // (the name comes back after its_LnFShowDur s)
+                zz = control_jpad(pad_LnF);
+                ((zz > 0) && (strlen(its_LnFile[lnr]) > 0)) ? (
+                    ui_GFXdoNow |= 4; ui_GFXReason = 34;
+                    (zz & ui_jpad_ev_lmc) ? (
+                        fsh ? (its_LnFShowT = 0) : (its_LnFShow = lnr; its_LnFShowT = time_precise() + its_LnFShowDur;);
+                    ) :
+                    (zz & ui_jpad_ev_rmc) ? (
+                        xx = control_jmenu(menu_LnF_Action);
+                        (xx === 1) ? (
+                            strcpy(#its_LnFTmp, its_LnFile[lnr]); // (Ln_Load_File writes its_LnFile)
+                            Ln_Load_File(lnr, #its_LnFTmp);
+                            lcbl = Lines_Set[lnr];
+                            lok = (lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl);
+                        ) :
+                        (xx === 2) ? (
+                            strcpy(its_LnFile[lnr], "");
+                        ) :
+                        (xx === 3) ? (
+                            sprintf(#s, "Line %d : file \"%s\"", lnr+1, its_LnFile[lnr]);
+                            mSL_log(SysLogBox, #s);
+                        );
+                    );
+                );
+            ui_pop();
+
+            // an audio file dropped elsewhere in the module : read into this line if it fits, into a new line otherwise
+            (zzmi && (g__dpa != 0)) ? (
+                sprintf(#s, "Line::drop file : \"%s\" - %d, %d, %d", g__efs, g__msx, g__msy, g__msc);
+                mSL_log(SysLogBox, #s);
+                g__dpa = 0;
+                (!lok) ? (
+                    p1 = p2 = -1;
+                ) : (
+                    p1 = lnr; p2 = lcbl;
+                );
+                nlnr = File_Handle(g__efs, p1, p2);
+                (nlnr >= 0) ? (
+                    lnr = LDBL[0] = nlnr;
+                    lcbl = Lines_Set[lnr];
+                    lok = (lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl);
+                );
+            );
 
             // Sliders
             ui_split_top(h2);
