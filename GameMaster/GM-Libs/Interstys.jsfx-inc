@@ -1714,7 +1714,7 @@ SVASIZ = max(idx, 32);
 savarea = make_array(SVASIZ); // Load/Save description area
 lodarea = make_array(SVASIZ); // Load/Save description area
 TMPSIZ = 4;
-savtmp = make_array(TMPSIZ); // Work area for load/save of a memory block
+savtmp = make_array(2 * TMPSIZ); // Work area for load/save of a memory block (two headers : 'ains')
 savcode = '1tr6'; // a save code
 // Saving doubles in @serialize as two singles : save_mem, load_mem, savwrk (shared, mSL_Serialize.jsfx-inc)
 <? include("GM-Libs/mSL_Serialize.jsfx-inc"); ?>
@@ -10426,6 +10426,13 @@ loadMode ? (
     lderr = 0;
     memset(DuplWA, 0, StaticWASize); // clean the load area pointer
     z__si = 0; loop(LN_CNT, strcpy(its_LnFile[z__si], ""); z__si += 1;); // (the files of the lines : 'lfil' blocks)
+    // the templates and the instances of algorithms ('algt', 'ains' blocks)
+    z__si = 0; loop(its_AlgMx,
+        (its_AlgBlk[z__si] > BASE_MEMORY) ? mSL_Dyn_Free(its_AlgBlk[z__si]);
+        its_AlgSym[z__si] = its_AlgBlk[z__si] = its_AlgLen[z__si] = 0;
+        z__si += 1;
+    );
+    z__si = 1; loop(its_InsMx, (its_InsSym[z__si] !== 0) ? its_Al_InsDrop(z__si); z__si += 1;);
     // First, load the block
     slz1 = load_mem(0, lodarea, SVASIZ);
     ldtotal += slz1;
@@ -10494,6 +10501,39 @@ loadMode ? (
                 z__si += 1;
             );
         ) :
+        (savtmp[0] === 'algt') ? (
+            // a template of algorithm (its name, its words)
+            z__sp = 0; while ((z__sp < its_AlgMx) && (its_AlgSym[z__sp] !== 0)) ( z__sp += 1; );
+            z__sbl = ((z__sp < its_AlgMx) && (savtmp[2] > 0)) ? mSL_Dyn_Alloc(savtmp[2] + 1, 'algt', 0) : 0;
+            (z__sbl > BASE_MEMORY) ? (
+                ldtotal += load_mem(0, z__sbl, savtmp[2]);
+                its_AlgSym[z__sp] = savtmp[1]; its_AlgBlk[z__sp] = z__sbl; its_AlgLen[z__sp] = savtmp[2];
+            ) : (
+                ldok = 0; lderr = 171; // no room or no memory for the template
+            );
+        ) :
+        (savtmp[0] === 'ains') ? (
+            // an instance of algorithm : number, name, template name ; then the sizes of its template, arguments, names
+            z__si = savtmp[1];
+            ldtotal += load_mem(0, savtmp + TMPSIZ, TMPSIZ);
+            ((z__si >= 1) && (z__si <= its_InsMx) && (its_InsSym[z__si] === 0)) ? (
+                its_InsSym[z__si] = savtmp[2]; its_InsAName[z__si] = savtmp[3];
+                its_InsTLen[z__si] = savtmp[TMPSIZ]; its_InsALen[z__si] = savtmp[TMPSIZ + 1]; its_InsNCnt[z__si] = savtmp[TMPSIZ + 2];
+                its_InsTpl[z__si] = mSL_Dyn_Alloc(its_InsTLen[z__si] + 1, 'algt', 0);
+                its_InsArg[z__si] = mSL_Dyn_Alloc(its_InsALen[z__si] + 1, 'alga', 0);
+                its_InsNam[z__si] = mSL_Dyn_Alloc(3 * its_InsNCnt[z__si] + 1, 'algn', 0);
+                ((its_InsTpl[z__si] > BASE_MEMORY) && (its_InsArg[z__si] > BASE_MEMORY) && (its_InsNam[z__si] > BASE_MEMORY)) ? (
+                    ldtotal += load_mem(0, its_InsTpl[z__si], its_InsTLen[z__si]);
+                    ldtotal += load_mem(0, its_InsArg[z__si], its_InsALen[z__si]);
+                    ldtotal += load_mem(0, its_InsNam[z__si], 3 * its_InsNCnt[z__si]);
+                ) : (
+                    its_Al_InsDrop(z__si);
+                    ldok = 0; lderr = 172; // no memory for the instance
+                );
+            ) : (
+                ldok = 0; lderr = 173; // bad instance number
+            );
+        ) :
         (savtmp[0] === 'lfil') ? (
             // the file of a line (the lines are saved without their samples : "Reload" in the file pad of the line)
             ((savtmp[1] >= 0) && (savtmp[1] < LN_CNT)) ? file_string(0, its_LnFile[savtmp[1]]) : file_string(0, #tnam_skip);
@@ -10554,6 +10594,27 @@ loadMode ? (
     savtmp[0] = 'disp'; savtmp[1] = DispStructsSize; savtmp[2] = savtmp[3] = 0;
     svtotal += save_mem(0, savtmp, TMPSIZ);
     svtotal += save_mem(0, ReadersStructA, DispStructsSize);
+    // Save the templates and the instances of algorithms
+    z__si = 0; loop(its_AlgMx,
+        ((its_AlgSym[z__si] !== 0) && (its_AlgBlk[z__si] > BASE_MEMORY)) ? (
+            savtmp[0] = 'algt'; savtmp[1] = its_AlgSym[z__si]; savtmp[2] = its_AlgLen[z__si]; savtmp[3] = 0;
+            svtotal += save_mem(0, savtmp, TMPSIZ);
+            svtotal += save_mem(0, its_AlgBlk[z__si], its_AlgLen[z__si]);
+        );
+        z__si += 1;
+    );
+    z__si = 1; loop(its_InsMx,
+        ((its_InsSym[z__si] !== 0) && (its_InsTpl[z__si] > BASE_MEMORY) && (its_InsArg[z__si] > BASE_MEMORY) && (its_InsNam[z__si] > BASE_MEMORY)) ? (
+            savtmp[0] = 'ains'; savtmp[1] = z__si; savtmp[2] = its_InsSym[z__si]; savtmp[3] = its_InsAName[z__si];
+            svtotal += save_mem(0, savtmp, TMPSIZ);
+            savtmp[0] = its_InsTLen[z__si]; savtmp[1] = its_InsALen[z__si]; savtmp[2] = its_InsNCnt[z__si]; savtmp[3] = 0;
+            svtotal += save_mem(0, savtmp, TMPSIZ);
+            svtotal += save_mem(0, its_InsTpl[z__si], its_InsTLen[z__si]);
+            svtotal += save_mem(0, its_InsArg[z__si], its_InsALen[z__si]);
+            svtotal += save_mem(0, its_InsNam[z__si], 3 * its_InsNCnt[z__si]);
+        );
+        z__si += 1;
+    );
     // Save the files of the lines (their names)
     z__si = 0; loop(LN_CNT,
         (strlen(its_LnFile[z__si]) > 0) ? (
