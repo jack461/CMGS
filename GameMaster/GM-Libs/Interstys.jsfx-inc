@@ -7967,9 +7967,13 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
                             harm : 1 to 16 weights, the others are 0 ; Dump : only the keys used by the mode
                                         "source", "gain" : src1, gain1 ; a new type gives its default values first
                                         (FX_Set_Type, as in the pad), the status is set last ; "mod X none" disconnects
-        Dump Line|Writer|Reader|Effect id
-                                        logs the module in the same syntax ; Dump All : all the modules
-        Check Line|Writer|Reader|Effect id key value ...
+        Global  samples Merge|Ignore|Pass  input dB  output dB  latency ms
+                action StopAll|PauseAll|RestartAll|RewindAll|ClearAll  chan n
+                                        the settings of the module "Globals" ; the action is performed last, at once ;
+                                        "chan" (the channels of the track) is accepted and ignored, checked by Check
+        Dump Line|Writer|Reader|Effect id | Global
+                                        logs the module in the same syntax ; Dump All : Global and all the modules
+        Check Line|Writer|Reader|Effect id key value ... | Check Global key value ...
                                         logs "Check Writer n OK", or an error 2759 for each difference
         Free Line|Writer|Reader|Effect id
                                         deletes the module
@@ -8114,6 +8118,19 @@ its_TbSMdN[its_SatSine] = "SineFold"; its_TbSMdN[its_SatXSin] = "XSin"; its_TbSM
 its_TbSMdN[its_SatChebSum] = "ChebSum";
 i__ii = 0; loop(its_SatModeCnt, its_TbSMd[i__ii] = mSL_symbol(its_TbSMdN[i__ii]); i__ii += 1;);
 its_TbHarm = make_array(its_SatHarm); // the weights of the key "harm" (its_TbK1 : their count)
+// the keys of the block Global ; track samples (as slSmpl), actions (index : its_GlAct_..., as slGlAct)
+its_TbGNk = 6;
+its_TbGKey = make_array(its_TbGNk); its_TbGNam = make_array(its_TbGNk);
+its_TbKey(its_TbGKey, its_TbGNam, 0, "samples"); its_TbKey(its_TbGKey, its_TbGNam, 1, "input");
+its_TbKey(its_TbGKey, its_TbGNam, 2, "output"); its_TbKey(its_TbGKey, its_TbGNam, 3, "latency");
+its_TbKey(its_TbGKey, its_TbGNam, 4, "action"); its_TbKey(its_TbGKey, its_TbGNam, 5, "chan");
+its_TbGSmN = make_array(3); its_TbGSm = make_array(3);
+its_TbGSmN[0] = "Merge"; its_TbGSmN[1] = "Ignore"; its_TbGSmN[2] = "Pass";
+i__ii = 0; loop(3, its_TbGSm[i__ii] = mSL_symbol(its_TbGSmN[i__ii]); i__ii += 1;);
+its_TbGAc = make_array(6);
+its_TbGAc[its_GlAct_None] = mSL_symbol("None"); its_TbGAc[its_GlAct_StopAll] = mSL_symbol("StopAll");
+its_TbGAc[its_GlAct_PauseAll] = mSL_symbol("PauseAll"); its_TbGAc[its_GlAct_RestartAll] = mSL_symbol("RestartAll");
+its_TbGAc[its_GlAct_RewdAll] = mSL_symbol("RewindAll"); its_TbGAc[its_GlAct_ClearAll] = mSL_symbol("ClearAll");
 
 its_TbNSz = 256; // the names of a table
 its_TbNSym = make_array(its_TbNSz);
@@ -9232,12 +9249,98 @@ function its_Tb_CheckMod(ty, k) local(b, ki, ok, nk, same)
     );
 );
 
+//—— Global
+
+// the keys of the block Global, until the next header : its_TbKS, its_TbK1
+function its_Tb_GKeys() local(w, ki, i)
+(
+    memset(its_TbKS, 0, its_TbKSz);
+    while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Tb_Peek())) (
+        its_Tb_Next();
+        ki = -1; i = 0; while ((ki < 0) && (i < its_TbGNk)) ( (its_TbGKey[i] === w) ? (ki = i); i += 1; );
+        (ki < 0) ? its_Tb_KeyErr(w, "Global") : (
+            its_TbKS[ki] = 1;
+            its_TbK1[ki] = (ki === 0) ? its_Tb_Enum("samples", its_TbGSm, 3) :
+                ((ki === 1) || (ki === 2)) ? its_Tb_Num(its_TbGNam[ki], -120, 40) :
+                (ki === 3) ? its_Tb_Num("latency", 1, 10000) :
+                (ki === 4) ? its_Tb_Enum("action", its_TbGAc, 6) :
+                its_Tb_Int("chan", 0, 128);
+        );
+    );
+);
+
+// the value of the key "ki" of the block Global
+function its_Tb_GGet(ki)
+(
+    (ki === 0) ? slSmpl : (ki === 1) ? slInGain : (ki === 2) ? slOutVol : (ki === 3) ? slStlatency : (ki === 4) ? 0 : chcnt;
+);
+
+function its_Tb_GText(str, ki, v)
+(
+    (ki === 0) ? strcpy(str, its_TbGSmN[max(0, min(2, v))]) : (ki === 5) ? sprintf(str, "%d", v) : sprintf(str, "%.10g", v);
+);
+
+/*
+    Global : the track samples, the input gain, the output volume and the latency are set in the native sliders (as the
+    module "Globals" does : update_sliders computes the gains) ; the action is performed last, at once (its_actions) ;
+    "chan" (the channels of the track) can't be set : it is accepted, so that a Dump can be read again, and checked
+*/
+function its_Tb_Global()
+(
+    its_Tb_GKeys();
+    ((its_Tb_error === 0) && (its_Tb_mode === 3)) ? (
+        its_TbKS[0] ? ( slSmpl = its_TbK1[0]; sliderchange(slSmpl); );
+        its_TbKS[1] ? ( slInGain = its_TbK1[1]; sliderchange(slInGain); );
+        its_TbKS[2] ? ( slOutVol = its_TbK1[2]; sliderchange(slOutVol); );
+        its_TbKS[3] ? ( slStlatency = its_TbK1[3]; sliderchange(slStlatency); );
+        slupdt = 1; // see update_sliders
+        (its_TbKS[4] && (its_TbK1[4] !== its_GlAct_None)) ? its_actions(its_TbK1[4]);
+    );
+);
+
+function its_Tb_DumpGlobal() local(ki)
+(
+    strcpy(#its_TbW, "Global");
+    ki = 0; loop(its_TbGNk,
+        (ki !== 4) ? (
+            strcat(#its_TbW, " "); strcat(#its_TbW, its_TbGNam[ki]); strcat(#its_TbW, " ");
+            strcat(#its_TbW, its_Tb_GText(#its_TbV1, ki, its_Tb_GGet(ki)));
+        );
+        ki += 1;
+    );
+    mSL_log(SysLogBox, #its_TbW);
+);
+
+function its_Tb_CheckGlobal() local(ki, bad)
+(
+    its_Tb_GKeys();
+    (its_TbKS[4] && (its_Tb_error === 0)) ? its_Tb_Err(2754, "Check Global : an action can't be checked");
+    ((its_Tb_error === 0) && (its_Tb_mode === 3)) ? (
+        bad = 0;
+        ki = 0; loop(its_TbGNk,
+            (its_TbKS[ki] && (abs(its_Tb_GGet(ki) - its_TbK1[ki]) >= 0.0000001)) ? (
+                sprintf(#its_TbMsg, "ERR: 2759    Interstys table : Check Global : %s %s (expected %s)", its_TbGNam[ki],
+                    its_Tb_GText(#its_TbV1, ki, its_Tb_GGet(ki)), its_Tb_GText(#its_TbV2, ki, its_TbK1[ki]));
+                mSL_log(SysLogBox, #its_TbMsg);
+                (its_Tb_res === 0) ? (its_Tb_res = 2759);
+                bad = 1;
+            );
+            ki += 1;
+        );
+        (bad === 0) ? mSL_log(SysLogBox, "Check Global OK");
+    );
+);
+
 //—— Dump, Check, Free
 function its_Tb_Dump() local(w, ty, k)
 (
     w = its_Tb_Next();
+    (w === its_TK_Global) ? (
+        (its_Tb_mode === 3) ? its_Tb_DumpGlobal();
+    ) :
     (w === its_TK_All) ? (
         (its_Tb_mode === 3) ? (
+            its_Tb_DumpGlobal();
             k = 0; loop(LN_CNT, (Lines_Set[k] !== 0) ? its_Tb_DumpLine(k); k += 1;);
             k = 0; loop(WR_CNT, (Writers_set[k] !== 0) ? its_Tb_DumpMod(its_TK_Writer, k); k += 1;);
             k = 0; loop(RD_CNT, (Readers_set[k] !== 0) ? its_Tb_DumpMod(its_TK_Reader, k); k += 1;);
@@ -9252,9 +9355,12 @@ function its_Tb_Dump() local(w, ty, k)
     );
 );
 
-function its_Tb_Check() local(ty, k)
+function its_Tb_Check() local(w, ty, k)
 (
-    ((ty = its_Tb_Type(its_Tb_Next(), "Check")) !== 0) ? (
+    ((w = its_Tb_Next()) === its_TK_Global) ? (
+        its_Tb_CheckGlobal();
+    ) :
+    ((ty = its_Tb_Type(w, "Check")) !== 0) ? (
         k = its_Tb_Id(ty, its_Tb_Next(), 0);
         (ty === its_TK_Line) ? its_Tb_CheckLine(k) : (ty === its_TK_Effect) ? its_Tb_CheckFx(k) : its_Tb_CheckMod(ty, k);
     );
@@ -9299,11 +9405,8 @@ function Set_Table(tbl) local(m, w)
             (w === its_TK_Dump) ? its_Tb_Dump() :
             (w === its_TK_Check) ? its_Tb_Check() :
             (w === its_TK_Free) ? its_Tb_Free() :
-            (w === its_TK_Global) ? (
-                sprintf(#its_TbW, "%s : not implemented yet", mSL_edit_value(#its_TbV, w));
-                its_Tb_Err(2751, #its_TbW);
-            ) : (
-                sprintf(#its_TbW, "%s : a block (Line, Writer, Reader, Effect, Dump, Check, Free, Clear) is expected", mSL_edit_value(#its_TbV, w));
+            (w === its_TK_Global) ? its_Tb_Global() : (
+                sprintf(#its_TbW, "%s : a block (Line, Writer, Reader, Effect, Global, Dump, Check, Free, Clear) is expected", mSL_edit_value(#its_TbV, w));
                 its_Tb_Err(2750, #its_TbW);
             );
         );
