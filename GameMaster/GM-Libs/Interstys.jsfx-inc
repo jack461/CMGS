@@ -8070,6 +8070,7 @@ its_TK_Instance = its_TK("Instance");
 its_TK_input = its_TK("input");
 its_TK_output = its_TK("output");
 its_TK_param = its_TK("param");
+its_TK_Set = its_TK("Set");
 // markers of the expanded table (its_Al_Expand : never in a data) : the begin of an instance (followed by the index of its
 // pending record, its_IP...), its end, the begin and the end of an argument (read in the scope outside the instance)
 its_TbM_Base = -(2^50);
@@ -8077,6 +8078,9 @@ its_TbM_Ins = its_TbM_Base - 1;
 its_TbM_InsEnd = its_TbM_Base - 2;
 its_TbM_Out = its_TbM_Base - 3;
 its_TbM_In = its_TbM_Base - 4;
+its_TbM_Set = its_TbM_Base - 5; // the begin of a Set (followed by the index of its record, its_SP...)
+its_TbM_SetEnd = its_TbM_Base - 6;
+its_TbM_Chg = its_TbM_Base - 7; // the value which follows comes from a changed argument (Set)
 
 // the keys of the writers and of the readers : their symbol, their name ; values (enumerations : the symbol of each value)
 its_TbWNk = 8;
@@ -8223,7 +8227,16 @@ function its_Tb_Peek() local(w)
             its_Tb_scope = 0;
         ) :
         (w === its_TbM_Out) ? ( its_Tb_sscope = its_Tb_scope; its_Tb_scope = 0; ) :
-        (w === its_TbM_In) ? ( its_Tb_scope = its_Tb_sscope; );
+        (w === its_TbM_In) ? ( its_Tb_scope = its_Tb_sscope; ) :
+        (w === its_TbM_Set) ? (
+            its_Tb_ptr += 1; its_Tb_si = its_Tb_tbl[its_Tb_ptr];
+            its_Tb_scope = its_SPK[its_Tb_si]; its_Tb_setm = 1;
+        ) :
+        (w === its_TbM_SetEnd) ? (
+            (its_Tb_mode === 3) ? (its_Tb_spend = its_Tb_si); // the arguments are recorded (its_Al_Flush)
+            its_Tb_scope = 0; its_Tb_setm = 0;
+        ) :
+        (w === its_TbM_Chg) ? ( its_Tb_chg = 1; );
         its_Tb_ptr += 1; w = its_TK_End;
     );
     w;
@@ -8259,7 +8272,7 @@ function its_Tb_IsHead(w)
     (w === its_TK_Clear) || (w === its_TK_Line) || (w === its_TK_Writer) || (w === its_TK_Reader)
         || (w === its_TK_Effect) || (w === its_TK_Global) || (w === its_TK_Dump) || (w === its_TK_Check)
         || (w === its_TK_Free) || (w === its_TK_End) || (w === its_TK_EofMark) || (w === its_TK_Algorithm)
-        || (w === its_TK_Instance);
+        || (w === its_TK_Instance) || (w === its_TK_Set);
 );
 
 // a number in [vmin, vmax] (a "-" word before it changes its sign) ; Undef and an error otherwise
@@ -8707,12 +8720,13 @@ function its_Tb_Line() local(w, k, len, ch, spl, sp, cc, nsp, nch, lcbl, u, r, f
     len = ch = spl = -1; fil = 0;
     while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Tb_Peek())) (
         its_Tb_Next();
-        (w === its_TK_length) ? ( len = its_Tb_Num("length", 0.001, 67108864 / srate); ) :
-        (w === its_TK_chan) ? ( ch = its_Tb_Int("chan", 1, 128); ) :
-        (w === its_TK_spls) ? ( spl = its_Tb_Int("spls", 48, 67108864); ) :
+        its_Tb_chg = 0;
+        (w === its_TK_length) ? ( len = its_Tb_Num("length", 0.001, 67108864 / srate); (its_Tb_setm && !its_Tb_chg) ? (len = -1); ) :
+        (w === its_TK_chan) ? ( ch = its_Tb_Int("chan", 1, 128); (its_Tb_setm && !its_Tb_chg) ? (ch = -1); ) :
+        (w === its_TK_spls) ? ( spl = its_Tb_Int("spls", 48, 67108864); (its_Tb_setm && !its_Tb_chg) ? (spl = -1); ) :
         (w === its_TK_freq) ? ( its_Tb_Num("freq", 2400, 384000); ) :
         (w === its_TK_status) ? ( its_Tb_Next(); ) :
-        (w === its_TK_file) ? ( fil = its_Tb_Next(); ) :
+        (w === its_TK_file) ? ( fil = its_Tb_Next(); (its_Tb_setm && !its_Tb_chg) ? (fil = 0); ) :
         its_Tb_KeyErr(w, "Line");
     );
     // a file : its size and its channels (length, chan, spls are then ignored : a Dump can be read again)
@@ -9056,9 +9070,13 @@ function its_Tb_Keys(ty) local(w, ki)
     while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Tb_Peek())) (
         its_Tb_Next();
         its_Tb_v3 = its_Tb_v4 = Undef;
+        its_Tb_chg = 0;
         ((ki = (ty === its_TK_Effect) ? its_Tb_FxKey(w) : its_Tb_Key(ty, w)) >= 0) ? (
-            its_TbKS[ki] = 1; its_TbK1[ki] = its_Tb_v1; its_TbK2[ki] = its_Tb_v2;
-            its_TbK3[ki] = its_Tb_v3; its_TbK4[ki] = its_Tb_v4;
+            // (Set : only the keys whose value depends on a changed argument)
+            (!its_Tb_setm || its_Tb_chg) ? (
+                its_TbKS[ki] = 1; its_TbK1[ki] = its_Tb_v1; its_TbK2[ki] = its_Tb_v2;
+                its_TbK3[ki] = its_Tb_v3; its_TbK4[ki] = its_Tb_v4;
+            );
         ) :
         its_Tb_KeyErr(w, its_Tb_TyName(ty));
     );
@@ -9575,12 +9593,13 @@ function its_Tb_GKeys() local(w, ki, i)
         its_Tb_Next();
         ki = -1; i = 0; while ((ki < 0) && (i < its_TbGNk)) ( (its_TbGKey[i] === w) ? (ki = i); i += 1; );
         (ki < 0) ? its_Tb_KeyErr(w, "Global") : (
-            its_TbKS[ki] = 1;
+            its_Tb_chg = 0;
             its_TbK1[ki] = (ki === 0) ? its_Tb_Enum("samples", its_TbGSm, 3) :
                 ((ki === 1) || (ki === 2)) ? its_Tb_Num(its_TbGNam[ki], -120, 40) :
                 (ki === 3) ? its_Tb_Num("latency", 1, 10000) :
                 (ki === 4) ? its_Tb_Enum("action", its_TbGAc, 6) :
                 its_Tb_Int("chan", 0, 128);
+            its_TbKS[ki] = !its_Tb_setm || its_Tb_chg; // (Set : only the keys of a changed argument)
         );
     );
 );
@@ -9657,6 +9676,8 @@ function its_Tb_CheckGlobal() local(ki, bad)
         is omitted ; an input or an output : its words, read in the scope of the table) ; the names of the template are the
         names of this instance (its scope : its number k, 1 ... its_InsMx) ; each module named in the template belongs to the
         instance (Owner = k)
+    Set i p v ... : the arguments given replace those of the instance ; only the keys whose value depends on a changed argument
+        are applied again (its_TbM_Chg) : the other settings of its modules (pads...) are kept
     Free Instance i : deletes its modules ; Dump Instance i : the call, then its modules ; Free Algorithm Name
     The instances are expanded before the 4 passes (its_Al_Expand) : markers (its_TbM_...) tell the scopes ; an instance and
     a template are recorded in pass 3 (its_Al_Commit, its_Al_TplCommit). Errors 2780 ... 2790.
@@ -9681,13 +9702,15 @@ its_IPN = make_array(its_IPMx); its_IPK = make_array(its_IPMx); its_IPAN = make_
 its_IPTP = make_array(its_IPMx); its_IPTL = make_array(its_IPMx);
 its_IPAO = make_array(its_IPMx); its_IPAL = make_array(its_IPMx);
 its_IPArgSz = 4096; its_IPArg = make_array(its_IPArgSz); // their arguments : for each declaration, n then n words
+its_SPMx = 32; its_SPCnt = 0; // the Set of the table : the instance, its new arguments (in its_IPArg)
+its_SPK = make_array(its_SPMx); its_SPAO = make_array(its_SPMx); its_SPAL = make_array(its_SPMx);
 // the declarations of a template (its_Al_Decl) : name, kind (0 input, 1 output, 2 param), default, min, max ; the arguments
 // of an instance : position in the table, count of words, value
 its_AlDMx = 32;
 its_AlDN = make_array(its_AlDMx); its_AlDK = make_array(its_AlDMx);
 its_AlDDef = make_array(its_AlDMx); its_AlDMin = make_array(its_AlDMx); its_AlDMax = make_array(its_AlDMx);
 its_AlAP = make_array(its_AlDMx); its_AlAL = make_array(its_AlDMx); its_AlAV = make_array(its_AlDMx);
-its_Tb_cpend = -1; its_Tb_scope = its_Tb_sscope = 0; its_Al_buf = 0;
+its_Tb_cpend = its_Tb_spend = -1; its_Tb_scope = its_Tb_sscope = its_Tb_setm = its_Tb_chg = 0; its_Al_buf = 0;
 
 // the word "i" of the table (its_TK_End after the last one) ; the next word that is not a comma
 function its_Al_W(i) ( (i < its_Tb_itc) ? its_Tb_tbl[i] : its_TK_End; );
@@ -9817,8 +9840,101 @@ function its_Al_SrcLen(p, dst) local(w, n)
     n;
 );
 
+// the arguments of the instance "nm" (template "an", declarations its_AlD...) from "p" up to the next block : its_AlAP (position
+// of the value of each declaration, 0 : not given), its_AlAL (its count of words), its_AlAV (a parameter : its value) ; the index after
+function its_Al_Args(p, nm, an) local(d, w, n, v)
+(
+    d = 0; loop(its_AlDMx, its_AlAP[d] = 0; d += 1;);
+    while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Al_W(p = its_Al_Skip(p)))) (
+        its_Tb_ptr = p; // (the word of an error)
+        ((d = its_Al_DIdx(w)) < 0) ? (
+            sprintf(#its_TbW, "Instance %s : %s is not an argument of %s", mSL_edit_value(#its_TbV, nm),
+                mSL_edit_value(#its_TbV1, w), mSL_edit_value(#its_TbV2, an));
+            its_Tb_Err(2784, #its_TbW);
+        ) : (
+            p = its_Al_Skip(p + 1);
+            its_AlAP[d] = p;
+            (its_AlDK[d] === 2) ? (
+                v = its_Al_RNum(its_Tb_tbl, its_Tb_itc, p);
+                ((v === Undef) || (v < its_AlDMin[d]) || (v > its_AlDMax[d])) ? (
+                    sprintf(#its_TbW, "Instance %s : %s : %s is not a value in [%g, %g]", mSL_edit_value(#its_TbV, nm),
+                        mSL_edit_value(#its_TbV1, w), mSL_edit_value(#its_TbV2, its_Al_W(p)), its_AlDMin[d], its_AlDMax[d]);
+                    its_Tb_Err(2785, #its_TbW);
+                );
+                its_AlAV[d] = v; p = its_Al_rn;
+            ) : (
+                ((n = its_Al_SrcLen(p, its_AlDK[d])) === 0) ? (
+                    sprintf(#its_TbW, "Instance %s : %s : %s is not %s", mSL_edit_value(#its_TbV, nm),
+                        mSL_edit_value(#its_TbV1, w), mSL_edit_value(#its_TbV2, its_Al_W(p)),
+                        its_AlDK[d] ? "a destination" : "a source");
+                    its_Tb_Err(2784, #its_TbW);
+                );
+                its_AlAL[d] = n; p += n;
+            );
+        );
+    );
+    p;
+);
+
+// the record of the arguments (for each declaration : n, then n words), in its_IPArg from its_IPAPt : the given ones, the
+// others from "old" (a record, 0 : the defaults) ; its offset (its_Al_alen : its length)
+function its_Al_Record(old) local(ao, d, n, j, q)
+(
+    ao = its_IPAPt; q = old;
+    d = 0; while ((its_Tb_error === 0) && (d < its_AlDCnt)) (
+        n = its_AlAP[d] ? ((its_AlDK[d] === 2) ? 1 : its_AlAL[d]) : (old !== 0) ? q[0] : 1;
+        (ao + n + 1 > its_IPArgSz) ? (
+            its_Tb_Err(2788, "Instance : too many arguments in this table");
+        ) : (
+            its_IPArg[ao] = n;
+            its_AlAP[d] ? (
+                (its_AlDK[d] === 2) ? (
+                    its_IPArg[ao + 1] = its_AlAV[d];
+                ) : (
+                    j = 0; loop(n, its_IPArg[ao + 1 + j] = its_Tb_tbl[its_AlAP[d] + j]; j += 1;);
+                );
+            ) :
+            (old !== 0) ? (
+                j = 0; loop(n, its_IPArg[ao + 1 + j] = q[1 + j]; j += 1;);
+            ) : (
+                its_IPArg[ao + 1] = its_AlDDef[d]; // (a parameter : an input or an output is given)
+            );
+            ao += n + 1;
+        );
+        (old !== 0) ? (q += q[0] + 1);
+        d += 1;
+    );
+    its_Al_alen = ao - its_IPAPt;
+    ao = its_IPAPt; its_IPAPt += its_Al_alen;
+    ao;
+);
+
+// the body of the template "tp" ("tl" words), the names of the declarations replaced by the arguments of the record "ao" ;
+// chg : a changed argument is preceded by the marker its_TbM_Chg (Set)
+function its_Al_Body(tp, tl, ao, chg) local(j, w, d, q, v, n)
+(
+    j = its_AlBody; while (j < tl) (
+        w = tp[j];
+        ((d = its_Al_DIdx(w)) < 0) ? (
+            its_Al_Emit(w);
+        ) : (
+            q = ao; loop(d, q += its_IPArg[q] + 1;); // the argument d
+            (chg && its_AlAP[d]) ? its_Al_Emit(its_TbM_Chg);
+            (its_AlDK[d] === 2) ? (
+                v = its_IPArg[q + 1];
+                (v < 0) ? ( its_Al_Emit(mSL_cstMinus); its_Al_Emit(-v); ) : its_Al_Emit(v);
+            ) : (
+                its_Al_Emit(its_TbM_Out);
+                n = its_IPArg[q]; q += 1; loop(n, its_Al_Emit(its_IPArg[q]); q += 1;);
+                its_Al_Emit(its_TbM_In);
+            );
+        );
+        j += 1;
+    );
+);
+
 // Instance at "i" : checked, its body is emitted (with its markers) ; the index after it
-function its_Al_Inst(i) local(nm, an, k, p, d, w, n, v, pi, ao, j, q, tp)
+function its_Al_Inst(i) local(nm, an, k, p, d, pi, tp)
 (
     nm = its_Al_W(i + 1); an = its_Al_W(i + 2); p = i + 3;
     !its_Tb_IsName(nm) ? (
@@ -9840,36 +9956,7 @@ function its_Al_Inst(i) local(nm, an, k, p, d, w, n, v, pi, ao, j, q, tp)
         tp = its_Al_tp;
         its_Al_cur = an;
         its_Al_Decl(tp, its_Al_tl);
-        // the arguments
-        d = 0; loop(its_AlDMx, its_AlAP[d] = 0; d += 1;);
-        while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Al_W(p = its_Al_Skip(p)))) (
-            its_Tb_ptr = p; // (the word of an error)
-            ((d = its_Al_DIdx(w)) < 0) ? (
-                sprintf(#its_TbW, "Instance %s : %s is not an argument of %s", mSL_edit_value(#its_TbV, nm),
-                    mSL_edit_value(#its_TbV1, w), mSL_edit_value(#its_TbV2, an));
-                its_Tb_Err(2784, #its_TbW);
-            ) : (
-                p = its_Al_Skip(p + 1);
-                its_AlAP[d] = p;
-                (its_AlDK[d] === 2) ? (
-                    v = its_Al_RNum(its_Tb_tbl, its_Tb_itc, p);
-                    ((v === Undef) || (v < its_AlDMin[d]) || (v > its_AlDMax[d])) ? (
-                        sprintf(#its_TbW, "Instance %s : %s : %s is not a value in [%g, %g]", mSL_edit_value(#its_TbV, nm),
-                            mSL_edit_value(#its_TbV1, w), mSL_edit_value(#its_TbV2, its_Al_W(p)), its_AlDMin[d], its_AlDMax[d]);
-                        its_Tb_Err(2785, #its_TbW);
-                    );
-                    its_AlAV[d] = v; p = its_Al_rn;
-                ) : (
-                    ((n = its_Al_SrcLen(p, its_AlDK[d])) === 0) ? (
-                        sprintf(#its_TbW, "Instance %s : %s : %s is not %s", mSL_edit_value(#its_TbV, nm),
-                            mSL_edit_value(#its_TbV1, w), mSL_edit_value(#its_TbV2, its_Al_W(p)),
-                            its_AlDK[d] ? "a destination" : "a source");
-                        its_Tb_Err(2784, #its_TbW);
-                    );
-                    its_AlAL[d] = n; p += n;
-                );
-            );
-        );
+        p = its_Al_Args(p, nm, an);
         // an input or an output must be given
         d = 0; while ((its_Tb_error === 0) && (d < its_AlDCnt)) (
             ((its_AlDK[d] < 2) && (its_AlAP[d] === 0)) ? (
@@ -9880,46 +9967,46 @@ function its_Al_Inst(i) local(nm, an, k, p, d, w, n, v, pi, ao, j, q, tp)
             d += 1;
         );
         (its_Tb_error === 0) ? (
-            // the record of the instance and its arguments (for each declaration : n, then n words)
             pi = its_IPCnt; its_IPCnt += 1;
             its_IPN[pi] = nm; its_IPK[pi] = k; its_IPAN[pi] = an; its_IPTP[pi] = tp; its_IPTL[pi] = its_Al_tl;
-            its_IPAO[pi] = ao = its_IPAPt;
-            d = 0; while ((its_Tb_error === 0) && (d < its_AlDCnt)) (
-                n = (its_AlDK[d] === 2) ? 1 : its_AlAL[d];
-                (ao + n + 1 > its_IPArgSz) ? (
-                    its_Tb_Err(2788, "Instance : too many arguments in this table");
-                ) : (
-                    its_IPArg[ao] = n;
-                    (its_AlDK[d] === 2) ? (
-                        its_IPArg[ao + 1] = its_AlAP[d] ? its_AlAV[d] : its_AlDDef[d];
-                    ) : (
-                        j = 0; loop(n, its_IPArg[ao + 1 + j] = its_Tb_tbl[its_AlAP[d] + j]; j += 1;);
-                    );
-                    ao += n + 1;
-                );
-                d += 1;
-            );
-            its_IPAL[pi] = ao - its_IPAO[pi]; its_IPAPt = ao;
-            // the body, the names of the arguments replaced
+            its_IPAO[pi] = its_Al_Record(0); its_IPAL[pi] = its_Al_alen;
             its_Al_Emit(its_TbM_Ins); its_Al_Emit(pi);
-            j = its_AlBody; while (j < its_Al_tl) (
-                w = tp[j];
-                ((d = its_Al_DIdx(w)) < 0) ? (
-                    its_Al_Emit(w);
-                ) : (
-                    q = its_IPAO[pi]; loop(d, q += its_IPArg[q] + 1;); // the argument d
-                    (its_AlDK[d] === 2) ? (
-                        v = its_IPArg[q + 1];
-                        (v < 0) ? ( its_Al_Emit(mSL_cstMinus); its_Al_Emit(-v); ) : its_Al_Emit(v);
-                    ) : (
-                        its_Al_Emit(its_TbM_Out);
-                        n = its_IPArg[q]; q += 1; loop(n, its_Al_Emit(its_IPArg[q]); q += 1;);
-                        its_Al_Emit(its_TbM_In);
-                    );
-                );
-                j += 1;
-            );
+            its_Al_Body(tp, its_Al_tl, its_IPAO[pi], 0);
             its_Al_Emit(its_TbM_InsEnd);
+        );
+    );
+    p;
+);
+
+// Set at "i" : the arguments given replace those of the instance ; its body is emitted in the mode Set (only the keys
+// that depend on a changed argument are applied, its_TbM_Chg) ; the index after it
+function its_Al_Set(i) local(nm, k, p, j, pi, si, tp, tl, old)
+(
+    nm = its_Al_W(i + 1); p = i + 2;
+    ((k = its_Al_InsFind(nm)) < 0) ? (
+        sprintf(#its_TbW, "Set : unknown instance %s", mSL_edit_value(#its_TbV, nm));
+        its_Tb_Err(2787, #its_TbW);
+    ) :
+    (its_SPCnt >= its_SPMx) ? (
+        its_Tb_Err(2788, "Set : too many Set in this table");
+    ) : (
+        // the template and the arguments : recorded, or of an instance of this table (the last record of its arguments)
+        (its_InsSym[k] === nm) ? (
+            tp = its_InsTpl[k]; tl = its_InsTLen[k]; old = its_InsArg[k]; its_Al_cur = its_InsAName[k];
+        ) : (
+            j = 0; while (j < its_IPCnt) ( (its_IPK[j] === k) ? (pi = j); j += 1; );
+            tp = its_IPTP[pi]; tl = its_IPTL[pi]; old = its_IPArg + its_IPAO[pi]; its_Al_cur = its_IPAN[pi];
+        );
+        j = 0; while (j < its_SPCnt) ( (its_SPK[j] === k) ? (old = its_IPArg + its_SPAO[j]); j += 1; ); // (a previous Set)
+        its_Al_Decl(tp, tl);
+        p = its_Al_Args(p, nm, its_Al_cur);
+        (its_Tb_error === 0) ? (
+            si = its_SPCnt; its_SPCnt += 1;
+            its_SPK[si] = k;
+            its_SPAO[si] = its_Al_Record(old); its_SPAL[si] = its_Al_alen;
+            its_Al_Emit(its_TbM_Set); its_Al_Emit(si);
+            its_Al_Body(tp, tl, its_SPAO[si], 1);
+            its_Al_Emit(its_TbM_SetEnd);
         );
     );
     p;
@@ -9929,7 +10016,7 @@ function its_Al_Inst(i) local(nm, an, k, p, d, w, n, v, pi, ao, j, q, tp)
 // (Algorithm and Instance after Free or Dump are kept : Free Algorithm, Free Instance, Dump Instance)
 function its_Al_Expand() local(i, j, w, nm, pw)
 (
-    its_Al_cnt = its_APCnt = its_IPCnt = its_IPAPt = 0;
+    its_Al_cnt = its_APCnt = its_IPCnt = its_SPCnt = its_IPAPt = 0;
     i = 0; pw = 0;
     while ((its_Tb_error === 0) && (i < its_Tb_itc)) (
         w = its_Tb_tbl[i];
@@ -9963,6 +10050,9 @@ function its_Al_Expand() local(i, j, w, nm, pw)
         ) :
         (w === its_TK_Instance) ? (
             i = its_Al_Inst(i);
+        ) :
+        (w === its_TK_Set) ? (
+            i = its_Al_Set(i);
         ) : (
             its_Al_Emit(w);
             i += 1;
@@ -9972,17 +10062,13 @@ function its_Al_Expand() local(i, j, w, nm, pw)
     its_Tb_ptr = 0;
 );
 
-// pass 3, at the end of an instance : it is recorded (its template copied, its arguments, its names)
-function its_Al_Commit(pi) local(k, b, n, i, j, ok)
+// a copy of the record of arguments "ao" ("n" words) in a dynamic block (0 : no memory) ; a name of the table after Reader or
+// Effect becomes its number (the names of a table don't last)
+function its_Al_ArgCopy(ao, n) local(b, i, j)
 (
-    k = its_IPK[pi]; ok = 1;
-    its_InsSym[k] = its_IPN[pi]; its_InsAName[k] = its_IPAN[pi];
-    ((b = mSL_Dyn_Alloc(its_IPTL[pi] + 1, 'algt', 0)) > BASE_MEMORY) ? memcpy(b, its_IPTP[pi], its_IPTL[pi]) : (ok = 0);
-    its_InsTpl[k] = b; its_InsTLen[k] = its_IPTL[pi];
-    ((b = mSL_Dyn_Alloc(its_IPAL[pi] + 1, 'alga', 0)) > BASE_MEMORY) ? (
-        memcpy(b, its_IPArg + its_IPAO[pi], its_IPAL[pi]);
-        // a name of the table after Reader or Effect : its number (the names of a table don't last)
-        j = 1; while (j < its_IPAL[pi]) (
+    ((b = mSL_Dyn_Alloc(n + 1, 'alga', 0)) > BASE_MEMORY) ? (
+        memcpy(b, its_IPArg + ao, n);
+        j = 1; while (j < n) (
             (((b[j - 1] === its_TK_Reader) || (b[j - 1] === its_TK_Effect)) && its_Tb_IsName(b[j])) ? (
                 i = 0; while (i < its_TbNCnt) (
                     ((its_TbNSym[i] === b[j]) && (its_TbNScp[i] === 0) && (its_TbNTyp[i] === b[j - 1])) ? (
@@ -9993,7 +10079,30 @@ function its_Al_Commit(pi) local(k, b, n, i, j, ok)
             );
             j += 1;
         );
-    ) : (ok = 0);
+    );
+    b;
+);
+
+// pass 3, at the end of a Set : the new arguments of the instance are recorded
+function its_Al_SetCommit(si) local(k, b)
+(
+    k = its_SPK[si];
+    ((b = its_Al_ArgCopy(its_SPAO[si], its_SPAL[si])) <= BASE_MEMORY) ? (
+        its_Tb_Err(2790, "Set : not enough memory for the arguments");
+    ) : (
+        (its_InsArg[k] > BASE_MEMORY) ? mSL_Dyn_Free(its_InsArg[k]);
+        its_InsArg[k] = b; its_InsALen[k] = its_SPAL[si];
+    );
+);
+
+// pass 3, at the end of an instance : it is recorded (its template copied, its arguments, its names)
+function its_Al_Commit(pi) local(k, b, n, i, j, ok)
+(
+    k = its_IPK[pi]; ok = 1;
+    its_InsSym[k] = its_IPN[pi]; its_InsAName[k] = its_IPAN[pi];
+    ((b = mSL_Dyn_Alloc(its_IPTL[pi] + 1, 'algt', 0)) > BASE_MEMORY) ? memcpy(b, its_IPTP[pi], its_IPTL[pi]) : (ok = 0);
+    its_InsTpl[k] = b; its_InsTLen[k] = its_IPTL[pi];
+    ((b = its_Al_ArgCopy(its_IPAO[pi], its_IPAL[pi])) <= BASE_MEMORY) ? (ok = 0);
     its_InsArg[k] = b; its_InsALen[k] = its_IPAL[pi];
     n = 0; i = 0; loop(its_TbNCnt, (its_TbNScp[i] === k) ? (n += 1); i += 1;);
     ((b = mSL_Dyn_Alloc(3 * n + 1, 'algn', 0)) > BASE_MEMORY) ? (
@@ -10009,7 +10118,31 @@ function its_Al_Commit(pi) local(k, b, n, i, j, ok)
     );
 );
 
-function its_Al_Flush() ( (its_Tb_cpend >= 0) ? ( its_Al_Commit(its_Tb_cpend); its_Tb_cpend = -1; ); );
+function its_Al_Flush()
+(
+    (its_Tb_cpend >= 0) ? ( its_Al_Commit(its_Tb_cpend); its_Tb_cpend = -1; );
+    (its_Tb_spend >= 0) ? ( its_Al_SetCommit(its_Tb_spend); its_Tb_spend = -1; );
+);
+
+// the names of the recorded instances changed by a Set of the table : in the table of the names (their scope : the instance)
+function its_Al_SetNames() local(i, j, k, b, m)
+(
+    i = 0; loop(its_SPCnt,
+        k = its_SPK[i]; m = 1;
+        j = 0; while (j < i) ( (its_SPK[j] === k) ? (m = 0); j += 1; ); // (once per instance)
+        (m && ((b = its_InsNam[k]) > BASE_MEMORY)) ? (
+            j = 0; loop(its_InsNCnt[k],
+                (its_TbNCnt < its_TbNSz) ? (
+                    its_TbNSym[its_TbNCnt] = b[3 * j]; its_TbNTyp[its_TbNCnt] = b[3 * j + 1]; its_TbNIdx[its_TbNCnt] = b[3 * j + 2];
+                    its_TbNScp[its_TbNCnt] = k;
+                    its_TbNCnt += 1;
+                );
+                j += 1;
+            );
+        );
+        i += 1;
+    );
+);
 
 // end of a table without error : its templates are recorded (a template of the same name is replaced)
 function its_Al_TplCommit() local(i, j, k, b)
@@ -10187,7 +10320,7 @@ function Set_Table(tbl) local(m, w, xb)
 (
     its_Tb_tbl = tbl; its_Tb_itc = tbl[-1];
     its_Tb_error = its_Tb_res = its_TbNCnt = 0;
-    its_Tb_scope = its_Tb_sscope = 0; its_Tb_cpend = -1;
+    its_Tb_scope = its_Tb_sscope = its_Tb_setm = 0; its_Tb_cpend = its_Tb_spend = -1;
     memset(its_TbResv, 0, LN_CNT + WR_CNT + RD_CNT + FX_CNT);
     // the templates taken, the instances expanded (its_Al_Expand : its size, then the words)
     its_Al_buf = xb = 0;
@@ -10201,12 +10334,13 @@ function Set_Table(tbl) local(m, w, xb)
             its_Al_Expand();
             its_Al_buf = 0;
             its_Tb_tbl = xb; its_Tb_itc = its_Al_cnt;
+            its_Al_SetNames(); // (the modules of the instances changed by a Set)
         );
     );
     m = 0;
     while ((m <= 3) && (its_Tb_error === 0)) (
         its_Tb_mode = m; its_Tb_ptr = its_Tb_clr = 0;
-        its_Tb_scope = its_Tb_sscope = 0;
+        its_Tb_scope = its_Tb_sscope = its_Tb_setm = 0;
         its_Tb_SimInit();
         (its_Tb_Peek() === its_TK_Interstys) ? its_Tb_Next();
         while ((its_Tb_error === 0) && ((w = its_Tb_Next()) !== its_TK_End) && (w !== its_TK_EofMark)) (
@@ -10218,7 +10352,7 @@ function Set_Table(tbl) local(m, w, xb)
             (w === its_TK_Check) ? its_Tb_Check() :
             (w === its_TK_Free) ? its_Tb_Free() :
             (w === its_TK_Global) ? its_Tb_Global() : (
-                sprintf(#its_TbW, "%s : a block (Line, Writer, Reader, Effect, Global, Algorithm, Instance, Dump, Check, Free, Clear) is expected", mSL_edit_value(#its_TbV, w));
+                sprintf(#its_TbW, "%s : a block (Line, Writer, Reader, Effect, Global, Algorithm, Instance, Set, Dump, Check, Free, Clear) is expected", mSL_edit_value(#its_TbV, w));
                 its_Tb_Err(2750, #its_TbW);
             );
         );
