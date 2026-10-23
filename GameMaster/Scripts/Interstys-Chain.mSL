@@ -1,0 +1,33 @@
+print("Interstys-Chain. Une chaine d'effets a ecouter (entree stereo In:0-1 -> Out:0-1).");
+
+/*
+  Exemple a deposer dans Interstys (pas un test : il laisse les modules en place). Les numeros sont fixes (effets 243 a
+  246, ligne, writer et reader 250) : le relancer remplace les memes modules. Les effets sont numerotes a l'envers de la
+  chaine : l'ordre d'execution (Dump Order) doit etre 246 245 244 243.
+
+    LFO 246 (0.2 Hz) --mod Cutoff--> Filter 245 (passe-bande 800 Hz, Q 4) <-- In:0-1
+    Filter 245 --> Saturation 244 (Soft, drive 18 dB)
+    Saturation 244 --> Writer 250 (ligne 250, 2 s, retour 40 %) ; Reader 250 (delai 0.375 s) --> Bus 6
+    Mixer 243 : In:0-1 (-6 dB) + Saturation 244 (-3 dB) + Bus 6, l'echo (-6 dB) --> Out:0-1
+
+  Le module Globals doit etre en "Merge" (l'entree est lue ; en "Ignore", l'entree In est muette) ; la sortie de la piste
+  est Out : le Mixer y met le son sec (-6 dB), le son traite et l'echo.
+  Pour tout retirer : table(data( Free Effect 243  Free Effect 244  Free Effect 245  Free Effect 246
+                                  Free Reader 250  Free Writer 250  Free Line 250 ))
+*/
+
+var r = table(data(
+    Interstys
+    Effect 246  type LFO  chan 1  freq 0.2  mode Sine  amp 1  offset 0
+    Effect 245  type Filter  chan 2  source In:0  freq 800  q 4  mode BP  stages 1  mod Cutoff Effect 246 depth 2
+    Effect 244  type Saturation  chan 2  source Effect 245  mode Soft  drive 18  mix 100  os 2  output -9
+    Line 250  length 2  chan 2
+    Writer 250  line 250  source Effect 244  overdub 40  status Writing
+    Reader 250  writer 250  delay 0.375  out Bus 6  status Reading
+    Effect 243  type Mixer  chan 2  src1 In:0  gain1 -6  src2 Effect 244  gain2 -3  src3 Bus 6  gain3 -6  out Out:0
+    Dump Order
+));
+print(sprintf(0, "Interstys-Chain. resultat : %d", r));
+
+// Expected "Order : %s246 245 244 243%s"
+// Expected "Interstys-Chain. resultat : 0"

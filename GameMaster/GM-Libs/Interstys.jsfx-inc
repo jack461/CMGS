@@ -365,7 +365,7 @@ its_Efx_OutCell = idx; idx += 1; //  sortie : première cellule (calculée par e
 its_Efx_OutAdd = idx; idx += 1; //  sortie : 1 pour un bus (addition), 0 pour le câble propre (affectation)
 its_Efx_OutDirty = idx; idx += 1; //  le câble propre a été écrit (il est effacé quand l'effet s'arrête)
 its_Efx_Owner = idx; idx += 1; //  propriétaire : 0 le patch utilisateur, sinon une instance d'algorithme
-its_Efx_Rank = idx; idx += 1; //  rang d'exécution (futur : algorithmes)
+its_Efx_Rank = idx; idx += 1; //  rang d'exécution dans its_FxOrd (calculé par its_Fx_Order)
 its_Efx_Lim = idx; idx += 1; //  1 : l'auto-limiteur de la sortie est en service (pas le LFO), avant le gain de sortie
 its_Efx_LimEnv = idx; idx += 1; //  l'enveloppe crête de l'auto-limiteur (toutes les voies), son gain est 1 / max(1, env)
 // zone de travail (KW_fxwk, non sauvée) : allouée par @gfx (its_Patch_Update), mise en place par @block (its_Fx_WorkSwitch)
@@ -2151,6 +2151,119 @@ local (i, b, w, wk, chg, n)
         i = 0; loop(WR_CNT+1, ((b = Writers_set[i]) > BASE_MEMORY) ? (b[its_Wrt_Check] = 0); i += 1;);
         i = 0; loop(FX_CNT+1, ((b = Effects_set[i]) > BASE_MEMORY) ? (b[its_Efx_Check] = 0); i += 1;);
     );
+);
+
+
+/*
+    The execution order of the effects in @sample : in each phase, an effect runs after the effects whose output it reads (their
+    own cable, a bus, Out : sources and modulation inputs) ; the effects of a loop (feedback) keep the order of their numbers
+    (one sample of delay), and so do the independent ones. Computed by @gfx (its_Fx_Order, when its signature changes), put in
+    place by @block between two audio blocks (its_Fx_OrderSwitch) : its_FxOrd[0 ... FX_CNT-1], the effects that exist first.
+*/
+its_FxOrd = make_array(FX_CNT); its_FxOrdNew = make_array(FX_CNT); its_FxOrdRdy = 0;
+i__ii = 0; loop(FX_CNT, its_FxOrd[i__ii] = i__ii; i__ii += 1;);
+its_FxLst = make_array(FX_CNT); // the effects that exist
+its_FxWK = make_array(FX_CNT); // the key of the cells each one writes (its_Fx_WKey)
+its_FxDeg = make_array(FX_CNT); // the count of the effects not yet placed that it reads
+its_FxDone = make_array(FX_CNT); // 1 : placed (index in its_FxLst) ; then, by number : in the order
+its_FxDep = make_array(FX_CNT * FX_CNT); // its_FxDep[a * FX_CNT + b] : its_FxLst[a] reads its_FxLst[b] (the same phase)
+its_FxSig = -1; // the signature of the last computation
+its_FxCycN = 0; // the effects placed in a loop (feedback) at the last computation
+
+// the key of the cells written by the effect "fx" (number "n") : its own cable, or its output (Out, a bus)
+function its_Fx_WKey(fx, n)
+(
+    (fx[its_Efx_OutK] === 0) ? ITS_KFx * ITS_KMul + n :
+    (floor(fx[its_Efx_OutK] / ITS_KMul) === ITS_KOut) ? ITS_KOut * ITS_KMul : fx[its_Efx_OutK];
+);
+
+// a source as a key of cells (Out : all its channels)
+function its_Fx_RKey(s) ( (floor(s / ITS_KMul) === ITS_KOut) ? ITS_KOut * ITS_KMul : s; );
+
+// the effect "fx" reads the key "wk" (one of its sources, one of its modulation inputs)
+function its_Fx_Reads(fx, wk)
+local (r, j, p, ns, nm)
+(
+    r = 0;
+    ns = max(0, its_Fx_NSrc(fx[its_Efx_Type]));
+    p = fx + its_Efx_Src1; j = 0;
+    while (!r && (j < ns)) ( r = (p[0] !== 0) && (its_Fx_RKey(p[0]) === wk); p += its_EfxDist; j += 1; );
+    nm = (fx[its_Efx_Type] === its_Efx_TyFilter) ? 2 : (fx[its_Efx_Type] === its_Efx_TySat) ? 3 : 0;
+    p = fx + its_Efx_Mod1; j = 0;
+    while (!r && (j < nm)) ( r = (p[its_Mod_Src] !== 0) && (its_Fx_RKey(p[its_Mod_Src]) === wk); p += its_ModDist; j += 1; );
+    r;
+);
+
+// the signature of what the order depends on : the effects that exist, their type, phase, output, sources, modulation inputs
+function its_Fx_OrdSig()
+local (i, j, b, p, g, sg)
+(
+    sg = 0;
+    i = 0; loop(FX_CNT,
+        b = Effects_set[i];
+        ((b > BASE_MEMORY) && (b[-2] === KW_effx)) ? (
+            g = 1 + b[its_Efx_Type] * 11 + b[its_Efx_Phase] * 7 + b[its_Efx_OutK] * 3;
+            p = b + its_Efx_Src1; j = 0; loop(8, g += p[0] * (j + 13); p += its_EfxDist; j += 1;);
+            p = b + its_Efx_Mod1; j = 0; loop(3, g += p[its_Mod_Src] * (j + 31); p += its_ModDist; j += 1;);
+            sg += (i + 1) * g;
+        );
+        i += 1;
+    );
+    sg;
+);
+
+// @gfx : the order, computed again when its signature changes (the previous one taken by @block)
+function its_Fx_Order()
+local (sg, m, a, b, fa, fb, k, best, i, chg)
+(
+    ((its_FxOrdRdy === 0) && ((sg = its_Fx_OrdSig()) !== its_FxSig)) ? (
+        its_FxSig = sg;
+        m = 0; i = 0; loop(FX_CNT,
+            b = Effects_set[i];
+            ((b > BASE_MEMORY) && (b[-2] === KW_effx)) ? ( its_FxLst[m] = i; its_FxWK[m] = its_Fx_WKey(b, i); m += 1; );
+            i += 1;
+        );
+        // the dependencies, in the same phase
+        a = 0; loop(m,
+            fa = Effects_set[its_FxLst[a]];
+            its_FxDeg[a] = its_FxDone[a] = 0;
+            b = 0; loop(m,
+                fb = Effects_set[its_FxLst[b]];
+                k = (a !== b) && (fa[its_Efx_Phase] === fb[its_Efx_Phase]) && its_Fx_Reads(fa, its_FxWK[b]);
+                its_FxDep[a * FX_CNT + b] = k;
+                its_FxDeg[a] += k;
+                b += 1;
+            );
+            a += 1;
+        );
+        // the next one : the first whose dependencies are placed ; none : a loop, the first one not placed
+        its_FxCycN = 0;
+        k = 0; loop(m,
+            best = -1; a = 0; while ((best < 0) && (a < m)) ( ((its_FxDone[a] === 0) && (its_FxDeg[a] === 0)) ? (best = a); a += 1; );
+            (best < 0) ? (
+                a = 0; while ((best < 0) && (a < m)) ( (its_FxDone[a] === 0) ? (best = a); a += 1; );
+                its_FxCycN += 1;
+            );
+            its_FxDone[best] = 1;
+            its_FxOrdNew[k] = its_FxLst[best];
+            fb = Effects_set[its_FxLst[best]];
+            (fb > BASE_MEMORY) ? (fb[its_Efx_Rank] = k); // (its rank in the order)
+            k += 1;
+            a = 0; loop(m, ((its_FxDone[a] === 0) && its_FxDep[a * FX_CNT + best]) ? (its_FxDeg[a] -= 1); a += 1;);
+        );
+        // then the other numbers
+        memset(its_FxDone, 0, FX_CNT);
+        a = 0; loop(k, its_FxDone[its_FxOrdNew[a]] = 1; a += 1;);
+        i = 0; loop(FX_CNT, (its_FxDone[i] === 0) ? ( its_FxOrdNew[k] = i; k += 1; ); i += 1;);
+        chg = 0; i = 0; loop(FX_CNT, (its_FxOrdNew[i] !== its_FxOrd[i]) ? (chg = 1); i += 1;);
+        its_FxOrdRdy = chg;
+    );
+);
+
+// @block : the new order, between two audio blocks
+function its_Fx_OrderSwitch()
+(
+    its_FxOrdRdy ? ( memcpy(its_FxOrd, its_FxOrdNew, FX_CNT); its_FxOrdRdy = 0; );
 );
 
 
@@ -8045,7 +8158,7 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
                 action StopAll|PauseAll|RestartAll|RewindAll|ClearAll  chan n
                                         the settings of the module "Globals" ; the action is performed last, at once ;
                                         "chan" (the channels of the track) is accepted and ignored, checked by Check
-        Dump Line|Writer|Reader|Effect id | Global
+        Dump Line|Writer|Reader|Effect id | Global | Order (the execution order of the effects, see its_Fx_Order)
                                         logs the module in the same syntax ; Dump All : Global and all the modules
         Check Line|Writer|Reader|Effect id key value ... | Check Global key value ...
                                         logs "Check Writer n OK", or an error 2759 for each difference
@@ -8105,6 +8218,7 @@ its_TK_input = its_TK("input");
 its_TK_output = its_TK("output");
 its_TK_param = its_TK("param");
 its_TK_Set = its_TK("Set");
+its_TK_Order = mSL_symbol("Order"); // (Dump Order ; reserved : a modulation input of the Saturation)
 // markers of the expanded table (its_Al_Expand : never in a data) : the begin of an instance (followed by the index of its
 // pending record, its_IP...), its end, the begin and the end of an argument (read in the scope outside the instance)
 its_TbM_Base = -(2^50);
@@ -10327,7 +10441,7 @@ function its_Al_FreeAlg() local(w, i, f)
 );
 
 //—— Dump, Check, Free
-function its_Tb_Dump() local(w, ty, k)
+function its_Tb_Dump() local(w, ty, k, b)
 (
     w = its_Tb_Next();
     (w === its_TK_Global) ? (
@@ -10336,6 +10450,20 @@ function its_Tb_Dump() local(w, ty, k)
     (w === its_TK_Instance) ? (
         k = its_Al_InsWord("Dump");
         ((its_Tb_mode === 3) && (k > 0)) ? its_Al_DumpIns(k);
+    ) :
+    (w === its_TK_Order) ? (
+        // the execution order of the effects that exist (computed now, unless the previous one is not yet taken by @block)
+        (its_Tb_mode === 3) ? (
+            (its_FxOrdRdy === 0) ? ( its_FxSig = -1; its_Fx_Order(); );
+            strcpy(#its_TbW, "Order :");
+            k = 0; loop(FX_CNT,
+                b = Effects_set[its_FxOrdNew[k]];
+                ((b > BASE_MEMORY) && (b[-2] === KW_effx)) ? strcat(#its_TbW, sprintf(#its_TbV1, " %d", its_FxOrdNew[k] + 1));
+                k += 1;
+            );
+            strcat(#its_TbW, sprintf(#its_TbV1, " ; loops %d", its_FxCycN));
+            mSL_log(SysLogBox, #its_TbW);
+        );
     ) :
     (w === its_TK_All) ? (
         (its_Tb_mode === 3) ? (
@@ -10750,6 +10878,7 @@ dbg_show_2(Readers_set[0],67);
 
 // the work areas of the effects prepared by @gfx (see its_Patch_Update)
 its_Fx_WorkSwitch();
+its_Fx_OrderSwitch(); // the execution order of the effects prepared by @gfx
 
 
 // Count Solo Readers
@@ -10831,13 +10960,14 @@ its_RdrSolos = b__j; // count of readers in solo mode
         s__i += 1; s__j += 1;
     );
 
-    // Phase 2 -- Pre READERS Effects
-    s__fxn = 0; loop(FX_CNT,
+    // Phase 2 -- Pre READERS Effects (in the order of its_FxOrd : see its_Fx_Order)
+    s__oi = 0; loop(FX_CNT,
+        s__fxn = its_FxOrd[s__oi];
         (((s__fx = Effects_set[s__fxn]) != 0) && (s__fx[its_Efx_Status] != 0)
             && (s__fx[its_Efx_Phase] === its_Efx_PhasePre)) ? (
             exec_fx(s__fx, s__fxn);
         );
-        s__fxn += 1;
+        s__oi += 1;
     );
 
     // Phase 3 -- Run READERS
@@ -10859,7 +10989,8 @@ Trace_D_Readers_flg_0 = X_rdz[its_Rdr_Flgs];
 Trace_D_Readers_stat_0 = X_rdz[its_Rdr_Status];
 
     // Phase 4 -- Run Standard effects
-    s__fxn = 0; loop(FX_CNT,
+    s__oi = 0; loop(FX_CNT,
+        s__fxn = its_FxOrd[s__oi];
         (((s__fx = Effects_set[s__fxn]) != 0) && (s__fx[its_Efx_Status] != 0)
             && (s__fx[its_Efx_Phase] === its_Efx_PhaseStd)) ? (
             exec_fx(s__fx, s__fxn);
@@ -10869,7 +11000,7 @@ Trace_D_Readers_stat_0 = X_rdz[its_Rdr_Status];
             (CblFxStart[s__fxn] > 0) ? memset(smpl_tab + CblFxStart[s__fxn], 0, CblFxWidth[s__fxn]);
             s__fx[its_Efx_OutDirty] = 0;
         );
-        s__fxn += 1;
+        s__oi += 1;
     );
 
     // Phase 5 -- Run Writers
@@ -10887,12 +11018,13 @@ Trace_D_writers_stat_0 = X_wr[its_Wrt_Status];
 Trace_D_writers_count_0 += 1;
 
     // Phase 6 -- Post Writers Effects
-    s__fxn = 0; loop(FX_CNT,
+    s__oi = 0; loop(FX_CNT,
+        s__fxn = its_FxOrd[s__oi];
         (((s__fx = Effects_set[s__fxn]) != 0) && (s__fx[its_Efx_Status] != 0)
             && (s__fx[its_Efx_Phase] === its_Efx_PhasePost)) ? (
             exec_fx(s__fx, s__fxn);
         );
-        s__fxn += 1;
+        s__oi += 1;
     );
 
     // generate output samples
@@ -11412,6 +11544,7 @@ while (SchedActive &&
 
 // the cables follow the modules
 its_Patch_Update();
+its_Fx_Order(); // the execution order of the effects (taken by @block)
 
 // A pad asked for too many cells (damaged pad ?) : see the guard in control_jpad (mSL_ui_Pads)
 ((ui_jpad_bad_cnt != ui_jpad_bad_seen) && (time() != ui_jpad_bad_t)) ? (
@@ -12451,9 +12584,7 @@ local (x, h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol
                             // status : Paused -> Reading ; Ready or Reading -> Paused
                             w = rcbl[its_Rdr_Status];
                             ((w === its_RdrStat_Ready) || (w === its_RdrStat_Paused) || (w === its_RdrStat_Reading)) ? (
-                                r = Rd_Set_Status(rdr, (w === its_RdrStat_Paused) ? its_RdrStat_Reading : its_RdrStat_Paused);
-                                sprintf(#itm, "Clic 1 : %d -> %d -> %d (%d)", rdr, w, rcbl[its_Rdr_Status], r);
-                                mSL_log(SysLogBox, #itm);
+                                Rd_Set_Status(rdr, (w === its_RdrStat_Paused) ? its_RdrStat_Reading : its_RdrStat_Paused);
                                 (rdr === slReader) ? (slRStatusPrv = slRStatus = rcbl[its_Rdr_Status]);
                             );
                         );
