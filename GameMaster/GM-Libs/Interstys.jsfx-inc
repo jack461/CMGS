@@ -3319,6 +3319,73 @@ local (w0, w1, w2)
     dst[its_Efx_Work] = w0; dst[its_Efx_WkNew] = w1; dst[its_Efx_WkOld] = w2;
 );
 
+// Auto Mixer : the same gain -20*log10(N) (rounded to 0.01 dB) for the N sources not null
+function FX_Auto_Gains(fx)
+local (n, g, p)
+(
+    n = 0; p = fx + its_Efx_Src1;
+    loop(8, (p[0] > 0) ? (n += 1); p += its_EfxDist;);
+    g = (n > 0) ? floor(0.5 - 2000 * log10(n)) / 100 : 0;
+    p = fx + its_Efx_Src1;
+    loop(8, p[its_Efx_VoldB1 - its_Efx_Src1] = (p[0] > 0) ? g : -120; p += its_EfxDist;);
+    fx[its_Efx_Check] = 0;
+);
+
+// the weights "hw" of the mode Cheb. sum : a preset "k" (menu_Efx_Harm)
+function its_Harm_Preset(hw, k)
+local (i, m)
+(
+    (k === 6) ? (
+        // normalize : the largest |weight| becomes 1
+        m = 0; i = 0; loop(its_SatHarm, m = max(m, abs(hw[i])); i += 1;);
+        (m > 0) ? (i = 0; loop(its_SatHarm, hw[i] /= m; i += 1;));
+    ) : (
+        i = 0; loop(its_SatHarm,
+            // i + 1 : the rank of the harmonic
+            hw[i] = (k === 0) ? (i === 0) :
+                    (k === 1) ? ((i & 1) === 0) / (i + 1) :
+                    (k === 2) ? 1 / (i + 1) :
+                    (k === 3) ? ((i & 1) === 0) / sqr(i + 1) :
+                    (k === 4) ? ((i === 0) ? 1 : ((i & 1) === 1) / (i + 1)) :
+                    (k === 5) ? rand(2) - 1 : 0;
+            i += 1;
+        );
+    );
+);
+
+// the type "ty" of the effect "fx" (the pad, the tables) : the parameters of the new type get their default values
+function FX_Set_Type(fx, ty)
+local (k)
+(
+    k = fx[its_Efx_Type]; // the previous type
+    fx[its_Efx_Type] = ty;
+    fx[its_Efx_Check] = 0;
+    (ty === its_Efx_TyAutoMix) ? FX_Auto_Gains(fx);
+    ((ty === its_Efx_TyLFO) && (fx[its_Efx_Par1] === 0)) ? (
+        fx[its_Efx_Par1] = 1; // 1 Hz
+        fx[its_Efx_Par1 + 2] = 1; // amplitude 1
+    );
+    ((ty === its_Efx_TyFilter) && (fx[its_Efx_Par1] < 10)) ? (
+        fx[its_Efx_Par1] = 1000; // 1 kHz
+        fx[its_Efx_Par1 + 1] = 0.707; // Q
+        fx[its_Efx_Par1 + 2] = its_FltLP; // biquad low pass
+        fx[its_Efx_Par1 + 3] = 0; // 12 dB/oct
+    );
+    ((ty === its_Efx_TySat) && (k !== its_Efx_TySat)) ? (
+        fx[its_Efx_Par1] = 12; // drive (dB)
+        fx[its_Efx_Par1 + 1] = its_SatSoft;
+        fx[its_Efx_Par1 + 2] = 0; // bias
+        fx[its_Efx_Par1 + 3] = 1; // mix : 100 %
+        fx[its_Efx_Par1 + 4] = 2; // oversampling 4x
+        fx[its_Efx_Par1 + 5] = -6; // output (dB)
+        fx[its_Efx_Par1 + 6] = 3; // order (x - sin, Chebyshev)
+        fx[its_Efx_Par1 + 7] = 1; // stretch (Cheb. sum)
+        fx[its_Efx_Par1 + 8] = 1; // A (x - A sin)
+        fx[its_Efx_Lim] = 1; // the auto-limiter in service
+        its_Harm_Preset(fx + its_Efx_Harm1, 0); // the fundamental only
+    );
+);
+
 
 // Menu 1 for Effects : their names, in sub-menus of 32 effects (the ">" headers are not counted in the results)
 <? fx_grp = 32; fx_mnc = FX_CNT + (0|((FX_CNT + fx_grp - 1) / fx_grp)); ?>menu_Efx_Ids_N = make_array(<? printf("%d", fx_mnc); ?>);
@@ -7889,23 +7956,33 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
         Reader id  line L | writer W  delay s  speed x  status Ready|Paused|Reading  out D  vol dB  first n  used n
                    loop once|repeat|catch|loop|exit|stop
                                         "line" : reader mode, "writer" : delay mode ; the status is set last
-        Dump Line|Writer|Reader id      logs the module in the same syntax ; Dump All : all the modules
-        Check Line|Writer|Reader id key value ...
+        Effect id  type T  status On|Off|Bypass  phase Std|Pre|Post  chan n  out D  limiter On|Off  (+ the keys of the type)
+                   T : None, Mixer : src1 S gain1 dB ... src8 S gain8 dB ; AutoMix : src1 S ... src8 S (gains computed) ;
+                   Filter : source S  gain dB  freq Hz  q x  mode LP1|HP1|LP|HP|BP|Notch  stages 1|2|4|8
+                            mod Cutoff|Reso S [depth d] [att a] ;
+                   LFO : freq Hz  mode Sine|Triangle|SawUp|SawDown|Square  amp a  offset o  spread s (no limiter) ;
+                   Saturation : source, gain only (its own keys : later)
+                                        "source", "gain" : src1, gain1 ; a new type gives its default values first
+                                        (FX_Set_Type, as in the pad), the status is set last ; "mod X none" disconnects
+        Dump Line|Writer|Reader|Effect id
+                                        logs the module in the same syntax ; Dump All : all the modules
+        Check Line|Writer|Reader|Effect id key value ...
                                         logs "Check Writer n OK", or an error 2759 for each difference
-        Free Line|Writer|Reader id      deletes the module
-    id : a number 1 ... LN_CNT (WR_CNT, RD_CNT), or a name (not a reserved word) valid in this table only ;
+        Free Line|Writer|Reader|Effect id
+                                        deletes the module
+    id : a number 1 ... LN_CNT (WR_CNT, RD_CNT, FX_CNT), or a name (not a reserved word) valid in this table only ;
     a new name gets a free module, that no number of the table designates.
-    Sources S : In:c  Out:c  Bus n[:c]  Ctl n  Reader id[:c]  Effect n[:c] ; outputs D : Own  Out:c  Bus n[:c]
+    Sources S : In:c  Out:c  Bus n[:c]  Ctl n  Reader id[:c]  Effect id[:c]  none ; outputs D : Own  Out:c  Bus n[:c]
     (channels from 0, modules from 1, as in the pads).
     An omitted key keeps the value of the module, or takes its default (a line : 1 s, 2 channels).
     Four passes on the words, nothing is modified before the last one :
         0 marks the modules designated by a number, 1 gives a module to the names of the headers,
         2 checks everything on a simulation (lines, channels...), 3 executes.
-    Errors 2750 ... 2766 ; the result of "table" is 0, or the first error.
+    Errors 2750 ... 2768 ; the result of "table" is 0, or the first error.
     It runs in @gfx (the mSL threads of Interstys) : the state of the analysis is global.
 */
 its_TK_Cnt = 0;
-its_TK_List = make_array(64); // the reserved words (they can't be names)
+its_TK_List = make_array(192); // the reserved words (they can't be names)
 function its_TK(name) local(s) ( s = mSL_symbol(name); its_TK_List[its_TK_Cnt] = s; its_TK_Cnt += 1; s; );
 its_TK_Interstys = its_TK("Interstys");
 its_TK_End = its_TK("End");
@@ -7933,8 +8010,14 @@ its_TK_status = its_TK("status");
 its_TK_Ready = its_TK("Ready");
 its_TK_Undefined = its_TK("Undefined");
 its_TK_Colon = ':' + mSL_CharConst; // as mSL_cstComma
+its_TK_none = its_TK("none");
+its_TK_source = its_TK("source");
+its_TK_gain = its_TK("gain");
+its_TK_mod = its_TK("mod");
+its_TK_depth = its_TK("depth");
+its_TK_att = its_TK("att");
 // reserved for the next blocks
-its_TK("mod"); its_TK("depth"); its_TK("att"); its_TK("file");
+its_TK("file");
 
 // the keys of the writers and of the readers : their symbol, their name ; values (enumerations : the symbol of each value)
 its_TbWNk = 8;
@@ -7960,19 +8043,76 @@ its_TbWMd = make_array(2); its_TbWMd[its_WrtMode_XFade] = mSL_symbol("XFade"); i
 its_TbRLp = make_array(6);
 i__ii = 0; loop(6, its_TbRLp[i__ii] = mSL_symbol(menu_Rdr_Loop_N[i__ii]); i__ii += 1;);
 
+// the keys of the effects (one table for all the types : its_Tb_FxOk tells which keys a type takes) ; "source" and "gain"
+// are src1 and gain1 ; the keys its_TbFMod ... : "mod" for each modulation input (its_TbFMI)
+its_TbFMod = 29;
+its_TbFMINb = 2;
+its_TbFNk = its_TbFMod + its_TbFMINb;
+its_TbFKey = make_array(its_TbFNk); its_TbFNam = make_array(its_TbFNk);
+its_TbKey(its_TbFKey, its_TbFNam, 0, "type"); its_TbKey(its_TbFKey, its_TbFNam, 1, "status");
+its_TbKey(its_TbFKey, its_TbFNam, 2, "phase"); its_TbKey(its_TbFKey, its_TbFNam, 3, "chan");
+its_TbKey(its_TbFKey, its_TbFNam, 4, "out"); its_TbKey(its_TbFKey, its_TbFNam, 5, "limiter");
+its_TbKey(its_TbFKey, its_TbFNam, 6, "src1"); its_TbKey(its_TbFKey, its_TbFNam, 7, "src2");
+its_TbKey(its_TbFKey, its_TbFNam, 8, "src3"); its_TbKey(its_TbFKey, its_TbFNam, 9, "src4");
+its_TbKey(its_TbFKey, its_TbFNam, 10, "src5"); its_TbKey(its_TbFKey, its_TbFNam, 11, "src6");
+its_TbKey(its_TbFKey, its_TbFNam, 12, "src7"); its_TbKey(its_TbFKey, its_TbFNam, 13, "src8");
+its_TbKey(its_TbFKey, its_TbFNam, 14, "gain1"); its_TbKey(its_TbFKey, its_TbFNam, 15, "gain2");
+its_TbKey(its_TbFKey, its_TbFNam, 16, "gain3"); its_TbKey(its_TbFKey, its_TbFNam, 17, "gain4");
+its_TbKey(its_TbFKey, its_TbFNam, 18, "gain5"); its_TbKey(its_TbFKey, its_TbFNam, 19, "gain6");
+its_TbKey(its_TbFKey, its_TbFNam, 20, "gain7"); its_TbKey(its_TbFKey, its_TbFNam, 21, "gain8");
+its_TbKey(its_TbFKey, its_TbFNam, 22, "freq"); its_TbKey(its_TbFKey, its_TbFNam, 23, "q");
+its_TbKey(its_TbFKey, its_TbFNam, 24, "mode"); its_TbKey(its_TbFKey, its_TbFNam, 25, "stages");
+its_TbKey(its_TbFKey, its_TbFNam, 26, "amp"); its_TbKey(its_TbFKey, its_TbFNam, 27, "offset");
+its_TbKey(its_TbFKey, its_TbFNam, 28, "spread");
+i__ii = its_TbFMod; loop(its_TbFMINb, its_TbFKey[i__ii] = its_TK_mod; its_TbFNam[i__ii] = "mod"; i__ii += 1;);
+// the modulation inputs : symbol, name, type of effect, input number, default depth
+its_TbFMI = make_array(its_TbFMINb); its_TbFMIN = make_array(its_TbFMINb); its_TbFMIt = make_array(its_TbFMINb);
+its_TbFMIj = make_array(its_TbFMINb); its_TbFMId = make_array(its_TbFMINb);
+i__ii = 0; loop(2,
+    its_TbFMIN[i__ii] = its_ModN_Flt[i__ii]; its_TbFMI[i__ii] = its_TK(its_TbFMIN[i__ii]);
+    its_TbFMIt[i__ii] = its_Efx_TyFilter; its_TbFMIj[i__ii] = i__ii; its_TbFMId[i__ii] = its_ModD_Flt[i__ii];
+    i__ii += 1;
+);
+// the values : types (index = its_Efx_Ty...), statuses (Off, On, Bypass : its_EfxStat_... ; the limiter : Off, On),
+// phases, filter modes, LFO shapes ; their names, their symbols
+its_TbFTyN = make_array(its_Efx_TyCnt); its_TbFTy = make_array(its_Efx_TyCnt);
+its_TbFTyN[0] = "Undefined"; its_TbFTyN[1] = "None"; its_TbFTyN[2] = "Mixer"; its_TbFTyN[3] = "AutoMix";
+its_TbFTyN[4] = "Mover"; its_TbFTyN[5] = "Action"; its_TbFTyN[6] = "Script"; its_TbFTyN[7] = "LFO";
+its_TbFTyN[8] = "Filter"; its_TbFTyN[9] = "Saturation";
+i__ii = 0; loop(its_Efx_TyCnt, its_TbFTy[i__ii] = its_TK(its_TbFTyN[i__ii]); i__ii += 1;);
+its_TbFStN = make_array(4); its_TbFSt = make_array(4);
+its_TbFStN[0] = "Off"; its_TbFStN[1] = "On"; its_TbFStN[2] = "Bypass"; its_TbFStN[3] = "Undefined";
+i__ii = 0; loop(4, its_TbFSt[i__ii] = its_TK(its_TbFStN[i__ii]); i__ii += 1;);
+its_TbFPhN = make_array(3); its_TbFPh = make_array(3);
+its_TbFPhN[0] = "Std"; its_TbFPhN[1] = "Pre"; its_TbFPhN[2] = "Post";
+i__ii = 0; loop(3, its_TbFPh[i__ii] = mSL_symbol(its_TbFPhN[i__ii]); i__ii += 1;);
+its_TbFMdN = make_array(6); its_TbFMd = make_array(6);
+its_TbFMdN[its_FltLP1] = "LP1"; its_TbFMdN[its_FltHP1] = "HP1"; its_TbFMdN[its_FltLP] = "LP";
+its_TbFMdN[its_FltHP] = "HP"; its_TbFMdN[its_FltBP] = "BP"; its_TbFMdN[its_FltNotch] = "Notch";
+i__ii = 0; loop(6, its_TbFMd[i__ii] = mSL_symbol(its_TbFMdN[i__ii]); i__ii += 1;);
+its_TbLShN = make_array(5); its_TbLSh = make_array(5);
+its_TbLShN[its_LfoSine] = "Sine"; its_TbLShN[its_LfoTri] = "Triangle"; its_TbLShN[its_LfoSawUp] = "SawUp";
+its_TbLShN[its_LfoSawDown] = "SawDown"; its_TbLShN[its_LfoSquare] = "Square";
+i__ii = 0; loop(5, its_TbLSh[i__ii] = mSL_symbol(its_TbLShN[i__ii]); i__ii += 1;);
+
 its_TbNSz = 256; // the names of a table
 its_TbNSym = make_array(its_TbNSz);
 its_TbNTyp = make_array(its_TbNSz);
 its_TbNIdx = make_array(its_TbNSz);
-its_TbResv = make_array(LN_CNT + WR_CNT + RD_CNT); // 1 : a module designated by a number, or given to a name
+its_TbResv = make_array(LN_CNT + WR_CNT + RD_CNT + FX_CNT); // 1 : a module designated by a number, or given to a name
 its_TbSimSp = make_array(LN_CNT + 1); // the simulation of pass 2 : the lines (samples, 0 : no line)
 its_TbSimCh = make_array(LN_CNT + 1); // and their channels
 its_TbSimWE = make_array(WR_CNT + 1); // the writers : 1 if they exist
 its_TbSimWL = make_array(WR_CNT + 1); // their line (-1 : none)
 its_TbSimRE = make_array(RD_CNT + 1); // the readers : 1 if they exist
-its_TbKS = make_array(16); // the keys of a block : 1 if given
-its_TbK1 = make_array(16); // their value
-its_TbK2 = make_array(16); // their second value (first channel of a source, of an output)
+its_TbSimFE = make_array(FX_CNT + 1); // the effects : 1 if they exist
+its_TbSimFT = make_array(FX_CNT + 1); // their type
+its_TbKSz = 40; // (keys of the effects : its_TbFNk)
+its_TbKS = make_array(its_TbKSz); // the keys of a block : 1 if given
+its_TbK1 = make_array(its_TbKSz); // their value
+its_TbK2 = make_array(its_TbKSz); // their second value (first channel of a source, of an output)
+its_TbK3 = make_array(its_TbKSz); // modulations : the depth, the attenuverter (Undef : not given)
+its_TbK4 = make_array(its_TbKSz);
 
 // the next word (the commas are skipped), its_TK_End after the last one
 function its_Tb_Peek() local(w)
@@ -8064,19 +8204,20 @@ function its_Tb_TyName(ty)
 
 function its_Tb_Count(ty)
 (
-    (ty === its_TK_Line) ? LN_CNT : (ty === its_TK_Writer) ? WR_CNT : RD_CNT;
+    (ty === its_TK_Line) ? LN_CNT : (ty === its_TK_Writer) ? WR_CNT : (ty === its_TK_Reader) ? RD_CNT : FX_CNT;
 );
 
 // the first entry of the type "ty" in its_TbResv
 function its_Tb_RBase(ty)
 (
-    (ty === its_TK_Line) ? 0 : (ty === its_TK_Writer) ? LN_CNT : LN_CNT + WR_CNT;
+    (ty === its_TK_Line) ? 0 : (ty === its_TK_Writer) ? LN_CNT : (ty === its_TK_Reader) ? LN_CNT + WR_CNT : LN_CNT + WR_CNT + RD_CNT;
 );
 
 // the module "i" of the type "ty" exists in the simulation
 function its_Tb_SimEx(ty, i)
 (
-    (ty === its_TK_Line) ? (its_TbSimSp[i] > 0) : (ty === its_TK_Writer) ? its_TbSimWE[i] : its_TbSimRE[i];
+    (ty === its_TK_Line) ? (its_TbSimSp[i] > 0) : (ty === its_TK_Writer) ? its_TbSimWE[i] : (ty === its_TK_Reader) ? its_TbSimRE[i] :
+        its_TbSimFE[i];
 );
 
 function its_Tb_Find(w) local(i, k)
@@ -8138,11 +8279,11 @@ function its_Tb_Id(ty, w, head) local(k, i, n, rb)
     k;
 );
 
-// the type of module named by the word "w" (Line, Writer, Reader), or 0 and an error
+// the type of module named by the word "w" (Line, Writer, Reader, Effect), or 0 and an error
 function its_Tb_Type(w, what)
 (
-    ((w === its_TK_Line) || (w === its_TK_Writer) || (w === its_TK_Reader)) ? w : (
-        sprintf(#its_TbW, "%s : %s is not Line, Writer or Reader", what, mSL_edit_value(#its_TbV, w));
+    ((w === its_TK_Line) || (w === its_TK_Writer) || (w === its_TK_Reader) || (w === its_TK_Effect)) ? w : (
+        sprintf(#its_TbW, "%s : %s is not Line, Writer, Reader or Effect", what, mSL_edit_value(#its_TbV, w));
         its_Tb_Err(2751, #its_TbW);
         0;
     );
@@ -8172,6 +8313,11 @@ function its_Tb_SimInit() local(i, b)
     i = 0; loop(RD_CNT,
         b = Readers_set[i];
         its_TbSimRE[i] = (b > BASE_MEMORY) && (b[-2] === KW_read);
+        i += 1;
+    );
+    i = 0; loop(FX_CNT,
+        b = Effects_set[i];
+        its_TbSimFT[i] = (its_TbSimFE[i] = ((b > BASE_MEMORY) && (b[-2] === KW_effx))) ? b[its_Efx_Type] : 0;
         i += 1;
     );
 );
@@ -8237,6 +8383,7 @@ function its_Tb_Clear()
     ) : (
         memset(its_TbSimSp, 0, LN_CNT); memset(its_TbSimCh, 0, LN_CNT);
         memset(its_TbSimWE, 0, WR_CNT); memset(its_TbSimRE, 0, RD_CNT);
+        memset(its_TbSimFE, 0, FX_CNT); memset(its_TbSimFT, 0, FX_CNT);
         its_Tb_clr = 1; // no more readers
     );
 );
@@ -8376,13 +8523,13 @@ function its_Tb_ChOpt(key)
     (its_Tb_Peek() === its_TK_Colon) ? ( its_Tb_Next(); its_Tb_Int(key, 0, 127); ) : 0;
 );
 
-// a source (dst = 0) or the destination of an output (dst = 1) : its_Tb_v1 (kind * ITS_KMul + number, 0 : none or own
-// cable), its_Tb_v2 (first channel)
+// a source (dst = 0 ; "none" : no source) or the destination of an output (dst = 1) : its_Tb_v1 (kind * ITS_KMul + number,
+// 0 : none or own cable), its_Tb_v2 (first channel)
 function its_Tb_Src(key, dst) local(w, n)
 (
     its_Tb_v1 = its_Tb_v2 = 0;
     w = its_Tb_Next();
-    (dst && (w === its_TK_Own)) ? (
+    ((dst && (w === its_TK_Own)) || (!dst && (w === its_TK_none))) ? (
         0;
     ) :
     ((!dst && (w === its_TK_In)) || (w === its_TK_Out)) ? (
@@ -8409,8 +8556,8 @@ function its_Tb_Src(key, dst) local(w, n)
         its_Tb_v2 = its_Tb_ChOpt(key);
     ) :
     (!dst && (w === its_TK_Effect)) ? (
-        n = its_Tb_Int(key, 1, FX_CNT);
-        its_Tb_v1 = ITS_KFx * ITS_KMul + n - 1;
+        n = its_Tb_Id(its_TK_Effect, its_Tb_Next(), 0);
+        its_Tb_v1 = ITS_KFx * ITS_KMul + max(0, n);
         its_Tb_v2 = its_Tb_ChOpt(key);
     ) : (
         sprintf(#its_TbW, "%s : %s is not a %s", key, mSL_edit_value(#its_TbV, w), dst ? "destination" : "source");
@@ -8467,14 +8614,77 @@ function its_Tb_Key(ty, w) local(keys, nk, ki, i, nm)
     ki;
 );
 
-// the keys of the block, until the next header : its_TbKS, its_TbK1, its_TbK2
+//—— Effects
+
+// the key "w" of an effect : its index (its value in its_Tb_v1 ... its_Tb_v4), -1 if unknown ; the word of "mode" is
+// kept in its_Tb_v1 (its meaning depends on the type : its_Tb_FxPrep)
+function its_Tb_FxKey(w) local(ki, i, nm, n)
+(
+    ki = -1; i = 0; while ((ki < 0) && (i < its_TbFMod)) ( (its_TbFKey[i] === w) ? (ki = i); i += 1; );
+    (w === its_TK_source) ? (ki = 6) : (w === its_TK_gain) ? (ki = 14) : (w === its_TK_mod) ? (ki = its_TbFMod);
+    its_Tb_v2 = 0;
+    (ki >= 0) ? (
+        nm = its_TbFNam[ki];
+        (ki === 0) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbFTy, its_Efx_TyCnt); ) :
+        (ki === 1) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbFSt, 4); ) :
+        (ki === 2) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbFPh, 3); ) :
+        (ki === 3) ? ( its_Tb_v1 = its_Tb_Int(nm, 1, 128); ) :
+        (ki === 4) ? ( its_Tb_Src(nm, 1); ) :
+        (ki === 5) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbFSt, 2); ) :
+        (ki < 14) ? ( its_Tb_Src(nm, 0); ) :
+        (ki < 22) ? ( its_Tb_v1 = its_Tb_Num(nm, -120, 40); ) :
+        (ki === 22) ? ( its_Tb_v1 = its_Tb_Num(nm, 0.001, 0.5 * srate); ) :
+        (ki === 23) ? ( its_Tb_v1 = its_Tb_Num(nm, 0.05, 2000); ) :
+        (ki === 24) ? ( its_Tb_v1 = its_Tb_Next(); ) :
+        (ki === 25) ? (
+            n = its_Tb_v1 = its_Tb_Int(nm, 1, 8);
+            ((its_Tb_error === 0) && (n !== 1) && (n !== 2) && (n !== 4) && (n !== 8)) ? (
+                sprintf(#its_TbW, "stages : %d is not 1, 2, 4 or 8", n);
+                its_Tb_Err(2754, #its_TbW);
+            );
+        ) :
+        (ki === 26) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 10); ) :
+        (ki === 27) ? ( its_Tb_v1 = its_Tb_Num(nm, -10, 10); ) :
+        (ki === 28) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 1); ) :
+        (
+            // mod : the input, its source, then "depth" and "att" (optional)
+            w = its_Tb_Next();
+            ki = -1; i = 0; while ((ki < 0) && (i < its_TbFMINb)) ( (its_TbFMI[i] === w) ? (ki = its_TbFMod + i); i += 1; );
+            (ki < 0) ? (
+                sprintf(#its_TbW, "mod : %s is not a modulation input", mSL_edit_value(#its_TbV, w));
+                its_Tb_Err(2754, #its_TbW);
+                ki = its_TbFMod; // (not -1 : not an unknown key)
+            ) : (
+                its_Tb_Src("mod", 0);
+                (its_Tb_Peek() === its_TK_depth) ? ( its_Tb_Next(); its_Tb_v3 = its_Tb_Num("depth", 0, 10); );
+                (its_Tb_Peek() === its_TK_att) ? ( its_Tb_Next(); its_Tb_v4 = its_Tb_Num("att", -10, 10); );
+            );
+        );
+    );
+    ki;
+);
+
+// the key "ki" has a meaning for the effect type "ty"
+function its_Tb_FxOk(ty, ki)
+(
+    (ki <= 4) ? 1 :
+    (ki === 5) ? (ty !== its_Efx_TyLFO) :
+    (ki >= its_TbFMod) ? (its_TbFMIt[ki - its_TbFMod] === ty) :
+    ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? ((ki < 14) || ((ki < 22) && (ty === its_Efx_TyMixer))) :
+    ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat)) ? ((ki === 6) || (ki === 14) || ((ty === its_Efx_TyFilter) && (ki >= 22) && (ki <= 25))) :
+    (ty === its_Efx_TyLFO) ? ((ki === 22) || (ki === 24) || ((ki >= 26) && (ki <= 28))) : 0;
+);
+
+// the keys of the block, until the next header : its_TbKS, its_TbK1 ... its_TbK4
 function its_Tb_Keys(ty) local(w, ki)
 (
-    memset(its_TbKS, 0, 16);
+    memset(its_TbKS, 0, its_TbKSz);
     while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Tb_Peek())) (
         its_Tb_Next();
-        ((ki = its_Tb_Key(ty, w)) >= 0) ? (
+        its_Tb_v3 = its_Tb_v4 = Undef;
+        ((ki = (ty === its_TK_Effect) ? its_Tb_FxKey(w) : its_Tb_Key(ty, w)) >= 0) ? (
             its_TbKS[ki] = 1; its_TbK1[ki] = its_Tb_v1; its_TbK2[ki] = its_Tb_v2;
+            its_TbK3[ki] = its_Tb_v3; its_TbK4[ki] = its_Tb_v4;
         ) :
         its_Tb_KeyErr(w, its_Tb_TyName(ty));
     );
@@ -8537,15 +8747,19 @@ function its_Tb_Cat(ty, ki, b)
     strcat(#its_TbW, its_Tb_ValText(#its_TbV1, ty, ki, its_Tb_g1, its_Tb_g2));
 );
 
-// the block of the writer or the reader "k" (0 : none)
+// the block of the writer, the reader or the effect "k" (0 : none)
 function its_Tb_Blk(ty, k) local(b)
 (
     (ty === its_TK_Writer) ? (
         b = Writers_set[k];
         ((b > BASE_MEMORY) && (b[-2] === KW_writ)) ? b : 0;
-    ) : (
+    ) :
+    (ty === its_TK_Reader) ? (
         b = Readers_set[k];
         ((b > BASE_MEMORY) && (b[-2] === KW_read)) ? b : 0;
+    ) : (
+        b = Effects_set[k];
+        ((b > BASE_MEMORY) && (b[-2] === KW_effx)) ? b : 0;
     );
 );
 
@@ -8668,14 +8882,225 @@ function its_Tb_SetMod(ty, k) local(b, v)
     );
 );
 
+//—— Effects (2)
+
+// the word of the key "mode" : its index for the type "ty" (Filter, LFO) ; -1 and an error if it is not a mode of the type
+function its_Tb_FxMode(ty, w) local(syms, n, k, i)
+(
+    (ty === its_Efx_TyFilter) ? ( syms = its_TbFMd; n = 6; ) : ( syms = its_TbLSh; n = 5; );
+    k = -1; i = 0; while ((k < 0) && (i < n)) ( (syms[i] === w) ? (k = i); i += 1; );
+    (k < 0) ? (
+        sprintf(#its_TbW, "mode : %s is not a mode of a %s", mSL_edit_value(#its_TbV, w), its_TbFTyN[ty]);
+        its_Tb_Err(2754, #its_TbW);
+    );
+    k;
+);
+
+// passes 2 and 3 : the type of the effect "k" after the block (its key "type", or its type in the simulation or now) ;
+// each key given must have a meaning for this type ; the word of "mode" becomes its index
+function its_Tb_FxPrep(k) local(ty, ki, fx)
+(
+    ty = its_TbKS[0] ? its_TbK1[0] : (its_Tb_mode === 2) ? its_TbSimFT[k] : ((fx = its_Tb_Blk(its_TK_Effect, k)) !== 0) ? fx[its_Efx_Type] : 0;
+    ki = 1; while ((its_Tb_error === 0) && (ki < its_TbFNk)) (
+        (its_TbKS[ki] && !its_Tb_FxOk(ty, ki)) ? (
+            sprintf(#its_TbW, "Effect %d : the key %s has no meaning for the type %s", k + 1, its_TbFNam[ki], its_TbFTyN[ty]);
+            its_Tb_Err(2767, #its_TbW);
+        );
+        ki += 1;
+    );
+    ((its_Tb_error === 0) && its_TbKS[24]) ? (its_TbK1[24] = its_Tb_FxMode(ty, its_TbK1[24]));
+    ty;
+);
+
+// the value of the key "ki" of the effect "fx" : its_Tb_g1 ... its_Tb_g4 ; fx === 0 : no effect
+function its_Tb_FxGet(ki, fx) local(p)
+(
+    its_Tb_g2 = its_Tb_g3 = its_Tb_g4 = 0;
+    its_Tb_g1 = (fx === 0) ? ((ki === 1) ? 3 : -1) : // (status Undefined)
+    (ki === 0) ? fx[its_Efx_Type] :
+    (ki === 1) ? fx[its_Efx_Status] :
+    (ki === 2) ? fx[its_Efx_Phase] :
+    (ki === 3) ? fx[its_Efx_CCnt] :
+    (ki === 4) ? ( its_Tb_g2 = fx[its_Efx_OutOff]; fx[its_Efx_OutK]; ) :
+    (ki === 5) ? (fx[its_Efx_Lim] !== 0) :
+    (ki < 14) ? ( p = fx + its_Efx_Src1 + (ki - 6) * its_EfxDist; its_Tb_g2 = p[its_Efx_Off1 - its_Efx_Src1]; p[0]; ) :
+    (ki < 22) ? fx[its_Efx_VoldB1 + (ki - 14) * its_EfxDist] :
+    (ki === 24) ? fx[its_Efx_Par1 + ((fx[its_Efx_Type] === its_Efx_TyFilter) ? 2 : 1)] :
+    (ki === 25) ? its_Flt_Stages(fx) :
+    (ki < 26) ? fx[its_Efx_Par1 + ki - 22] : // freq Par1, q Par2
+    (ki < its_TbFMod) ? fx[its_Efx_Par1 + ki - 24] : // amp Par3, offset Par4, spread Par5
+    (
+        p = fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist;
+        its_Tb_g2 = p[its_Mod_Off]; its_Tb_g3 = p[its_Mod_Depth]; its_Tb_g4 = p[its_Mod_Att];
+        p[its_Mod_Src];
+    );
+);
+
+// the text of the value "v1" ... "v4" of the key "ki" (effect of type "ty") ; v3, v4 : Undef if not given
+function its_Tb_FxText(str, ki, ty, v1, v2, v3, v4)
+(
+    (ki === 0) ? strcpy(str, its_TbFTyN[max(0, min(its_Efx_TyCnt - 1, v1))]) :
+    ((ki === 1) || (ki === 5)) ? strcpy(str, its_TbFStN[max(0, min(3, v1))]) :
+    (ki === 2) ? strcpy(str, its_TbFPhN[max(0, min(2, v1))]) :
+    ((ki === 3) || (ki === 25)) ? sprintf(str, "%d", v1) :
+    (ki === 4) ? ((v1 === 0) ? strcpy(str, "Own") : its_Tb_SrcText(str, v1, v2)) :
+    (ki < 14) ? its_Tb_SrcText(str, v1, v2) :
+    (ki === 24) ? strcpy(str, (ty === its_Efx_TyFilter) ? its_TbFMdN[max(0, min(5, v1))] : its_TbLShN[max(0, min(4, v1))]) :
+    (ki < its_TbFMod) ? sprintf(str, "%.10g", v1) :
+    (
+        // mod : the input, the source, depth, att
+        sprintf(str, "%s ", its_TbFMIN[ki - its_TbFMod]);
+        strcat(str, its_Tb_SrcText(#its_TbV3, v1, v2));
+        (v1 !== 0) ? (
+            (v3 !== Undef) ? strcat(str, sprintf(#its_TbV3, " depth %.10g", v3));
+            (v4 !== Undef) ? strcat(str, sprintf(#its_TbV3, " att %.10g", v4));
+        );
+        str;
+    );
+    str;
+);
+
+// the name of the key "ki" in a Dump (an effect with one source : "source", "gain")
+function its_Tb_FxKName(ty, ki)
+(
+    (((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat)) && ((ki === 6) || (ki === 14))) ? ((ki === 6) ? "source" : "gain") :
+        its_TbFNam[ki];
+);
+
+function its_Tb_DumpFx(k) local(fx, ty, ki, p)
+(
+    sprintf(#its_TbW, "Effect %d", k + 1);
+    ((fx = its_Tb_Blk(its_TK_Effect, k)) === 0) ? (
+        strcat(#its_TbW, " status Undefined");
+    ) : (
+        ty = fx[its_Efx_Type];
+        ki = 0; loop(its_TbFNk,
+            // the status first ; the sources connected only, each one followed by its gain ; the modulations connected only
+            p = (ki === 0) ? 1 : (ki === 1) ? 0 : ((ki >= 6) && (ki < 22)) ? 6 + ((ki - 6) >> 1) + ((ki - 6) & 1) * 8 : ki;
+            (its_Tb_FxOk(ty, p) && ((p < 6) || (p >= 22) || (fx[its_Efx_Src1 + ((p - 6) % 8) * its_EfxDist] !== 0))) ? (
+                its_Tb_FxGet(p, fx);
+                ((p < its_TbFMod) || (its_Tb_g1 !== 0)) ? (
+                    strcat(#its_TbW, " ");
+                    strcat(#its_TbW, its_Tb_FxKName(ty, p));
+                    strcat(#its_TbW, " ");
+                    strcat(#its_TbW, its_Tb_FxText(#its_TbV1, p, ty, its_Tb_g1, its_Tb_g2, its_Tb_g3, its_Tb_g4));
+                );
+            );
+            ki += 1;
+        );
+    );
+    mSL_log(SysLogBox, #its_TbW);
+);
+
+// pass 2 : the keys of the effect "k" checked on the simulation
+function its_Tb_SimFx(k) local(ty, j)
+(
+    ty = its_Tb_FxPrep(k);
+    (its_Tb_error === 0) ? (
+        (its_TbKS[1] && (its_TbK1[1] === 3)) ? (
+            sprintf(#its_TbW, "Effect %d : status Undefined (Free Effect deletes an effect)", k + 1);
+            its_Tb_Err(2754, #its_TbW);
+        );
+        j = 0; loop(8,
+            (its_TbKS[6 + j] && (its_TbK1[6 + j] === ITS_KFx * ITS_KMul + k)) ? (
+                sprintf(#its_TbW, "Effect %d : its own output is its source %d", k + 1, j + 1);
+                its_Tb_Err(2768, #its_TbW);
+            );
+            j += 1;
+        );
+    );
+    its_TbSimFE[k] = 1; its_TbSimFT[k] = ty;
+);
+
+// pass 3 : the effect "k" is created if needed, then set (the type first : it gives default values ; the status last)
+function its_Tb_SetFx(k) local(fx, ty, j, p, ki)
+(
+    ((fx = its_Tb_Blk(its_TK_Effect, k)) === 0) ? (fx = FX_make(k));
+    (fx <= BASE_MEMORY) ? (
+        Effects_set[k] = 0;
+        sprintf(#its_TbW, "Effect %d : not enough memory", k + 1);
+        its_Tb_Err(2766, #its_TbW);
+    ) : (
+        ty = its_Tb_FxPrep(k); // (checked by pass 2)
+        (its_TbKS[0] && (fx[its_Efx_Type] !== ty)) ? FX_Set_Type(fx, ty);
+        its_TbKS[2] ? ( fx[its_Efx_Phase] = its_TbK1[2]; );
+        its_TbKS[3] ? ( fx[its_Efx_CCnt] = its_TbK1[3]; );
+        its_TbKS[4] ? ( fx[its_Efx_OutK] = its_TbK1[4]; fx[its_Efx_OutOff] = its_TbK2[4]; );
+        its_TbKS[5] ? ( fx[its_Efx_Lim] = its_TbK1[5]; fx[its_Efx_LimEnv] = 0; );
+        j = 0; p = fx + its_Efx_Src1; loop(8,
+            its_TbKS[6 + j] ? ( p[0] = its_TbK1[6 + j]; p[its_Efx_Off1 - its_Efx_Src1] = its_TbK2[6 + j]; );
+            its_TbKS[14 + j] ? ( p[its_Efx_VoldB1 - its_Efx_Src1] = its_TbK1[14 + j]; );
+            j += 1; p += its_EfxDist;
+        );
+        (ty === its_Efx_TyAutoMix) ? FX_Auto_Gains(fx);
+        its_TbKS[22] ? ( fx[its_Efx_Par1] = its_TbK1[22]; );
+        its_TbKS[23] ? ( fx[its_Efx_Par1 + 1] = its_TbK1[23]; );
+        its_TbKS[24] ? ( fx[its_Efx_Par1 + ((ty === its_Efx_TyFilter) ? 2 : 1)] = its_TbK1[24]; );
+        its_TbKS[25] ? ( fx[its_Efx_Par1 + 3] = floor(log(its_TbK1[25]) / log(2) + 0.5); ); // 1, 2, 4, 8 stages : 0 ... 3
+        ki = 26; loop(3, its_TbKS[ki] ? ( fx[its_Efx_Par1 + ki - 24] = its_TbK1[ki]; ); ki += 1;);
+        // the modulations : a new connection gets the attenuverter 1 and the default depth (as in the pad)
+        ki = its_TbFMod; loop(its_TbFMINb,
+            its_TbKS[ki] ? (
+                p = fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist;
+                (its_TbK1[ki] === 0) ? (
+                    p[its_Mod_Src] = p[its_Mod_Off] = 0;
+                ) : (
+                    (p[its_Mod_Src] === 0) ? (
+                        p[its_Mod_Att] = 1;
+                        (p[its_Mod_Depth] === 0) ? (p[its_Mod_Depth] = its_TbFMId[ki - its_TbFMod]);
+                    );
+                    p[its_Mod_Src] = its_TbK1[ki]; p[its_Mod_Off] = its_TbK2[ki];
+                );
+                (its_TbK3[ki] !== Undef) ? (p[its_Mod_Depth] = its_TbK3[ki]);
+                (its_TbK4[ki] !== Undef) ? (p[its_Mod_Att] = its_TbK4[ki]);
+            );
+            ki += 1;
+        );
+        its_TbKS[1] ? ( fx[its_Efx_Status] = its_TbK1[1]; );
+        fx[its_Efx_Check] = 0; // checked again by exec_fx
+    );
+);
+
+function its_Tb_CheckFx(k) local(fx, ty, fty, ki, bad, same)
+(
+    its_Tb_Keys(its_TK_Effect);
+    ((its_Tb_error === 0) && (its_Tb_mode === 3) && (k >= 0)) ? (
+        fx = its_Tb_Blk(its_TK_Effect, k);
+        ty = its_Tb_FxPrep(k);
+        fty = (fx !== 0) ? fx[its_Efx_Type] : 0;
+        bad = 0;
+        ki = 0; loop(its_TbFNk,
+            ((its_Tb_error === 0) && its_TbKS[ki]) ? (
+                its_Tb_FxGet(ki, fx);
+                same = (abs(its_Tb_g1 - its_TbK1[ki]) < 0.0000001) && (its_Tb_g2 === its_TbK2[ki])
+                    && ((its_TbK3[ki] === Undef) || (abs(its_Tb_g3 - its_TbK3[ki]) < 0.0000001))
+                    && ((its_TbK4[ki] === Undef) || (abs(its_Tb_g4 - its_TbK4[ki]) < 0.0000001));
+                (!same) ? (
+                    sprintf(#its_TbMsg, "ERR: 2759    Interstys table : Check Effect %d : %s %s (expected %s)", k + 1, its_TbFNam[ki],
+                        its_Tb_FxText(#its_TbV1, ki, fty, its_Tb_g1, its_Tb_g2, its_Tb_g3, its_Tb_g4),
+                        its_Tb_FxText(#its_TbV2, ki, ty, its_TbK1[ki], its_TbK2[ki], its_TbK3[ki], its_TbK4[ki]));
+                    mSL_log(SysLogBox, #its_TbMsg);
+                    (its_Tb_res === 0) ? (its_Tb_res = 2759);
+                    bad = 1;
+                );
+            );
+            ki += 1;
+        );
+        ((bad === 0) && (its_Tb_error === 0)) ? (
+            sprintf(#its_TbW, "Check Effect %d OK", k + 1);
+            mSL_log(SysLogBox, #its_TbW);
+        );
+    );
+);
+
 function its_Tb_Module(ty) local(k)
 (
     k = its_Tb_Id(ty, its_Tb_Next(), 1);
     its_Tb_Keys(ty);
     ((its_Tb_error === 0) && (k >= 0)) ? (
         (its_Tb_mode === 0) ? ( its_TbResv[its_Tb_RBase(ty) + k] = 1; ) :
-        (its_Tb_mode === 2) ? ( its_Tb_SimMod(ty, k); ) :
-        (its_Tb_mode === 3) ? ( its_Tb_SetMod(ty, k); );
+        (its_Tb_mode === 2) ? ( (ty === its_TK_Effect) ? its_Tb_SimFx(k) : its_Tb_SimMod(ty, k); ) :
+        (its_Tb_mode === 3) ? ( (ty === its_TK_Effect) ? its_Tb_SetFx(k) : its_Tb_SetMod(ty, k); );
     );
 );
 
@@ -8719,12 +9144,13 @@ function its_Tb_Dump() local(w, ty, k)
             k = 0; loop(LN_CNT, (Lines_Set[k] !== 0) ? its_Tb_DumpLine(k); k += 1;);
             k = 0; loop(WR_CNT, (Writers_set[k] !== 0) ? its_Tb_DumpMod(its_TK_Writer, k); k += 1;);
             k = 0; loop(RD_CNT, (Readers_set[k] !== 0) ? its_Tb_DumpMod(its_TK_Reader, k); k += 1;);
+            k = 0; loop(FX_CNT, (Effects_set[k] !== 0) ? its_Tb_DumpFx(k); k += 1;);
         );
     ) :
     ((ty = its_Tb_Type(w, "Dump")) !== 0) ? (
         k = its_Tb_Id(ty, its_Tb_Next(), 0);
         ((its_Tb_mode === 3) && (k >= 0)) ? (
-            (ty === its_TK_Line) ? its_Tb_DumpLine(k) : its_Tb_DumpMod(ty, k);
+            (ty === its_TK_Line) ? its_Tb_DumpLine(k) : (ty === its_TK_Effect) ? its_Tb_DumpFx(k) : its_Tb_DumpMod(ty, k);
         );
     );
 );
@@ -8733,7 +9159,7 @@ function its_Tb_Check() local(ty, k)
 (
     ((ty = its_Tb_Type(its_Tb_Next(), "Check")) !== 0) ? (
         k = its_Tb_Id(ty, its_Tb_Next(), 0);
-        (ty === its_TK_Line) ? its_Tb_CheckLine(k) : its_Tb_CheckMod(ty, k);
+        (ty === its_TK_Line) ? its_Tb_CheckLine(k) : (ty === its_TK_Effect) ? its_Tb_CheckFx(k) : its_Tb_CheckMod(ty, k);
     );
 );
 
@@ -8745,12 +9171,14 @@ function its_Tb_Free() local(ty, k)
             (its_Tb_mode === 2) ? (
                 (ty === its_TK_Line) ? ( its_TbSimSp[k] = its_TbSimCh[k] = 0; ) :
                 (ty === its_TK_Writer) ? ( its_TbSimWE[k] = 0; its_TbSimWL[k] = -1; ) :
-                ( its_TbSimRE[k] = 0; );
+                (ty === its_TK_Reader) ? ( its_TbSimRE[k] = 0; ) :
+                ( its_TbSimFE[k] = its_TbSimFT[k] = 0; );
             ) :
             (its_Tb_mode === 3) ? (
                 (ty === its_TK_Line) ? Ln_Delete(k, 1) :
                 (ty === its_TK_Writer) ? Wr_Action(its_WrtAct_Delete, k, 0) :
-                Rd_Action(k, its_RdrAct_Delete, 0);
+                (ty === its_TK_Reader) ? Rd_Action(k, its_RdrAct_Delete, 0) :
+                FX_Delete(k);
             );
         );
     );
@@ -8761,7 +9189,7 @@ function Set_Table(tbl) local(m, w)
 (
     its_Tb_tbl = tbl; its_Tb_itc = tbl[-1];
     its_Tb_error = its_Tb_res = its_TbNCnt = 0;
-    memset(its_TbResv, 0, LN_CNT + WR_CNT + RD_CNT);
+    memset(its_TbResv, 0, LN_CNT + WR_CNT + RD_CNT + FX_CNT);
     m = 0;
     while ((m <= 3) && (its_Tb_error === 0)) (
         its_Tb_mode = m; its_Tb_ptr = its_Tb_clr = 0;
@@ -8770,15 +9198,15 @@ function Set_Table(tbl) local(m, w)
         while ((its_Tb_error === 0) && ((w = its_Tb_Next()) !== its_TK_End) && (w !== its_TK_EofMark)) (
             (w === its_TK_Clear) ? its_Tb_Clear() :
             (w === its_TK_Line) ? its_Tb_Line() :
-            ((w === its_TK_Writer) || (w === its_TK_Reader)) ? its_Tb_Module(w) :
+            ((w === its_TK_Writer) || (w === its_TK_Reader) || (w === its_TK_Effect)) ? its_Tb_Module(w) :
             (w === its_TK_Dump) ? its_Tb_Dump() :
             (w === its_TK_Check) ? its_Tb_Check() :
             (w === its_TK_Free) ? its_Tb_Free() :
-            ((w === its_TK_Effect) || (w === its_TK_Global)) ? (
+            (w === its_TK_Global) ? (
                 sprintf(#its_TbW, "%s : not implemented yet", mSL_edit_value(#its_TbV, w));
                 its_Tb_Err(2751, #its_TbW);
             ) : (
-                sprintf(#its_TbW, "%s : a block (Line, Writer, Reader, Dump, Check, Free, Clear) is expected", mSL_edit_value(#its_TbV, w));
+                sprintf(#its_TbW, "%s : a block (Line, Writer, Reader, Effect, Dump, Check, Free, Clear) is expected", mSL_edit_value(#its_TbV, w));
                 its_Tb_Err(2750, #its_TbW);
             );
         );
@@ -11365,18 +11793,6 @@ local (h1, h2, h3, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lcbl, 
 );
 
 
-// Auto Mixer : the same gain -20*log10(N) (rounded to 0.01 dB) for the N sources not null
-function FX_Auto_Gains(fx)
-local (n, g, p)
-(
-    n = 0; p = fx + its_Efx_Src1;
-    loop(8, (p[0] > 0) ? (n += 1); p += its_EfxDist;);
-    g = (n > 0) ? floor(0.5 - 2000 * log10(n)) / 100 : 0;
-    p = fx + its_Efx_Src1;
-    loop(8, p[its_Efx_VoldB1 - its_Efx_Src1] = (p[0] > 0) ? g : -120; p += its_EfxDist;);
-    fx[its_Efx_Check] = 0;
-);
-
 /*
     The part of the pad specific to a type : one function per type, "what" tells what to do
         FXP_Dims : set RDBL[3] (lines of the pad, the common line included) and RDBL[5] (count of sliders)
@@ -11391,28 +11807,6 @@ FXP_Fill = 1;
 FXP_Click = 2;
 FXP_Sliders = 3;
 FXP_Graph = 4;
-
-// the weights "hw" of the mode Cheb. sum : a preset "k" (menu_Efx_Harm)
-function its_Harm_Preset(hw, k)
-local (i, m)
-(
-    (k === 6) ? (
-        // normalize : the largest |weight| becomes 1
-        m = 0; i = 0; loop(its_SatHarm, m = max(m, abs(hw[i])); i += 1;);
-        (m > 0) ? (i = 0; loop(its_SatHarm, hw[i] /= m; i += 1;));
-    ) : (
-        i = 0; loop(its_SatHarm,
-            // i + 1 : the rank of the harmonic
-            hw[i] = (k === 0) ? (i === 0) :
-                    (k === 1) ? ((i & 1) === 0) / (i + 1) :
-                    (k === 2) ? 1 / (i + 1) :
-                    (k === 3) ? ((i & 1) === 0) / sqr(i + 1) :
-                    (k === 4) ? ((i === 0) ? 1 : ((i & 1) === 1) / (i + 1)) :
-                    (k === 5) ? rand(2) - 1 : 0;
-            i += 1;
-        );
-    );
-);
 
 /*
     the editor of the weights "hw" of the mode Cheb. sum, in the current rect : a bar per harmonic, in [-1, 1]
@@ -11921,33 +12315,7 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, 
                             xx = control_jmenu(menu_Efx_Type);
                             (xx != 0) ? (
                                 (!fok) ? (fx = FX_make(fxn); fok = 1;);
-                                k = fx[its_Efx_Type]; // the previous type
-                                fx[its_Efx_Type] = xx - 1;
-                                fx[its_Efx_Check] = 0;
-                                (fx[its_Efx_Type] === its_Efx_TyAutoMix) ? FX_Auto_Gains(fx);
-                                ((fx[its_Efx_Type] === its_Efx_TyLFO) && (fx[its_Efx_Par1] === 0)) ? (
-                                    fx[its_Efx_Par1] = 1; // 1 Hz
-                                    fx[its_Efx_Par1 + 2] = 1; // amplitude 1
-                                );
-                                ((fx[its_Efx_Type] === its_Efx_TyFilter) && (fx[its_Efx_Par1] < 10)) ? (
-                                    fx[its_Efx_Par1] = 1000; // 1 kHz
-                                    fx[its_Efx_Par1 + 1] = 0.707; // Q
-                                    fx[its_Efx_Par1 + 2] = its_FltLP; // biquad low pass
-                                    fx[its_Efx_Par1 + 3] = 0; // 12 dB/oct
-                                );
-                                ((fx[its_Efx_Type] === its_Efx_TySat) && (k !== its_Efx_TySat)) ? (
-                                    fx[its_Efx_Par1] = 12; // drive (dB)
-                                    fx[its_Efx_Par1 + 1] = its_SatSoft;
-                                    fx[its_Efx_Par1 + 2] = 0; // bias
-                                    fx[its_Efx_Par1 + 3] = 1; // mix : 100 %
-                                    fx[its_Efx_Par1 + 4] = 2; // oversampling 4x
-                                    fx[its_Efx_Par1 + 5] = -6; // output (dB)
-                                    fx[its_Efx_Par1 + 6] = 3; // order (x - sin, Chebyshev)
-                                    fx[its_Efx_Par1 + 7] = 1; // stretch (Cheb. sum)
-                                    fx[its_Efx_Par1 + 8] = 1; // A (x - A sin)
-                                    fx[its_Efx_Lim] = 1; // the auto-limiter in service
-                                    its_Harm_Preset(fx + its_Efx_Harm1, 0); // the fundamental only
-                                );
+                                FX_Set_Type(fx, xx - 1);
                             );
                             ui_menu_tick(menu_Efx_Type, -1, 0);
                         ) :
