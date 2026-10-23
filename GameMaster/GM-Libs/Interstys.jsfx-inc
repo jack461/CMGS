@@ -85,7 +85,7 @@ p_play_XFade
 idx = 0;
 //  0
 its_Lin_Unuz1 = idx; idx += 1; // Sécurité : mot inutilisé
-its_Lin_Ltype= idx; idx += 1; // Line type
+its_Lin_Owner = idx; idx += 1; // propriétaire : 0 le patch utilisateur, sinon une instance d'algorithme
 its_Lin_Status = idx; idx += 1; //  Etat du buffer
 its_Lin_Flgs = idx; idx += 1; //  Flags du buffer
 its_Lin_Numb = idx; idx += 1; //  Buffer number (in line set)
@@ -8025,7 +8025,8 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
     Four passes on the words, nothing is modified before the last one :
         0 marks the modules designated by a number, 1 gives a module to the names of the headers,
         2 checks everything on a simulation (lines, channels...), 3 executes.
-    Errors 2750 ... 2773 ; the result of "table" is 0, or the first error.
+    Algorithm, Instance, Free Instance|Algorithm, Dump Instance : see "Algorithms" below.
+    Errors 2750 ... 2773, 2780 ... 2790 ; the result of "table" is 0, or the first error.
     It runs in @gfx (the mSL threads of Interstys) : the state of the analysis is global.
 */
 its_TK_Cnt = 0;
@@ -8064,6 +8065,18 @@ its_TK_mod = its_TK("mod");
 its_TK_depth = its_TK("depth");
 its_TK_att = its_TK("att");
 its_TK_file = its_TK("file");
+its_TK_Algorithm = its_TK("Algorithm");
+its_TK_Instance = its_TK("Instance");
+its_TK_input = its_TK("input");
+its_TK_output = its_TK("output");
+its_TK_param = its_TK("param");
+// markers of the expanded table (its_Al_Expand : never in a data) : the begin of an instance (followed by the index of its
+// pending record, its_IP...), its end, the begin and the end of an argument (read in the scope outside the instance)
+its_TbM_Base = -(2^50);
+its_TbM_Ins = its_TbM_Base - 1;
+its_TbM_InsEnd = its_TbM_Base - 2;
+its_TbM_Out = its_TbM_Base - 3;
+its_TbM_In = its_TbM_Base - 4;
 
 // the keys of the writers and of the readers : their symbol, their name ; values (enumerations : the symbol of each value)
 its_TbWNk = 8;
@@ -8171,7 +8184,8 @@ its_TbGAc[its_GlAct_None] = mSL_symbol("None"); its_TbGAc[its_GlAct_StopAll] = m
 its_TbGAc[its_GlAct_PauseAll] = mSL_symbol("PauseAll"); its_TbGAc[its_GlAct_RestartAll] = mSL_symbol("RestartAll");
 its_TbGAc[its_GlAct_RewdAll] = mSL_symbol("RewindAll"); its_TbGAc[its_GlAct_ClearAll] = mSL_symbol("ClearAll");
 
-its_TbNSz = 256; // the names of a table
+its_TbNSz = 512; // the names of a table
+its_TbNScp = make_array(its_TbNSz); // their scope : 0 the table, k the instance k
 its_TbNSym = make_array(its_TbNSz);
 its_TbNTyp = make_array(its_TbNSz);
 its_TbNIdx = make_array(its_TbNSz);
@@ -8183,6 +8197,10 @@ its_TbSimWL = make_array(WR_CNT + 1); // their line (-1 : none)
 its_TbSimRE = make_array(RD_CNT + 1); // the readers : 1 if they exist
 its_TbSimFE = make_array(FX_CNT + 1); // the effects : 1 if they exist
 its_TbSimFT = make_array(FX_CNT + 1); // their type
+its_TbSimLO = make_array(LN_CNT + 1); // the owner of each line, writer, reader, effect (0 : none, k : the instance k)
+its_TbSimWO = make_array(WR_CNT + 1);
+its_TbSimRO = make_array(RD_CNT + 1);
+its_TbSimFO = make_array(FX_CNT + 1);
 its_TbKSz = 48; // (keys of the effects : its_TbFNk)
 its_TbKS = make_array(its_TbKSz); // the keys of a block : 1 if given
 its_TbK1 = make_array(its_TbKSz); // their value
@@ -8191,10 +8209,21 @@ its_TbK3 = make_array(its_TbKSz); // modulations : the depth, the attenuverter (
 its_TbK4 = make_array(its_TbKSz);
 
 // the next word (the commas are skipped), its_TK_End after the last one
+// (and the markers of the instances : they change the scope of the names, its_Tb_scope)
 function its_Tb_Peek() local(w)
 (
     w = its_TK_End;
-    while ((its_Tb_ptr < its_Tb_itc) && ((w = its_Tb_tbl[its_Tb_ptr]) === mSL_cstComma)) (
+    while ((its_Tb_ptr < its_Tb_itc) && (((w = its_Tb_tbl[its_Tb_ptr]) === mSL_cstComma) || (w <= its_TbM_Base))) (
+        (w === its_TbM_Ins) ? (
+            its_Tb_ptr += 1; its_Tb_pi = its_Tb_tbl[its_Tb_ptr];
+            its_Tb_scope = its_IPK[its_Tb_pi];
+        ) :
+        (w === its_TbM_InsEnd) ? (
+            (its_Tb_mode === 3) ? (its_Tb_cpend = its_Tb_pi); // the instance is recorded (its_Al_Flush)
+            its_Tb_scope = 0;
+        ) :
+        (w === its_TbM_Out) ? ( its_Tb_sscope = its_Tb_scope; its_Tb_scope = 0; ) :
+        (w === its_TbM_In) ? ( its_Tb_scope = its_Tb_sscope; );
         its_Tb_ptr += 1; w = its_TK_End;
     );
     w;
@@ -8229,7 +8258,8 @@ function its_Tb_IsHead(w)
 (
     (w === its_TK_Clear) || (w === its_TK_Line) || (w === its_TK_Writer) || (w === its_TK_Reader)
         || (w === its_TK_Effect) || (w === its_TK_Global) || (w === its_TK_Dump) || (w === its_TK_Check)
-        || (w === its_TK_Free) || (w === its_TK_End) || (w === its_TK_EofMark);
+        || (w === its_TK_Free) || (w === its_TK_End) || (w === its_TK_EofMark) || (w === its_TK_Algorithm)
+        || (w === its_TK_Instance);
 );
 
 // a number in [vmin, vmax] (a "-" word before it changes its sign) ; Undef and an error otherwise
@@ -8296,10 +8326,11 @@ function its_Tb_SimEx(ty, i)
         its_TbSimFE[i];
 );
 
+// the name "w" in the current scope (its_Tb_scope) : its entry, or -1
 function its_Tb_Find(w) local(i, k)
 (
     k = -1; i = 0;
-    while ((k < 0) && (i < its_TbNCnt)) ( (its_TbNSym[i] === w) ? (k = i); i += 1; );
+    while ((k < 0) && (i < its_TbNCnt)) ( ((its_TbNSym[i] === w) && (its_TbNScp[i] === its_Tb_scope)) ? (k = i); i += 1; );
     k;
 );
 
@@ -8310,6 +8341,7 @@ function its_Tb_Find(w) local(i, k)
 function its_Tb_Id(ty, w, head) local(k, i, n, rb)
 (
     k = -1;
+    its_Tb_idLocal = 0; // 1 : a name of an instance (its module belongs to the instance : its_Tb_own)
     n = its_Tb_Count(ty);
     ((w === floor(w)) && (w >= 1) && (w <= n)) ? (
         k = w - 1;
@@ -8318,6 +8350,7 @@ function its_Tb_Id(ty, w, head) local(k, i, n, rb)
         ((i = its_Tb_Find(w)) >= 0) ? (
             (its_TbNTyp[i] === ty) ? (
                 k = its_TbNIdx[i];
+                its_Tb_idLocal = (its_Tb_scope > 0);
             ) : (
                 sprintf(#its_TbW, "%s is not a %s", mSL_edit_value(#its_TbV, w), its_Tb_TyName(ty));
                 its_Tb_Err(2756, #its_TbW);
@@ -8339,9 +8372,16 @@ function its_Tb_Id(ty, w, head) local(k, i, n, rb)
                 its_Tb_Err(2762, "too many names");
             ) : (
                 its_TbNSym[its_TbNCnt] = w; its_TbNTyp[its_TbNCnt] = ty; its_TbNIdx[its_TbNCnt] = k;
+                its_TbNScp[its_TbNCnt] = its_Tb_scope;
                 its_TbNCnt += 1;
                 its_TbResv[rb + k] = 1;
-                sprintf(#its_TbW, "Interstys table : %s = %s %d", mSL_edit_value(#its_TbV, w), its_Tb_TyName(ty), k + 1);
+                its_Tb_idLocal = (its_Tb_scope > 0);
+                (its_Tb_scope > 0) ? (
+                    sprintf(#its_TbW, "Interstys table : %s = %s %d (instance %d)", mSL_edit_value(#its_TbV, w), its_Tb_TyName(ty), k + 1,
+                        its_Tb_scope);
+                ) : (
+                    sprintf(#its_TbW, "Interstys table : %s = %s %d", mSL_edit_value(#its_TbV, w), its_Tb_TyName(ty), k + 1);
+                );
                 mSL_log(SysLogBox, #its_TbW);
             );
         ) : (
@@ -8371,29 +8411,30 @@ function its_Tb_SimInit() local(i, b)
     i = 0; loop(LN_CNT,
         b = Lines_Set[i];
         ((b > BASE_MEMORY) && (b[-2] === KW_lcbl)) ? (
-            its_TbSimSp[i] = b[its_Lin_SmplCnt]; its_TbSimCh[i] = b[its_Lin_ChCnt];
+            its_TbSimSp[i] = b[its_Lin_SmplCnt]; its_TbSimCh[i] = b[its_Lin_ChCnt]; its_TbSimLO[i] = b[its_Lin_Owner];
         ) : (
-            its_TbSimSp[i] = its_TbSimCh[i] = 0;
+            its_TbSimSp[i] = its_TbSimCh[i] = its_TbSimLO[i] = 0;
         );
         i += 1;
     );
     i = 0; loop(WR_CNT,
         b = Writers_set[i];
         (its_TbSimWE[i] = ((b > BASE_MEMORY) && (b[-2] === KW_writ))) ? (
-            its_TbSimWL[i] = b[its_Wrt_LineNb];
+            its_TbSimWL[i] = b[its_Wrt_LineNb]; its_TbSimWO[i] = b[its_Wrt_Owner];
         ) : (
-            its_TbSimWL[i] = -1;
+            its_TbSimWL[i] = -1; its_TbSimWO[i] = 0;
         );
         i += 1;
     );
     i = 0; loop(RD_CNT,
         b = Readers_set[i];
-        its_TbSimRE[i] = (b > BASE_MEMORY) && (b[-2] === KW_read);
+        its_TbSimRO[i] = (its_TbSimRE[i] = (b > BASE_MEMORY) && (b[-2] === KW_read)) ? b[its_Rdr_Owner] : 0;
         i += 1;
     );
     i = 0; loop(FX_CNT,
         b = Effects_set[i];
         its_TbSimFT[i] = (its_TbSimFE[i] = ((b > BASE_MEMORY) && (b[-2] === KW_effx))) ? b[its_Efx_Type] : 0;
+        its_TbSimFO[i] = its_TbSimFE[i] ? b[its_Efx_Owner] : 0;
         i += 1;
     );
 );
@@ -8603,10 +8644,21 @@ local (c0)
     ) : 0;
 );
 
-function its_Tb_Clear()
+// the instance "k" of an algorithm is forgotten (its modules are not deleted)
+function its_Al_InsDrop(k)
+(
+    (its_InsTpl[k] > BASE_MEMORY) ? mSL_Dyn_Free(its_InsTpl[k]);
+    (its_InsArg[k] > BASE_MEMORY) ? mSL_Dyn_Free(its_InsArg[k]);
+    (its_InsNam[k] > BASE_MEMORY) ? mSL_Dyn_Free(its_InsNam[k]);
+    its_InsSym[k] = its_InsAName[k] = its_InsTpl[k] = its_InsArg[k] = its_InsNam[k] = 0;
+    its_InsTLen[k] = its_InsALen[k] = its_InsNCnt[k] = 0;
+);
+
+function its_Tb_Clear() local(k)
 (
     (its_Tb_mode === 3) ? (
         its_actions(its_GlAct_DelAll);
+        k = 1; loop(its_InsMx, (its_InsSym[k] !== 0) ? its_Al_InsDrop(k); k += 1;); // (their modules are deleted)
     ) : (
         memset(its_TbSimSp, 0, LN_CNT); memset(its_TbSimCh, 0, LN_CNT);
         memset(its_TbSimWE, 0, WR_CNT); memset(its_TbSimRE, 0, RD_CNT);
@@ -8648,9 +8700,10 @@ function its_Tb_File(name) local(fh, cc, fr, ok)
     ok;
 );
 
-function its_Tb_Line() local(w, k, len, ch, spl, sp, cc, nsp, nch, lcbl, u, r, fil, err)
+function its_Tb_Line() local(w, k, len, ch, spl, sp, cc, nsp, nch, lcbl, u, r, fil, err, own)
 (
     k = its_Tb_Id(its_TK_Line, its_Tb_Next(), 1);
+    own = its_Tb_idLocal ? its_Tb_scope : 0; // a line of an instance
     len = ch = spl = -1; fil = 0;
     while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Tb_Peek())) (
         its_Tb_Next();
@@ -8692,6 +8745,7 @@ function its_Tb_Line() local(w, k, len, ch, spl, sp, cc, nsp, nch, lcbl, u, r, f
                     its_Tb_Err(2758, #its_TbW);
                 );
                 its_TbSimSp[k] = nsp; its_TbSimCh[k] = nch;
+                (own > 0) ? (its_TbSimLO[k] = own);
             ) :
             (fil !== 0) ? (
                 // read the file into the line (created, or replaced if it differs)
@@ -8713,6 +8767,7 @@ function its_Tb_Line() local(w, k, len, ch, spl, sp, cc, nsp, nch, lcbl, u, r, f
                     its_Tb_error = 2610; // (logged by Ln_Make)
                 );
             );
+            ((its_Tb_mode === 3) && (own > 0) && ((lcbl = Lines_Set[k]) > BASE_MEMORY)) ? (lcbl[its_Lin_Owner] = own);
         );
     );
 );
@@ -9113,6 +9168,7 @@ function its_Tb_SimMod(ty, k) local(l, w, sp, ch)
     l = -1;
     (ty === its_TK_Writer) ? (
         its_TbSimWE[k] = 1;
+        (its_Tb_own > 0) ? (its_TbSimWO[k] = its_Tb_own);
         its_TbKS[0] ? (
             l = its_TbK1[0];
             (its_TbSimSp[l] === 0) ? (
@@ -9128,6 +9184,7 @@ function its_Tb_SimMod(ty, k) local(l, w, sp, ch)
         );
     ) : (
         its_TbSimRE[k] = 1;
+        (its_Tb_own > 0) ? (its_TbSimRO[k] = its_Tb_own);
         its_TbKS[0] ? (
             l = its_TbK1[0];
             (its_TbSimSp[l] === 0) ? (
@@ -9173,6 +9230,7 @@ function its_Tb_SetMod(ty, k) local(b, v)
         its_TbKS[5] ? ( b[its_Wrt_Mode] = its_TbK1[5]; );
         its_TbKS[6] ? ( b[its_Wrt_Bf1stChan] = its_TbK1[6]; b[its_Wrt_Check] = 0; );
         its_TbKS[7] ? ( b[its_Wrt_BfChanUsed] = its_TbK1[7]; b[its_Wrt_Check] = 0; );
+        (its_Tb_own > 0) ? (b[its_Wrt_Owner] = its_Tb_own);
         Wr_Set_Status(k, its_TbKS[2] ? its_TbK1[2] : b[its_Wrt_Status]); // no line or no source : "Created"
         (k === slWriter) ? (Currwriter = b);
         wrupdt = 1;
@@ -9195,6 +9253,7 @@ function its_Tb_SetMod(ty, k) local(b, v)
         its_TbKS[3] ? Rd_Set_Speed(k, its_TbK1[3], 1);
         its_TbKS[2] ? Rd_Set_Offset(b, its_TbK1[2] * srate);
         its_TbKS[4] ? Rd_Set_Status(k, its_TbK1[4]);
+        (its_Tb_own > 0) ? (b[its_Rdr_Owner] = its_Tb_own);
         b[its_Rdr_StFlgs] |= its_RdrFlg_Mod; // (Rd_Update in @block)
         (k === slReader) ? (Currreader = b);
         rdupdt = 1;
@@ -9358,6 +9417,7 @@ function its_Tb_SimFx(k) local(ty, j)
         );
     );
     its_TbSimFE[k] = 1; its_TbSimFT[k] = ty;
+    (its_Tb_own > 0) ? (its_TbSimFO[k] = its_Tb_own);
 );
 
 // pass 3 : the effect "k" is created if needed, then set (the type first : it gives default values ; the status last)
@@ -9411,6 +9471,7 @@ function its_Tb_SetFx(k) local(fx, ty, j, p, ki)
             ki += 1;
         );
         its_TbKS[1] ? ( fx[its_Efx_Status] = its_TbK1[1]; );
+        (its_Tb_own > 0) ? (fx[its_Efx_Owner] = its_Tb_own);
         fx[its_Efx_Check] = 0; // checked again by exec_fx
     );
 );
@@ -9464,6 +9525,7 @@ function its_Tb_CheckFx(k) local(fx, ty, fty, ki, bad, same, j, v)
 function its_Tb_Module(ty) local(k)
 (
     k = its_Tb_Id(ty, its_Tb_Next(), 1);
+    its_Tb_own = its_Tb_idLocal ? its_Tb_scope : 0; // a module of an instance (its_Tb_SimMod ... its_Tb_SetFx)
     its_Tb_Keys(ty);
     ((its_Tb_error === 0) && (k >= 0)) ? (
         (its_Tb_mode === 0) ? ( its_TbResv[its_Tb_RBase(ty) + k] = 1; ) :
@@ -9585,12 +9647,485 @@ function its_Tb_CheckGlobal() local(ki, bad)
     );
 );
 
+//—— Algorithms
+
+/*
+    Algorithm Name  input a  output b  param p def min max  <blocks>  End
+        a template : the words between the name and End (the declarations first) ; nothing is created
+    Instance i Name  a S  b D  p v
+        the blocks of the template, with the arguments in place of their names (a parameter : its value, its default if it
+        is omitted ; an input or an output : its words, read in the scope of the table) ; the names of the template are the
+        names of this instance (its scope : its number k, 1 ... its_InsMx) ; each module named in the template belongs to the
+        instance (Owner = k)
+    Free Instance i : deletes its modules ; Dump Instance i : the call, then its modules ; Free Algorithm Name
+    The instances are expanded before the 4 passes (its_Al_Expand) : markers (its_TbM_...) tell the scopes ; an instance and
+    a template are recorded in pass 3 (its_Al_Commit, its_Al_TplCommit). Errors 2780 ... 2790.
+*/
+its_AlgMx = 32; // the templates
+its_AlgSym = make_array(its_AlgMx); its_AlgBlk = make_array(its_AlgMx); its_AlgLen = make_array(its_AlgMx);
+its_InsMx = 64; // the instances 1 ... its_InsMx : name, template (name, copy of its words), arguments, names
+its_InsSym = make_array(its_InsMx + 1); its_InsAName = make_array(its_InsMx + 1);
+its_InsTpl = make_array(its_InsMx + 1); its_InsTLen = make_array(its_InsMx + 1);
+its_InsArg = make_array(its_InsMx + 1); its_InsALen = make_array(its_InsMx + 1);
+its_InsNam = make_array(its_InsMx + 1); its_InsNCnt = make_array(its_InsMx + 1);
+// (their blocks are dynamic : protected from the garbage collector)
+mm_usr_prot[mm_usr_prot_ptr] = its_AlgBlk; mm_usr_prot_ptr += 1;
+mm_usr_prot[mm_usr_prot_ptr] = its_InsTpl; mm_usr_prot_ptr += 1;
+mm_usr_prot[mm_usr_prot_ptr] = its_InsArg; mm_usr_prot_ptr += 1;
+mm_usr_prot[mm_usr_prot_ptr] = its_InsNam; mm_usr_prot_ptr += 1;
+// the templates and the instances of the current table, recorded in pass 3
+its_APMx = 16; its_APCnt = 0;
+its_APN = make_array(its_APMx); its_APP = make_array(its_APMx); its_APL = make_array(its_APMx);
+its_IPMx = 32; its_IPCnt = 0;
+its_IPN = make_array(its_IPMx); its_IPK = make_array(its_IPMx); its_IPAN = make_array(its_IPMx);
+its_IPTP = make_array(its_IPMx); its_IPTL = make_array(its_IPMx);
+its_IPAO = make_array(its_IPMx); its_IPAL = make_array(its_IPMx);
+its_IPArgSz = 4096; its_IPArg = make_array(its_IPArgSz); // their arguments : for each declaration, n then n words
+// the declarations of a template (its_Al_Decl) : name, kind (0 input, 1 output, 2 param), default, min, max ; the arguments
+// of an instance : position in the table, count of words, value
+its_AlDMx = 32;
+its_AlDN = make_array(its_AlDMx); its_AlDK = make_array(its_AlDMx);
+its_AlDDef = make_array(its_AlDMx); its_AlDMin = make_array(its_AlDMx); its_AlDMax = make_array(its_AlDMx);
+its_AlAP = make_array(its_AlDMx); its_AlAL = make_array(its_AlDMx); its_AlAV = make_array(its_AlDMx);
+its_Tb_cpend = -1; its_Tb_scope = its_Tb_sscope = 0; its_Al_buf = 0;
+
+// the word "i" of the table (its_TK_End after the last one) ; the next word that is not a comma
+function its_Al_W(i) ( (i < its_Tb_itc) ? its_Tb_tbl[i] : its_TK_End; );
+function its_Al_Skip(i) ( while ((i < its_Tb_itc) && (its_Tb_tbl[i] === mSL_cstComma)) ( i += 1; ); i; );
+
+// the expanded table (its_Al_buf : 0 when its size is computed)
+function its_Al_Emit(w) ( (its_Al_buf !== 0) ? (its_Al_buf[its_Al_cnt] = w); its_Al_cnt += 1; );
+
+// the declaration of the name "w" : its index, or -1
+function its_Al_DIdx(w) local(i, k)
+(
+    k = -1; i = 0; while ((k < 0) && (i < its_AlDCnt)) ( (its_AlDN[i] === w) ? (k = i); i += 1; );
+    k;
+);
+
+// a number (a "-" word before it changes its sign) at "i" in the "n" words "tp" : its value (Undef if none), its_Al_rn the next
+// index
+function its_Al_RNum(tp, n, i) local(w, sg)
+(
+    sg = 1;
+    w = (i < n) ? tp[i] : its_TK_End;
+    (w === mSL_cstMinus) ? ( sg = -1; i += 1; w = (i < n) ? tp[i] : its_TK_End; );
+    its_Al_rn = i + 1;
+    (abs(w) < mSL_CharConst) ? sg * w : Undef;
+);
+
+// the declarations of the template "tp" ("n" words) : its_AlD..., its_AlDCnt ; its_AlBody : the index of its first block
+function its_Al_Decl(tp, n) local(i, w, nm, c, v1, v2, v3)
+(
+    its_AlDCnt = 0; i = 0; its_AlBody = -1;
+    while ((its_Tb_error === 0) && (its_AlBody < 0) && (i < n)) (
+        w = tp[i];
+        (w === mSL_cstComma) ? ( i += 1; ) :
+        ((w === its_TK_input) || (w === its_TK_output) || (w === its_TK_param)) ? (
+            nm = (i + 1 < n) ? tp[i + 1] : 0;
+            c = its_AlDCnt;
+            !its_Tb_IsName(nm) ? (
+                sprintf(#its_TbW, "Algorithm %s : %s is not a name", mSL_edit_value(#its_TbV, its_Al_cur), mSL_edit_value(#its_TbV1, nm));
+                its_Tb_Err(2782, #its_TbW);
+            ) :
+            (its_Al_DIdx(nm) >= 0) ? (
+                sprintf(#its_TbW, "Algorithm %s : %s is declared twice", mSL_edit_value(#its_TbV, its_Al_cur), mSL_edit_value(#its_TbV1, nm));
+                its_Tb_Err(2782, #its_TbW);
+            ) :
+            (c >= its_AlDMx) ? (
+                sprintf(#its_TbW, "Algorithm %s : more than %d declarations", mSL_edit_value(#its_TbV, its_Al_cur), its_AlDMx);
+                its_Tb_Err(2788, #its_TbW);
+            ) : (
+                its_AlDN[c] = nm; its_AlDK[c] = (w === its_TK_input) ? 0 : (w === its_TK_output) ? 1 : 2;
+                i += 2;
+                (w === its_TK_param) ? (
+                    v1 = its_Al_RNum(tp, n, i); i = its_Al_rn;
+                    v2 = its_Al_RNum(tp, n, i); i = its_Al_rn;
+                    v3 = its_Al_RNum(tp, n, i); i = its_Al_rn;
+                    ((v1 === Undef) || (v2 === Undef) || (v3 === Undef) || (v2 > v1) || (v1 > v3)) ? (
+                        sprintf(#its_TbW, "Algorithm %s : param %s default min max (min <= default <= max) expected",
+                            mSL_edit_value(#its_TbV, its_Al_cur), mSL_edit_value(#its_TbV1, nm));
+                        its_Tb_Err(2782, #its_TbW);
+                    );
+                    its_AlDDef[c] = v1; its_AlDMin[c] = v2; its_AlDMax[c] = v3;
+                );
+                its_AlDCnt += 1;
+            );
+        ) : (
+            its_AlBody = i; // the first block
+        );
+    );
+    (its_AlBody < 0) ? (its_AlBody = n);
+);
+
+// the template "w" : 1 if it exists (its words in its_Al_tp, its_Al_tl), the templates of this table first
+function its_Al_FindTpl(w) local(i, r)
+(
+    r = 0;
+    i = its_APCnt - 1; while ((r === 0) && (i >= 0)) (
+        (its_APN[i] === w) ? ( r = 1; its_Al_tp = its_APP[i]; its_Al_tl = its_APL[i]; );
+        i -= 1;
+    );
+    i = 0; while ((r === 0) && (i < its_AlgMx)) (
+        (its_AlgSym[i] === w) ? ( r = 1; its_Al_tp = its_AlgBlk[i]; its_Al_tl = its_AlgLen[i]; );
+        i += 1;
+    );
+    r;
+);
+
+// the instance named "w" : its number (recorded, or of this table), or -1
+function its_Al_InsFind(w) local(i, k)
+(
+    k = -1;
+    i = 1; while ((k < 0) && (i <= its_InsMx)) ( (its_InsSym[i] === w) ? (k = i); i += 1; );
+    i = 0; while ((k < 0) && (i < its_IPCnt)) ( (its_IPN[i] === w) ? (k = its_IPK[i]); i += 1; );
+    k;
+);
+
+// a module (line, writer, reader, effect) belongs to the instance "k"
+function its_Al_Owned(k) local(i, b, r)
+(
+    r = 0;
+    i = 0; while (!r && (i < LN_CNT)) ( b = Lines_Set[i]; r = (b > BASE_MEMORY) && (b[-2] === KW_lcbl) && (b[its_Lin_Owner] === k); i += 1; );
+    i = 0; while (!r && (i < WR_CNT)) ( b = Writers_set[i]; r = (b > BASE_MEMORY) && (b[-2] === KW_writ) && (b[its_Wrt_Owner] === k); i += 1; );
+    i = 0; while (!r && (i < RD_CNT)) ( b = Readers_set[i]; r = (b > BASE_MEMORY) && (b[-2] === KW_read) && (b[its_Rdr_Owner] === k); i += 1; );
+    i = 0; while (!r && (i < FX_CNT)) ( b = Effects_set[i]; r = (b > BASE_MEMORY) && (b[-2] === KW_effx) && (b[its_Efx_Owner] === k); i += 1; );
+    r;
+);
+
+// a free number for a new instance (not recorded, not used by this table, no module) : 1 ... its_InsMx, or 0
+function its_Al_NewId() local(k, i, j, u)
+(
+    k = 0; i = 1;
+    while ((k === 0) && (i <= its_InsMx)) (
+        u = (its_InsSym[i] !== 0) || its_Al_Owned(i);
+        j = 0; while (!u && (j < its_IPCnt)) ( u = (its_IPK[j] === i); j += 1; );
+        !u ? (k = i);
+        i += 1;
+    );
+    k;
+);
+
+// the words of an input (dst = 0) or of an output (dst = 1) at "p" in the table : their count (0 : not a source, a destination)
+function its_Al_SrcLen(p, dst) local(w, n)
+(
+    w = its_Al_W(p);
+    n = ((dst && (w === its_TK_Own)) || (!dst && (w === its_TK_none))) ? 1 :
+        ((!dst && (w === its_TK_In)) || (w === its_TK_Out)) ? 3 :
+        ((w === its_TK_Bus) || (!dst && ((w === its_TK_Reader) || (w === its_TK_Effect) || (w === its_TK_Ctl)))) ? 2 : 0;
+    ((n === 2) && (w !== its_TK_Ctl) && (its_Al_W(p + 2) === its_TK_Colon)) ? (n = 4);
+    n;
+);
+
+// Instance at "i" : checked, its body is emitted (with its markers) ; the index after it
+function its_Al_Inst(i) local(nm, an, k, p, d, w, n, v, pi, ao, j, q, tp)
+(
+    nm = its_Al_W(i + 1); an = its_Al_W(i + 2); p = i + 3;
+    !its_Tb_IsName(nm) ? (
+        sprintf(#its_TbW, "Instance : %s is not a name", mSL_edit_value(#its_TbV, nm));
+        its_Tb_Err(2783, #its_TbW);
+    ) :
+    (its_Al_InsFind(nm) >= 0) ? (
+        sprintf(#its_TbW, "Instance %s exists already (Free Instance first)", mSL_edit_value(#its_TbV, nm));
+        its_Tb_Err(2783, #its_TbW);
+    ) :
+    !its_Al_FindTpl(an) ? (
+        sprintf(#its_TbW, "Instance %s : unknown algorithm %s", mSL_edit_value(#its_TbV, nm), mSL_edit_value(#its_TbV1, an));
+        its_Tb_Err(2781, #its_TbW);
+    ) :
+    ((its_IPCnt >= its_IPMx) || ((k = its_Al_NewId()) === 0)) ? (
+        sprintf(#its_TbW, "Instance %s : too many instances", mSL_edit_value(#its_TbV, nm));
+        its_Tb_Err(2788, #its_TbW);
+    ) : (
+        tp = its_Al_tp;
+        its_Al_cur = an;
+        its_Al_Decl(tp, its_Al_tl);
+        // the arguments
+        d = 0; loop(its_AlDMx, its_AlAP[d] = 0; d += 1;);
+        while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Al_W(p = its_Al_Skip(p)))) (
+            its_Tb_ptr = p; // (the word of an error)
+            ((d = its_Al_DIdx(w)) < 0) ? (
+                sprintf(#its_TbW, "Instance %s : %s is not an argument of %s", mSL_edit_value(#its_TbV, nm),
+                    mSL_edit_value(#its_TbV1, w), mSL_edit_value(#its_TbV2, an));
+                its_Tb_Err(2784, #its_TbW);
+            ) : (
+                p = its_Al_Skip(p + 1);
+                its_AlAP[d] = p;
+                (its_AlDK[d] === 2) ? (
+                    v = its_Al_RNum(its_Tb_tbl, its_Tb_itc, p);
+                    ((v === Undef) || (v < its_AlDMin[d]) || (v > its_AlDMax[d])) ? (
+                        sprintf(#its_TbW, "Instance %s : %s : %s is not a value in [%g, %g]", mSL_edit_value(#its_TbV, nm),
+                            mSL_edit_value(#its_TbV1, w), mSL_edit_value(#its_TbV2, its_Al_W(p)), its_AlDMin[d], its_AlDMax[d]);
+                        its_Tb_Err(2785, #its_TbW);
+                    );
+                    its_AlAV[d] = v; p = its_Al_rn;
+                ) : (
+                    ((n = its_Al_SrcLen(p, its_AlDK[d])) === 0) ? (
+                        sprintf(#its_TbW, "Instance %s : %s : %s is not %s", mSL_edit_value(#its_TbV, nm),
+                            mSL_edit_value(#its_TbV1, w), mSL_edit_value(#its_TbV2, its_Al_W(p)),
+                            its_AlDK[d] ? "a destination" : "a source");
+                        its_Tb_Err(2784, #its_TbW);
+                    );
+                    its_AlAL[d] = n; p += n;
+                );
+            );
+        );
+        // an input or an output must be given
+        d = 0; while ((its_Tb_error === 0) && (d < its_AlDCnt)) (
+            ((its_AlDK[d] < 2) && (its_AlAP[d] === 0)) ? (
+                sprintf(#its_TbW, "Instance %s : %s %s missing", mSL_edit_value(#its_TbV, nm), its_AlDK[d] ? "output" : "input",
+                    mSL_edit_value(#its_TbV1, its_AlDN[d]));
+                its_Tb_Err(2786, #its_TbW);
+            );
+            d += 1;
+        );
+        (its_Tb_error === 0) ? (
+            // the record of the instance and its arguments (for each declaration : n, then n words)
+            pi = its_IPCnt; its_IPCnt += 1;
+            its_IPN[pi] = nm; its_IPK[pi] = k; its_IPAN[pi] = an; its_IPTP[pi] = tp; its_IPTL[pi] = its_Al_tl;
+            its_IPAO[pi] = ao = its_IPAPt;
+            d = 0; while ((its_Tb_error === 0) && (d < its_AlDCnt)) (
+                n = (its_AlDK[d] === 2) ? 1 : its_AlAL[d];
+                (ao + n + 1 > its_IPArgSz) ? (
+                    its_Tb_Err(2788, "Instance : too many arguments in this table");
+                ) : (
+                    its_IPArg[ao] = n;
+                    (its_AlDK[d] === 2) ? (
+                        its_IPArg[ao + 1] = its_AlAP[d] ? its_AlAV[d] : its_AlDDef[d];
+                    ) : (
+                        j = 0; loop(n, its_IPArg[ao + 1 + j] = its_Tb_tbl[its_AlAP[d] + j]; j += 1;);
+                    );
+                    ao += n + 1;
+                );
+                d += 1;
+            );
+            its_IPAL[pi] = ao - its_IPAO[pi]; its_IPAPt = ao;
+            // the body, the names of the arguments replaced
+            its_Al_Emit(its_TbM_Ins); its_Al_Emit(pi);
+            j = its_AlBody; while (j < its_Al_tl) (
+                w = tp[j];
+                ((d = its_Al_DIdx(w)) < 0) ? (
+                    its_Al_Emit(w);
+                ) : (
+                    q = its_IPAO[pi]; loop(d, q += its_IPArg[q] + 1;); // the argument d
+                    (its_AlDK[d] === 2) ? (
+                        v = its_IPArg[q + 1];
+                        (v < 0) ? ( its_Al_Emit(mSL_cstMinus); its_Al_Emit(-v); ) : its_Al_Emit(v);
+                    ) : (
+                        its_Al_Emit(its_TbM_Out);
+                        n = its_IPArg[q]; q += 1; loop(n, its_Al_Emit(its_IPArg[q]); q += 1;);
+                        its_Al_Emit(its_TbM_In);
+                    );
+                );
+                j += 1;
+            );
+            its_Al_Emit(its_TbM_InsEnd);
+        );
+    );
+    p;
+);
+
+// the table, its templates taken and its instances expanded, in its_Al_buf (0 : only its size, its_Al_cnt)
+// (Algorithm and Instance after Free or Dump are kept : Free Algorithm, Free Instance, Dump Instance)
+function its_Al_Expand() local(i, j, w, nm, pw)
+(
+    its_Al_cnt = its_APCnt = its_IPCnt = its_IPAPt = 0;
+    i = 0; pw = 0;
+    while ((its_Tb_error === 0) && (i < its_Tb_itc)) (
+        w = its_Tb_tbl[i];
+        its_Tb_ptr = i; // (the word of an error)
+        ((pw === its_TK_Free) || (pw === its_TK_Dump)) ? (
+            its_Al_Emit(w);
+            i += 1;
+        ) :
+        (w === its_TK_Algorithm) ? (
+            nm = its_Al_W(i + 1); j = i + 2;
+            while ((j < its_Tb_itc) && ((w = its_Tb_tbl[j]) !== its_TK_End) && (w !== its_TK_Algorithm) && (w !== its_TK_Instance)
+                && (w !== its_TK_EofMark)) ( j += 1; );
+            !its_Tb_IsName(nm) ? (
+                sprintf(#its_TbW, "Algorithm : %s is not a name", mSL_edit_value(#its_TbV, nm));
+                its_Tb_Err(2782, #its_TbW);
+            ) :
+            ((j >= its_Tb_itc) || (its_Tb_tbl[j] !== its_TK_End)) ? (
+                sprintf(#its_TbW, "Algorithm %s : %s", mSL_edit_value(#its_TbV, nm),
+                    ((w === its_TK_Algorithm) || (w === its_TK_Instance)) ? "Algorithm or Instance inside" : "End missing");
+                its_Tb_Err(((w === its_TK_Algorithm) || (w === its_TK_Instance)) ? 2789 : 2780, #its_TbW);
+            ) :
+            (its_APCnt >= its_APMx) ? (
+                its_Tb_Err(2788, "Algorithm : too many templates in this table");
+            ) : (
+                its_Al_cur = nm;
+                its_Al_Decl(its_Tb_tbl + i + 2, j - i - 2);
+                its_APN[its_APCnt] = nm; its_APP[its_APCnt] = its_Tb_tbl + i + 2; its_APL[its_APCnt] = j - i - 2;
+                its_APCnt += 1;
+            );
+            i = j + 1;
+        ) :
+        (w === its_TK_Instance) ? (
+            i = its_Al_Inst(i);
+        ) : (
+            its_Al_Emit(w);
+            i += 1;
+        );
+        (w !== mSL_cstComma) ? (pw = w);
+    );
+    its_Tb_ptr = 0;
+);
+
+// pass 3, at the end of an instance : it is recorded (its template copied, its arguments, its names)
+function its_Al_Commit(pi) local(k, b, n, i, j, ok)
+(
+    k = its_IPK[pi]; ok = 1;
+    its_InsSym[k] = its_IPN[pi]; its_InsAName[k] = its_IPAN[pi];
+    ((b = mSL_Dyn_Alloc(its_IPTL[pi] + 1, 'algt', 0)) > BASE_MEMORY) ? memcpy(b, its_IPTP[pi], its_IPTL[pi]) : (ok = 0);
+    its_InsTpl[k] = b; its_InsTLen[k] = its_IPTL[pi];
+    ((b = mSL_Dyn_Alloc(its_IPAL[pi] + 1, 'alga', 0)) > BASE_MEMORY) ? (
+        memcpy(b, its_IPArg + its_IPAO[pi], its_IPAL[pi]);
+        // a name of the table after Reader or Effect : its number (the names of a table don't last)
+        j = 1; while (j < its_IPAL[pi]) (
+            (((b[j - 1] === its_TK_Reader) || (b[j - 1] === its_TK_Effect)) && its_Tb_IsName(b[j])) ? (
+                i = 0; while (i < its_TbNCnt) (
+                    ((its_TbNSym[i] === b[j]) && (its_TbNScp[i] === 0) && (its_TbNTyp[i] === b[j - 1])) ? (
+                        b[j] = its_TbNIdx[i] + 1; i = its_TbNCnt;
+                    );
+                    i += 1;
+                );
+            );
+            j += 1;
+        );
+    ) : (ok = 0);
+    its_InsArg[k] = b; its_InsALen[k] = its_IPAL[pi];
+    n = 0; i = 0; loop(its_TbNCnt, (its_TbNScp[i] === k) ? (n += 1); i += 1;);
+    ((b = mSL_Dyn_Alloc(3 * n + 1, 'algn', 0)) > BASE_MEMORY) ? (
+        j = 0; i = 0; loop(its_TbNCnt,
+            (its_TbNScp[i] === k) ? ( b[j] = its_TbNSym[i]; b[j + 1] = its_TbNTyp[i]; b[j + 2] = its_TbNIdx[i]; j += 3; );
+            i += 1;
+        );
+    ) : (ok = 0);
+    its_InsNam[k] = b; its_InsNCnt[k] = n;
+    !ok ? (
+        sprintf(#its_TbW, "Instance %s : not enough memory for its record", mSL_edit_value(#its_TbV, its_IPN[pi]));
+        its_Tb_Err(2790, #its_TbW);
+    );
+);
+
+function its_Al_Flush() ( (its_Tb_cpend >= 0) ? ( its_Al_Commit(its_Tb_cpend); its_Tb_cpend = -1; ); );
+
+// end of a table without error : its templates are recorded (a template of the same name is replaced)
+function its_Al_TplCommit() local(i, j, k, b)
+(
+    i = 0; loop(its_APCnt,
+        (its_APN[i] !== 0) ? (
+            k = -1; j = 0; while ((k < 0) && (j < its_AlgMx)) ( (its_AlgSym[j] === its_APN[i]) ? (k = j); j += 1; );
+            j = 0; while ((k < 0) && (j < its_AlgMx)) ( (its_AlgSym[j] === 0) ? (k = j); j += 1; );
+            (k < 0) ? (
+                its_Tb_Err(2788, "Algorithm : too many templates");
+            ) :
+            ((b = mSL_Dyn_Alloc(its_APL[i] + 1, 'algt', 0)) <= BASE_MEMORY) ? (
+                its_Tb_Err(2790, "Algorithm : not enough memory");
+            ) : (
+                (its_AlgBlk[k] > BASE_MEMORY) ? mSL_Dyn_Free(its_AlgBlk[k]);
+                memcpy(b, its_APP[i], its_APL[i]);
+                its_AlgSym[k] = its_APN[i]; its_AlgBlk[k] = b; its_AlgLen[k] = its_APL[i];
+            );
+        );
+        i += 1;
+    );
+);
+
+// the text of the "n" words "p" of an argument (In:0, Bus 2:1, Reader 3...)
+function its_Al_WText(str, p, n) local(i, w)
+(
+    strcpy(str, "");
+    i = 0; loop(n,
+        w = p[i];
+        (w === its_TK_Colon) ? strcat(str, ":") : (
+            ((i > 0) && (p[i - 1] !== its_TK_Colon)) ? strcat(str, " ");
+            strcat(str, mSL_edit_value(#its_TbV3, w));
+        );
+        i += 1;
+    );
+    str;
+);
+
+// Dump Instance i : "Instance i Name arg value ...", then its modules
+function its_Al_DumpIns(k) local(d, q, n, i, b)
+(
+    sprintf(#its_TbW, "Instance %s %s", mSL_edit_value(#its_TbV, its_InsSym[k]), mSL_edit_value(#its_TbV1, its_InsAName[k]));
+    its_Al_cur = its_InsAName[k];
+    its_Al_Decl(its_InsTpl[k], its_InsTLen[k]);
+    q = its_InsArg[k];
+    d = 0; loop(its_AlDCnt,
+        n = q[0];
+        strcat(#its_TbW, " "); strcat(#its_TbW, mSL_edit_value(#its_TbV, its_AlDN[d])); strcat(#its_TbW, " ");
+        (its_AlDK[d] === 2) ? strcat(#its_TbW, sprintf(#its_TbV1, "%.10g", q[1])) : strcat(#its_TbW, its_Al_WText(#its_TbV1, q + 1, n));
+        q += n + 1; d += 1;
+    );
+    mSL_log(SysLogBox, #its_TbW);
+    i = 0; loop(LN_CNT, (((b = Lines_Set[i]) > BASE_MEMORY) && (b[its_Lin_Owner] === k)) ? its_Tb_DumpLine(i); i += 1;);
+    i = 0; loop(WR_CNT, (((b = Writers_set[i]) > BASE_MEMORY) && (b[its_Wrt_Owner] === k)) ? its_Tb_DumpMod(its_TK_Writer, i); i += 1;);
+    i = 0; loop(RD_CNT, (((b = Readers_set[i]) > BASE_MEMORY) && (b[its_Rdr_Owner] === k)) ? its_Tb_DumpMod(its_TK_Reader, i); i += 1;);
+    i = 0; loop(FX_CNT, (((b = Effects_set[i]) > BASE_MEMORY) && (b[its_Efx_Owner] === k)) ? its_Tb_DumpFx(i); i += 1;);
+);
+
+// Free Instance i : its modules are deleted (pass 2 : in the simulation), then it is forgotten
+function its_Al_FreeIns(k) local(i, b)
+(
+    (its_Tb_mode === 2) ? (
+        i = 0; loop(LN_CNT, (its_TbSimLO[i] === k) ? ( its_TbSimSp[i] = its_TbSimCh[i] = its_TbSimLO[i] = 0; ); i += 1;);
+        i = 0; loop(WR_CNT, (its_TbSimWO[i] === k) ? ( its_TbSimWE[i] = its_TbSimWO[i] = 0; its_TbSimWL[i] = -1; ); i += 1;);
+        i = 0; loop(RD_CNT, (its_TbSimRO[i] === k) ? ( its_TbSimRE[i] = its_TbSimRO[i] = 0; ); i += 1;);
+        i = 0; loop(FX_CNT, (its_TbSimFO[i] === k) ? ( its_TbSimFE[i] = its_TbSimFT[i] = its_TbSimFO[i] = 0; ); i += 1;);
+    ) :
+    (its_Tb_mode === 3) ? (
+        i = 0; loop(RD_CNT, (((b = Readers_set[i]) > BASE_MEMORY) && (b[its_Rdr_Owner] === k)) ? Rd_Action(i, its_RdrAct_Delete, 0); i += 1;);
+        i = 0; loop(WR_CNT, (((b = Writers_set[i]) > BASE_MEMORY) && (b[its_Wrt_Owner] === k)) ? Wr_Action(its_WrtAct_Delete, i, 0); i += 1;);
+        i = 0; loop(FX_CNT, (((b = Effects_set[i]) > BASE_MEMORY) && (b[its_Efx_Owner] === k)) ? FX_Delete(i); i += 1;);
+        i = 0; loop(LN_CNT, (((b = Lines_Set[i]) > BASE_MEMORY) && (b[its_Lin_Owner] === k)) ? Ln_Delete(i, 1); i += 1;);
+        its_Al_InsDrop(k);
+        i = 0; loop(its_IPCnt, (its_IPK[i] === k) ? (its_IPN[i] = 0); i += 1;); // (an instance of this table)
+    );
+);
+
+// the instance named by the next word (Free, Dump) : its number, or -1 and an error
+function its_Al_InsWord(what) local(w, k)
+(
+    w = its_Tb_Next();
+    ((k = its_Al_InsFind(w)) < 0) ? (
+        sprintf(#its_TbW, "%s Instance : unknown instance %s", what, mSL_edit_value(#its_TbV, w));
+        its_Tb_Err(2787, #its_TbW);
+    );
+    k;
+);
+
+// Free Algorithm Name : the template is forgotten (the instances keep their copy)
+function its_Al_FreeAlg() local(w, i, f)
+(
+    w = its_Tb_Next(); f = 0;
+    i = 0; loop(its_APCnt, (its_APN[i] === w) ? ( f = 1; (its_Tb_mode === 3) ? (its_APN[i] = 0); ); i += 1;);
+    i = 0; loop(its_AlgMx,
+        (its_AlgSym[i] === w) ? (
+            f = 1;
+            (its_Tb_mode === 3) ? ( (its_AlgBlk[i] > BASE_MEMORY) ? mSL_Dyn_Free(its_AlgBlk[i]); its_AlgSym[i] = its_AlgBlk[i] = its_AlgLen[i] = 0; );
+        );
+        i += 1;
+    );
+    !f ? (
+        sprintf(#its_TbW, "Free Algorithm : unknown algorithm %s", mSL_edit_value(#its_TbV, w));
+        its_Tb_Err(2781, #its_TbW);
+    );
+);
+
 //—— Dump, Check, Free
 function its_Tb_Dump() local(w, ty, k)
 (
     w = its_Tb_Next();
     (w === its_TK_Global) ? (
         (its_Tb_mode === 3) ? its_Tb_DumpGlobal();
+    ) :
+    (w === its_TK_Instance) ? (
+        k = its_Al_InsWord("Dump");
+        ((its_Tb_mode === 3) && (k > 0)) ? its_Al_DumpIns(k);
     ) :
     (w === its_TK_All) ? (
         (its_Tb_mode === 3) ? (
@@ -9620,9 +10155,15 @@ function its_Tb_Check() local(w, ty, k)
     );
 );
 
-function its_Tb_Free() local(ty, k)
+function its_Tb_Free() local(w, ty, k)
 (
-    ((ty = its_Tb_Type(its_Tb_Next(), "Free")) !== 0) ? (
+    ((w = its_Tb_Next()) === its_TK_Instance) ? (
+        ((k = its_Al_InsWord("Free")) > 0) ? its_Al_FreeIns(k);
+    ) :
+    (w === its_TK_Algorithm) ? (
+        its_Al_FreeAlg();
+    ) :
+    ((ty = its_Tb_Type(w, "Free")) !== 0) ? (
         k = its_Tb_Id(ty, its_Tb_Next(), 0);
         (k >= 0) ? (
             (its_Tb_mode === 2) ? (
@@ -9642,17 +10183,34 @@ function its_Tb_Free() local(ty, k)
 );
 
 // Implementation of the mSL "table" operation
-function Set_Table(tbl) local(m, w)
+function Set_Table(tbl) local(m, w, xb)
 (
     its_Tb_tbl = tbl; its_Tb_itc = tbl[-1];
     its_Tb_error = its_Tb_res = its_TbNCnt = 0;
+    its_Tb_scope = its_Tb_sscope = 0; its_Tb_cpend = -1;
     memset(its_TbResv, 0, LN_CNT + WR_CNT + RD_CNT + FX_CNT);
+    // the templates taken, the instances expanded (its_Al_Expand : its size, then the words)
+    its_Al_buf = xb = 0;
+    its_Al_Expand();
+    (its_Tb_error === 0) ? (
+        ((xb = mSL_Dyn_Alloc(its_Al_cnt + 4, 'tbex', 0)) <= BASE_MEMORY) ? (
+            its_Tb_Err(2790, "not enough memory for the expanded table");
+            xb = 0;
+        ) : (
+            its_Al_buf = xb;
+            its_Al_Expand();
+            its_Al_buf = 0;
+            its_Tb_tbl = xb; its_Tb_itc = its_Al_cnt;
+        );
+    );
     m = 0;
     while ((m <= 3) && (its_Tb_error === 0)) (
         its_Tb_mode = m; its_Tb_ptr = its_Tb_clr = 0;
+        its_Tb_scope = its_Tb_sscope = 0;
         its_Tb_SimInit();
         (its_Tb_Peek() === its_TK_Interstys) ? its_Tb_Next();
         while ((its_Tb_error === 0) && ((w = its_Tb_Next()) !== its_TK_End) && (w !== its_TK_EofMark)) (
+            its_Al_Flush(); // (an instance ended by the previous block)
             (w === its_TK_Clear) ? its_Tb_Clear() :
             (w === its_TK_Line) ? its_Tb_Line() :
             ((w === its_TK_Writer) || (w === its_TK_Reader) || (w === its_TK_Effect)) ? its_Tb_Module(w) :
@@ -9660,12 +10218,15 @@ function Set_Table(tbl) local(m, w)
             (w === its_TK_Check) ? its_Tb_Check() :
             (w === its_TK_Free) ? its_Tb_Free() :
             (w === its_TK_Global) ? its_Tb_Global() : (
-                sprintf(#its_TbW, "%s : a block (Line, Writer, Reader, Effect, Global, Dump, Check, Free, Clear) is expected", mSL_edit_value(#its_TbV, w));
+                sprintf(#its_TbW, "%s : a block (Line, Writer, Reader, Effect, Global, Algorithm, Instance, Dump, Check, Free, Clear) is expected", mSL_edit_value(#its_TbV, w));
                 its_Tb_Err(2750, #its_TbW);
             );
         );
+        (its_Tb_error === 0) ? its_Al_Flush();
         m += 1;
     );
+    ((m === 4) && (its_Tb_error === 0)) ? its_Al_TplCommit();
+    (xb > BASE_MEMORY) ? mSL_Dyn_Free(xb);
     (m === 4) ? (its_PatchForce = 1); // the cables of all the modules (see its_Patch_Update)
     (its_Tb_error !== 0) ? its_Tb_error : its_Tb_res;
 );
