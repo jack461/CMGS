@@ -3246,6 +3246,38 @@ pad_PchG_Labs = pad_PatchG + pad_PatchG[ui_jpad_labs];
 pad_PchG_Colrs = pad_PatchG + pad_PatchG[ui_jpad_clrs];
 i__ii = 0; loop(pad_Pch_Siz, pad_Pch_Colrs[i__ii] = Col_Inactive; pad_Pch_Labs[i__ii] = ""; i__ii += 1;);
 i__ii = 0; loop(pad_PchG_Siz, pad_PchG_Colrs[i__ii] = Col_Inactive; pad_PchG_Labs[i__ii] = ""; i__ii += 1;);
+// Pads of the module "Instances" (see show_Instances_Pad) : line 1, then one cell per instance (8 x 8 : 1 ... its_InsMx)
+pad_Ins_Siz = 8;
+pad_Ins = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    1, pad_Ins_Siz, pad_Ins_Siz);
+pad_Ins_Labs = pad_Ins + pad_Ins[ui_jpad_labs];
+pad_Ins_Colrs = pad_Ins + pad_Ins[ui_jpad_clrs];
+pad_InsG_NL = 8;
+pad_InsG_Siz = 8 * pad_InsG_NL;
+pad_InsG = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    pad_InsG_NL, 8, pad_InsG_Siz);
+pad_InsG_Labs = pad_InsG + pad_InsG[ui_jpad_labs];
+pad_InsG_Colrs = pad_InsG + pad_InsG[ui_jpad_clrs];
+i__ii = 0; loop(pad_Ins_Siz, pad_Ins_Colrs[i__ii] = Col_Inactive; pad_Ins_Labs[i__ii] = ""; i__ii += 1;);
+i__ii = 0; loop(pad_InsG_Siz, pad_InsG_Colrs[i__ii] = Col_Inactive; pad_InsG_Labs[i__ii] = ""; i__ii += 1;);
+menu_Ins_Action_N = make_array(2); // an instance (right clic on its cell)
+menu_Ins_Action_N[0] = "Dump";
+menu_Ins_Action_N[1] = "Free";
+menu_Ins_Action = make_jmenu(
+    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "instance-actions", 2, menu_Ins_Action_N);
+menu_InsAll_Action_N = make_array(4); // all the instances (cell 7)
+menu_InsAll_Action_N[0] = "Dump all";
+menu_InsAll_Action_N[1] = "Templates in the log";
+menu_InsAll_Action_N[2] = "---";
+menu_InsAll_Action_N[3] = "Free all instances";
+menu_InsAll_Action = make_jmenu(
+    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "instances-actions", 4, menu_InsAll_Action_N);
+its_InsUiSel = 0; // the instance selected in the module (0 : none)
+
 // the views of the module "Patch"
 its_PchV_In = 0;
 its_PchV_Out = 1;
@@ -4807,6 +4839,8 @@ local (i, j, g, it, fid, ttl, gl0, gl1, gl2, gl3, othFirst, tmp, bln, blu, itdsp
     blockDispNames[blockControls] = "Controls"; // see show_Controls_Pad
     blockPatch = (itdsp += 1);
     blockDispNames[blockPatch] = "Patch"; // see show_Patch_Pad
+    blockInstances = (itdsp += 1);
+    blockDispNames[blockInstances] = "Instances"; // see show_Instances_Pad
 
     blockUsrFirst = itdsp+1;
     // Add users modules
@@ -10181,28 +10215,75 @@ function its_Al_WText(str, p, n) local(i, w)
     str;
 );
 
-// Dump Instance i : "Instance i Name arg value ...", then its modules
-function its_Al_DumpIns(k) local(d, q, n, i, b)
+// the call of the instance "k" in "str" : "Instance i Name arg value ..."
+function its_Al_CallText(str, k) local(d, q, n)
 (
-    sprintf(#its_TbW, "Instance %s %s", mSL_edit_value(#its_TbV, its_InsSym[k]), mSL_edit_value(#its_TbV1, its_InsAName[k]));
+    sprintf(str, "Instance %s %s", mSL_edit_value(#its_TbV, its_InsSym[k]), mSL_edit_value(#its_TbV1, its_InsAName[k]));
     its_Al_cur = its_InsAName[k];
     its_Al_Decl(its_InsTpl[k], its_InsTLen[k]);
     q = its_InsArg[k];
     d = 0; loop(its_AlDCnt,
         n = q[0];
-        strcat(#its_TbW, " "); strcat(#its_TbW, mSL_edit_value(#its_TbV, its_AlDN[d])); strcat(#its_TbW, " ");
-        (its_AlDK[d] === 2) ? strcat(#its_TbW, sprintf(#its_TbV1, "%.10g", q[1])) : strcat(#its_TbW, its_Al_WText(#its_TbV1, q + 1, n));
+        strcat(str, " "); strcat(str, mSL_edit_value(#its_TbV, its_AlDN[d])); strcat(str, " ");
+        (its_AlDK[d] === 2) ? strcat(str, sprintf(#its_TbV1, "%.10g", q[1])) : strcat(str, its_Al_WText(#its_TbV1, q + 1, n));
         q += n + 1; d += 1;
     );
-    mSL_log(SysLogBox, #its_TbW);
+    str;
+);
+
+// the name of the instance "k" (the owner of a module) in "str"
+function its_Al_OwnName(str, k)
+(
+    ((k >= 1) && (k <= its_InsMx) && (its_InsSym[k] !== 0)) ? mSL_edit_value(str, its_InsSym[k]) : sprintf(str, "#%d", k);
+    str;
+);
+
+// the templates in the log : "Algorithm Name input a output b param p def min max"
+function its_Al_DumpTpls() local(i, d, n)
+(
+    n = 0;
+    i = 0; loop(its_AlgMx,
+        (its_AlgSym[i] !== 0) ? (
+            its_Al_cur = its_AlgSym[i];
+            its_Al_Decl(its_AlgBlk[i], its_AlgLen[i]);
+            sprintf(#its_TbW, "Algorithm %s", mSL_edit_value(#its_TbV, its_AlgSym[i]));
+            d = 0; loop(its_AlDCnt,
+                strcat(#its_TbW, (its_AlDK[d] === 0) ? " input " : (its_AlDK[d] === 1) ? " output " : " param ");
+                strcat(#its_TbW, mSL_edit_value(#its_TbV, its_AlDN[d]));
+                (its_AlDK[d] === 2) ? strcat(#its_TbW, sprintf(#its_TbV1, " %.10g %.10g %.10g", its_AlDDef[d], its_AlDMin[d], its_AlDMax[d]));
+                d += 1;
+            );
+            mSL_log(SysLogBox, #its_TbW);
+            n += 1;
+        );
+        i += 1;
+    );
+    (n === 0) ? mSL_log(SysLogBox, "No algorithm");
+);
+
+// Dump Instance i : "Instance i Name arg value ...", then its modules
+function its_Al_DumpIns(k) local(i, b)
+(
+    mSL_log(SysLogBox, its_Al_CallText(#its_TbW, k));
     i = 0; loop(LN_CNT, (((b = Lines_Set[i]) > BASE_MEMORY) && (b[its_Lin_Owner] === k)) ? its_Tb_DumpLine(i); i += 1;);
     i = 0; loop(WR_CNT, (((b = Writers_set[i]) > BASE_MEMORY) && (b[its_Wrt_Owner] === k)) ? its_Tb_DumpMod(its_TK_Writer, i); i += 1;);
     i = 0; loop(RD_CNT, (((b = Readers_set[i]) > BASE_MEMORY) && (b[its_Rdr_Owner] === k)) ? its_Tb_DumpMod(its_TK_Reader, i); i += 1;);
     i = 0; loop(FX_CNT, (((b = Effects_set[i]) > BASE_MEMORY) && (b[its_Efx_Owner] === k)) ? its_Tb_DumpFx(i); i += 1;);
 );
 
+// the modules of the instance "k" are deleted, then it is forgotten (@gfx : Free Instance, the module "Instances")
+function its_Al_Delete(k) local(i, b)
+(
+    i = 0; loop(RD_CNT, (((b = Readers_set[i]) > BASE_MEMORY) && (b[its_Rdr_Owner] === k)) ? Rd_Action(i, its_RdrAct_Delete, 0); i += 1;);
+    i = 0; loop(WR_CNT, (((b = Writers_set[i]) > BASE_MEMORY) && (b[its_Wrt_Owner] === k)) ? Wr_Action(its_WrtAct_Delete, i, 0); i += 1;);
+    i = 0; loop(FX_CNT, (((b = Effects_set[i]) > BASE_MEMORY) && (b[its_Efx_Owner] === k)) ? FX_Delete(i); i += 1;);
+    i = 0; loop(LN_CNT, (((b = Lines_Set[i]) > BASE_MEMORY) && (b[its_Lin_Owner] === k)) ? Ln_Delete(i, 1); i += 1;);
+    its_Al_InsDrop(k);
+    its_PatchForce = 1;
+);
+
 // Free Instance i : its modules are deleted (pass 2 : in the simulation), then it is forgotten
-function its_Al_FreeIns(k) local(i, b)
+function its_Al_FreeIns(k) local(i)
 (
     (its_Tb_mode === 2) ? (
         i = 0; loop(LN_CNT, (its_TbSimLO[i] === k) ? ( its_TbSimSp[i] = its_TbSimCh[i] = its_TbSimLO[i] = 0; ); i += 1;);
@@ -10211,11 +10292,7 @@ function its_Al_FreeIns(k) local(i, b)
         i = 0; loop(FX_CNT, (its_TbSimFO[i] === k) ? ( its_TbSimFE[i] = its_TbSimFT[i] = its_TbSimFO[i] = 0; ); i += 1;);
     ) :
     (its_Tb_mode === 3) ? (
-        i = 0; loop(RD_CNT, (((b = Readers_set[i]) > BASE_MEMORY) && (b[its_Rdr_Owner] === k)) ? Rd_Action(i, its_RdrAct_Delete, 0); i += 1;);
-        i = 0; loop(WR_CNT, (((b = Writers_set[i]) > BASE_MEMORY) && (b[its_Wrt_Owner] === k)) ? Wr_Action(its_WrtAct_Delete, i, 0); i += 1;);
-        i = 0; loop(FX_CNT, (((b = Effects_set[i]) > BASE_MEMORY) && (b[its_Efx_Owner] === k)) ? FX_Delete(i); i += 1;);
-        i = 0; loop(LN_CNT, (((b = Lines_Set[i]) > BASE_MEMORY) && (b[its_Lin_Owner] === k)) ? Ln_Delete(i, 1); i += 1;);
-        its_Al_InsDrop(k);
+        its_Al_Delete(k);
         i = 0; loop(its_IPCnt, (its_IPK[i] === k) ? (its_IPN[i] = 0); i += 1;); // (an instance of this table)
     );
 );
@@ -12107,7 +12184,8 @@ local (x, h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol
                     );
                     rerr = RDBL[2];
                 );
-                sprintf(pad_Rdr_Labs[0],"Reader %d", rdr+1);
+                (rok && (rcbl[its_Rdr_Owner] > 0)) ? sprintf(pad_Rdr_Labs[0],"Reader %d (%s)", rdr+1, its_Al_OwnName(#its_OwnN, rcbl[its_Rdr_Owner])) :
+                    sprintf(pad_Rdr_Labs[0],"Reader %d", rdr+1);
                 (rok) ? (
                     (rerr) ? (
                         sprintf(pad_Rdr_Labs[14],"Err: %d", rerr);
@@ -12892,7 +12970,8 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lc
                     sprintf(pad_Lin_Labs[4], "%d chan.", lcbl[its_Lin_ChCnt]);
                     sprintf(pad_Lin_Labs[5], "F. %d Hz", lcbl[its_Lin_RecFreq]);
                 );
-                sprintf(pad_Lin_Labs[0],"Line %d", lnr+1);
+                (lok && (lcbl[its_Lin_Owner] > 0)) ? sprintf(pad_Lin_Labs[0],"Line %d (%s)", lnr+1, its_Al_OwnName(#its_OwnN, lcbl[its_Lin_Owner])) :
+                    sprintf(pad_Lin_Labs[0],"Line %d", lnr+1);
                 strcpy(pad_Lin_Labs[7],"Action");
 
                 zz = control_jpad(pad_Line);
@@ -13512,7 +13591,8 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, 
                     pad_Efx_Colrs[i] = dfCol;
                     strcpy(pad_Efx_Labs[i],"");
                     i += 1;);
-                sprintf(pad_Efx_Labs[0],"Effect %d", fxn+1);
+                (fok && (fx[its_Efx_Owner] > 0)) ? sprintf(pad_Efx_Labs[0],"Effect %d (%s)", fxn+1, its_Al_OwnName(#its_OwnN, fx[its_Efx_Owner])) :
+                    sprintf(pad_Efx_Labs[0],"Effect %d", fxn+1);
                 (fok) ? (
                     strcpy(pad_Efx_Labs[1], menu_Efx_Type_N[max(0, min(its_Efx_TyCnt - 1, fx[its_Efx_Type]))]);
                     pad_Efx_Colrs[1] = Col_P3;
@@ -13775,7 +13855,8 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lo
                     pad_Wrt_Colrs[i] = dfCol;
                     strcpy(pad_Wrt_Labs[i],"");
                     i += 1;);
-                sprintf(pad_Wrt_Labs[0],"Writer %d", wrt+1);
+                (wok && (wcbl[its_Wrt_Owner] > 0)) ? sprintf(pad_Wrt_Labs[0],"Writer %d (%s)", wrt+1, its_Al_OwnName(#its_OwnN, wcbl[its_Wrt_Owner])) :
+                    sprintf(pad_Wrt_Labs[0],"Writer %d", wrt+1);
                 (wok) ? (
                     strcpy(pad_Wrt_Labs[1],menu_Wrt_Status_N[wcbl[its_Wrt_Status]]);
                     // status : Ready (blue), Paused (orange), Writing (green), else the default color (as for the readers)
@@ -14291,6 +14372,136 @@ local (h1, h2, h3, uix_jneed, zzmi, i, k, c, w, v, pg, npg, ncel, nl, zz, zzmcl,
                     sprintf(#its_PchTxt, "%d connections not valid", its_PchBad);
                     ui_split_top(ui_texth()); ui_text("Mouse over a cell : who writes it, who reads it."); ui_pop();
                     ui_split_top(ui_texth()); ui_text(#its_PchTxt); ui_pop();
+                );
+            ui_pop();
+
+        ui_pop();
+    );
+);
+
+/*
+    The module "Instances" : the instances of algorithms (see "Algorithms", table(data(...)))
+    line 1 : 0 "Instances", 1 their count, 2 the count of templates, 7 actions (right clic : Dump all, Templates in the log,
+    Free all instances)
+    the grid : one cell per instance (its number : 1 ... its_InsMx), "name : Template" ; left clic : selects it ; right clic :
+    menu (Dump, Free)
+    the text : the instance under the mouse (or the selected one) : its call, the count of its modules
+*/
+function show_Instances_Pad(blockId)
+local (h1, h2, h3, uix_jneed, zzmi, i, k, n, nt, mx, nl, zz, zzmcl, xx, hk, hx, hy, b, nln, nwr, nrd, nfx)
+(
+    n = nt = mx = 0;
+    k = 1; loop(its_InsMx, (its_InsSym[k] !== 0) ? ( n += 1; mx = k; ); k += 1;);
+    i = 0; loop(its_AlgMx, (its_AlgSym[i] !== 0) ? (nt += 1); i += 1;);
+    (its_InsSym[its_InsUiSel] === 0) ? (its_InsUiSel = 0);
+    nl = max(1, ceil(mx / 8));
+    h1 = uix_jpadHeight(1);
+    h2 = uix_jpadHeight(nl);
+    h3 = uix_jBoxHeight(2);
+    uix_jneed = h1+h2+h3+ui_jd_ctgr;
+    (ui_height() >= uix_jneed) ? (
+        ui_split_top(uix_jneed);
+        ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
+            zzmi = ui_hover();
+            keepBlockInfos(blockId);
+            (zzmi) ? (
+                ui_push();
+                    // stack is now 2 levels deep
+                    ui_color(Col_Frame);
+                    ui_border(); // draws in purple
+                ui_pop();
+            );
+            control_group(blockDispNames[blockDispInverts[blockId]]);
+            ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+
+            // line 1
+            ui_split_top(h1);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_Ins_Labs, pad_Ins_Siz);
+                i = 0; loop(pad_Ins_Siz, pad_Ins_Colrs[i] = Col_InfoA; strcpy(pad_Ins_Labs[i], ""); i += 1;);
+                strcpy(pad_Ins_Labs[0], "Instances");
+                sprintf(pad_Ins_Labs[1], "%d instance%s", n, (n > 1) ? "s" : "");
+                sprintf(pad_Ins_Labs[2], "%d template%s", nt, (nt > 1) ? "s" : "");
+                pad_Ins_Colrs[1] = pad_Ins_Colrs[2] = Color_Heliotrope;
+                strcpy(pad_Ins_Labs[7], "Action");
+                pad_Ins_Colrs[7] = Col_P1;
+                zz = control_jpad(pad_Ins);
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4; ui_GFXReason = 36;
+                    zzmcl = pad_Ins[ui_jpad_last]-1;
+                    ((zz & ui_jpad_ev_rmc) && (zzmcl === 7)) ? (
+                        xx = control_jmenu(menu_InsAll_Action);
+                        (xx === 1) ? (
+                            k = 1; loop(its_InsMx, (its_InsSym[k] !== 0) ? its_Al_DumpIns(k); k += 1;);
+                            (n === 0) ? mSL_log(SysLogBox, "No instance");
+                        ) :
+                        (xx === 2) ? (
+                            its_Al_DumpTpls();
+                        ) :
+                        (xx === 4) ? (
+                            k = 1; loop(its_InsMx, (its_InsSym[k] !== 0) ? its_Al_Delete(k); k += 1;);
+                            its_InsUiSel = 0;
+                        );
+                    );
+                );
+            ui_pop();
+
+            // the grid : the instances
+            ui_split_top(h2);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_InsG_Labs, 8 * nl);
+                hk = 0;
+                i = 0; loop(8 * nl,
+                    k = i + 1;
+                    (its_InsSym[k] !== 0) ? (
+                        sprintf(pad_InsG_Labs[i], "%s : %s", mSL_edit_value(#its_TbV, its_InsSym[k]), mSL_edit_value(#its_TbV1, its_InsAName[k]));
+                        pad_InsG_Colrs[i] = (k === its_InsUiSel) ? Color_Goldenrod : Color_Limegreen;
+                    ) : (
+                        strcpy(pad_InsG_Labs[i], "");
+                        pad_InsG_Colrs[i] = Col_Inactive;
+                    );
+                    i += 1;
+                );
+                zz = control_jpad(pad_InsG, nl, -1, 1);
+                // the instance under the mouse (geometry of the pad just drawn, see ui_jpad_cell_pos)
+                (ui_hover() && (ui_jpad_lst_wi > 0) && (ui_jpad_lst_he > 0)) ? (
+                    hx = floor((uix_mouse_x - ui_jpad_lst_left) / ui_jpad_lst_wi);
+                    hy = floor((uix_mouse_y - ui_jpad_lst_top) / ui_jpad_lst_he);
+                    ((hx >= 0) && (hx < 8) && (hy >= 0) && (hy < nl) && (its_InsSym[hy * 8 + hx + 1] !== 0)) ? (hk = hy * 8 + hx + 1);
+                );
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4; ui_GFXReason = 36;
+                    k = pad_InsG[ui_jpad_last];
+                    ((k >= 1) && (k <= its_InsMx) && (its_InsSym[k] !== 0)) ? (
+                        (zz & ui_jpad_ev_lmc) ? (
+                            its_InsUiSel = (its_InsUiSel === k) ? 0 : k;
+                        ) :
+                        (zz & ui_jpad_ev_rmc) ? (
+                            xx = control_jmenu(menu_Ins_Action);
+                            (xx === 1) ? its_Al_DumpIns(k) :
+                            (xx === 2) ? ( its_Al_Delete(k); (its_InsUiSel === k) ? (its_InsUiSel = 0); );
+                        );
+                    );
+                );
+            ui_pop();
+
+            // the text : the instance under the mouse, or the selected one
+            ui_split_top(h3);
+                ui_pad(4,2,4,2);
+                ui_pcolor(ui_jcolor_text);
+                ui_align(0, 0);
+                k = (hk > 0) ? hk : its_InsUiSel;
+                (k > 0) ? (
+                    ui_split_top(ui_texth()); ui_text(its_Al_CallText(#its_InsTxt, k)); ui_pop();
+                    nln = nwr = nrd = nfx = 0;
+                    i = 0; loop(LN_CNT, (((b = Lines_Set[i]) > BASE_MEMORY) && (b[its_Lin_Owner] === k)) ? (nln += 1); i += 1;);
+                    i = 0; loop(WR_CNT, (((b = Writers_set[i]) > BASE_MEMORY) && (b[its_Wrt_Owner] === k)) ? (nwr += 1); i += 1;);
+                    i = 0; loop(RD_CNT, (((b = Readers_set[i]) > BASE_MEMORY) && (b[its_Rdr_Owner] === k)) ? (nrd += 1); i += 1;);
+                    i = 0; loop(FX_CNT, (((b = Effects_set[i]) > BASE_MEMORY) && (b[its_Efx_Owner] === k)) ? (nfx += 1); i += 1;);
+                    sprintf(#its_InsTxt, "Modules : %d lines, %d writers, %d readers, %d effects", nln, nwr, nrd, nfx);
+                    ui_split_top(ui_texth()); ui_text(#its_InsTxt); ui_pop();
+                ) : (
+                    ui_split_top(ui_texth()); ui_text("Mouse over an instance : its call and its modules."); ui_pop();
                 );
             ui_pop();
 
@@ -15155,6 +15366,9 @@ local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in
                 ) :
                 (igb === blockPatch) ? (
                     show_Patch_Pad(blockPatch);
+                ) :
+                (igb === blockInstances) ? (
+                    show_Instances_Pad(blockInstances);
                 ) :
                 ((igb >= blockUsrFirst) && (igb <= blockUsrLast)) && (blockUsrChecks[blockUsrNum[igb - blockUsrFirst]]) ? (
                     show_UserModule(igb);
