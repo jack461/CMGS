@@ -121,15 +121,31 @@ its_LinAct_Delete = 4;
 
 
 //==========================================================
+// MODULES EXÉCUTÉS PAR @sample (voir its_Run_Schedule) : les premiers mots des blocs des readers, des writers, des effets,
+// et des blocs spécialisés "Clear", "Input", "Output" ; le mot 0 est le mot de sécurité (SECURE_BL) des blocs
+its_Run_Delay = 1; // délai (samples) : > 0 décompté à chaque sample sans exécuter, 0 exécuté, < 0 inactif (décompté) jusqu'au prochain ordonnancement
+its_Run_Kind = 2; // nature du module (its_RunK_...)
+its_Run_Num = 3; // numéro du module dans Readers_set, Writers_set, Effects_set
+its_Run_First = 4; // premier mot propre à chaque nature
+its_RunK_None = 0; // (bloc effacé ou libéré : jamais exécuté)
+its_RunK_Reader = 1;
+its_RunK_Writer = 2;
+its_RunK_Effect = 3;
+its_RunK_Input = 4; // les entrées de la piste dans In
+its_RunK_Output = 5; // Out dans les sorties de la piste
+its_RunK_Clear = 6; // effacement de Out et des bus
+
+//==========================================================
 // READER - KW_read - Readers_set[RD_CNT]
 its_RdrMaxMulti = 8; // nombre max de lecteurs multi simultanés
 idx = 0;
 //  0
 its_Rdr_Unuz1 = idx; idx += 1; //  Securité : mot inutilisé
+its_Rdr_Number = its_Run_Num; //  Numéro interne du reader
+idx = its_Run_First;
 its_Rdr_Status = idx; idx += 1; //  Etat affiché du reader
 its_Rdr_Flgs = idx; idx += 1; //  Flags du reader
 its_Rdr_Mode = idx; idx += 1; //  Mode du reader
-its_Rdr_Number = idx; idx += 1; //  Numéro interne du reader
 its_Rdr_LoopType = idx; idx += 1; //  Type of looping
 its_Rdr_InAction = idx; idx += 1; //  internal action
 its_Rdr_Intern = idx; idx += 1; //  Etat interne du reader
@@ -218,8 +234,10 @@ its_Mod_Smooth = 5; // valeur lissée
 its_Mod_Att = 6; // atténuverteur [-10 ... 10] (1 à la connexion)
 its_Mod_ShowAtt = 7; // 1 : le slider de l'atténuverteur est affiché (clic gauche sur la cellule)
 its_ModDist = 8;
-// 3 entrées de modulation : 0 le décalage (mode delay), 1 la vitesse (mode reader), 2 le volume
-its_Rdr_Mod1 = idx; idx += 3 * its_ModDist;
+// 5 entrées de modulation : 0 le décalage (mode delay), 1 la vitesse (mode reader), 2 le volume, 3 la vitesse de la loop
+// (mode reader), 4 la désynchronisation des canaux (mode reader)
+its_Rdr_ModN = 5;
+its_Rdr_Mod1 = idx; idx += its_Rdr_ModN * its_ModDist;
 //  0x40 - 72
 its_Rdr_Abspos = idx; idx += its_RdrMaxMulti; //  Position [its_Rdr_Start ... its_Rdr_Last - 1] de lecture en samples
 its_Rdr_AbsInc = idx; idx += its_RdrMaxMulti; //  Incrément de la position
@@ -229,6 +247,8 @@ its_Rdr_XFadeCnt = idx; idx += its_RdrMaxMulti; // X Fade counter
 its_Rdr_XFadeIdxPos = idx; idx += its_RdrMaxMulti; // X Fade position
 its_Rdr_XFadeIncr = idx; idx += its_RdrMaxMulti; // X Fade increment
 its_Rdr_XFadeCntNxt = idx; idx += its_RdrMaxMulti; // next X Fade counter
+its_Rdr_LoopSpd = idx; idx += 1; // vitesse de déplacement de la loop (s/s) [-1 ... 1] (mode reader, voir its_Rdr_LoopMove)
+its_Rdr_Desync = idx; idx += 1; // désynchronisation (s) [-1 ... 1] : le canal c lit c * Desync secondes avant le canal 0 (mode reader)
 idx |= 3; // for rounding to a multiple of 4 minus 1
 its_Rdr_Unuz2 = idx; idx += 1; //  Securité : mot inutilisé
 its_Rdr_BlkSize = idx; // actual size
@@ -280,8 +300,9 @@ its_RdrLoopTypeStop = 5;
 idx = 0;
 // 0
 its_Wrt_Unuz1 = idx; idx += 1; //  Securité : mot inutilisé
+its_Wrt_Number = its_Run_Num; //  Numéro du writer
+idx = its_Run_First;
 its_Wrt_BLType = idx; idx += 1; //  Type du bloc
-its_Wrt_Number = idx; idx += 1; //  Numéro du writer
 its_Wrt_Status = idx; idx += 1; //  Etat du writer
 its_Wrt_InAction = idx; idx += 1; //  internal action
 its_Wrt_Flgs = idx; idx += 1; //  Flags du writer
@@ -314,9 +335,22 @@ its_Wrt_Tmp6 = idx; idx += 1; // temp 6
 its_Wrt_SrcOff = idx; idx += 1; // premier canal pris dans la source
 its_Wrt_InCell = idx; idx += 1; // première cellule lue (calculée par exec_writer)
 its_Wrt_Owner = idx; idx += 1; // propriétaire : 0 le patch utilisateur, sinon une instance d'algorithme
-// 2 entrées de modulation : 0 le gain d'enregistrement (profondeur en dB), 1 l'overdub (profondeur en %)
-its_Wrt_Mod1 = idx; idx += 2 * its_ModDist;
-// 30
+// 7 entrées de modulation : 0 le gain d'enregistrement (profondeur en dB), 1 l'overdub (profondeur en %),
+// en mode W-Mix : 2 la durée des fondus, 3 le plateau, 4 l'attente (profondeurs en octaves), 5 la direction, 6 la désynchronisation (%)
+its_Wrt_ModN = 7;
+its_Wrt_Mod1 = idx; idx += its_Wrt_ModN * its_ModDist;
+// mode W-Mix (voir its_Wrt_WMix) : les 5 réglages (contigus, dans l'ordre de its_WMix_Par)
+its_Wrt_WFade = idx; idx += 1; // durée commune du fondu d'entrée et du fondu de sortie (s) [0.001 ... 10]
+its_Wrt_WPlat = idx; idx += 1; // durée du plateau (s) [0 ... 100]
+its_Wrt_WWait = idx; idx += 1; // durée de l'attente (s) [0 ... 100]
+its_Wrt_WDir = idx; idx += 1; // direction [-1 ... 1] : probabilité (1 + d) / 2 d'écrire à la vitesse 1, sinon -1
+its_Wrt_WDesync = idx; idx += 1; // désynchronisation des canaux (%) [0 ... 100]
+// mode W-Mix : l'état du cycle
+its_Wrt_WPhase = idx; idx += 1; // phase (its_WMix_...)
+its_Wrt_WCnt = idx; idx += 1; // samples restant dans la phase
+its_Wrt_WLen = idx; idx += 1; // durée des fondus du cycle (samples)
+its_Wrt_WInc = idx; idx += 1; // direction du cycle : 1 ou -1
+its_Wrt_WOffs = idx; idx += 128; // décalage de chaque canal par rapport à its_Wrt_Abspos [0 ... SmplCnt - 1]
 idx |= 3; // for rounding to a multiple of 4 minus 1
 its_Wrt_Unuz2 = idx; idx += 1; //  Securité : mot inutilisé
 its_Wrt_BlkSize = idx; // actual size
@@ -325,6 +359,14 @@ its_WrtFlg_init = 0x0001; //  si writer initialisé
 // Modes (its_Wrt_Mode) : how the overdub (its_Wrt_Ovrdb, x %) mixes the previous content of the line with the input
 its_WrtMode_XFade = 0; // x % of the previous content + (100 - x) % of the input, then the record gain
 its_WrtMode_Sum = 1; // x % of the previous content (feedback) + the input with the record gain
+its_WrtMode_WMix = 2; // cycles : random position, fade-in, plateau, fade-out, wait (see its_Wrt_WMix) ; no overdub
+its_WrtModeCnt = 3;
+// the phases of a W-Mix cycle (its_Wrt_WPhase)
+its_WMix_Cycle = 0; // a new cycle starts at the next sample
+its_WMix_FadeIn = 1;
+its_WMix_Plateau = 2;
+its_WMix_FadeOut = 3;
+its_WMix_Wait = 4;
 // x in [-150, 150] : x < 0 inverts the previous content ; a loop gain above 1 (|x| > 100, or the record gain in X-fade)
 // is regenerative : the written value then goes through a tanh (see exec_writer)
 // Etats
@@ -353,10 +395,11 @@ its_WrtErrXe = 0; // last exec error
 idx = 0;
 //   0
 its_Efx_Unuz1 = idx; idx += 1; //  Securité : mot inutilisé
+its_Efx_Numb = its_Run_Num; //  Numéro de l'effet
+idx = its_Run_First;
 its_Efx_Status = idx; idx += 1; //  Etat de l'effet
 its_Efx_Flgs = idx; idx += 1; //  Flags de l'effet
 its_Efx_Type = idx; idx += 1; //  Type de l'effet
-its_Efx_Numb = idx; idx += 1; //  Numéro de l'effet
 its_Efx_Phase = idx; idx += 1; //  Phase de l'effet
 its_Efx_CCnt = idx; idx += 1; //  Channel count
 its_Efx_OutK = idx; idx += 1; //  sortie : 0 son câble propre, sinon Out ou un bus (kind * ITS_KMul + number)
@@ -985,7 +1028,7 @@ EffectsStructH = idx; idx += LinesBlockSize;
 EffectsStructI = idx; idx += LinesBlockSize;
 EffectsStructJ = idx; idx += LinesBlockSize;
 ControlsStruct = idx; idx += 8; // the module "Controls" : [0] the page of sliders shown
-PatchStruct = idx; idx += 8; // the module "Patch" : [0] the view (its_PchV...), [1] the page
+PatchStruct = idx; idx += 8; // the module "Patch" : [0] the view (its_PchV...), [1] the page, [2] the pinned entry + 1, [3] its view
 // the display blocks of the modules above (number of the object shown, display options) : saved in the 'disp' block
 DispStructsSize = idx - ReadersStructA;
 
@@ -1016,14 +1059,17 @@ p_wrOvrdb = idx; idx += 1; // overdub of a writer (%)
 p_glInGain = idx; idx += 1; // global input gain (dB) : slider slInGain
 p_glOutVol = idx; idx += 1; // global output volume (dB) : slider slOutVol
 p_fxGain1 = idx; idx += 8; // gains of the 8 sources of a mixer (dB) : p_fxGain1 ... p_fxGain1 + 7
-p_rdModDepth1 = idx; idx += 3; // depths of the 3 modulation inputs of a reader : offset (ms), speed, volume
-p_rdModAtt1 = idx; idx += 3; // attenuverters of the 3 modulation inputs of a reader [-10 ... 10]
+p_rdModDepth1 = idx; idx += 5; // depths of the 5 modulation inputs of a reader : offset (ms), speed, volume, loop speed (s/s), desync (s)
+p_rdModAtt1 = idx; idx += 5; // attenuverters of the 5 modulation inputs of a reader [-10 ... 10]
+p_rdLoopSpd = idx; idx += 1; // speed of the move of the loop of a reader (s/s) [-1 ... 1]
+p_rdDesync = idx; idx += 1; // desync of the channels of a reader (s) [-1 ... 1]
 p_fxLfoFreq = idx; idx += 1; // LFO : frequency (Hz)
 p_fxLfoAmp = idx; idx += 1; // LFO : amplitude
 p_fxLfoDC = idx; idx += 1; // LFO : offset
 p_fxLfoSpread = idx; idx += 1; // LFO : phase spread between the channels (turns)
-p_wrModDepth1 = idx; idx += 2; // depths of the 2 modulation inputs of a writer : record gain (dB), overdub (%)
-p_wrModAtt1 = idx; idx += 2; // their attenuverters [-10 ... 10]
+p_wrModDepth1 = idx; idx += 7; // depths of the 7 modulation inputs of a writer : record gain (dB), overdub (%), W-Mix (its_Wrt_Mod1)
+p_wrModAtt1 = idx; idx += 7; // their attenuverters [-10 ... 10]
+p_wrWFade = idx; idx += 5; // W-Mix : fade (s), plateau (s), wait (s), direction, desync (%) (in the order of its_Wrt_WFade ...)
 p_fxFltFreq = idx; idx += 1; // Filter : cutoff frequency (Hz)
 p_fxFltQ = idx; idx += 1; // Filter : resonance (Q)
 p_fxFltModD1 = idx; idx += 2; // depths of the 2 modulation inputs of a filter : cutoff, resonance (octaves)
@@ -1267,8 +1313,7 @@ ubMeanT = ubXcnt = ubXdur = ubXmax = 0;
 
 
 
-function
-checkUsrMods()
+function checkUsrMods()
 local (blu, i, k)
 (
     dcbUModsCnt = i = 0;
@@ -1280,8 +1325,7 @@ local (blu, i, k)
     );
 );
 
-function
-deleteUsrMods()
+function deleteUsrMods()
 local (blu, i, k)
 (
     memset(blockUsrNames, 0, dcbUModsSiz);
@@ -1861,6 +1905,18 @@ function its_Mod_Used(mp, j, okm)
     (mp[j * its_ModDist + its_Mod_Src] !== 0) && ((okm & (1 << j)) !== 0);
 );
 
+// the modulation inputs meaningful in the mode of the writer : gain and overdub ; W-Mix : gain and its 5 settings
+function its_Wrt_ModOk(wcb)
+(
+    (wcb[its_Wrt_Mode] === its_WrtMode_WMix) ? 0x7D : 3;
+);
+
+// the modulation inputs shown : 2, or 7 in W-Mix
+function its_Wrt_ModShown(wcb)
+(
+    (wcb[its_Wrt_Mode] === its_WrtMode_WMix) ? its_Wrt_ModN : 2;
+);
+
 // Saturation : the modulation inputs meaningful (drive, bias ; the order or the stretch in the modes x - sin, Chebyshev, Cheb. sum)
 function its_Sat_ModOk(fx)
 (
@@ -1953,10 +2009,109 @@ local (i, b, wn)
     );
 );
 
-// the inputs of a reader meaningful in its mode : offset (delay mode), speed (reader mode), volume (both)
+/*
+    The modules executed by @sample : readers, writers, effects, and the specialised blocks "Clear", "Input", "Output".
+    @sample runs the list its_RunX (addresses of blocks, ended by 0 ; see its_Run_Delay), in the order prepared by @gfx
+    (its_Run_Schedule) : the active modules only. @gfx builds the next list in the work list its_RunWrk, then sets
+    its_RunX to it and exchanges its_RunWrk and its_RunExe (the list executed). A module that stops, or that is deleted,
+    gets the delay -1 (its_Run_Check, its_Run_Free) : @sample no longer executes it, until the next schedule leaves it out.
+*/
+its_RunSize = RD_CNT + WR_CNT + FX_CNT + 4; // (the 3 specialised blocks and the final 0)
+its_RunExe = make_array(its_RunSize); // the list executed by @sample
+its_RunWrk = make_array(its_RunSize); // the work list of @gfx
+its_RunClr = make_array(its_Run_First); its_RunClr[its_Run_Kind] = its_RunK_Clear;
+its_RunInp = make_array(its_Run_First); its_RunInp[its_Run_Kind] = its_RunK_Input;
+its_RunOut = make_array(its_Run_First); its_RunOut[its_Run_Kind] = its_RunK_Output;
+its_RunExe[0] = its_RunClr; its_RunExe[1] = its_RunInp; its_RunExe[2] = its_RunOut; // (until the first schedule)
+its_RunX = its_RunExe;
+its_RunPubN = 1; // count of the lists published
+its_RunPubBlk = its_RunPubT = 0; // its_BlkCnt and time of the last one
+its_RunTrW = 0; // 1 : a deleted block waits for a new list (see its_Run_TrashRun)
+// the blocks deleted, freed by @gfx once @sample can no longer see them (its_Run_TrashRun)
+its_RunTrSz = 2 * its_RunSize;
+its_RunTrB = make_array(its_RunTrSz); // the block (0 : free entry)
+mm_usr_prot[mm_usr_prot_ptr] = its_RunTrB; mm_usr_prot_ptr += 1; // (the garbage collector keeps them)
+its_RunTrN = make_array(its_RunTrSz); // its_RunPubN when it was deleted (10^30 : being filled)
+memset(its_RunTrN, 10^30, its_RunTrSz);
+its_RunTrLost = 0; // trash full : blocks not freed (logged by @gfx)
+
+// 1 : the module "b" is executed by @sample (the tests of the former loops of @sample)
+function its_Run_Active(b)
+local (k)
+(
+    k = b[its_Run_Kind];
+    (k === its_RunK_Reader) ? ((b[its_Rdr_Flgs] !== 0) && (b[its_Rdr_Status] === its_RdrStat_Reading)) :
+    (k === its_RunK_Writer) ? ((b[its_Wrt_Flgs] != 0) && (b[its_Wrt_Status] == its_WrtStat_Writing)) :
+    (k === its_RunK_Effect) ? (b[its_Efx_Status] != 0) :
+    0;
+);
+
+// the own cable of a module that no longer runs is silent (several readers of the cable may follow)
+function its_Run_Silent(b)
+local (k, n)
+(
+    k = b[its_Run_Kind]; n = b[its_Run_Num];
+    ((k === its_RunK_Reader) && b[its_Rdr_OutDirty]) ? (
+        (CblRdStart[n] > 0) ? memset(smpl_tab + CblRdStart[n], 0, CblRdWidth[n]);
+        b[its_Rdr_OutDirty] = 0;
+    ) :
+    ((k === its_RunK_Effect) && b[its_Efx_OutDirty]) ? (
+        (CblFxStart[n] > 0) ? memset(smpl_tab + CblFxStart[n], 0, CblFxWidth[n]);
+        b[its_Efx_OutDirty] = 0;
+    );
+);
+
+// a module no longer active (stopped, cleared...) : @sample does not execute it until the next schedule
+function its_Run_Check(b)
+(
+    ((b > BASE_MEMORY) && (b[its_Run_Delay] >= 0) && (its_Run_Active(b) == 0)) ? (
+        b[its_Run_Delay] = -1;
+        its_Run_Silent(b);
+    );
+);
+
+/*
+    a module deleted (no longer in Readers_set, Writers_set, Effects_set) : never executed again, freed by @gfx (with the
+    work areas of an effect) once the lists that may hold it are no longer used ; may be called by @block (load)
+*/
+function its_Run_Free(b)
+local (i, ok)
+(
+    (b > BASE_MEMORY) ? (
+        b[its_Run_Kind] = its_RunK_None;
+        b[its_Run_Delay] = -1;
+        ok = i = 0;
+        while ((ok === 0) && (i < its_RunTrSz)) (
+            (atomic_setifequal(its_RunTrB[i], 0, b) === 0) ? ( its_RunTrN[i] = its_RunPubN; ok = 1; ) : (i += 1);
+        );
+        (ok === 0) ? (its_RunTrLost += 1);
+    );
+);
+
+// the specialised blocks : "Clear" (Out and the buses : several sources add into them), "Input", "Output"
+function its_Run_Clear()
+local (i, k)
+(
+    memset(smpl_tab + OUT_P, 0, CH_NB);
+    i = 0; loop(BusActN, k = BusAct[i]; memset(smpl_tab + BusStart[k], 0, BusWidth[k]); i += 1;);
+);
+function its_Run_Input()
+local (i, p)
+(
+    i = 0; p = smpl_tab + IN_P;
+    loop(chcnt, p[0] = vol_inp * spl(i); spl(i) = 0; i += 1; p += 1;);
+);
+function its_Run_Output()
+local (i, p)
+(
+    i = 0; p = smpl_tab + OUT_P;
+    loop(chcnt, spl(i) += vol_out * p[0]; i += 1; p += 1;);
+);
+
+// the inputs of a reader meaningful in its mode : offset (delay mode), speed, loop speed and desync (reader mode), volume (both)
 function its_Rdr_ModOk(rcbl)
 (
-    4 | ((rcbl[its_Rdr_Mode] === its_RdrMode_Delay) ? 1 : 2);
+    4 | ((rcbl[its_Rdr_Mode] === its_RdrMode_Delay) ? 1 : (2 | 8 | 16));
 );
 
 /*
@@ -1964,7 +2119,7 @@ function its_Rdr_ModOk(rcbl)
     its_Patch_Scan(-1) counts the writers (its_PchW) and the readers (its_PchR) of each cell, from the settings of the
     modules (On or Off), and the connections that are not valid (its_PchBad) ; its_Patch_Scan(cell) writes in #its_PchWs
     and #its_PchRs who writes and who reads the cells [cell, cell + its_PchCellW) (the text shown under the pad, for the
-    cell under the mouse) ; its_Patch_Scan(-2) computes the width asked for each bus (BusNeed, see its_Patch_Update)
+    cell under the mouse), and in its_PchLst... the menu of these modules (right clic) ; its_Patch_Scan(-2) computes the width asked for each bus (BusNeed, see its_Patch_Update)
     its_Pch_Use : the connection "code" (source or destination, kind * ITS_KMul + number), first channel "off", resolved
     in the cell "c" (0 : none, -1 : not valid), "w" channels, written (wr = 1) or read
 */
@@ -1985,6 +2140,13 @@ local (k)
         ) :
         ((its_PchCell < c + w) && (its_PchCell + its_PchCellW > c)) ? (
             sprintf(#its_PchTmp, "%s %d %s", kind, n + 1, role);
+            // the menu of the cell (right clic in the module "Patch") : the module, kind 'R', 'W' or 'E'
+            (its_PchLstN < its_PchLstMx) ? (
+                its_PchLstT[its_PchLstN] = str_getchar(kind, 0, 'cu');
+                its_PchLstM[its_PchLstN] = n;
+                sprintf(menu_Pch_Mods[ui_jmenu_items + its_PchLstN], "*-----%s %d : %s", kind, n + 1, role);
+                its_PchLstN += 1;
+            );
             wr ? (
                 (strlen(#its_PchWs) > 0) ? strcat(#its_PchWs, ", ");
                 strcat(#its_PchWs, #its_PchTmp);
@@ -2022,6 +2184,7 @@ local (i, b, w, f, n, ty, p)
     ) : (
         strcpy(#its_PchWs, "");
         strcpy(#its_PchRs, "");
+        its_PchLstN = 0;
     );
     i = 0; loop(RD_CNT,
         b = Readers_set[i];
@@ -2029,7 +2192,7 @@ local (i, b, w, f, n, ty, p)
             w = max(1, min(128, b[its_Rdr_BfChanUsed]));
             its_Pch_Use(b[its_Rdr_OutK], b[its_Rdr_OutOff],
                 its_Out_Cell(b[its_Rdr_OutK], b[its_Rdr_OutOff], w, CblRdStart[i], CblRdWidth[i]), w, 1, "Reader", i, "output");
-            its_Pch_Mods(b + its_Rdr_Mod1, 3, its_ModN_Rdr, its_Rdr_ModOk(b), "Reader", i);
+            its_Pch_Mods(b + its_Rdr_Mod1, its_Rdr_ModN, its_ModN_Rdr, its_Rdr_ModOk(b), "Reader", i);
         );
         i += 1;
     );
@@ -2041,7 +2204,7 @@ local (i, b, w, f, n, ty, p)
             (b[its_Wrt_BfChanUsed] > 0) ? (n = min(n, b[its_Wrt_BfChanUsed]));
             (n > 0) ? its_Pch_Use(b[its_Wrt_Src], b[its_Wrt_SrcOff], its_Src_Cell(b[its_Wrt_Src], b[its_Wrt_SrcOff], n), n, 0,
                 "Writer", i, "input");
-            its_Pch_Mods(b + its_Wrt_Mod1, 2, its_ModN_Wrt, 3, "Writer", i);
+            its_Pch_Mods(b + its_Wrt_Mod1, its_Wrt_ModN, its_ModN_Wrt, its_Wrt_ModOk(b), "Writer", i);
         );
         i += 1;
     );
@@ -2157,10 +2320,10 @@ local (i, b, w, wk, chg, n)
 /*
     The execution order of the effects in @sample : in each phase, an effect runs after the effects whose output it reads (their
     own cable, a bus, Out : sources and modulation inputs) ; the effects of a loop (feedback) keep the order of their numbers
-    (one sample of delay), and so do the independent ones. Computed by @gfx (its_Fx_Order, when its signature changes), put in
-    place by @block between two audio blocks (its_Fx_OrderSwitch) : its_FxOrd[0 ... FX_CNT-1], the effects that exist first.
+    (one sample of delay), and so do the independent ones. Computed by @gfx (its_Fx_Order, when its signature changes), used by
+    its_Run_Schedule : its_FxOrd[0 ... FX_CNT-1], the effects that exist first.
 */
-its_FxOrd = make_array(FX_CNT); its_FxOrdNew = make_array(FX_CNT); its_FxOrdRdy = 0;
+its_FxOrd = make_array(FX_CNT);
 i__ii = 0; loop(FX_CNT, its_FxOrd[i__ii] = i__ii; i__ii += 1;);
 its_FxLst = make_array(FX_CNT); // the effects that exist
 its_FxWK = make_array(FX_CNT); // the key of the cells each one writes (its_Fx_WKey)
@@ -2214,9 +2377,9 @@ local (i, j, b, p, g, sg)
 
 // @gfx : the order, computed again when its signature changes (the previous one taken by @block)
 function its_Fx_Order()
-local (sg, m, a, b, fa, fb, k, best, i, chg)
+local (sg, m, a, b, fa, fb, k, best, i)
 (
-    ((its_FxOrdRdy === 0) && ((sg = its_Fx_OrdSig()) !== its_FxSig)) ? (
+    ((sg = its_Fx_OrdSig()) !== its_FxSig) ? (
         its_FxSig = sg;
         m = 0; i = 0; loop(FX_CNT,
             b = Effects_set[i];
@@ -2245,7 +2408,7 @@ local (sg, m, a, b, fa, fb, k, best, i, chg)
                 its_FxCycN += 1;
             );
             its_FxDone[best] = 1;
-            its_FxOrdNew[k] = its_FxLst[best];
+            its_FxOrd[k] = its_FxLst[best];
             fb = Effects_set[its_FxLst[best]];
             (fb > BASE_MEMORY) ? (fb[its_Efx_Rank] = k); // (its rank in the order)
             k += 1;
@@ -2253,17 +2416,93 @@ local (sg, m, a, b, fa, fb, k, best, i, chg)
         );
         // then the other numbers
         memset(its_FxDone, 0, FX_CNT);
-        a = 0; loop(k, its_FxDone[its_FxOrdNew[a]] = 1; a += 1;);
-        i = 0; loop(FX_CNT, (its_FxDone[i] === 0) ? ( its_FxOrdNew[k] = i; k += 1; ); i += 1;);
-        chg = 0; i = 0; loop(FX_CNT, (its_FxOrdNew[i] !== its_FxOrd[i]) ? (chg = 1); i += 1;);
-        its_FxOrdRdy = chg;
+        a = 0; loop(k, its_FxDone[its_FxOrd[a]] = 1; a += 1;);
+        i = 0; loop(FX_CNT, (its_FxDone[i] === 0) ? ( its_FxOrd[k] = i; k += 1; ); i += 1;);
     );
 );
 
-// @block : the new order, between two audio blocks
-function its_Fx_OrderSwitch()
+// the effects of phase "ph" that are active, in the order its_FxOrd, put in the list "w" from "n" ; returns the new "n"
+function its_Run_AddFx(w, n, ph)
+local (i, b)
 (
-    its_FxOrdRdy ? ( memcpy(its_FxOrd, its_FxOrdNew, FX_CNT); its_FxOrdRdy = 0; );
+    i = 0; loop(FX_CNT,
+        b = Effects_set[its_FxOrd[i]];
+        ((b > BASE_MEMORY) && (b[its_Run_Kind] === its_RunK_Effect) && (b[its_Efx_Phase] === ph) && its_Run_Active(b)) ? (
+            w[n] = b; n += 1;
+        );
+        i += 1;
+    );
+    n;
+);
+
+/*
+    @gfx : the list of the modules executed by @sample, built again in the work list ; published (its_RunX) when it changes,
+    or when a deleted block waits for it. The work list is free once @sample uses the last list published : two audio blocks
+    later (@block and @sample run in sequence), or after 1 s without audio. Order : Clear, Input, the effects "Pre", the
+    readers, the effects "Std", the writers, the effects "Post", Output. A module started again after a stop (delay < 0) gets
+    the delay 0.
+*/
+function its_Run_Schedule()
+local (w, n, i, b, chg)
+(
+    // the own cables of the modules that no longer run (written once more after its_Run_Check)
+    i = 0; loop(RD_CNT, (((b = Readers_set[i]) > BASE_MEMORY) && (its_Run_Active(b) == 0)) ? its_Run_Silent(b); i += 1;);
+    i = 0; loop(FX_CNT, (((b = Effects_set[i]) > BASE_MEMORY) && (its_Run_Active(b) == 0)) ? its_Run_Silent(b); i += 1;);
+    ((its_BlkCnt - its_RunPubBlk >= 2) || (time_precise() - its_RunPubT > 1)) ? (
+        w = its_RunWrk; n = 0;
+        w[n] = its_RunClr; n += 1;
+        w[n] = its_RunInp; n += 1;
+        n = its_Run_AddFx(w, n, its_Efx_PhasePre);
+        i = 0; loop(RD_CNT,
+            (((b = Readers_set[i]) > BASE_MEMORY) && (b[its_Run_Kind] === its_RunK_Reader) && its_Run_Active(b)) ? ( w[n] = b; n += 1; );
+            i += 1;
+        );
+        n = its_Run_AddFx(w, n, its_Efx_PhaseStd);
+        i = 0; loop(WR_CNT,
+            (((b = Writers_set[i]) > BASE_MEMORY) && (b[its_Run_Kind] === its_RunK_Writer) && its_Run_Active(b)) ? ( w[n] = b; n += 1; );
+            i += 1;
+        );
+        n = its_Run_AddFx(w, n, its_Efx_PhasePost);
+        w[n] = its_RunOut; n += 1;
+        w[n] = 0;
+        chg = its_RunTrW;
+        i = 0; while ((chg === 0) && (i <= n)) ( (w[i] !== its_RunExe[i]) ? (chg = 1); i += 1; );
+        // the modules started again
+        i = 0; loop(n, b = w[i]; ((b[its_Run_Delay] < 0) && (b[its_Run_Kind] !== its_RunK_None)) ? (b[its_Run_Delay] = 0); i += 1;);
+        chg ? (
+            its_RunX = w;
+            its_RunWrk = its_RunExe; its_RunExe = w;
+            its_RunPubN += 1; its_RunPubBlk = its_BlkCnt; its_RunPubT = time_precise();
+        );
+    );
+);
+
+/*
+    @gfx : free the deleted blocks (its_Run_Free). A block deleted when its_RunPubN was N may be in the list N (published)
+    and in the list N+1 (built before its deletion) : it is freed once the list N+2 is the one @sample uses.
+*/
+function its_Run_TrashRun()
+local (i, b, ok)
+(
+    ok = (its_BlkCnt - its_RunPubBlk >= 2) || (time_precise() - its_RunPubT > 1);
+    its_RunTrW = 0;
+    i = 0; loop(its_RunTrSz,
+        ((b = its_RunTrB[i]) > 0) ? (
+            (ok && (its_RunTrN[i] + 2 <= its_RunPubN)) ? (
+                (b[-2] === KW_effx) ? its_Fx_WorkFree(b);
+                mSL_Dyn_Free(b);
+                its_RunTrN[i] = 10^30;
+                its_RunTrB[i] = 0;
+            ) :
+            (its_RunTrN[i] + 2 > its_RunPubN) ? (its_RunTrW = 1); // (10^30 : being filled, published later)
+        );
+        i += 1;
+    );
+    (its_RunTrLost > 0) ? (
+        sprintf(#its_RunTrM, "Error 2791 : %d deleted modules not freed (trash full)", its_RunTrLost);
+        mSL_log(SysLogBox, #its_RunTrM);
+        its_RunTrLost = 0;
+    );
 );
 
 
@@ -2273,6 +2512,10 @@ function its_Fx_OrderSwitch()
 its_PchW = make_array(SMPL_SIZE);
 its_PchR = make_array(SMPL_SIZE);
 its_PchCbl = make_array(RD_CNT + FX_CNT); // the own cables that exist (see its_Pch_Cables)
+its_PchLstMx = 32; // the modules that write or read a cell (its_Patch_Scan(cell)) : kind ('R', 'W', 'E'), number
+its_PchLstT = make_array(its_PchLstMx);
+its_PchLstM = make_array(its_PchLstMx);
+its_PchLstN = 0;
 
 mm_limit_a = make_array(2);
 mm_limit_a[0] = 'STRT'; mm_limit_a[1] = 'MEMR';
@@ -2354,6 +2597,7 @@ str_mess_prv = "Previous message";
 ctime = 0;
 pgmode = 0; // plug-in mode : merge
 vol_inp = 1; // global gain - entrée
+its_InGainLow = -60; // below (dB) : the input is shown as almost muted (Globals : the cell "Channels" in red ; Patch : the cells In)
 vol_out = 1; // global volume - sortie
 
 // Return a unique time stamp
@@ -2640,8 +2884,7 @@ local (pfid, ref, value, force, addr, res, flg, kod, size, s, ip, k, k2, pt, kid
 
 
 // Read & Compile a mSL script file
-function
-mSL_load_file_inGFX(fname)
+function mSL_load_file_inGFX(fname)
 local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_start, mSL_load_end)
 (
     mSL_load_start = gfxStartTime;
@@ -2738,8 +2981,7 @@ local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_
 
 
 
-function
-Simple_Action(src)
+function Simple_Action(src)
 local (zz, xp, mr, ccnt, ent, s1, mpt, w1, pindx, err, p, flgs, auxKmd, auxRes,
     par1, par2, par3, par4, par5, par6, par7, par8)
 (
@@ -2788,8 +3030,7 @@ local(res, kw)
 /*
     Call operations = call a JSfX func from mSL
 */
-function
-mSL_players_ops(argc, argv)
+function mSL_players_ops(argc, argv)
 local()
 (
     Undef;
@@ -2800,8 +3041,7 @@ local()
 /*
     Play operations = single operation for playing in mSL
 */
-function
-mSL_play_ops(argc, argv)
+function mSL_play_ops(argc, argv)
 local ()
 (
     Undef;
@@ -3044,6 +3284,36 @@ local (pp)
 //  Readers_set[RD_CNT]
 
 
+/*
+    the move of the loop of the reader "r" during an audio block (@block) : in reader mode, while reading, its low and high
+    limits move at its_Rdr_LoopSpd s/s (with the modulation input 3, added : the raw value of the cell), its length kept ;
+    at an end of the line, the loop starts again from the other end ; then Rd_Update computes again the position of the
+    region and its crossfade limits (a crossfade in progress keeps its positions)
+*/
+function its_Rdr_LoopMove(r)
+local (v, p, lo, hi, cs, ln)
+(
+    ((r > BASE_MEMORY) && (r[-2] === KW_read) && (r[its_Rdr_Mode] === its_RdrMode_Read)
+        && (r[its_Rdr_Status] === its_RdrStat_Reading) && (r[its_Rdr_Lcbl] > BASE_MEMORY)) ? (
+        v = r[its_Rdr_LoopSpd];
+        p = r + its_Rdr_Mod1 + 3 * its_ModDist;
+        (p[its_Mod_Src] !== 0) ? (v += smpl_tab[p[its_Mod_Cell]] * p[its_Mod_Depth] * p[its_Mod_Att]);
+        v = max(-1, min(1, v));
+        lo = r[its_Rdr_LowPosSec]; hi = r[its_Rdr_HighPosSec];
+        cs = r[its_Rdr_SmplCnt] / srate; // the length of the line (s)
+        ln = hi - lo;
+        ((v !== 0) && (ln > 0) && (ln < cs)) ? (
+            lo += v * samplesblock / srate;
+            hi = lo + ln;
+            (hi > cs) ? ( lo = hi - cs; hi = lo + ln; ) : // (at most one jump : |v| <= 1, ln < cs)
+            (lo < 0) ? ( hi = cs + lo; lo = hi - ln; );
+            r[its_Rdr_LowPosSec] = max(0, lo);
+            r[its_Rdr_HighPosSec] = min(cs, hi);
+            r[its_Rdr_StFlgs] |= its_RdrFlg_Mod; // (Rd_Update)
+        );
+    );
+);
+
 function Rd_Clear(rnum)
 local(rcb)
 (
@@ -3060,10 +3330,12 @@ local(rcb)
         rcb[its_Rdr_AbsInc] = 1;
         rcb[its_Rdr_OutVol] = 1;
         rcb[its_Rdr_OutK] = ITS_KOut * ITS_KMul; // default output : Out, channel 0
-        its_Mod_Init(rcb + its_Rdr_Mod1, 3); // modulation attenuverters
+        its_Mod_Init(rcb + its_Rdr_Mod1, its_Rdr_ModN); // modulation attenuverters
         rcb[its_Rdr_NxtPosSec] = -1;
         rcb[its_Rdr_Unuz1] = rcb[its_Rdr_Unuz2] = SECURE_BL;
         rcb[its_Rdr_Number] = rnum;
+        rcb[its_Run_Kind] = its_RunK_Reader;
+        its_Run_Check(rcb);
     );
 );
 function Rd_Make(rnum)
@@ -3088,7 +3360,8 @@ function Rd_Delete(rnum)
 local (rcb)
 (
     ((rnum >= 0) && (rnum <= RD_CNT) && ((rcb = Readers_set[rnum]) > BASE_MEMORY) && (rcb[-2] === KW_read)) ? (
-        mSL_Dyn_Free(rcb);
+        Readers_set[rnum] = 0;
+        its_Run_Free(rcb);
     );
     Readers_set[rnum] = 0;
 );
@@ -3206,6 +3479,15 @@ menu_Rdr_RegLen = make_jmenu(
 //===== WRITERS Handling
 // Writers_set[WR_CNT]
 
+// the default settings of W-Mix (fade, plateau, wait : s ; direction ; desync : %), in the order of its_Wrt_WFade ...
+its_WMix_Def = make_array(5);
+its_WMix_Def[0] = 0.05; its_WMix_Def[1] = 1; its_WMix_Def[2] = 1; its_WMix_Def[3] = 1; its_WMix_Def[4] = 0;
+function its_Wrt_WMixInit(wcb)
+(
+    memcpy(wcb + its_Wrt_WFade, its_WMix_Def, 5);
+    wcb[its_Wrt_WPhase] = its_WMix_Cycle;
+);
+
 function Wr_Clear(wnum)
 local (wcb)
 (
@@ -3217,7 +3499,10 @@ local (wcb)
         wcb[its_Wrt_Status] = its_WrtStat_Created;
         wcb[its_Wrt_Unuz1] = wcb[its_Wrt_Unuz2] = SECURE_BL;
         wcb[its_Wrt_Number] = wnum;
-        its_Mod_Init(wcb + its_Wrt_Mod1, 2); // modulation attenuverters
+        wcb[its_Run_Kind] = its_RunK_Writer;
+        its_Mod_Init(wcb + its_Wrt_Mod1, its_Wrt_ModN); // modulation attenuverters
+        its_Wrt_WMixInit(wcb);
+        its_Run_Check(wcb);
     );
 );
 // Create a writer in slot "wnum" or return the existing writer
@@ -3237,7 +3522,8 @@ function Wr_Delete(wnum)
 local (wcb)
 (
     ((wnum >= 0) && (wnum <= WR_CNT) && ((wcb = Writers_set[wnum]) > BASE_MEMORY) && (wcb[-2] === KW_writ)) ? (
-        mSL_Dyn_Free(wcb);
+        Writers_set[wnum] = 0;
+        its_Run_Free(wcb);
     );
     Writers_set[wnum] = 0;
 );
@@ -3343,14 +3629,14 @@ i__ii = 0; loop(pad_Ctl_Siz,
             i__ii+=1;
 );
 
-// Pads of the module "Patch" (see show_Patch_Pad) : the views, then the cells (8 x 16)
+// Pads of the module "Patch" (see show_Patch_Pad) : the views, then the cells (8 x 8 per page)
 pad_Pch_Siz = 8;
 pad_Patch = make_jpad(
     ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
     1, pad_Pch_Siz, pad_Pch_Siz);
 pad_Pch_Labs = pad_Patch + pad_Patch[ui_jpad_labs]; // addresses of labels
 pad_Pch_Colrs = pad_Patch + pad_Patch[ui_jpad_clrs]; // addresses of colors
-pad_PchG_NL = 16;
+pad_PchG_NL = 8;
 pad_PchG_Siz = 8 * pad_PchG_NL;
 pad_PatchG = make_jpad(
     ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
@@ -3390,6 +3676,10 @@ menu_InsAll_Action = make_jmenu(
     ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "instances-actions", 4, menu_InsAll_Action_N);
 its_InsUiSel = 0; // the instance selected in the module (0 : none)
+// the modules that write or read a cell of the module "Patch" (right clic on the cell) : its items are set by its_Pch_Use
+menu_Pch_Mods = make_jmenu(
+    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "patch-modules", "-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-");
 
 // the views of the module "Patch"
 its_PchV_In = 0;
@@ -3428,6 +3718,7 @@ local (fxcb, w0, w1, w2)
         fxcb[its_Efx_Status] = its_Efx_Unspecified;
         fxcb[its_Efx_Phase] = its_Efx_PhaseStd;
         fxcb[its_Efx_Numb] = enum;
+        fxcb[its_Run_Kind] = its_RunK_Effect;
         fxcb[its_Efx_CCnt] = 1;
         its_Mod_Init(fxcb + its_Efx_Mod1, 3); // modulation attenuverters
         fxcb[its_Efx_Unuz1] = fxcb[its_Efx_Unuz2] = SECURE_BL;
@@ -3449,19 +3740,21 @@ local (fxcb)
 (
     ((enum >= 0) && (enum <= FX_CNT) && ((fxcb = Effects_set[enum]) > BASE_MEMORY) && (fxcb[-2] === KW_effx)) ? (
         Effects_set[enum] = 0; // first : the audio thread no longer sees it
-        its_Fx_WorkFree(fxcb);
-        mSL_Dyn_Free(fxcb);
+        its_Run_Free(fxcb); // (with its work areas)
     );
     Effects_set[enum] = 0;
 );
 
 // Copy the effect "src" into "dst" (Copy, Paste) : "dst" keeps its own work areas
 function FX_Copy(dst, src)
-local (w0, w1, w2)
+local (w0, w1, w2, d, n)
 (
     w0 = dst[its_Efx_Work]; w1 = dst[its_Efx_WkNew]; w2 = dst[its_Efx_WkOld];
+    d = dst[its_Run_Delay]; n = dst[its_Run_Num];
     memcpy(dst, src, its_Efx_BlkSize);
     dst[its_Efx_Work] = w0; dst[its_Efx_WkNew] = w1; dst[its_Efx_WkOld] = w2;
+    dst[its_Run_Delay] = d; dst[its_Run_Num] = n;
+    its_Run_Check(dst);
 );
 
 // Auto Mixer : the same gain -20*log10(N) (rounded to 0.01 dB) for the N sources not null
@@ -3596,10 +3889,14 @@ menu_Efx_Harm = make_jmenu(
             "harmonics", 8, menu_Efx_Harm_N);
 
 // The modulation inputs of the modules : their names, and their first depths (when first connected)
-its_ModN_Rdr = make_array(3); its_ModN_Rdr[0] = "Offset"; its_ModN_Rdr[1] = "Speed"; its_ModN_Rdr[2] = "Volume";
-its_ModD_Rdr = make_array(3); its_ModD_Rdr[0] = 2; its_ModD_Rdr[1] = 0.1; its_ModD_Rdr[2] = 0.5;
-its_ModN_Wrt = make_array(2); its_ModN_Wrt[0] = "Gain"; its_ModN_Wrt[1] = "Overdub";
-its_ModD_Wrt = make_array(2); its_ModD_Wrt[0] = 6; its_ModD_Wrt[1] = 20;
+its_ModN_Rdr = make_array(its_Rdr_ModN); its_ModN_Rdr[0] = "Offset"; its_ModN_Rdr[1] = "Speed"; its_ModN_Rdr[2] = "Volume";
+its_ModN_Rdr[3] = "Loop spd"; its_ModN_Rdr[4] = "Desync";
+its_ModD_Rdr = make_array(its_Rdr_ModN); its_ModD_Rdr[0] = 2; its_ModD_Rdr[1] = 0.1; its_ModD_Rdr[2] = 0.5; its_ModD_Rdr[3] = 0.1;
+its_ModD_Rdr[4] = 0.01;
+its_ModN_Wrt = make_array(its_Wrt_ModN); its_ModN_Wrt[0] = "Gain"; its_ModN_Wrt[1] = "Overdub";
+its_ModN_Wrt[2] = "Fade"; its_ModN_Wrt[3] = "Plateau"; its_ModN_Wrt[4] = "Wait"; its_ModN_Wrt[5] = "Dir."; its_ModN_Wrt[6] = "Desync";
+its_ModD_Wrt = make_array(its_Wrt_ModN); its_ModD_Wrt[0] = 6; its_ModD_Wrt[1] = 20;
+its_ModD_Wrt[2] = its_ModD_Wrt[3] = its_ModD_Wrt[4] = 1; its_ModD_Wrt[5] = 0.5; its_ModD_Wrt[6] = 20;
 its_ModN_Flt = make_array(2); its_ModN_Flt[0] = "Cutoff"; its_ModN_Flt[1] = "Reso";
 its_ModD_Flt = make_array(2); its_ModD_Flt[0] = 2; its_ModD_Flt[1] = 1;
 its_ModN_Sat = make_array(3); its_ModN_Sat[0] = "Drive"; its_ModN_Sat[1] = "Bias"; its_ModN_Sat[2] = "Order"; // "Stretch" : Cheb. sum
@@ -3830,6 +4127,7 @@ local (lcbl, i, j, cb)
                 cb[its_Rdr_Tmp5] = cb[its_Rdr_Status];
                 cb[its_Rdr_Tmp6] = ts();
                     cb[its_Rdr_Status] = its_RdrStat_Created;
+                    its_Run_Check(cb);
                     cb[its_Rdr_Check] = 0;
                     cb[its_Rdr_Lcbl] = 0;
                     cb[its_Rdr_LineNb] = -1;
@@ -3844,6 +4142,7 @@ local (lcbl, i, j, cb)
                     cb[its_Wrt_Flgs] &= -1 ~ (its_WrtFlg_init | 2);
                     cb[its_Wrt_Buff_1] = 0;
                     cb[its_Wrt_Status] = its_WrtStat_Created;
+                    its_Run_Check(cb);
                     cb[its_Wrt_Check] = 0;
                     cb[its_Wrt_Lcbl] = 0;
                     cb[its_Wrt_LineNb] = -1;
@@ -4009,8 +4308,7 @@ local (rcb, mem_0_ACT, mem_0_CCR)
 (
     (Readers_set[rnum] !== 0) ? (
         // ty to delete it
-        mSL_Dyn_Free(Readers_set[rnum]);
-        Readers_set[rnum] = 0;
+        Rd_Delete(rnum);
     );
     // allocate the object uninitialized
     rcb = Rd_Make(rnum);
@@ -4025,6 +4323,7 @@ local (rcb, mem_0_ACT, mem_0_CCR)
                 rcb[its_Rdr_Tmp5] = rcb[its_Rdr_Status];
                 rcb[its_Rdr_Tmp6] = ts();
         rcb[its_Rdr_Status] = its_RdrStat_Created;
+        its_Run_Check(rcb);
         rcb[its_Rdr_Number] = rnum;
         rcb[its_Rdr_InAction] = 510;
     );
@@ -4173,6 +4472,7 @@ local(reader, lcbl, err, w)
             // Remove the line from buffer
             reader[its_Rdr_Flgs] = 0;
             reader[its_Rdr_Status] = its_RdrStat_Created; // marks inactive
+            its_Run_Check(reader);
             reader[its_Rdr_Relpos] = 0;
             reader[its_Rdr_LineNb] = -1;
             reader[its_Rdr_Lcbl] = 0;
@@ -4203,6 +4503,7 @@ local(reader, lcbl, err, w)
             reader[its_Rdr_NxtPosSec] = -1;
             reader[its_Rdr_XFade_mSec] = 10;  // Set X-fade to 10 ms.
             reader[its_Rdr_Status] = max(reader[its_Rdr_Status], its_RdrStat_Ready);
+            its_Run_Check(reader);
             reader[its_Rdr_SpeedPrev] = reader[its_Rdr_RegSizeSecPrv]
                 = reader[its_Rdr_RegPosSecPrv] = reader[its_Rdr_XFade_mSecPrv] = -1;
             Rd_Update(rdrn); // Update other fields
@@ -4238,6 +4539,7 @@ local(reader, wcbl, lcbl, err)
         reader[its_Rdr_WrBPtr] = 0;
         reader[its_Rdr_LineNb] = -1; reader[its_Rdr_Lcbl] = 0; // no more line either
         reader[its_Rdr_Status] = its_RdrStat_Created;
+        its_Run_Check(reader);
     ) : (
         reader[its_Rdr_Tmp1] = 200 + wrnb;
         reader[its_Rdr_Tmp2] = ts();
@@ -4266,6 +4568,7 @@ local(reader, wcbl, lcbl, err)
                 reader[its_Rdr_Tmp6] = ts();
             );
             reader[its_Rdr_Status] = max(its_RdrStat_Ready, reader[its_Rdr_Status]);
+            its_Run_Check(reader);
             reader[its_Rdr_Tmp1] = 400 + wrnb;
             reader[its_Rdr_Tmp2] = ts();
             (reader[its_Rdr_WrSrc] === wrnb - 1) ? (
@@ -4284,6 +4587,7 @@ local(reader, wcbl, lcbl, err)
                 reader[its_Rdr_Tmp6] = ts();
             );
             reader[its_Rdr_Status] = its_RdrStat_Created;
+            its_Run_Check(reader);
             reader[its_Rdr_Tmp1] = 300 + wrnb;
             reader[its_Rdr_Tmp2] = ts();
             err = 2604; // erreur : writer undefined, or without a line
@@ -4348,6 +4652,7 @@ local (reader, err, w)
                 err = Rd_Set_Line(rdrn, reader[its_Rdr_LineNb] + 1);
             ) : (
                 reader[its_Rdr_Status] = its_RdrStat_Created;
+                its_Run_Check(reader);
                 reader[its_Rdr_Check] = 0;
             );
         ) : (
@@ -4452,6 +4757,7 @@ local (reader, md, rdst, err, lcbl, wcbl, ns)
             ns = its_RdrStat_Created;
         );
         reader[its_Rdr_Status] = ns;
+        its_Run_Check(reader);
     );
     err;
 );
@@ -4510,6 +4816,7 @@ local (ty, sp, mdr)
 function Rd_Do_Stop(reader, nbr)
 (
     reader[its_Rdr_Status] = its_RdrStat_Ready;
+    its_Run_Check(reader);
     reader[its_Rdr_LoopType] = its_RdrLoopTypeOnce;
     reader[its_Rdr_Abspos] = (reader[its_Rdr_Speed] >= 0) ? reader[its_Rdr_Start] : reader[its_Rdr_Last];
 );
@@ -4537,6 +4844,7 @@ local (reader, err)
                     memcpy(Readers_set[rdrn], Readers_set[RD_CNT], its_Rdr_BlkSize);
                     reader[its_Rdr_Number] = rdrn; // the copy keeps the number of its source
                     reader[its_Rdr_Check] = 0;
+                    its_Run_Check(reader);
                 );
             );
         ) : (
@@ -4559,6 +4867,7 @@ local (reader, err)
             memcpy(Readers_set[rdrn], Readers_set[RD_CNT], its_Rdr_BlkSize);
             reader[its_Rdr_Number] = rdrn; // the copy keeps the number of its source
             reader[its_Rdr_Check] = 0;
+            its_Run_Check(reader);
         );
     ) :
     (act === its_RdrAct_Clear) ? (
@@ -4619,6 +4928,7 @@ local(writer, lcbl)
         writer[its_Wrt_LineNb] = -1;
         writer[its_Wrt_Lcbl] = writer[its_Wrt_Buff_1] = 0;
         writer[its_Wrt_Status] = its_WrtStat_Created;
+        its_Run_Check(writer);
         writer[its_Wrt_Check] = -1;
         Wr_Followers(writer, 0); // they will find that the writer has no line
         0;
@@ -4642,6 +4952,7 @@ local(writer, lcbl)
         // default source : In, channel 0
         (writer[its_Wrt_Src] === 0) ? (writer[its_Wrt_Src] = ITS_KIn * ITS_KMul);
         writer[its_Wrt_Status] = max(writer[its_Wrt_Status], its_WrtStat_Ready);
+        its_Run_Check(writer);
         Wr_Followers(writer, 0); // the delay readers take the new line
         0;
     );
@@ -4669,6 +4980,8 @@ local(writer, lcbl)
             writer[its_Wrt_Flgs] &= 0xFFFD;
         );
         writer[its_Wrt_Status] = st;
+        its_Run_Check(writer);
+        st;
     );
 );
 
@@ -4776,14 +5089,14 @@ local (cb, lcbl, cpy)
         (Writers_set[wnum] !== 0) ? (
             // ty to delete it
             Wr_Followers(Writers_set[wnum], 1); // the delay readers no longer follow the freed block
-            mSL_Dyn_Free(Writers_set[wnum]);
-            Writers_set[wnum] = 0;
+            Wr_Delete(wnum);
         );
         // allocate the object uninitialized
         cb = Wr_Make(wnum);
         ((cb !== 0) && (cb[-2] === KW_writ)) ? (
             // Set as unspecified
             cb[its_Wrt_Status] = its_WrtStat_Created;
+            its_Run_Check(cb);
             cb[its_Wrt_InAction] = 520;
             cb[its_Wrt_Number] = wnum;
             str_mess = "Create writer configuration";
@@ -4824,6 +5137,7 @@ local (cb, lcbl, cpy)
         ) :
         (act === its_WrtAct_Rewind) ? (
             cb[its_Wrt_Abspos] = cb[its_Wrt_Start];
+            cb[its_Wrt_WPhase] = its_WMix_Cycle; // W-Mix : a new cycle
             str_mess = "Rewind writer";
         ) :
         (act === its_WrtAct_Show) ? (
@@ -5135,8 +5449,7 @@ mkModuleMenu();
         module= a "module" number
         kit = the suboperation number
 */
-function
-mSL_GUI_Generic(opr, bNumb, module, kit)
+function mSL_GUI_Generic(opr, bNumb, module, kit)
 local (p, i, j, u, v, flg, tbN, mblk, a, k)
 (
     flg = 1;
@@ -5697,6 +6010,7 @@ local (bfr, flg, ds, slRdModePrev, zz)
             ((slRdWref !== 0)) ? (
                 slider_show(slRdOffs,gui_show_sliders);
                 Currreader[its_Rdr_Flgs] = flg = flg |its_RdrFlg_init;
+                its_Run_Check(Currreader);
                 slRStatus = max(its_RdrStat_Ready, slRStatus);
             ) : (
                 slider_show(slRdOffs,0);
@@ -5718,6 +6032,7 @@ local (bfr, flg, ds, slRdModePrev, zz)
             Currreader[its_Rdr_Tmp6] = ts();
     );
         Currreader[its_Rdr_Status] = slRStatusPrv = slRStatus;
+        its_Run_Check(Currreader);
     );
 
 
@@ -5864,6 +6179,7 @@ local (i, cbl)
             cbl = Readers_set[i];
             ((cbl > BASE_MEMORY) && (cbl[-2] === KW_read) && (cbl[its_Rdr_Status] > its_RdrStat_Ready)) ? (
                 cbl[its_Rdr_Status] = its_RdrStat_Ready;
+                its_Run_Check(cbl);
             );
             i+=1;
         );
@@ -5872,6 +6188,7 @@ local (i, cbl)
             cbl = Writers_set[i];
             ((cbl > BASE_MEMORY) && (cbl[-2] === KW_writ) && (cbl[its_Wrt_Status] > its_WrtStat_Ready)) ? (
                 cbl[its_Wrt_Status] = its_WrtStat_Ready;
+                its_Run_Check(cbl);
             );
             i+=1;
         );
@@ -5882,6 +6199,7 @@ local (i, cbl)
             cbl = Readers_set[i];
             ((cbl > BASE_MEMORY) && (cbl[-2] === KW_read) && (cbl[its_Rdr_Status] > its_RdrStat_Paused)) ? (
                 cbl[its_Rdr_Status] = its_RdrStat_Paused;
+                its_Run_Check(cbl);
             );
             i+=1;
         );
@@ -5890,6 +6208,7 @@ local (i, cbl)
             cbl = Writers_set[i];
             ((cbl > BASE_MEMORY) && (cbl[-2] === KW_writ) && (cbl[its_Wrt_Status] > its_WrtStat_Paused)) ? (
                 cbl[its_Wrt_Status] = its_WrtStat_Paused;
+                its_Run_Check(cbl);
             );
             i+=1;
         );
@@ -6150,6 +6469,7 @@ sprintf(#A021, "st = %d prvst = %d", slRStatus, slRStatusPrv);
                     Currreader[its_Rdr_Tmp6] = ts();
             );
             Currreader[its_Rdr_Status] = slRStatusPrv = slRStatus;
+            its_Run_Check(Currreader);
 sprintf(#A011, "Rd.set line %d {%d, %d} st=%d", slReader, Currreader[its_Rdr_LineNb], Currreader[its_Rdr_Lcbl], slRStatus);
             dbg_show_2(Currreader,200);
         );
@@ -6311,6 +6631,7 @@ sprintf(#A018, "rdr: %d, wref : %d, wrefP : %d  [%d]", slReader, slRdWref, slRdW
                 flg = Currwriter[its_Wrt_Flgs];
                 flg &= (1 - its_WrtFlg_init);
                 Currwriter[its_Wrt_Flgs] = flg;
+                its_Run_Check(Currwriter);
                 Currwriter[its_Wrt_LineNb] = -1;
                 Currwriter[its_Wrt_Lcbl] = 0;
                 slDrLinePrv = slWDlLine = 0; //none
@@ -6330,6 +6651,7 @@ sprintf(#A016,"Wrt. %d  st=%d/%d (%d : %d)", slWriter, slWrStatus, Currwriter[it
                 slWrStatus = max(slWrStatus, its_WrtStat_Ready);
             );
             Currwriter[its_Wrt_Status] = slWrStatusPrv = slWrStatus;
+            its_Run_Check(Currwriter);
 sprintf(#A012,"Wr.set-line %d {%d  %d} st=%d", slWriter, Currwriter[its_Wrt_LineNb], Currwriter[its_Wrt_Lcbl], slWrStatus);
         );
         wrupdt = 1;
@@ -6439,8 +6761,7 @@ sprintf(#A012,"Wr.set-line %d {%d  %d} st=%d", slWriter, Currwriter[its_Wrt_Line
 /*
 === PARAMETERS DCL ===
 */
-function
-initAllParameters()
+function initAllParameters()
 local(ix)
 (
     // do some default init. We keep the name uninitialized.
@@ -6456,8 +6777,7 @@ local(ix)
     parDclMode = 0xf;
 );
 
-function
-dclAllParameters()
+function dclAllParameters()
 local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
 (
     paramBlock[pp_Name] = "(unused)"; // this "locks" entry 0.
@@ -6500,6 +6820,14 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_rdModAtt1, "Offset atten.",  "RdAttOff",  i_UB|i_SP, "%.3f", "Offset atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_rdModAtt1+1, "Speed atten.",  "RdAttSpd",  i_UB|i_SP, "%.3f", "Speed atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_rdModAtt1+2, "Volume atten.",  "RdAttVol",  i_UB|i_SP, "%.3f", "Volume atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_rdModDepth1+3, "Loop speed depth",  "RdModLsp",  i_UB|i_SP, "%.4f s/s", "Loop speed depth: %.4f s/s",   0,   2,    0.1,  0.0001, 0);
+    parDcl(p_rdModAtt1+3, "Loop speed atten.",  "RdAttLsp",  i_UB|i_SP, "%.3f", "Loop speed atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    // symmetric curve (slope 1000 + 7, see uix_slider_value_to_ratio) : fine near 0 (about 0.03 s/s at a quarter of the slider)
+    parDcl(p_rdLoopSpd, "Loop speed",  "RdLoopSp",  i_UB|i_SP, "%.4f s/s", "Loop speed: %.4f s/s",   -1,   1,    0,  0.0001, 1007);
+    // symmetric curve, finer (slope 1000 + 9) : about 0.6 ms at a tenth of a half, 11 ms at a quarter of the slider
+    parDcl(p_rdDesync, "Desync",  "RdDesync",  i_UB|i_SP, "%.5f s", "Desync: %.5f s",   -1,   1,    0,  0.00001, 1009);
+    parDcl(p_rdModDepth1+4, "Desync depth",  "RdModDsy",  i_UB|i_SP, "%.5f s", "Desync depth: %.5f s",   0,   1,    0.01,  0.00001, 9); // (exponential)
+    parDcl(p_rdModAtt1+4, "Desync atten.",  "RdAttDsy",  i_UB|i_SP, "%.3f", "Desync atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_fxLfoFreq, "LFO Frequency",  "LfoFreq",  i_UB|i_SP, "%.3f Hz", "LFO Frequency: %.3f Hz",   0.001,   10000,    1,  0.001, 14); // exponential : about 9 Hz at the middle
     parDcl(p_fxLfoAmp, "LFO Amplitude",  "LfoAmp",  i_UB|i_SP, "%.3f", "LFO Amplitude: %.3f",   0,   10,    1,  0.001, 4.5); // exponential : 1 near the middle
     parDcl(p_fxLfoDC, "LFO Offset",  "LfoDC",  i_UB|i_SP, "%.3f", "LFO Offset: %.3f",   -10,   10,    0,  0.001, 0);
@@ -6508,6 +6836,22 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_wrModDepth1+1, "Overdub depth",  "WrModOv",  i_UB|i_SP, "%.1f %%", "Overdub depth: %.1f %%",   0,   150,    20,  0.1, 0);
     parDcl(p_wrModAtt1, "Gain atten.",  "WrAttGn",  i_UB|i_SP, "%.3f", "Gain atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_wrModAtt1+1, "Overdub atten.",  "WrAttOv",  i_UB|i_SP, "%.3f", "Overdub atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    // W-Mix : exponential (slope 9 : about 0.1 s in the middle of the fade, 1 s in the middle of the plateau and of the wait)
+    parDcl(p_wrWFade, "Fade",  "WrWFade",  i_UB|i_SP, "%.4f s", "Fade: %.4f s",   0.001,   10,    0.05,  0.0001, 9);
+    parDcl(p_wrWFade+1, "Plateau",  "WrWPlat",  i_UB|i_SP, "%.3f s", "Plateau: %.3f s",   0,   100,    1,  0.001, 9);
+    parDcl(p_wrWFade+2, "Wait",  "WrWWait",  i_UB|i_SP, "%.3f s", "Wait: %.3f s",   0,   100,    1,  0.001, 9);
+    parDcl(p_wrWFade+3, "Direction",  "WrWDir",  i_UB|i_SP, "%.3f", "Direction: %.3f",   -1,   1,    1,  0.001, 0);
+    parDcl(p_wrWFade+4, "Desync",  "WrWDsync",  i_UB|i_SP, "%.1f %%", "Desync: %.1f %%",   0,   100,    0,  0.1, 0);
+    parDcl(p_wrModDepth1+2, "Fade depth",  "WrModFd",  i_UB|i_SP, "%.3f oct", "Fade depth: %.3f oct",   0,   8,    1,  0.001, 0);
+    parDcl(p_wrModDepth1+3, "Plateau depth",  "WrModPl",  i_UB|i_SP, "%.3f oct", "Plateau depth: %.3f oct",   0,   8,    1,  0.001, 0);
+    parDcl(p_wrModDepth1+4, "Wait depth",  "WrModWt",  i_UB|i_SP, "%.3f oct", "Wait depth: %.3f oct",   0,   8,    1,  0.001, 0);
+    parDcl(p_wrModDepth1+5, "Direction depth",  "WrModDr",  i_UB|i_SP, "%.3f", "Direction depth: %.3f",   0,   2,    0.5,  0.001, 0);
+    parDcl(p_wrModDepth1+6, "Desync depth",  "WrModDs",  i_UB|i_SP, "%.1f %%", "Desync depth: %.1f %%",   0,   100,    20,  0.1, 0);
+    parDcl(p_wrModAtt1+2, "Fade atten.",  "WrAttFd",  i_UB|i_SP, "%.3f", "Fade atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_wrModAtt1+3, "Plateau atten.",  "WrAttPl",  i_UB|i_SP, "%.3f", "Plateau atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_wrModAtt1+4, "Wait atten.",  "WrAttWt",  i_UB|i_SP, "%.3f", "Wait atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_wrModAtt1+5, "Direction atten.",  "WrAttDr",  i_UB|i_SP, "%.3f", "Direction atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_wrModAtt1+6, "Desync atten.",  "WrAttDs",  i_UB|i_SP, "%.3f", "Desync atten.: %.3f",   -10,   10,    1,  0.001, 0);
     // exponential : about 600 Hz in the middle of the slider
     parDcl(p_fxFltFreq, "Cutoff",  "FltFreq",  i_UB|i_SP, "%.1f Hz", "Cutoff: %.1f Hz",   1,   20000,    1000,  0.1, 7);
     parDcl(p_fxFltQ, "Resonance",  "FltQ",  i_UB|i_SP, "%.3f", "Resonance (Q): %.3f",   0.1,   1000,    0.707,  0.001, 9);
@@ -6647,9 +6991,18 @@ local (FFrRate, FlCC, Fhandle, Fformat, FFSize, cbfsiz, bread, ptbuf, bcnt, addb
 /*
     Execute a read - the reader is defined and in status "reading"
 */
+// the position "x" of the reader "r", brought back in its line [Start ... Last) (the desync of a channel can be far)
+function its_Rd_Wrap(r, x)
+local (st, n)
+(
+    st = r[its_Rdr_Start]; n = r[its_Rdr_SmplCnt];
+    ((x < st) || (x >= st + n)) ? (x -= n * floor((x - st) / n));
+    x;
+);
+
 function exec_reader(reader, nbr)
 local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc, loc_aux, SP, A, A_aux, playing, l_valid, lax_valid, wps, oc,
-        mp, c, inc, dm, off)
+        mp, c, inc, dm, off, ds, lc)
 (
     its_RdrErrXe = (reader[its_Rdr_Check] !== BLOCK_CHECK);
     (its_RdrErrXe) ? (
@@ -6728,7 +7081,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                 reader[its_Rdr_Error] = 2711; // erreur : the output (own cable or bus) is not valid
             );
             // the modulation inputs (1 channel each) : an error is not fatal (no modulation)
-            its_Mod_Resolve(reader + its_Rdr_Mod1, 3) ? (
+            its_Mod_Resolve(reader + its_Rdr_Mod1, its_Rdr_ModN) ? (
                 reader[its_Rdr_Check] = 0; // checked again at the next sample
                 reader[its_Rdr_Error] = 2713; // erreur : a modulation input is not valid
             );
@@ -6763,6 +7116,8 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
             // Mode reader
             inc = (reader[its_Rdr_AbsInc] + its_Mod_Val(reader + its_Rdr_Mod1 + its_ModDist)) * reader[its_Rdr_AdjInc]; // speed, modulated
             inc = max(-256, min(256, inc)); // the reads stay in the guard samples (B_FADESIZ + BF_LIM)
+            // the desync (samples, modulated) : the channel s reads at loc - s * ds, in the line (see its_Rd_Wrap)
+            ds = (reader[its_Rdr_Desync] + its_Mod_Val(reader + its_Rdr_Mod1 + 4 * its_ModDist)) * srate;
             loc = reader[its_Rdr_Abspos]; // loc is the index to read
             it = (loc === floor(loc)); // true if reading at integer positions
             ty = reader[its_Rdr_LoopType];
@@ -6785,6 +7140,11 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                         (bfr === 0) ? (
                             val = val_aux = 0;
                         ) : (
+                            (ds !== 0) ? (
+                                // desync : each channel at its own position
+                                l_valid ? (lc = its_Rd_Wrap(reader, loc - s * ds); val = (lc === floor(lc)) ? bfr[lc] : inter_cube(bfr, lc));
+                                lax_valid ? (lc = its_Rd_Wrap(reader, loc_aux - s * ds); val_aux = (lc === floor(lc)) ? bfr[lc] : inter_cube(bfr, lc));
+                            ) :
                             (it) ? (
                                 // Read as integers
                                 l_valid ? (val = bfr[loc]);
@@ -6823,6 +7183,11 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                         (bfr === 0) ? (
                             val = 0;
                         ) : (
+                            (ds !== 0) ? (
+                                // desync : each channel at its own position
+                                lc = its_Rd_Wrap(reader, loc - s * ds);
+                                val = (lc === floor(lc)) ? bfr[lc] : inter_cube(bfr, lc);
+                            ) :
                             (it) ? (
                                 // Read as integers
                                 val = bfr[loc];
@@ -7026,8 +7391,10 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                 );
                 (reader[its_Rdr_Lcbl] > BASE_MEMORY) ? (
                     reader[its_Rdr_Status] = its_RdrStat_Ready;
+                    its_Run_Check(reader);
                 ) : (
                     reader[its_Rdr_Status] = its_RdrStat_Created;
+                    its_Run_Check(reader);
                 );
                 dbg_show_3(reader, 310);
             );
@@ -7035,6 +7402,92 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
         );
         rdupdt = 1;
     );
+);
+
+/*
+    W-Mix : the setting "i" of the writer "w" (0 fade, 1 plateau, 2 wait : s ; 3 direction ; 4 desync : %) with its modulation
+    (input 2 + i), within its range ; the durations are modulated in octaves (a duration 0 stays 0), the direction and the
+    desync are added ; taken once per phase : the raw value of the cell (the control cells are not smoothed, see its_Mod_Val)
+*/
+function its_WMix_Par(w, i)
+local (p, x, m)
+(
+    x = w[its_Wrt_WFade + i];
+    p = w + its_Wrt_Mod1 + (2 + i) * its_ModDist;
+    (p[its_Mod_Src] !== 0) ? (
+        m = smpl_tab[p[its_Mod_Cell]] * p[its_Mod_Depth] * p[its_Mod_Att];
+        x = (i < 3) ? x * 2^max(-30, min(30, m)) : x + m;
+    );
+    (i === 0) ? max(0.001, min(10, x)) : (i < 3) ? max(0, min(100, x)) : (i === 3) ? max(-1, min(1, x)) : max(0, min(100, x));
+);
+
+/*
+    W-Mix : one sample of the writer "w" (see exec_writer : its line "lcbl", channels [f ... f+n-1] of the line, input cells
+    [ic ... ic+n-1], record gain "vol") ; a cycle (its_Wrt_WPhase) :
+    1) its start : a random position in the line, the direction (1 with the probability (1 + dir) / 2, else -1), the offsets of
+       the channels (desync d % : channel 0 at the position, each other one at a random offset in [-d/2, d/2) % of the line :
+       100 %, anywhere), the duration of the fades (the same for the fade-in and the fade-out)
+    2) fade-in : line = (1 - g) * line + g * input, g from 0 to 1 ; plateau : the input replaces the line ; fade-out : g from
+       1 to 0 ; the heads move at the speed 1 or -1, and wrap around the line
+    3) wait : the input is ignored ; then a new cycle (a plateau or a wait of 0 is skipped)
+    each setting is taken at the start of its phase ; its_Wrt_Abspos is the head of the channel 0
+*/
+function its_Wrt_WMix(w, lcbl, f, n, ic, vol)
+local (ph, cnt, len, st, lst, sz, k, s, o, bp, p, g, x, d)
+(
+    st = w[its_Wrt_Start]; lst = w[its_Wrt_Last]; sz = lst - st;
+    ph = w[its_Wrt_WPhase];
+    k = w[its_Wrt_Abspos];
+    p = w + its_Wrt_WOffs;
+    ((ph >= its_WMix_FadeIn) && (ph <= its_WMix_Wait)) ? (
+        cnt = w[its_Wrt_WCnt];
+    ) : (
+        // a new cycle
+        w[its_Wrt_WLen] = cnt = max(1, floor(its_WMix_Par(w, 0) * srate + 0.5));
+        w[its_Wrt_WInc] = (rand(1) < 0.5 * (1 + its_WMix_Par(w, 3))) ? 1 : -1;
+        k = st + min(sz - 1, floor(rand(sz)));
+        d = 0.01 * its_WMix_Par(w, 4);
+        p[0] = 0;
+        s = 1; loop(min(n, 128) - 1,
+            o = floor(d * (rand(1) - 0.5) * sz);
+            p[s] = (o < 0) ? o + sz : min(sz - 1, o);
+            s += 1;
+        );
+        ph = its_WMix_FadeIn;
+    );
+    len = w[its_Wrt_WLen];
+    (ph !== its_WMix_Wait) ? (
+        g = (ph === its_WMix_FadeIn) ? (len - cnt + 0.5) / len : (ph === its_WMix_FadeOut) ? (cnt - 0.5) / len : 1;
+        s = 0; loop(n,
+            // Allows null pointers as output buffers
+            ((bp = lcbl[its_Lin_BF1ST + f + s]) !== 0) ? (
+                o = k + ((s < 128) ? p[s] : 0);
+                (o >= lst) ? (o -= sz);
+                x = o[bp];
+                x += g * (vol * smpl_tab[ic + s] - x);
+                !(abs(x) < its_FinMax) ? (x = 0; its_NaNCnt += 1;);
+                o[bp] = x;
+                // when at start/end of buffer, duplicate samples in guard area
+                (o < st + BF_LIM) ? (o[bp + sz] = x) : (o > lst - BF_LIM) ? (o[bp - sz] = x);
+            );
+            s += 1;
+        );
+        k += w[its_Wrt_WInc];
+        (k >= lst) ? (k = st) : (k < st) ? (k = lst - 1);
+        w[its_Wrt_Abspos] = k;
+    );
+    // the next phase
+    cnt -= 1;
+    (cnt <= 0) ? (
+        (ph === its_WMix_FadeIn) ? ( ph = its_WMix_Plateau; cnt = floor(its_WMix_Par(w, 1) * srate + 0.5); ) :
+        (ph === its_WMix_Plateau) ? ( ph = its_WMix_FadeOut; cnt = len; ) :
+        (ph === its_WMix_FadeOut) ? ( ph = its_WMix_Wait; cnt = floor(its_WMix_Par(w, 2) * srate + 0.5); ) :
+        ( ph = its_WMix_Cycle; );
+        ((ph === its_WMix_Plateau) && (cnt <= 0)) ? ( ph = its_WMix_FadeOut; cnt = len; );
+        ((ph === its_WMix_Wait) && (cnt <= 0)) ? ( ph = its_WMix_Cycle; );
+    );
+    w[its_Wrt_WPhase] = ph;
+    w[its_Wrt_WCnt] = cnt;
 );
 
 function exec_writer(writer, nbr)
@@ -7087,7 +7540,7 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md, ic, mp, lg)
                 );
             );
             // the modulation inputs : an error is not fatal (no modulation)
-            its_Mod_Resolve(writer + its_Wrt_Mod1, 2) ? (
+            its_Mod_Resolve(writer + its_Wrt_Mod1, its_Wrt_ModN) ? (
                 writer[its_Wrt_Check] = 0; // checked again at the next sample
                 writer[its_Wrt_Error] = 2714; // erreur : a modulation input is not valid
             );
@@ -7111,6 +7564,7 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md, ic, mp, lg)
         f = max(0, min(writer[its_Wrt_ChNbr] - 1, writer[its_Wrt_Bf1stChan])); // first channel
         n = writer[its_Wrt_ChNbr] - f;
         (writer[its_Wrt_BfChanUsed] > 0) ? (n = min(n, writer[its_Wrt_BfChanUsed])); // 0 : all
+        (md === its_WrtMode_WMix) ? its_Wrt_WMix(writer, lcbl, f, n, ic, vol) : (
         s = 0; loop(n,
             // Allows null pointers as output buffers
             ((bp = lcbl[its_Lin_BF1ST + f + s]) !== 0) ? (
@@ -7147,6 +7601,7 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md, ic, mp, lg)
         k += 1;
         (k >= writer[its_Wrt_Last]) ? (k = writer[its_Wrt_Start];);
         writer[its_Wrt_Abspos] = k;
+        ); // (X-fade, Sum)
         /*
         Trace_X_its_Wrt_1_First = writer[its_Wrt_Start];
         Trace_X_its_Wrt_2_Abspos = k;
@@ -7161,8 +7616,10 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md, ic, mp, lg)
         ((writer > BASE_MEMORY) && (writer[-2] === KW_writ)) ? (
             ((writer[its_Wrt_Lcbl] > BASE_MEMORY) && (writer[its_Wrt_Src] != 0)) ? (
                 writer[its_Wrt_Status] = its_WrtStat_Ready;
+                its_Run_Check(writer);
             ) : (
                 writer[its_Wrt_Status] = its_WrtStat_Created;
+                its_Run_Check(writer);
             );
             dbg_show_4(writer, 730);
             writer[its_Wrt_Error] = max(0, its_WrtErrXe);
@@ -8231,26 +8688,31 @@ its_TbM_SetEnd = its_TbM_Base - 6;
 its_TbM_Chg = its_TbM_Base - 7; // the value which follows comes from a changed argument (Set)
 
 // the keys of the writers and of the readers : their symbol, their name ; values (enumerations : the symbol of each value)
-its_TbWNk = 8;
+its_TbWNk = 13;
 its_TbWKey = make_array(its_TbWNk); its_TbWNam = make_array(its_TbWNk);
-its_TbRNk = 10;
+its_TbRNk = 12;
 its_TbRKey = make_array(its_TbRNk); its_TbRNam = make_array(its_TbRNk);
 function its_TbKey(keys, nams, i, name) ( nams[i] = name; keys[i] = its_TK(name); );
 its_TbKey(its_TbWKey, its_TbWNam, 0, "line"); its_TbKey(its_TbWKey, its_TbWNam, 1, "source");
 its_TbKey(its_TbWKey, its_TbWNam, 2, "status"); its_TbKey(its_TbWKey, its_TbWNam, 3, "gain");
 its_TbKey(its_TbWKey, its_TbWNam, 4, "overdub"); its_TbKey(its_TbWKey, its_TbWNam, 5, "mode");
 its_TbKey(its_TbWKey, its_TbWNam, 6, "first"); its_TbKey(its_TbWKey, its_TbWNam, 7, "used");
+its_TbKey(its_TbWKey, its_TbWNam, 8, "fade"); its_TbKey(its_TbWKey, its_TbWNam, 9, "plateau"); // W-Mix (its_Wrt_WFade ...)
+its_TbKey(its_TbWKey, its_TbWNam, 10, "wait"); its_TbKey(its_TbWKey, its_TbWNam, 11, "direction");
+its_TbKey(its_TbWKey, its_TbWNam, 12, "desync");
 its_TbKey(its_TbRKey, its_TbRNam, 0, "line"); its_TbKey(its_TbRKey, its_TbRNam, 1, "writer");
 its_TbKey(its_TbRKey, its_TbRNam, 2, "delay"); its_TbKey(its_TbRKey, its_TbRNam, 3, "speed");
 its_TbKey(its_TbRKey, its_TbRNam, 4, "status"); its_TbKey(its_TbRKey, its_TbRNam, 5, "out");
 its_TbKey(its_TbRKey, its_TbRNam, 6, "vol"); its_TbKey(its_TbRKey, its_TbRNam, 7, "first");
 its_TbKey(its_TbRKey, its_TbRNam, 8, "used"); its_TbKey(its_TbRKey, its_TbRNam, 9, "loop");
+its_TbKey(its_TbRKey, its_TbRNam, 10, "loopspeed"); its_TbKey(its_TbRKey, its_TbRNam, 11, "desync");
 // statuses (its_WrtStat_..., its_RdrStat_... : 0 ... 4), modes of the writer, loops of the reader (its_RdrLoopType...)
 its_TbWSt = make_array(5); its_TbRSt = make_array(5);
 its_TbWSt[0] = its_TbRSt[0] = its_TK_Undefined; its_TbWSt[1] = its_TbRSt[1] = its_TK("Created");
 its_TbWSt[2] = its_TbRSt[2] = its_TK_Ready; its_TbWSt[3] = its_TbRSt[3] = its_TK("Paused");
 its_TbWSt[4] = its_TK("Writing"); its_TbRSt[4] = its_TK("Reading");
-its_TbWMd = make_array(2); its_TbWMd[its_WrtMode_XFade] = mSL_symbol("XFade"); its_TbWMd[its_WrtMode_Sum] = mSL_symbol("Sum");
+its_TbWMd = make_array(its_WrtModeCnt); its_TbWMd[its_WrtMode_XFade] = mSL_symbol("XFade"); its_TbWMd[its_WrtMode_Sum] = mSL_symbol("Sum");
+its_TbWMd[its_WrtMode_WMix] = mSL_symbol("WMix");
 its_TbRLp = make_array(6);
 i__ii = 0; loop(6, its_TbRLp[i__ii] = mSL_symbol(menu_Rdr_Loop_N[i__ii]); i__ii += 1;);
 
@@ -9103,9 +9565,13 @@ function its_Tb_Key(ty, w) local(keys, nk, ki, i, nm)
             (ki === 2) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbWSt, 5); ) :
             (ki === 3) ? ( its_Tb_v1 = its_Tb_Num(nm, -120, 40); ) :
             (ki === 4) ? ( its_Tb_v1 = its_Tb_Num(nm, -150, 150); ) :
-            (ki === 5) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbWMd, 2); ) :
+            (ki === 5) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbWMd, its_WrtModeCnt); ) :
             (ki === 6) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 127); ) :
-            ( its_Tb_v1 = its_Tb_Int(nm, 0, 128); );
+            (ki === 7) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 128); ) :
+            (ki === 8) ? ( its_Tb_v1 = its_Tb_Num(nm, 0.001, 10); ) :
+            ((ki === 9) || (ki === 10)) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 100); ) :
+            (ki === 11) ? ( its_Tb_v1 = its_Tb_Num(nm, -1, 1); ) :
+            ( its_Tb_v1 = its_Tb_Num(nm, 0, 100); );
         ) : (
             (ki === 0) ? ( its_Tb_v1 = its_Tb_Id(its_TK_Line, its_Tb_Next(), 0); ) :
             (ki === 1) ? ( its_Tb_v1 = its_Tb_Id(its_TK_Writer, its_Tb_Next(), 0); ) :
@@ -9116,7 +9582,8 @@ function its_Tb_Key(ty, w) local(keys, nk, ki, i, nm)
             (ki === 6) ? ( its_Tb_v1 = its_Tb_Num(nm, -120, 40); ) :
             (ki === 7) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 127); ) :
             (ki === 8) ? ( its_Tb_v1 = its_Tb_Int(nm, 1, 128); ) :
-            ( its_Tb_v1 = its_Tb_Enum(nm, its_TbRLp, 6); );
+            (ki === 9) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbRLp, 6); ) :
+            ( its_Tb_v1 = its_Tb_Num(nm, -1, 1); ); // loopspeed, desync
         );
     );
     ki;
@@ -9242,7 +9709,8 @@ function its_Tb_Get(ty, ki, b)
         (ki === 3) ? b[its_Wrt_InGaindB] :
         (ki === 4) ? b[its_Wrt_Ovrdb] :
         (ki === 5) ? b[its_Wrt_Mode] :
-        (ki === 6) ? b[its_Wrt_Bf1stChan] : b[its_Wrt_BfChanUsed];
+        (ki === 6) ? b[its_Wrt_Bf1stChan] :
+        (ki === 7) ? b[its_Wrt_BfChanUsed] : b[its_Wrt_WFade + ki - 8];
     ) : (
         (ki === 0) ? ((b[its_Rdr_Mode] === its_RdrMode_Read) ? b[its_Rdr_LineNb] : -1) :
         (ki === 1) ? ((b[its_Rdr_Mode] === its_RdrMode_Delay) ? b[its_Rdr_WrSrc] : -1) :
@@ -9252,7 +9720,9 @@ function its_Tb_Get(ty, ki, b)
         (ki === 5) ? ( its_Tb_g2 = b[its_Rdr_OutOff]; b[its_Rdr_OutK]; ) :
         (ki === 6) ? b[its_Rdr_OutVoldB] :
         (ki === 7) ? b[its_Rdr_Bf1stChan] :
-        (ki === 8) ? b[its_Rdr_BfChanUsed] : b[its_Rdr_LoopType];
+        (ki === 8) ? b[its_Rdr_BfChanUsed] :
+        (ki === 9) ? b[its_Rdr_LoopType] :
+        (ki === 10) ? b[its_Rdr_LoopSpd] : b[its_Rdr_Desync];
     );
 );
 
@@ -9263,7 +9733,7 @@ function its_Tb_ValText(str, ty, ki, v1, v2)
         (ki === 0) ? ((v1 < 0) ? strcpy(str, "none") : sprintf(str, "%d", v1 + 1)) :
         (ki === 1) ? its_Tb_SrcText(str, v1, v2) :
         (ki === 2) ? strcpy(str, menu_Wrt_Status_N[max(0, min(4, v1))]) :
-        (ki === 5) ? strcpy(str, (v1 === its_WrtMode_Sum) ? "Sum" : "XFade") :
+        (ki === 5) ? strcpy(str, (v1 === its_WrtMode_WMix) ? "WMix" : (v1 === its_WrtMode_Sum) ? "Sum" : "XFade") :
         ((ki === 6) || (ki === 7)) ? sprintf(str, "%d", v1) :
         sprintf(str, "%.10g", v1);
     ) : (
@@ -9314,6 +9784,7 @@ function its_Tb_DumpMod(ty, k) local(b, i)
         (b[its_Wrt_LineNb] >= 0) ? its_Tb_Cat(ty, 0, b);
         (b[its_Wrt_Src] !== 0) ? its_Tb_Cat(ty, 1, b);
         i = 3; loop(5, its_Tb_Cat(ty, i, b); i += 1;);
+        (b[its_Wrt_Mode] === its_WrtMode_WMix) ? ( i = 8; loop(5, its_Tb_Cat(ty, i, b); i += 1;); ); // its settings
     ) : (
         its_Tb_Cat(ty, 4, b);
         (b[its_Rdr_Mode] === its_RdrMode_Read) ? (
@@ -9324,6 +9795,8 @@ function its_Tb_DumpMod(ty, k) local(b, i)
         );
         its_Tb_Cat(ty, 3, b);
         i = 5; loop(5, its_Tb_Cat(ty, i, b); i += 1;);
+        ((b[its_Rdr_Mode] === its_RdrMode_Read) && (b[its_Rdr_LoopSpd] !== 0)) ? its_Tb_Cat(ty, 10, b); // a moving loop
+        ((b[its_Rdr_Mode] === its_RdrMode_Read) && (b[its_Rdr_Desync] !== 0)) ? its_Tb_Cat(ty, 11, b); // channels desynchronized
     );
     mSL_log(SysLogBox, #its_TbW);
 );
@@ -9393,9 +9866,14 @@ function its_Tb_SetMod(ty, k) local(b, v)
         its_TbKS[1] ? ( b[its_Wrt_Src] = its_TbK1[1]; b[its_Wrt_SrcOff] = its_TbK2[1]; b[its_Wrt_Check] = 0; );
         its_TbKS[3] ? ( b[its_Wrt_InGaindB] = v = its_TbK1[3]; b[its_Wrt_InGain] = (v <= -120) ? 0 : 10^(v/20); );
         its_TbKS[4] ? ( b[its_Wrt_Ovrdb] = its_TbK1[4]; );
-        its_TbKS[5] ? ( b[its_Wrt_Mode] = its_TbK1[5]; );
+        (its_TbKS[5] && (b[its_Wrt_Mode] !== its_TbK1[5])) ? (
+            b[its_Wrt_Mode] = its_TbK1[5];
+            b[its_Wrt_WPhase] = its_WMix_Cycle; // W-Mix : a new cycle
+            b[its_Wrt_Check] = 0;
+        );
         its_TbKS[6] ? ( b[its_Wrt_Bf1stChan] = its_TbK1[6]; b[its_Wrt_Check] = 0; );
         its_TbKS[7] ? ( b[its_Wrt_BfChanUsed] = its_TbK1[7]; b[its_Wrt_Check] = 0; );
+        v = 8; loop(5, its_TbKS[v] ? ( b[its_Wrt_WFade + v - 8] = its_TbK1[v]; ); v += 1;); // W-Mix : fade ... desync
         (its_Tb_own > 0) ? (b[its_Wrt_Owner] = its_Tb_own);
         Wr_Set_Status(k, its_TbKS[2] ? its_TbK1[2] : b[its_Wrt_Status]); // no line or no source : "Created"
         (k === slWriter) ? (Currwriter = b);
@@ -9416,6 +9894,8 @@ function its_Tb_SetMod(ty, k) local(b, v)
         its_TbKS[7] ? ( b[its_Rdr_Bf1stChan] = its_TbK1[7]; b[its_Rdr_Check] = 0; );
         its_TbKS[8] ? ( b[its_Rdr_BfChanUsed] = its_TbK1[8]; b[its_Rdr_Check] = 0; );
         its_TbKS[9] ? ( b[its_Rdr_LoopType] = its_TbK1[9]; );
+        its_TbKS[10] ? ( b[its_Rdr_LoopSpd] = its_TbK1[10]; );
+        its_TbKS[11] ? ( b[its_Rdr_Desync] = its_TbK1[11]; );
         its_TbKS[3] ? Rd_Set_Speed(k, its_TbK1[3], 1);
         its_TbKS[2] ? Rd_Set_Offset(b, its_TbK1[2] * srate);
         its_TbKS[4] ? Rd_Set_Status(k, its_TbK1[4]);
@@ -9637,6 +10117,7 @@ function its_Tb_SetFx(k) local(fx, ty, j, p, ki)
             ki += 1;
         );
         its_TbKS[1] ? ( fx[its_Efx_Status] = its_TbK1[1]; );
+        its_Run_Check(fx);
         (its_Tb_own > 0) ? (fx[its_Efx_Owner] = its_Tb_own);
         fx[its_Efx_Check] = 0; // checked again by exec_fx
     );
@@ -10454,11 +10935,11 @@ function its_Tb_Dump() local(w, ty, k, b)
     (w === its_TK_Order) ? (
         // the execution order of the effects that exist (computed now, unless the previous one is not yet taken by @block)
         (its_Tb_mode === 3) ? (
-            (its_FxOrdRdy === 0) ? ( its_FxSig = -1; its_Fx_Order(); );
+            its_FxSig = -1; its_Fx_Order();
             strcpy(#its_TbW, "Order :");
             k = 0; loop(FX_CNT,
-                b = Effects_set[its_FxOrdNew[k]];
-                ((b > BASE_MEMORY) && (b[-2] === KW_effx)) ? strcat(#its_TbW, sprintf(#its_TbV1, " %d", its_FxOrdNew[k] + 1));
+                b = Effects_set[its_FxOrd[k]];
+                ((b > BASE_MEMORY) && (b[-2] === KW_effx)) ? strcat(#its_TbW, sprintf(#its_TbV1, " %d", its_FxOrd[k] + 1));
                 k += 1;
             );
             strcat(#its_TbW, sprintf(#its_TbV1, " ; loops %d", its_FxCycN));
@@ -10878,7 +11359,6 @@ dbg_show_2(Readers_set[0],67);
 
 // the work areas of the effects prepared by @gfx (see its_Patch_Update)
 its_Fx_WorkSwitch();
-its_Fx_OrderSwitch(); // the execution order of the effects prepared by @gfx
 
 
 // Count Solo Readers
@@ -10886,6 +11366,7 @@ b__i = b__j = 0;
 loop(RD_CNT,
     ((b__r = Readers_set[b__i]) !== 0)  ? (
         (b__r[its_Rdr_StFlgs] & its_RdrFlg_solo) ? b__j += 1;
+        ((b__r[its_Rdr_LoopSpd] !== 0) || (b__r[its_Rdr_Mod1 + 3 * its_ModDist + its_Mod_Src] !== 0)) ? its_Rdr_LoopMove(b__r);
         (b__r[its_Rdr_StFlgs] & its_RdrFlg_Mod) ? Rd_Update(b__i);
     );
     b__i += 1;
@@ -10949,96 +11430,23 @@ its_RdrSolos = b__j; // count of readers in solo mode
 @sample
 
 ((pgmode < 2) && (its_Hold === 0)) ? (
-    // Phase 1 --
-    // clear Out and the buses : several sources add into them (a cable is written by its only source)
-    memset(smpl_tab + OUT_P, 0, CH_NB);
-    bus_i = 0; loop(BusActN, bus_k = BusAct[bus_i]; memset(smpl_tab + BusStart[bus_k], 0, BusWidth[bus_k]); bus_i += 1;);
-    // get input samples ;
-    s__i = 0; s__j = smpl_tab + IN_P; loop (chcnt,
-        s__j[0] = vol_inp * spl(s__i);
-        spl(s__i) = 0;
-        s__i += 1; s__j += 1;
-    );
-
-    // Phase 2 -- Pre READERS Effects (in the order of its_FxOrd : see its_Fx_Order)
-    s__oi = 0; loop(FX_CNT,
-        s__fxn = its_FxOrd[s__oi];
-        (((s__fx = Effects_set[s__fxn]) != 0) && (s__fx[its_Efx_Status] != 0)
-            && (s__fx[its_Efx_Phase] === its_Efx_PhasePre)) ? (
-            exec_fx(s__fx, s__fxn);
+    // the modules, in the order of the list prepared by @gfx (see its_Run_Schedule)
+    s__p = its_RunX;
+    while ((s__b = s__p[0]) > 0) (
+        ((s__d = s__b[its_Run_Delay]) !== 0) ? (
+            s__b[its_Run_Delay] = s__d - 1; // waits (> 0) or inactive (< 0)
+        ) : (
+            s__k = s__b[its_Run_Kind];
+            (s__k === its_RunK_Reader) ? exec_reader(s__b, s__b[its_Run_Num]) :
+            (s__k === its_RunK_Effect) ? exec_fx(s__b, s__b[its_Run_Num]) :
+            (s__k === its_RunK_Writer) ? exec_writer(s__b, s__b[its_Run_Num]) :
+            (s__k === its_RunK_Clear) ? its_Run_Clear() :
+            (s__k === its_RunK_Input) ? its_Run_Input() :
+            (s__k === its_RunK_Output) ? its_Run_Output();
         );
-        s__oi += 1;
+        s__p += 1;
     );
-
-    // Phase 3 -- Run READERS
-    s__rdn = 0; loop(RD_CNT,
-        (((X_rd = Readers_set[s__rdn]) !== 0) && (X_rd[its_Rdr_Flgs] !== 0) && (X_rd[its_Rdr_Status] === its_RdrStat_Reading)) ? (
-            Trace_X_exec_reader = X_rd;
-            exec_reader(X_rd, s__rdn);
-        ) :
-        ((X_rd !== 0) && X_rd[its_Rdr_OutDirty]) ? (
-            // a reader stopped : its own cable is silent
-            (CblRdStart[s__rdn] > 0) ? memset(smpl_tab + CblRdStart[s__rdn], 0, CblRdWidth[s__rdn]);
-            X_rd[its_Rdr_OutDirty] = 0;
-        );
-        s__rdn += 1;
-    );
-
-Trace_D_Readers_addr_0 = X_rdz = Readers_set[0];
-Trace_D_Readers_flg_0 = X_rdz[its_Rdr_Flgs];
-Trace_D_Readers_stat_0 = X_rdz[its_Rdr_Status];
-
-    // Phase 4 -- Run Standard effects
-    s__oi = 0; loop(FX_CNT,
-        s__fxn = its_FxOrd[s__oi];
-        (((s__fx = Effects_set[s__fxn]) != 0) && (s__fx[its_Efx_Status] != 0)
-            && (s__fx[its_Efx_Phase] === its_Efx_PhaseStd)) ? (
-            exec_fx(s__fx, s__fxn);
-        ) :
-        ((s__fx != 0) && (s__fx[its_Efx_Status] == 0) && s__fx[its_Efx_OutDirty]) ? (
-            // an effect turned off : its own cable is silent
-            (CblFxStart[s__fxn] > 0) ? memset(smpl_tab + CblFxStart[s__fxn], 0, CblFxWidth[s__fxn]);
-            s__fx[its_Efx_OutDirty] = 0;
-        );
-        s__oi += 1;
-    );
-
-    // Phase 5 -- Run Writers
-    s__wrn = 0; loop(WR_CNT,
-        (((X_wr = Writers_set[s__wrn]) != 0) && (X_wr[its_Wrt_Flgs] != 0) && (X_wr[its_Wrt_Status] == its_WrtStat_Writing)) ? (
-            Trace_X_exec_writer = X_wr;
-            exec_writer(X_wr, s__wrn);
-        );
-        s__wrn += 1;
-    );
-
-Trace_D_Writers_addr_0 = X_wr = Writers_set[0];
-Trace_D_writers_flg_0 = X_wr[its_Wrt_Flgs];
-Trace_D_writers_stat_0 = X_wr[its_Wrt_Status];
-Trace_D_writers_count_0 += 1;
-
-    // Phase 6 -- Post Writers Effects
-    s__oi = 0; loop(FX_CNT,
-        s__fxn = its_FxOrd[s__oi];
-        (((s__fx = Effects_set[s__fxn]) != 0) && (s__fx[its_Efx_Status] != 0)
-            && (s__fx[its_Efx_Phase] === its_Efx_PhasePost)) ? (
-            exec_fx(s__fx, s__fxn);
-        );
-        s__oi += 1;
-    );
-
-    // generate output samples
-    s__i = 0; s__j = smpl_tab + OUT_P; loop (chcnt, spl(s__i) += vol_out * s__j[0]; s__i += 1; s__j+= 1;);
-
 );
-
-Trace_X_sample_count += 1;
-
-
-
-// Trace a few work area
-<? i=0; loop(8, printf("work%02d = smpl_tab[%d];", i, i); i+=1;); ?>
-
 
 
 
@@ -11544,7 +11952,9 @@ while (SchedActive &&
 
 // the cables follow the modules
 its_Patch_Update();
-its_Fx_Order(); // the execution order of the effects (taken by @block)
+its_Fx_Order(); // the execution order of the effects (used by its_Run_Schedule)
+its_Run_TrashRun(); // the deleted modules that @sample can no longer see
+its_Run_Schedule(); // the list of the modules executed by @sample
 
 // A pad asked for too many cells (damaged pad ?) : see the guard in control_jpad (mSL_ui_Pads)
 ((ui_jpad_bad_cnt != ui_jpad_bad_seen) && (time() != ui_jpad_bad_t)) ? (
@@ -12019,6 +12429,18 @@ local (k, n, xx, res)
 );
 
 // menu of the first channel [0 ... 127], "off" ticked ; returns the channel chosen, -1 if no choice
+// the menu "m" of a cell "Action" of a pad, opened by the clic "ev" of the pad : right clic, or left clic (the menu
+// accepts the button used, see control_jmenu ; then its option again)
+function its_Menu_Clic(m, ev)
+local (ty, r)
+(
+    ty = m[ui_jmenu_type];
+    m[ui_jmenu_type] = ty - (ty & ui_jmenu_opt_mask) + ((ev & ui_jpad_ev_rmc) ? ui_jmenu_opt_rclick : ui_jmenu_opt_lclick);
+    r = control_jmenu(m);
+    m[ui_jmenu_type] = ty;
+    r;
+);
+
 function its_Off_Choose(off)
 local (xx, res)
 (
@@ -12223,7 +12645,8 @@ local (x, h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol
                     RDBL[5] = (rcbl[its_Rdr_Mode] === its_RdrMode_Delay) ? 2 : // delay mode : volume and offset only
                         (h3 > 0) ? 9 : 8; // + "Zoom" slider when the waveform is shown
                     // + the depths of the modulations used, and their attenuverters if shown
-                    RDBL[5] += its_Mod_SlCount(rcbl + its_Rdr_Mod1, 3, its_Rdr_ModOk(rcbl));
+                    (rcbl[its_Rdr_Mode] !== its_RdrMode_Delay) ? (RDBL[5] += 2); // + "Loop speed", "Desync"
+                    RDBL[5] += its_Mod_SlCount(rcbl + its_Rdr_Mod1, its_Rdr_ModN, its_Rdr_ModOk(rcbl));
                     i = 0; loop(pad_Rdr_Siz,
                         pad_Rdr_Colrs[i] = dfCol;
                         strcpy(pad_Rdr_Labs[i],"");
@@ -12359,7 +12782,7 @@ local (x, h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol
                             mSL_log(SysLogBox, #itm);
                     */
                     //==============================================
-                    (zz & ui_jpad_ev_rmc) ? (  // right mouse clic
+                    ((zz & ui_jpad_ev_rmc) || ((zz & ui_jpad_ev_lmc) && (zzmcl === 15))) ? (  // right mouse clic (the cell "Action" : left clic too)
                         (zzmcl === 0) ? (
                             k = rdr+1;
                             ui_menu_tick(menu_Rdr_Ids, k, 1);
@@ -12495,9 +12918,7 @@ local (x, h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol
                                     (rok) ? (rcbl[its_Rdr_Mode] = its_RdrMode_Delay);
                                 );
                                 ((xx != 0) && (rok)) ? (
-                                    r = Rd_Set_Writer(rdr, xx - 1); // 0 for "none"
-                                    sprintf(#itm, "Menu 13 : %d -> %d -> %d", rdr, xx, r);
-                                    mSL_log(SysLogBox, #itm);
+                                    Rd_Set_Writer(rdr, xx - 1); // 0 for "none"
                                     // keep the JSFX sliders in sync when this reader is the current one (it may have just been created)
                                     (rdr === slReader) ? (
                                         Currreader = rcbl;
@@ -12519,7 +12940,7 @@ local (x, h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol
                             RDBL[2] = 0;
                         ) :
                         (zzmcl === 15) ? (
-                            xx = control_jmenu(menu_Rdr_Action);
+                            xx = its_Menu_Clic(menu_Rdr_Action, zz);
                             (xx != 0) ? (
                                 wrk1[0] = (rcbl === 0) ? ( RDBL[1] ) : ( rcbl[its_Rdr_Mode] );
                                 Rd_Action(rdr, xx - 1, wrk1);
@@ -12687,8 +13108,6 @@ local (x, h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol
 
                     //==============================================
                     (zz & ui_jpad_ev_key) ? (
-                            sprintf(#itm, "PAD -> %d %d %d %d %d", zz, zzch, zzent, zzmcl, zzmmd);
-                            mSL_log(SysLogBox, #itm);
                         GM_key_take('r') ? (
                             // toggle run/pause state
                             Rd_Set_Status(rdr, -1);
@@ -12717,7 +13136,7 @@ local (x, h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol
             (rok && (h4 > 0)) ? (
                 ui_split_top(h4);
                     ui_pad(1,2,2,2);
-                    its_Mod_Row(rcbl + its_Rdr_Mod1, 3, its_ModN_Rdr, its_Rdr_ModOk(rcbl), its_ModD_Rdr) ? (rcbl[its_Rdr_Check] = 0);
+                    its_Mod_Row(rcbl + its_Rdr_Mod1, its_Rdr_ModN, its_ModN_Rdr, its_Rdr_ModOk(rcbl), its_ModD_Rdr) ? (rcbl[its_Rdr_Check] = 0);
                 ui_pop();
             );
 
@@ -12968,6 +13387,20 @@ local (x, h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol
                             rdupdt = 1;
                         );
 
+                        // the move of the loop (s/s, see its_Rdr_LoopMove ; right clic : 0, still)
+                        paramValues[p_rdLoopSpd] = rcbl[its_Rdr_LoopSpd];
+                        r = parCtl(p_rdLoopSpd);
+                        (r != 0) ? (
+                            rcbl[its_Rdr_LoopSpd] = (r === 8) ? 0 : max(-1, min(1, parV(p_rdLoopSpd)));
+                        );
+
+                        // the desync of the channels (s : the channel c reads c * desync s before the channel 0 ; right clic : 0)
+                        paramValues[p_rdDesync] = rcbl[its_Rdr_Desync];
+                        r = parCtl(p_rdDesync);
+                        (r != 0) ? (
+                            rcbl[its_Rdr_Desync] = (r === 8) ? 0 : max(-1, min(1, parV(p_rdDesync)));
+                        );
+
                         // region size (seconds)
                         // Play speed
                         k = RDBL[6];
@@ -13009,7 +13442,7 @@ local (x, h1, h2, h3, h4, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol
                     );
 
                     // the depths of the modulation inputs used, their attenuverters if shown
-                    its_Mod_Sliders(rcbl + its_Rdr_Mod1, 3, its_Rdr_ModOk(rcbl), p_rdModDepth1, p_rdModAtt1);
+                    its_Mod_Sliders(rcbl + its_Rdr_Mod1, its_Rdr_ModN, its_Rdr_ModOk(rcbl), p_rdModDepth1, p_rdModAtt1);
 
                 ui_pop();
 
@@ -13038,6 +13471,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lc
     h1 = uix_jpadHeight(pad_Lin_NL); // height
     h4 = uix_jpadHeight(1); // the file of the line
     h2 = ui_jd_slidh * 1 + 4;
+    (LDBL[1] <= 0) ? (LDBL[1] = 1); // the length asked for a new line (1 s, as the reset by right clic)
     // waveform, if the line exists (see mSL_ui_audio.jsfx-inc)
     lcbl = Lines_Set[LDBL[0]];
     h3 = ((lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) ? its_Wave_H(LDBL + 5, LDBL + 6, its_LinWaveH) : 0;
@@ -13113,7 +13547,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lc
                     zzmcl = pad_Line[ui_jpad_last]-1;
                     zzmmd = pad_Line[ui_jpad_lmods];
 
-                    (zz & ui_jpad_ev_rmc) ? (  // right mouse clic
+                    ((zz & ui_jpad_ev_rmc) || ((zz & ui_jpad_ev_lmc) && (zzmcl === 7))) ? (  // right mouse clic (the cell "Action" : left clic too)
                         (zzmcl === 0) ? (
                             k = lnr+1;
                             ui_menu_tick(menu_Lin_Ids, k, 1);
@@ -13157,7 +13591,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lc
                             );
                         ) :
                         (zzmcl === 7) ? (
-                            xx = control_jmenu(menu_Lin_Action);
+                            xx = its_Menu_Clic(menu_Lin_Action, zz);
                             (xx != 0) ? (
                                 Ln_Action(lnr, xx - 1, LDBL);
                             );
@@ -13780,9 +14214,10 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, 
                     ui_GFXdoNow |= 4; ui_GFXReason = 34;
                     zzmcl = pad_Effect[ui_jpad_last]-1;
 
-                    (zz & ui_jpad_ev_rmc) ? (  // right mouse clic
+                    ((zz & ui_jpad_ev_rmc) || ((zz & ui_jpad_ev_lmc) && (zzmcl === 7))) ? (  // right mouse clic (the cell "Action" : left clic too)
                         ((zzmcl === 3) && fok) ? (
                             fx[its_Efx_Status] = (fx[its_Efx_Status] !== its_EfxStat_Bypass) ? its_EfxStat_Bypass : its_EfxStat_On;
+                            its_Run_Check(fx);
                         ) :
                         (zzmcl === 0) ? (
                             // the effect to display
@@ -13840,7 +14275,7 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, 
                             );
                         ) :
                         (zzmcl === 7) ? (
-                            xx = control_jmenu(menu_Efx_Action);
+                            xx = its_Menu_Clic(menu_Efx_Action, zz);
                             act = xx - 1;
                             (act === its_EfxAct_Create) ? (
                                 (!fok) ? FX_make(fxn);
@@ -13893,6 +14328,7 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, 
                         ) :
                         ((zzmcl === 3) && fok) ? (
                             fx[its_Efx_Status] = (fx[its_Efx_Status] === its_EfxStat_On) ? its_EfxStat_Off : its_EfxStat_On;
+                            its_Run_Check(fx);
                         ) :
                         ((zzmcl === 5) && fok) ? (
                             ((k = its_Off_Choose(fx[its_Efx_OutOff])) >= 0) ? (
@@ -13944,7 +14380,7 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, 
 */
 function show_Writer_Pad(WDBL, blockId)
 local (h1, h2, h3, h4, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, CL1, dfCol, i, k, r, w, x, xx, zi, zz, zzch,
-        zzent, zzmcl, zzmmd, wgh, f, n)
+        zzent, zzmcl, zzmmd, wgh, f, n, wm)
 (
     h1 = uix_jpadHeight(pad_Wrt_NL); // height
     wrt = WDBL[0]; // number of writer to be displayed
@@ -13952,8 +14388,9 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lo
     wok = (wcbl > BASE_MEMORY) && (wcbl[-2] === KW_writ);
     lcbl = wok ? wcbl[its_Wrt_Lcbl] : 0;
     lok = wok && (lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl);
-    // sliders : record gain, overdub, and the modulations used
-    h2 = wok ? ui_jd_slidh * (2 + its_Mod_SlCount(wcbl + its_Wrt_Mod1, 2, 3)) + 6 : 0;
+    // sliders : record gain, overdub (W-Mix : its 5 settings), and the modulations used
+    wm = wok && (wcbl[its_Wrt_Mode] === its_WrtMode_WMix);
+    h2 = wok ? ui_jd_slidh * ((wm ? 6 : 2) + its_Mod_SlCount(wcbl + its_Wrt_Mod1, its_Wrt_ModShown(wcbl), its_Wrt_ModOk(wcbl))) + 6 : 0;
     h3 = lok ? its_Wave_H(WDBL + 5, WDBL + 6, its_LinWaveH) : 0; // waveform of the line, between the pad and the sliders
     h4 = wok ? uix_jpadHeight(1) : 0; // the modulation inputs
     uix_jneed = h1+h2+h3+h4+ui_jd_ctgr;
@@ -14014,8 +14451,20 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lo
                     );
                     its_Src_Label(pad_Wrt_Labs[10], wcbl[its_Wrt_Src], wcbl[its_Wrt_SrcOff]);
                     pad_Wrt_Colrs[10] = Col_P3;
-                    strcpy(pad_Wrt_Labs[12], (wcbl[its_Wrt_Mode] === its_WrtMode_Sum) ? "Overdub Sum" : "Overdub X-fade");
+                    k = wcbl[its_Wrt_Mode];
+                    strcpy(pad_Wrt_Labs[12], (k === its_WrtMode_WMix) ? "W-Mix" : (k === its_WrtMode_Sum) ? "Overdub Sum" : "Overdub X-fade");
                     pad_Wrt_Colrs[12] = CL1;
+                    (k === its_WrtMode_WMix) ? (
+                        // the phase of the cycle, and its remaining time
+                        k = wcbl[its_Wrt_WPhase];
+                        (k === its_WMix_FadeIn) ? sprintf(pad_Wrt_Labs[13], "Fade-in %.2f s", wcbl[its_Wrt_WCnt] / srate) :
+                        (k === its_WMix_Plateau) ? sprintf(pad_Wrt_Labs[13], "Plateau %.2f s", wcbl[its_Wrt_WCnt] / srate) :
+                        (k === its_WMix_FadeOut) ? sprintf(pad_Wrt_Labs[13], "Fade-out %.2f s", wcbl[its_Wrt_WCnt] / srate) :
+                        (k === its_WMix_Wait) ? sprintf(pad_Wrt_Labs[13], "Wait %.2f s", wcbl[its_Wrt_WCnt] / srate) :
+                        strcpy(pad_Wrt_Labs[13], "New cycle");
+                        pad_Wrt_Colrs[13] = ((k === its_WMix_Wait) || (k === its_WMix_Cycle)) ? Col_P1 :
+                            (wcbl[its_Wrt_WInc] < 0) ? Color_Dark_Orange : Color_Limegreen; // (backwards : orange)
+                    );
                 ) : (
                     strcpy(pad_Wrt_Labs[1],menu_Wrt_Status_N[0]);
                     strcpy(pad_Wrt_Labs[3],"Line: None");
@@ -14031,7 +14480,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lo
                     zzmcl = pad_Writer[ui_jpad_last]-1;
                     zzmmd = pad_Writer[ui_jpad_lmods];
 
-                    (zz & ui_jpad_ev_rmc) ? (  // right mouse clic
+                    ((zz & ui_jpad_ev_rmc) || ((zz & ui_jpad_ev_lmc) && (zzmcl === 15))) ? (  // right mouse clic (the cell "Action" : left clic too)
                         (zzmcl === 0) ? (
                             // the writer to display
                             k = wrt+1;
@@ -14119,7 +14568,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lo
                             );
                         ) :
                         (zzmcl === 15) ? (
-                            xx = control_jmenu(menu_Wrt_Action);
+                            xx = its_Menu_Clic(menu_Wrt_Action, zz);
                             (xx > 1) ? (
                                 wcbl = Wr_Action(xx - 1, wrt, 0);
                             );
@@ -14151,8 +14600,11 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lo
                             );
                         );
                         ((zzmcl === 12) && wok) ? (
-                            // overdub mode : X-fade <-> Sum
-                            wcbl[its_Wrt_Mode] = (wcbl[its_Wrt_Mode] === its_WrtMode_Sum) ? its_WrtMode_XFade : its_WrtMode_Sum;
+                            // the mode : X-fade -> Sum -> W-Mix -> X-fade (shift : the other way) ; W-Mix starts a new cycle
+                            wcbl[its_Wrt_Mode] = (max(0, min(its_WrtModeCnt - 1, 0|wcbl[its_Wrt_Mode])) +
+                                ((jmc & shfCap) ? its_WrtModeCnt - 1 : 1)) % its_WrtModeCnt;
+                            wcbl[its_Wrt_WPhase] = its_WMix_Cycle;
+                            wcbl[its_Wrt_Check] = 0; // (the modulation inputs meaningful)
                         );
                     );
                 );
@@ -14164,11 +14616,12 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lo
             lcbl = wok ? wcbl[its_Wrt_Lcbl] : 0;
             lok = wok && (lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl);
 
-            // the modulation inputs : record gain, overdub
+            // the modulation inputs : record gain, overdub (W-Mix : record gain, its 5 settings)
             (wok && (h4 > 0)) ? (
                 ui_split_top(h4);
                     ui_pad(1,2,2,2);
-                    its_Mod_Row(wcbl + its_Wrt_Mod1, 2, its_ModN_Wrt, 3, its_ModD_Wrt) ? (wcbl[its_Wrt_Check] = 0);
+                    its_Mod_Row(wcbl + its_Wrt_Mod1, its_Wrt_ModShown(wcbl), its_ModN_Wrt, its_Wrt_ModOk(wcbl), its_ModD_Wrt) ?
+                        (wcbl[its_Wrt_Check] = 0);
                 ui_pop();
             );
 
@@ -14200,17 +14653,27 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lo
                         (wcbl === Currwriter) ? (slWrInGainPrv = slWrInGain = zi);
                     );
 
-                    // Overdub
-                    paramValues[p_wrOvrdb] = wcbl[its_Wrt_Ovrdb];
-                    r = parCtl(p_wrOvrdb);
-                    (r != 0) ? (
-                        zi = (r === 8) ? 0 : max(-150, min(150, parV(p_wrOvrdb))); // right clic : no overdub
-                        wcbl[its_Wrt_Ovrdb] = zi;
-                        (wcbl === Currwriter) ? (slWrOvrdbPrv = slWrOvrdb = zi);
+                    (wcbl[its_Wrt_Mode] === its_WrtMode_WMix) ? (
+                        // W-Mix : fade, plateau, wait, direction, desync (right clic : the default)
+                        i = 0; loop(5,
+                            paramValues[p_wrWFade + i] = wcbl[its_Wrt_WFade + i];
+                            r = parCtl(p_wrWFade + i);
+                            (r != 0) ? (wcbl[its_Wrt_WFade + i] = (r === 8) ? its_WMix_Def[i] : parV(p_wrWFade + i));
+                            i += 1;
+                        );
+                    ) : (
+                        // Overdub
+                        paramValues[p_wrOvrdb] = wcbl[its_Wrt_Ovrdb];
+                        r = parCtl(p_wrOvrdb);
+                        (r != 0) ? (
+                            zi = (r === 8) ? 0 : max(-150, min(150, parV(p_wrOvrdb))); // right clic : no overdub
+                            wcbl[its_Wrt_Ovrdb] = zi;
+                            (wcbl === Currwriter) ? (slWrOvrdbPrv = slWrOvrdb = zi);
+                        );
                     );
 
                     // the depths of the modulation inputs used, their attenuverters if shown
-                    its_Mod_Sliders(wcbl + its_Wrt_Mod1, 2, 3, p_wrModDepth1, p_wrModAtt1);
+                    its_Mod_Sliders(wcbl + its_Wrt_Mod1, its_Wrt_ModShown(wcbl), its_Wrt_ModOk(wcbl), p_wrModDepth1, p_wrModAtt1);
                 ui_pop();
             );
 
@@ -14337,21 +14800,89 @@ local (c, kr)
     kr;
 );
 
+// the text of the writer "the track" of the cells In (Patch) : with the input gain if it is very low, or the samples ignored
+function its_Pch_TrackTxt(str)
+(
+    (slSmpl === 1) ? strcpy(str, "the track (ignored : Globals)") :
+    ((slSmpl === 0) && (slInGain <= its_InGainLow)) ? sprintf(str, "the track (Input Gain %.0f dB)", slInGain) :
+    strcpy(str, "the track");
+    str;
+);
+
+// the cell of the entry "k" (all pages) of the view "v", and who writes and who reads it (see its_Patch_Scan(cell)) ; 0 : none
+function its_Pch_Info(v, k)
+local (c, m)
+(
+    ((c = its_Pch_GridCell(v, 0, k)) > 0) ? (
+        // a cable, a bus : all its cells
+        m = its_PchCbl[k];
+        its_PchCellW = (v === its_PchV_Cbl) ? ((m < RD_CNT) ? CblRdWidth[m] : CblFxWidth[m - RD_CNT]) :
+            (v === its_PchV_Bus) ? BusWidth[BusAct[k]] : 1;
+        its_Patch_Scan(c);
+        its_PchCellW = 1;
+    );
+    c;
+);
+
+/*
+    open the module "t" ('R' reader, 'W' writer, 'E' effect) n° "n" (menu of a cell of the module "Patch") : nothing to do if
+    a display module (Reader A ... H, Writer A ... H, Effect A ... H) of the visible panes of the tab shows it ; else the first
+    one of these panes shows it ; else a display module not used in the tab is added just below "Patch", in its pane
+    (blockDesc : the pane being drawn) ; 0 : no room
+*/
+function its_Pch_Open(t, n)
+local (b0, st, sz, p, d, i, m, fd, fs, used, k)
+(
+    (t === 'R') ? (b0 = blockReaderA; st = ReadersStructA; sz = ReadersBlockSize;) :
+    (t === 'W') ? (b0 = blockWriterA; st = WriterStructA; sz = WriterBlockSize;) :
+    (b0 = blockEffectA; st = EffectsStructA; sz = LinesBlockSize;); // (the effects : LinesBlockSize, see EffectsStructA)
+    fd = fs = -1; used = 0;
+    p = 0; loop(dcbPannelsMax,
+        d = dcbBlocksAll + (TabIdt * dcbPannelsMax + p) * dcbWSize;
+        i = 0; loop(dcbMax,
+            m = d[i] - b0;
+            ((m >= 0) && (m < 8)) ? (
+                used |= 2 ^ m;
+                (p < studDispPCnt) ? (
+                    (st[m * sz] === n) ? (fs = m) : (fd < 0) ? (fd = m);
+                );
+            );
+            i += 1;
+        );
+        p += 1;
+    );
+    (fs >= 0) ? 1 :
+    (fd >= 0) ? (
+        st[fd * sz] = n;
+        1;
+    ) : (
+        m = 0; while ((m < 8) && (used & (2 ^ m))) (m += 1;);
+        k = 0; while ((k < dcbMax) && (blockDesc[k] !== blockPatch)) (k += 1;);
+        ((blockDesc > 0) && (m < 8) && (k < dcbMax - 1) && (blockDesc[dcbMax - 1] === 0)) ? (
+            i = dcbMax - 1; while (i > k + 1) (blockDesc[i] = blockDesc[i - 1]; i -= 1;);
+            blockDesc[k + 1] = b0 + m;
+            st[m * sz] = n;
+            1;
+        ) : 0;
+    );
+);
+
 /*
     The pad of the module "Patch"
     line 1 : 0 "Patch", 1 ... 5 the views (In, Out, Buses, Controls, Cables ; the buses and the cables that exist), 6 the page (left clic : the next one ;
     right clic : the previous one), 7 the count of problems (connections not valid, buses read but not written,
     cables not read)
     the grid : one cell of the patch per entry (the cables : one cable per entry) ; colors : green written and read,
-    orange written but not read, red read but not written (buses), grey unused
-    the text : the cell under the mouse, its value, who writes it, who reads it
+    orange written but not read, red read but not written (buses), grey unused ; left clic : pins the entry (again : unpins it),
+    shown [between brackets] ; right clic : the menu of the modules that write or read it, the chosen one is opened (its_Pch_Open)
+    the text : the cell under the mouse (else the pinned one), its value, who writes it, who reads it
 */
 function show_Patch_Pad(blockId)
-local (h1, h2, h3, uix_jneed, zzmi, i, k, c, w, v, pg, npg, ncel, nl, zz, zzmcl, nbad, hc, hx, hy, kw, kr, ch)
+local (h1, h2, h3, uix_jneed, zzmi, i, k, c, w, v, pg, npg, ncel, nl, zz, zzmcl, nbad, hc, hk, hx, hy, kw, kr, ch, e, xx, pin)
 (
     v = PatchStruct[0] = max(0, min(its_PchV_Cnt - 1, 0|PatchStruct[0]));
     its_Pch_Cables();
-    ncel = ((v === its_PchV_In) || (v === its_PchV_Out)) ? min(CH_NB, max(8, chcnt)) :
+    ncel = ((v === its_PchV_In) || (v === its_PchV_Out)) ? CH_NB :
         (v === its_PchV_Bus) ? BusActN : (v === its_PchV_Ctl) ? NB_CTL : its_PchCblN;
     npg = max(1, ceil(ncel / pad_PchG_Siz));
     pg = PatchStruct[1] = max(0, min(npg - 1, 0|PatchStruct[1]));
@@ -14429,7 +14960,7 @@ local (h1, h2, h3, uix_jneed, zzmi, i, k, c, w, v, pg, npg, ncel, nl, zz, zzmcl,
             ui_split_top(h2);
                 ui_pad(1,2,2,2);
                 mSL_setStrArray(pad_PchG_Labs, 8 * nl);
-                hc = 0;
+                hk = 0; // the entry under the mouse + 1 (all pages)
                 i = 0; loop(8 * nl,
                     c = its_Pch_GridCell(v, pg, i);
                     k = pg * pad_PchG_Siz + i;
@@ -14455,11 +14986,18 @@ local (h1, h2, h3, uix_jneed, zzmi, i, k, c, w, v, pg, npg, ncel, nl, zz, zzmcl,
                             (v === its_PchV_In) ? sprintf(pad_PchG_Labs[i], "In:%d", k) :
                             (v === its_PchV_Out) ? sprintf(pad_PchG_Labs[i], "Out:%d", k) :
                             sprintf(pad_PchG_Labs[i], "Ctl %d", k + 1);
-                            // In and the controls are written by REAPER (the track, the sliders), Out is read by REAPER
-                            ((v === its_PchV_In) || (v === its_PchV_Ctl)) ? (kw = 1) : (v === its_PchV_Out) ? (kr += (kw > 0));
+                            // In (the channels of the track) and the controls are written by REAPER (the track, the sliders),
+                            // Out is read by REAPER (the channels of the track)
+                            // (the input muted : In is not written, a cell read is red)
+                            (v === its_PchV_In) ? (kw = (k < chcnt) && (vol_inp !== 0)) : (v === its_PchV_Ctl) ? (kw = 1) :
+                            (v === its_PchV_Out) ? (kr += ((kw > 0) && (k < chcnt)));
                             pad_PchG_Colrs[i] = ((kw > 0) && (kr > 0)) ? Color_Limegreen :
                                 (kw > 0) ? Color_Dark_Orange : (kr > 0) ? Col_P6 : Col_Inactive;
                             (((v === its_PchV_In) || (v === its_PchV_Ctl)) && (kr === 0)) ? (pad_PchG_Colrs[i] = Col_Inactive);
+                        );
+                        ((PatchStruct[2] === k + 1) && (PatchStruct[3] === v)) ? (
+                            strcpy(#its_PchName, pad_PchG_Labs[i]);
+                            sprintf(pad_PchG_Labs[i], "[%s]", #its_PchName);
                         );
                     );
                     i += 1;
@@ -14469,38 +15007,75 @@ local (h1, h2, h3, uix_jneed, zzmi, i, k, c, w, v, pg, npg, ncel, nl, zz, zzmcl,
                 (ui_hover() && (ui_jpad_lst_wi > 0) && (ui_jpad_lst_he > 0)) ? (
                     hx = floor((uix_mouse_x - ui_jpad_lst_left) / ui_jpad_lst_wi);
                     hy = floor((uix_mouse_y - ui_jpad_lst_top) / ui_jpad_lst_he);
-                    ((hx >= 0) && (hx < 8) && (hy >= 0) && (hy < nl)) ? (hc = its_Pch_GridCell(v, pg, k = hy * 8 + hx));
+                    ((hx >= 0) && (hx < 8) && (hy >= 0) && (hy < nl)) ? (hk = pg * pad_PchG_Siz + hy * 8 + hx + 1);
+                );
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4; ui_GFXReason = 36;
+                    e = pad_PatchG[ui_jpad_last] - 1; // the entry in the page
+                    k = pg * pad_PchG_Siz + e;
+                    ((e >= 0) && (e < 8 * nl) && (its_Pch_GridCell(v, pg, e) > 0)) ? (
+                        (zz & ui_jpad_ev_lmc) ? (
+                            // pin (or unpin) the entry : its text stays shown
+                            ((PatchStruct[2] === k + 1) && (PatchStruct[3] === v)) ? (PatchStruct[2] = 0) : (
+                                PatchStruct[2] = k + 1; PatchStruct[3] = v;
+                            );
+                        ) :
+                        (zz & ui_jpad_ev_rmc) ? (
+                            // the modules that write or read the entry : the chosen one is opened
+                            its_Pch_Info(v, k);
+                            (its_PchLstN === 0) ? (
+                                strcpy(menu_Pch_Mods[ui_jmenu_items], "*--#--No module writes or reads it");
+                                menu_Pch_Mods[ui_jmenu_itc] = 1;
+                            ) : (
+                                menu_Pch_Mods[ui_jmenu_itc] = its_PchLstN;
+                            );
+                            xx = control_jmenu(menu_Pch_Mods);
+                            ((xx >= 1) && (xx <= its_PchLstN)) ? (
+                                !its_Pch_Open(its_PchLstT[xx - 1], its_PchLstM[xx - 1]) ?
+                                    mSL_log(SysLogBox, "Patch : no room in the pane to open this module");
+                            );
+                        );
+                    );
                 );
             ui_pop();
 
-            // the text : the cell under the mouse
+            // the text : the cell under the mouse, else the pinned one (if it still exists)
             ui_split_top(h3);
                 ui_pad(4,2,4,2);
                 ui_pcolor(ui_jcolor_text);
                 ui_align(0, 0);
+                pin = (hk === 0) && (PatchStruct[2] > 0) && (PatchStruct[3] === v);
+                k = (hk > 0) ? hk - 1 : pin ? PatchStruct[2] - 1 : -1;
+                hc = (k >= 0) ? its_Pch_Info(v, k) : 0;
                 (hc > 0) ? (
-                    // a cable, a bus : all its cells
-                    k += pg * pad_PchG_Siz;
-                    its_PchCellW = (v === its_PchV_Cbl) ? ((its_PchCbl[k] < RD_CNT) ? CblRdWidth[its_PchCbl[k]] : CblFxWidth[its_PchCbl[k] - RD_CNT]) :
-                        (v === its_PchV_Bus) ? BusWidth[BusAct[k]] : 1;
-                    its_Patch_Scan(hc);
-                    its_PchCellW = 1;
                     (v === its_PchV_Cbl) ? (
                         ch = its_PchCbl[k];
                         (ch < RD_CNT) ? sprintf(#its_PchName, "Cable of Reader %d", ch + 1) :
                             sprintf(#its_PchName, "Cable of Effect %d", ch - RD_CNT + 1);
                     ) :
-                    strcpy(#its_PchName, pad_PchG_Labs[hy * 8 + hx]);
-                    sprintf(#its_PchTxt, "%s = %.4f", #its_PchName, smpl_tab[hc]);
+                    (v === its_PchV_Bus) ? sprintf(#its_PchName, "Bus %d [%d]", BusAct[k] + 1, BusWidth[BusAct[k]]) :
+                    (v === its_PchV_In) ? sprintf(#its_PchName, "In:%d", k) :
+                    (v === its_PchV_Out) ? sprintf(#its_PchName, "Out:%d", k) :
+                    sprintf(#its_PchName, "Ctl %d", k + 1);
+                    sprintf(#its_PchTxt, "%s%s = %.4f", pin ? "(pinned) " : "", #its_PchName, smpl_tab[hc]);
                     ui_split_top(ui_texth()); ui_text(#its_PchTxt); ui_pop();
                     sprintf(#its_PchTxt, "Written by: %s", (strlen(#its_PchWs) > 0) ? #its_PchWs :
-                        ((v === its_PchV_In) ? "the track" : (v === its_PchV_Ctl) ? "the slider" : "nobody"));
+                        ((v === its_PchV_In) ? ((k < chcnt) ? its_Pch_TrackTxt(#its_PchTrk) : "nobody (not a channel of the track)") :
+                        (v === its_PchV_Ctl) ? "the slider" : "nobody"));
                     ui_split_top(ui_texth()); ui_text(#its_PchTxt); ui_pop();
                     sprintf(#its_PchTxt, "Read by: %s", (strlen(#its_PchRs) > 0) ? #its_PchRs :
-                        ((v === its_PchV_Out) ? "the track" : "nobody"));
+                        ((v === its_PchV_Out) ? ((k < chcnt) ? "the track" : "nobody (not a channel of the track)") : "nobody"));
                     ui_split_top(ui_texth()); ui_text(#its_PchTxt); ui_pop();
+                ) :
+                ((v === its_PchV_Bus) && (BusActN === 0)) ? (
+                    ui_split_top(ui_texth()); ui_text("No bus in use : a bus exists while a module writes or reads it"); ui_pop();
+                    ui_split_top(ui_texth()); ui_text("(output or source 'Bus n' of a reader, a writer, an effect)."); ui_pop();
+                ) :
+                ((v === its_PchV_Cbl) && (its_PchCblN === 0)) ? (
+                    ui_split_top(ui_texth()); ui_text("No cable : a reader or an effect gets its own cable"); ui_pop();
+                    ui_split_top(ui_texth()); ui_text("when its output is 'Own cable'."); ui_pop();
                 ) : (
-                    sprintf(#its_PchTxt, "%d connections not valid", its_PchBad);
+                    sprintf(#its_PchTxt, "%d connections not valid ; %d channels in the track", its_PchBad, chcnt);
                     ui_split_top(ui_texth()); ui_text("Mouse over a cell : who writes it, who reads it."); ui_pop();
                     ui_split_top(ui_texth()); ui_text(#its_PchTxt); ui_pop();
                 );
@@ -14560,8 +15135,8 @@ local (h1, h2, h3, uix_jneed, zzmi, i, k, n, nt, mx, nl, zz, zzmcl, xx, hk, hx, 
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 36;
                     zzmcl = pad_Ins[ui_jpad_last]-1;
-                    ((zz & ui_jpad_ev_rmc) && (zzmcl === 7)) ? (
-                        xx = control_jmenu(menu_InsAll_Action);
+                    ((zz & (ui_jpad_ev_rmc | ui_jpad_ev_lmc)) && (zzmcl === 7)) ? ( // the cell "Action" : right or left clic
+                        xx = its_Menu_Clic(menu_InsAll_Action, zz);
                         (xx === 1) ? (
                             k = 1; loop(its_InsMx, (its_InsSym[k] !== 0) ? its_Al_DumpIns(k); k += 1;);
                             (n === 0) ? mSL_log(SysLogBox, "No instance");
@@ -14687,6 +15262,11 @@ local (h1, h2, uix_jneed, zzmi, jmc, i, k, r, xx, zi, zz, zzmcl, nLn, nRd, nWr, 
                     i += 1;);
                 strcpy(pad_Glb_Labs[0],"Globals");
                 sprintf(pad_Glb_Labs[1],"Channels %d", chcnt);
+                // the input almost muted by the input gain (its slider, below) : in red
+                ((slSmpl === 0) && (slInGain <= its_InGainLow)) ? (
+                    sprintf(pad_Glb_Labs[1],"Channels %d, In %.0f dB", chcnt, slInGain);
+                    pad_Glb_Colrs[1] = Col_P6;
+                );
                 k = max(0, min(2, slSmpl));
                 strcpy(pad_Glb_Labs[2],menu_Glb_Smpl_N[k]);
                 // track samples : Merge (green), Ignore (orange), Pass (blue)
@@ -14703,7 +15283,7 @@ local (h1, h2, uix_jneed, zzmi, jmc, i, k, r, xx, zi, zz, zzmcl, nLn, nRd, nWr, 
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 35;
                     zzmcl = pad_Global[ui_jpad_last]-1;
-                    (zz & ui_jpad_ev_rmc) ? (  // right mouse clic
+                    ((zz & ui_jpad_ev_rmc) || ((zz & ui_jpad_ev_lmc) && (zzmcl === 7))) ? (  // right mouse clic (the cell "Action" : left clic too)
                         (zzmcl === 2) ? (
                             ui_menu_tick(menu_Glb_Smpl, -1, 0);
                             ui_menu_tick(menu_Glb_Smpl, k+1, 1);
@@ -14715,7 +15295,7 @@ local (h1, h2, uix_jneed, zzmi, jmc, i, k, r, xx, zi, zz, zzmcl, nLn, nRd, nWr, 
                             ui_menu_tick(menu_Glb_Smpl, -1, 0);
                         ) :
                         (zzmcl === 7) ? (
-                            xx = control_jmenu(menu_Glb_Action);
+                            xx = its_Menu_Clic(menu_Glb_Action, zz);
                             (xx > 1) ? (
                                 slGlAct = xx - 1; // performed by update_sliders (its_actions)
                                 slupdt = 1;
