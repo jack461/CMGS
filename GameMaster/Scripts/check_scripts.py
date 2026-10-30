@@ -6,7 +6,7 @@ The log is a "syslog-<Plugin>-<date>.txt" file. Given a directory, the most rece
 in it is used; with no argument, the most recent one in ~/Music/REAPER-Projects/*/.
 
 Each script line  // Expected "text"  (or  // Expect "text") announces a line of the output which
-must contain "text" ; the text may not end inside a word or a number ("s vaut 55" does not
+must contain "text" (up to the last double quote of the line) ; the text may not end inside a word or a number ("s vaut 55" does not
 accept "s vaut 557", nor "s vaut 55.2").
 In "text", sprintf formats stand for values which may change from one run to another, e.g.
 "Ex-0004. fib = %d" :
@@ -51,7 +51,7 @@ SCRIPTS = HERE  # the test scripts are next to this file
 PROJECTS = os.path.expanduser('~/Music/REAPER-Projects')
 USING = re.compile(r'^(?:::-> Using "(.*)"\s*$|\*\s+(?:Compile|Script):\s+(.*?\.(?:mSL|txt))\s)')
 SEPARATOR = '_' * 17
-EXPECTED = re.compile(r'//\s*Expect(?:ed)?\s*"([^"]*)"')
+EXPECTED = re.compile(r'//\s*Expect(?:ed)?\s*"(.*)"[ \t]*$', re.M)  # (the text may hold double quotes)
 EXPECTED_ERR = re.compile(r'//\s*Expect(?:ed)?\s+error\s+(\d+)')
 # the plug-in specific series of scripts (first digit of the number), named as in "syslog-<Plugin>-<date>.txt"
 SERIES = {'1': 'Interstys', '2': 'GamePlayer', '3': 'Diffusion3'}

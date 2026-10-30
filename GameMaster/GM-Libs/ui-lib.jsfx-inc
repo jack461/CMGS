@@ -2243,16 +2243,28 @@ function control_navbar(title) (
 	control_navbar(title, -1, -1);
 );
 
-function uix_slider_value_to_ratio(value, range_low, range_high, curve_bias) local(valueratio) (
+// (JJG) curve_bias >= 1000 : a symmetric curve around the middle of the range, bias (curve_bias - 1000) on each half
+// (fine near the middle, e.g. a speed in [-1, 1] fine near 0)
+function uix_slider_value_to_ratio(value, range_low, range_high, curve_bias) local(valueratio, b, x) (
 	valueratio = max(0, min(1, (value - range_low)/(range_high - range_low)));
+	(curve_bias >= 1000) ? (
+		b = curve_bias - 1000;
+		x = 2*valueratio - 1;
+		0.5 + 0.5*sign(x)*(b ? log(abs(x)*(exp(b) - 1) + 1)/b : abs(x));
+	) :
 	curve_bias ? (
 		log(valueratio*(exp(curve_bias) - 1) + 1)/curve_bias
 	) : valueratio;
 );
 
-function uix_slider_ratio_to_value(ratio, range_low, range_high, curve_bias) local(valueratio) (
+function uix_slider_ratio_to_value(ratio, range_low, range_high, curve_bias) local(valueratio, b, x) (
 	ratio = max(0, min(1, ratio));
-	valueratio = curve_bias ? (
+	valueratio = (curve_bias >= 1000) ? (
+		b = curve_bias - 1000;
+		x = 2*ratio - 1;
+		0.5 + 0.5*sign(x)*(b ? (exp(abs(x)*b) - 1)/(exp(b) - 1) : abs(x));
+	) :
+	curve_bias ? (
 		(exp(ratio*curve_bias) - 1)/(exp(curve_bias) - 1)
 	) : ratio;
 	range_low + (range_high - range_low)*valueratio;
