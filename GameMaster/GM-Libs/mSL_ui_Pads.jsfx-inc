@@ -490,6 +490,7 @@ local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, 
         // geometry of the last pad drawn (see ui_jpad_cell_pos)
         ui_jpad_lst_left = left; ui_jpad_lst_top = top; ui_jpad_lst_wi = wi; ui_jpad_lst_he = he;
         ui_jpad_lst_ix = ix; ui_jpad_lst_iy = iy; ui_jpad_lst_gloff = gloff;
+        ui_jpad_lst_nc = nc; ui_jpad_lst_nl = nl;
         labs = pm[ui_jpad_labs]; labs != 0 ? labs += pm; // labels, if any
         alabs = pm[ui_jpad_altlabs]; alabs != 0 ? alabs += pm; // alt labels, if any
         cdefs = pm[ui_jpad_cells]; cdefs != 0 ? cdefs += pm; // cell definitions
@@ -739,6 +740,100 @@ local (k, nx, ny)
     );
     ui_jpad_cx = ui_jpad_lst_left + nx * ui_jpad_lst_wi;
     ui_jpad_cy = ui_jpad_lst_top + ny * ui_jpad_lst_he;
+);
+
+/*
+   The cell of the last pad drawn by control_jpad under the mouse : its number (as pad[ui_jpad_last] - 1), -1 if none
+*/
+ui_jpad_lst_nc = ui_jpad_lst_nl = 0;
+function ui_jpad_cell_at()
+local (nx, ny)
+(
+    ((ui_jpad_lst_wi > 0) && (ui_jpad_lst_he > 0)) ? (
+        nx = floor((uix_mouse_x - ui_jpad_lst_left) / ui_jpad_lst_wi);
+        ny = floor((uix_mouse_y - ui_jpad_lst_top) / ui_jpad_lst_he);
+        ((nx >= 0) && (nx < ui_jpad_lst_nc) && (ny >= 0) && (ny < ui_jpad_lst_nl)) ?
+            nx * ui_jpad_lst_ix + ny * ui_jpad_lst_iy - ui_jpad_lst_gloff : -1;
+    ) : -1;
+);
+
+
+/*
+   The drag of a cell of value : a potentiometer (the convention of CMGS for the cells holding a value) :
+       left drag   horizontal : coarse, the whole range [lo, hi] in px pixels ; vertical : fine (1/10, up = more) ;
+                   the cross of the cell : in its column (the cell included), only the fine adjustment (the vertical
+                   moves) ; in its row, out of the column, only the coarse one (the horizontal moves) ; elsewhere both
+       Shift + left clic : the reset (the host does it ; no drag starts with Shift) ; the left clic alone does nothing ;
+       right clic : a menu (the host)
+   In the frame, after control_jpad(pad) (same viewport) :
+       c = ui_jpad_cell_at();
+       (ui_jdrag_can_start() && <the cell c holds a value>) ? ui_jdrag_start(owner, c, value, lo, hi, px, flags);
+                (just after control_jpad : the geometry of the cell is taken from the last pad drawn)
+       d = ui_jdrag(owner);
+       (d & 1) ? <the value of the cell ui_jdrag_cell becomes ui_jdrag_v>;
+       (d & 2) : the drag has moved, the left clic of this frame (its end) must be ignored
+   owner : who draws the pad (e.g. the block of the module) ; flags : 1 logarithmic (lo > 0), 2 integer values
+*/
+ui_jdrag_own = -1;          // the owner of the current drag (-1 : none)
+ui_jdrag_cell = -1;         // its cell
+ui_jdrag_v = ui_jdrag_v0 = ui_jdrag_lo = ui_jdrag_hi = ui_jdrag_px = ui_jdrag_fl = 0;
+ui_jdrag_x0 = ui_jdrag_y0 = ui_jdrag_mv = 0;
+ui_jdrag_lx = ui_jdrag_ly = ui_jdrag_p = 0;                         // the last mouse position, the accumulated move
+ui_jdrag_cl = ui_jdrag_cr = ui_jdrag_ct = ui_jdrag_cb = 0;          // the cell : left, right, top, bottom
+
+// The left button has just been pressed in the current viewport (the pad), without Shift
+function ui_jdrag_can_start()
+(
+    ui_mouse_down(1) && !(mouse_cap & 8);
+);
+
+function ui_jdrag_start(owner, cell, v, lo, hi, px, flags)
+(
+    ui_jdrag_own = owner; ui_jdrag_cell = cell;
+    ui_jdrag_v = ui_jdrag_v0 = v; ui_jdrag_lo = lo; ui_jdrag_hi = hi; ui_jdrag_px = max(1, px); ui_jdrag_fl = flags;
+    ui_jdrag_x0 = ui_jdrag_lx = uix_mouse_x; ui_jdrag_y0 = ui_jdrag_ly = uix_mouse_y; ui_jdrag_mv = ui_jdrag_p = 0;
+    ui_jpad_cell_pos(cell);
+    ui_jdrag_cl = ui_jpad_cx; ui_jdrag_cr = ui_jpad_cx + ui_jpad_lst_wi;
+    ui_jdrag_ct = ui_jpad_cy; ui_jdrag_cb = ui_jpad_cy + ui_jpad_lst_he;
+);
+
+function ui_jdrag(owner)
+local (x, y, inc, inr, v, r)
+(
+    r = 0;
+    (ui_jdrag_own === owner) ? (
+        r = ui_jdrag_mv ? 2 : 0;
+        (mouse_cap & 1) ? (
+            x = uix_mouse_x; y = uix_mouse_y;
+            ((abs(x - ui_jdrag_x0) > 3) || (abs(y - ui_jdrag_y0) > 3)) ? (ui_jdrag_mv = 1);
+            ui_jdrag_mv ? (
+                // the moves of this frame, according to the zone of the mouse (accumulated : no jump between zones)
+                inc = (x >= ui_jdrag_cl) && (x < ui_jdrag_cr); // in the column of the cell
+                inr = (y >= ui_jdrag_ct) && (y < ui_jdrag_cb); // in its row
+                (!inc) ? (ui_jdrag_p += x - ui_jdrag_lx); // coarse
+                (inc || !inr) ? (ui_jdrag_p += 0.1 * (ui_jdrag_ly - y)); // fine
+                v = (ui_jdrag_fl & 1) ?
+                    max(ui_jdrag_lo, ui_jdrag_v0) * (ui_jdrag_hi / ui_jdrag_lo) ^ (ui_jdrag_p / ui_jdrag_px) :
+                    ui_jdrag_v0 + (ui_jdrag_hi - ui_jdrag_lo) * ui_jdrag_p / ui_jdrag_px;
+                ((v < ui_jdrag_lo) || (v > ui_jdrag_hi)) ? (
+                    // at a limit : the accumulated move is brought back to it (no dead travel when coming back)
+                    v = max(ui_jdrag_lo, min(ui_jdrag_hi, v));
+                    ui_jdrag_p = (ui_jdrag_fl & 1) ?
+                        ui_jdrag_px * log(v / max(ui_jdrag_lo, ui_jdrag_v0)) / log(ui_jdrag_hi / ui_jdrag_lo) :
+                        (v - ui_jdrag_v0) * ui_jdrag_px / max(0.000001, ui_jdrag_hi - ui_jdrag_lo);
+                );
+                (ui_jdrag_fl & 2) ? (v = floor(v + 0.5));
+                v = max(ui_jdrag_lo, min(ui_jdrag_hi, v));
+                (v != ui_jdrag_v) ? (ui_jdrag_v = v; r |= 1;);
+                r |= 2;
+                ui_GFXdoNow |= 4;
+            );
+            ui_jdrag_lx = x; ui_jdrag_ly = y;
+        ) : (
+            ui_jdrag_own = -1; ui_jdrag_cell = -1; // released (r : 2 if it has moved)
+        );
+    );
+    r;
 );
 
 

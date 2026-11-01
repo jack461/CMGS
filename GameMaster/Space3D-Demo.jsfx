@@ -1,0 +1,416 @@
+desc:Space3D-Demo
+
+/*
+    Test bench of the 3D view GM-Libs/mSL_ui_Space3D.jsfx-inc
+
+    - left drag : rotate the view ; wheel : zoom ; left click : select a speaker or a source
+    - right click : display options, Top / Front / 3D views
+    - drop a GRM Spaces layout (.lay) or a library of layouts (.ala) on the window ;
+      then click on "Speakers" or "Sources" in the title line to choose a layout of the library
+      (greyed : too many points). A single .lay becomes directly the "Fichier" speakers layout
+      (sources layout when its root element is <Sources...>).
+
+    Sources : position = group center + spread * (position in the sources layout, in [-1,1])
+
+    The gains are computed by a PROVISIONAL distance law (each source lights the speakers
+    nearer than its size, with a cosine weight, normalized in power) : it is only here to
+    animate the view, until the law of Spaces 3D is measured. No audio processing.
+*/
+
+slider1:5<0,6,1{Stereo,Quadriphonie,Octophonie,Cercle 16,Sphere 18,NHK 22.2,Fichier}>Speakers layout
+slider2:3<0,5,1{Mono,Stereo,Quadriphonie,Octophonie,Cercle 16,Fichier}>Sources layout
+slider3:25<0,100,1>Spread (%)
+slider4:50<1,100,1>Source size (%)
+slider5:1<0,2,1{None,Circle,Square}>Trajectory
+slider6:3<-30,30,0.1>Speed (turns/min)
+slider7:0.6<0,1,0.01>Trajectory radius
+slider8:0<-1,1,0.01>left / right
+slider9:0<-1,1,0.01>back / front
+slider10:0<-1,1,0.01>bottom / top
+slider11:789<0,1023,1>-Display options
+slider12:0.45<-3.15,3.15,0.001>-Camera azimuth
+slider13:0.3<-1.6,1.6,0.001>-Camera elevation
+slider14:4.2<1.8,12,0.01>-Camera distance
+
+options:no_meter
+
+import GM-Libs/mSL_ui_Space3D.jsfx-inc
+
+@init
+
+MAX_SPK = 128;
+MAX_SRC = 32;
+i__next = s3d_init(0, MAX_SPK, MAX_SRC, 256, 3);
+file_spk = i__next;     // the speakers read from a .lay file (entries of s3d_st values)
+i__next += MAX_SPK * s3d_st;
+file_src = i__next;     // the sources read from a .lay file
+i__next += MAX_SRC * s3d_st;
+src_lay = i__next;      // the current sources layout (x, y, z in [-1,1])
+i__next += MAX_SRC * 3;
+demo_w = i__next;       // work weights of demo_gains
+i__next += MAX_SPK;
+MAX_LIBPTS = 2048;      // the library of layouts (.ala)
+MAX_LIBG = 64;
+lib_pts = i__next;      // points (entries of s3d_st values)
+i__next += MAX_LIBPTS * s3d_st;
+lib_start = i__next;    // first point of each layout
+i__next += MAX_LIBG;
+lib_cnt = i__next;      // number of points of each layout
+i__next += MAX_LIBG;
+lib_ng = 0;
+strcpy(#liblist, "");   // names of the layouts, separated by "|"
+strcpy(#libfile, "");
+file_n = file_ns = 0;
+file_vers = 0;          // incremented when a file layout changes
+cur_layout = cur_srclay = -1;
+cur_file = -1;
+phase = 0;
+last_time = time_precise();
+strcpy(#layname, "");
+strcpy(#srcname, "");
+
+
+function setspk(k, x, y, z)
+local(e)
+(
+    e = s3d_spk + k * s3d_st;
+    e[s3d_fx] = x; e[s3d_fy] = y; e[s3d_fz] = z;
+);
+
+// n points on a horizontal ring of radius r at height z, the first at the angle a0
+// (angles in degrees, from the front, clockwise) ; tab : entries of st values
+function setring(tab, st, k0, n, r, z, a0)
+local(k, a, e)
+(
+    k = 0;
+    loop(n,
+        a = (a0 + k * 360 / n) * $pi / 180;
+        e = tab + (k0 + k) * st;
+        e[0] = r * sin(a); e[1] = r * cos(a); e[2] = z;
+        k += 1;
+    );
+);
+
+function demo_layout(ly)
+local(k)
+(
+    (ly === 0) ? (
+        setspk(0, -0.71, 0.70, 0); setspk(1, 0.70, 0.70, 0);
+        s3d_nspk = 2;
+    ) :
+    (ly === 1) ? (
+        setspk(0, -0.7, 0.7, 0); setspk(1, 0.7, 0.7, 0);
+        setspk(2, -0.7, -0.7, 0); setspk(3, 0.7, -0.7, 0);
+        s3d_nspk = 4;
+    ) :
+    (ly === 2) ? (
+        setring(s3d_spk, s3d_st, 0, 8, 1, 0, -22.5);
+        s3d_nspk = 8;
+    ) :
+    (ly === 3) ? (
+        setring(s3d_spk, s3d_st, 0, 16, 1, 0, -11.25);
+        s3d_nspk = 16;
+    ) :
+    (ly === 4) ? (
+        // approximation of "Sphere 18" : 4 low, 8 middle, 4 high, top, bottom
+        setring(s3d_spk, s3d_st, 0, 4, 0.714, -0.7, -45);
+        setring(s3d_spk, s3d_st, 4, 8, 1, 0, -22.5);
+        setring(s3d_spk, s3d_st, 12, 4, 0.714, 0.7, -45);
+        setspk(16, 0, 0, 1); setspk(17, 0, 0, -1);
+        s3d_nspk = 18;
+    ) :
+    (ly === 5) ? (
+        // NHK 22.2, as saved by the Spaces layout editor
+        setspk(0, -0.71, 0.70, 0);      setspk(1, 0.70, 0.70, 0);       setspk(2, 0, 1, 0);
+        setspk(3, -0.06, -1, -1);       setspk(4, -1, -0.60, 0);        setspk(5, 1, -0.575, 0);
+        setspk(6, -0.395, 0.855, 0);    setspk(7, 0.41, 0.81, 0);       setspk(8, 0, -1, 0);
+        setspk(9, 0.065, -1, -1);       setspk(10, -1, 0.215, 0);       setspk(11, 1, 0.205, 0);
+        setspk(12, -0.70, 0.705, 0.705); setspk(13, 0.70, 0.70, 0.70); setspk(14, 0, 1, 0.70);
+        setspk(15, 0, 0, 1);            setspk(16, -0.70, -0.705, 0.705); setspk(17, 0.70, -0.70, 0.70);
+        setspk(18, -1, 0.20, 0.70);     setspk(19, 1, 0.205, 0.70);     setspk(20, 0, -1, 0.705);
+        setspk(21, 0, 1, -0.50);        setspk(22, -0.705, 0.70, -0.50); setspk(23, 0.70, 0.70, -0.495);
+        s3d_nspk = 24;
+    ) : (
+        memcpy(s3d_spk, file_spk, file_n * s3d_st);
+        s3d_nspk = file_n;
+    );
+);
+
+// the sources layout, in src_lay (x, y, z)
+function demo_srclayout(ly)
+local(k)
+(
+    memset(src_lay, 0, MAX_SRC * 3);
+    (ly === 0) ? (
+        src_n = 1;
+    ) :
+    (ly === 1) ? (
+        src_lay[0] = -0.8; src_lay[3] = 0.8;
+        src_n = 2;
+    ) :
+    (ly === 2) ? (
+        src_lay[0] = -0.625; src_lay[1] = 0.625;  src_lay[3] = 0.625; src_lay[4] = 0.625;
+        src_lay[6] = -0.625; src_lay[7] = -0.625; src_lay[9] = 0.625; src_lay[10] = -0.625;
+        src_n = 4;
+    ) :
+    (ly === 3) ? (
+        setring(src_lay, 3, 0, 8, 1, 0, -22.5);
+        src_n = 8;
+    ) :
+    (ly === 4) ? (
+        setring(src_lay, 3, 0, 16, 1, 0, -11.25);
+        src_n = 16;
+    ) : (
+        k = 0;
+        loop(file_ns,
+            src_lay[3*k] = file_src[k * s3d_st + s3d_fx];
+            src_lay[3*k+1] = file_src[k * s3d_st + s3d_fy];
+            src_lay[3*k+2] = file_src[k * s3d_st + s3d_fz];
+            k += 1;
+        );
+        src_n = file_ns;
+    );
+);
+
+// the name of the layout g of the library, in #lib_nm
+function lib_name(g)
+local(p, len, k, p0)
+(
+    len = strlen(#liblist);
+    p = 0; k = 0;
+    while ((k < g) && (p < len)) (
+        (str_getchar(#liblist, p) === '|') ? k += 1;
+        p += 1;
+    );
+    p0 = p;
+    while ((p < len) && (str_getchar(#liblist, p) !== '|')) (p += 1;);
+    strcpy_substr(#lib_nm, #liblist, p0, p - p0);
+);
+
+// menu of the library : the layouts of more than maxn points are greyed, the current one checked
+// returns the chosen layout, or -1
+function lib_menu(maxn, curname)
+local(g, c)
+(
+    strcpy(#lib_mnu, "");
+    g = 0;
+    loop(lib_ng,
+        lib_name(g);
+        (g > 0) ? strcat(#lib_mnu, "|");
+        (lib_cnt[g] > maxn) ? strcat(#lib_mnu, "#") : (strcmp(#lib_nm, curname) === 0) ? strcat(#lib_mnu, "!");
+        sprintf(#lib_it, "%s  (%d)", #lib_nm, lib_cnt[g]);
+        strcat(#lib_mnu, #lib_it);
+        g += 1;
+    );
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    c = gfx_showmenu(#lib_mnu);
+    c - 1;
+);
+
+// copy the layout g of the library to the speakers (dsrc = 0) or the sources (dsrc = 1)
+function lib_take(g, dsrc)
+local(n)
+(
+    lib_name(g);
+    dsrc ? (
+        file_ns = n = min(MAX_SRC, lib_cnt[g]);
+        memcpy(file_src, lib_pts + lib_start[g] * s3d_st, n * s3d_st);
+        strcpy(#srcname, #lib_nm);
+        slider2 = 5; sliderchange(slider2);
+    ) : (
+        file_n = n = min(MAX_SPK, lib_cnt[g]);
+        memcpy(file_spk, lib_pts + lib_start[g] * s3d_st, n * s3d_st);
+        strcpy(#layname, #lib_nm);
+        slider1 = 6; sliderchange(slider1);
+    );
+    file_vers += 1;
+);
+
+// PROVISIONAL gain law : see the header
+function demo_gains(rad)
+local(i, k, e, f, d, w, sw, best, bd)
+(
+    k = 0; loop(s3d_nspk, s3d_spk[k * s3d_st + s3d_fg] = 0; k += 1;);
+    i = 0;
+    loop(s3d_nsrc,
+        f = s3d_src + i * s3d_st;
+        // sum of the squared weights for this source
+        sw = 0; best = 0; bd = 100;
+        k = 0;
+        loop(s3d_nspk,
+            e = s3d_spk + k * s3d_st;
+            d = sqrt(sqr(e[s3d_fx] - f[s3d_fx]) + sqr(e[s3d_fy] - f[s3d_fy]) + sqr(e[s3d_fz] - f[s3d_fz]));
+            (d < bd) ? (bd = d; best = k;);
+            demo_w[k] = w = (d < rad) ? cos(0.5 * $pi * d / rad) : 0;
+            sw += w * w;
+            k += 1;
+        );
+        // no speaker in reach : the nearest one
+        (sw <= 0) ? (demo_w[best] = 1; sw = 1;);
+        k = 0;
+        loop(s3d_nspk,
+            e = s3d_spk + k * s3d_st;
+            e[s3d_fg] += sqr(demo_w[k]) / sw; // power of this source on this speaker
+            k += 1;
+        );
+        i += 1;
+    );
+    k = 0; loop(s3d_nspk, e = s3d_spk + k * s3d_st; e[s3d_fg] = sqrt(e[s3d_fg] / max(1, s3d_nsrc)); k += 1;);
+);
+
+
+@serialize
+
+file_var(0, file_n);
+file_n = max(0, min(MAX_SPK, file_n|0));
+file_mem(0, file_spk, file_n * s3d_st);
+file_string(0, #layname);
+file_var(0, file_ns);
+file_ns = max(0, min(MAX_SRC, file_ns|0));
+file_mem(0, file_src, file_ns * s3d_st);
+file_string(0, #srcname);
+file_var(0, lib_ng);
+lib_ng = max(0, min(MAX_LIBG, lib_ng|0));
+file_mem(0, lib_start, lib_ng);
+file_mem(0, lib_cnt, lib_ng);
+i__np = (lib_ng > 0) ? min(MAX_LIBPTS, lib_start[lib_ng-1] + lib_cnt[lib_ng-1]) : 0;
+file_mem(0, lib_pts, i__np * s3d_st);
+file_string(0, #liblist);
+file_string(0, #libfile);
+file_vers += 1;
+
+
+@gfx 900 650
+
+(g__font === 0) ? (gfx_setfont(1, "Arial", 13); g__font = 1;);
+
+// a layout file dropped on the window : it becomes the library
+gfx_getdropfile(0, #g__drop) ? (
+    (matchi("*.lay", #g__drop) || matchi("*.ala", #g__drop) || matchi("*.xml", #g__drop)) ? (
+        g__n = s3d_load_lay(#g__drop, lib_pts, MAX_LIBPTS, lib_start, lib_cnt, MAX_LIBG);
+        (g__n > 0) ? (
+            lib_ng = g__n;
+            strcpy(#liblist, #s3d_laylist);
+            // keep only the name of the file
+            g__k = strlen(#g__drop);
+            while ((g__k > 0) && (str_getchar(#g__drop, g__k - 1) !== '/') && (str_getchar(#g__drop, g__k - 1) !== '\\')) (g__k -= 1;);
+            strcpy_substr(#libfile, #g__drop, g__k);
+            (g__n === 1) ? (
+                lib_take(0, matchi("*source*", #s3d_laytag));
+                sprintf(#g__msg, "%s : \"%s\", %d points", #libfile, #lib_nm, lib_cnt[0]);
+            ) : (
+                sprintf(#g__msg, "%s : %d layouts - click on Speakers or Sources above to choose one", #libfile, g__n);
+            );
+        ) : (
+            sprintf(#g__msg, "%s : no layout read (%d)", #g__drop, g__n);
+        );
+    );
+    gfx_getdropfile(-1);
+);
+
+// layouts
+((slider1 != cur_layout) || (slider2 != cur_srclay) || (cur_file != file_vers)) ? (
+    demo_layout(slider1);
+    demo_srclayout(slider2);
+    cur_layout = slider1; cur_srclay = slider2; cur_file = file_vers;
+    s3d_sel = -1;
+);
+
+// group position and trajectory
+g__t = time_precise();
+phase += slider6 / 60 * min(0.2, g__t - last_time);
+phase -= floor(phase);
+last_time = g__t;
+g__r = slider7;
+(slider5 === 1) ? (
+    s3d_ntrj = 64; s3d_trjclosed = 1;
+    g__k = 0;
+    loop(64,
+        s3d_trj[3*g__k] = slider8 + g__r * sin(2 * $pi * g__k / 64);
+        s3d_trj[3*g__k+1] = slider9 + g__r * cos(2 * $pi * g__k / 64);
+        s3d_trj[3*g__k+2] = slider10;
+        g__k += 1;
+    );
+    s3d_gx = slider8 + g__r * sin(2 * $pi * phase);
+    s3d_gy = slider9 + g__r * cos(2 * $pi * phase);
+    s3d_gz = slider10;
+) : (slider5 === 2) ? (
+    s3d_ntrj = 4; s3d_trjclosed = 1;
+    s3d_trj[0] = slider8 - g__r; s3d_trj[1] = slider9 + g__r;
+    s3d_trj[3] = slider8 + g__r; s3d_trj[4] = slider9 + g__r;
+    s3d_trj[6] = slider8 + g__r; s3d_trj[7] = slider9 - g__r;
+    s3d_trj[9] = slider8 - g__r; s3d_trj[10] = slider9 - g__r;
+    s3d_trj[2] = s3d_trj[5] = s3d_trj[8] = s3d_trj[11] = slider10;
+    // along the sides, clockwise from the front left corner
+    g__u = phase * 4; g__k = floor(g__u); g__u -= g__k;
+    g__p = s3d_trj + 3 * g__k; g__q = s3d_trj + 3 * ((g__k + 1) % 4);
+    s3d_gx = g__p[0] + g__u * (g__q[0] - g__p[0]);
+    s3d_gy = g__p[1] + g__u * (g__q[1] - g__p[1]);
+    s3d_gz = slider10;
+) : (
+    s3d_ntrj = 0;
+    s3d_gx = slider8; s3d_gy = slider9; s3d_gz = slider10;
+);
+s3d_gon = 1;
+
+// the sources : group center + spread * sources layout
+s3d_nsrc = min(MAX_SRC, src_n);
+g__k = 0;
+loop(s3d_nsrc,
+    g__p = s3d_src + g__k * s3d_st;
+    g__p[s3d_fx] = max(-1, min(1, s3d_gx + slider3 / 100 * src_lay[3*g__k]));
+    g__p[s3d_fy] = max(-1, min(1, s3d_gy + slider3 / 100 * src_lay[3*g__k+1]));
+    g__p[s3d_fz] = max(-1, min(1, s3d_gz + slider3 / 100 * src_lay[3*g__k+2]));
+    g__k += 1;
+);
+demo_gains(1.2 * slider4 / 100);
+
+// the view : camera and options are kept in the hidden sliders
+s3d_mouse(0, 20, gfx_w, gfx_h - 20, mouse_wheel) ? mouse_wheel = 0;
+s3d_changed ? (
+    s3d_az -= 2 * $pi * floor((s3d_az + $pi) / (2 * $pi));
+    slider11 = s3d_opt; slider12 = s3d_az; slider13 = s3d_el; slider14 = s3d_dist;
+    sliderchange(slider11); sliderchange(slider12); sliderchange(slider13); sliderchange(slider14);
+    s3d_changed = 0;
+) : (
+    s3d_opt = slider11; s3d_az = slider12; s3d_el = slider13; s3d_dist = slider14;
+);
+s3d_draw(0, 20, gfx_w, gfx_h - 20);
+
+// title line : click on "Speakers" or "Sources" to choose a layout of the library
+gfx_set(0.15, 0.15, 0.15, 1);
+gfx_rect(0, 0, gfx_w, 20);
+gfx_set(0.85, 0.85, 0.85, 1);
+gfx_x = 6; gfx_y = 4;
+sprintf(#g__s, "Speakers : %s (%d)", (slider1 == 6) ? (strlen(#layname) ? #layname : "file") : "preset", s3d_nspk);
+gfx_drawstr(#g__s);
+g__x1 = gfx_x;
+gfx_x += 30;
+g__x2 = gfx_x;
+sprintf(#g__s, "Sources : %s (%d)", (slider2 == 5) ? (strlen(#srcname) ? #srcname : "file") : "preset", s3d_nsrc);
+gfx_drawstr(#g__s);
+g__x3 = gfx_x;
+(lib_ng > 0) ? (
+    gfx_set(0.6, 0.6, 0.6, 1);
+    gfx_x += 30;
+    sprintf(#g__s, "[%s : %d layouts]", #libfile, lib_ng);
+    gfx_drawstr(#g__s);
+);
+((mouse_cap & 1) && (g__ldown === 0) && (mouse_y < 20) && (lib_ng > 0)) ? (
+    (mouse_x < g__x1) ? (
+        g__k = lib_menu(MAX_SPK, #layname);
+        (g__k >= 0) ? lib_take(g__k, 0);
+    ) : ((mouse_x >= g__x2) && (mouse_x < g__x3)) ? (
+        g__k = lib_menu(MAX_SRC, #srcname);
+        (g__k >= 0) ? lib_take(g__k, 1);
+    );
+);
+g__ldown = mouse_cap & 1;
+strlen(#g__msg) ? (
+    gfx_set(1, 0.8, 0.4, 1);
+    gfx_x = 6; gfx_y = 24;
+    gfx_drawstr(#g__msg);
+);
+gfx_set(0.85, 0.85, 0.85, 1);
+gfx_x = gfx_w - 500; gfx_y = 4;
+gfx_drawstr("drag: rotate   wheel: zoom   click: select   right click: menu   drop .lay / .ala");

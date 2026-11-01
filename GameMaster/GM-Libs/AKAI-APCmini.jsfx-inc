@@ -900,25 +900,28 @@ local (km, p1, p2, ppro, fvol, fpro, mpro, MIDIdate, pstat)
             ) :
             // ==========================================================
             (CurrentPage === 8) ? (
-                // Choose a configuration in pad2 group
-                projUI[prx_newchoice] = w = (paddef - firstgroup + p1) % 4096; // A number in [0 ... 4095]
-                projUI[prx_prvchoice] = -1; // force update
-                projUI[prx_ptrconf] = -3;  // no selected config
-                projUI[prx_cpadval] = p1;  // selected entry
-                // select the new configuration
-                // change prev leds
-                (reledA2 != unusedled) ? midisend(0, NoteOn, reledA2, colorAOff);
-                // turn the pad led red, then green
-                reledA2 = p1;
-                midisend(0, NoteOnB, reledA2, colorChange);
-                reledA2time = timez + delitime;
-                willdo(reledA2time, refresh_01, 0);
-                // turn "off" the item entry
-                (reledC != unusedled) ? midisend(0, NoteOn, reledC, colorCOff);
-                reledC = unusedled;
-                projnum = projUI[prx_fident];
-                signal_change(projnum, 2); // a new config is loaded
-                projUI[prx_citmval] = unusedled;
+                // Choose a configuration in pad2 group (only the 64 pads : not the page button that has just
+                // selected this page, nor the projector buttons, nor shift)
+                (p1 < 0x40) ? (
+                    projUI[prx_newchoice] = w = (paddef - firstgroup + p1) % 4096; // A number in [0 ... 4095]
+                    projUI[prx_prvchoice] = -1; // force update
+                    projUI[prx_ptrconf] = -3;  // no selected config
+                    projUI[prx_cpadval] = p1;  // selected entry
+                    // select the new configuration
+                    // change prev leds
+                    (reledA2 != unusedled) ? midisend(0, NoteOn, reledA2, colorAOff);
+                    // turn the pad led red, then green
+                    reledA2 = p1;
+                    midisend(0, NoteOnB, reledA2, colorChange);
+                    reledA2time = timez + delitime;
+                    willdo(reledA2time, refresh_01, 0);
+                    // turn "off" the item entry
+                    (reledC != unusedled) ? midisend(0, NoteOn, reledC, colorCOff);
+                    reledC = unusedled;
+                    projnum = projUI[prx_fident];
+                    signal_change(projnum, 2); // a new config is loaded
+                    projUI[prx_citmval] = unusedled;
+                );
             ) :
             // ==========================================================
             (CurrentPage === 1) ? (
@@ -942,7 +945,7 @@ local (km, p1, p2, ppro, fvol, fpro, mpro, MIDIdate, pstat)
                     (actlist[p1] != 0) ? (
                         midisend(0, NoteOnB, p1, colorChange);
                         willdo(timez + delitime, refresh_01, 0);
-                        perform_actionlist(actlist[p1]);
+                        live_post(lrq_kActs, actlist[p1], 0, 0); // performed by @gfx (display actions, mSL functions)
                     );
                 );
             ) :
@@ -1102,19 +1105,20 @@ local (km, p1, p2, ppro, fvol, fpro, mpro, MIDIdate, pstat)
                         midisend(0, NoteOnB, reledY, colorChange);
                         reledQtime = timez + delitime;
                         willdo(reledQtime, refresh_05, 0);
-                        toggleclock(1); stattimer = 1 - stattimer; statgraph = 1;
+                        // (the clock box : by @gfx, see live_post)
+                        live_post(lrq_kClock, 1, 0, 0); stattimer = 1 - stattimer; statgraph = 1;
                     ) :
                     ((MIDIdate + timez) < 6) ? (
                         (MIDInotedate[shiftB] < 0) ? (
                             // reset timer
-                            toggleclock(1);
+                            live_post(lrq_kClock, 1, 0, 0);
                             timet = timec;
                             stattimer = 1;
                         ) : (
                             // Turn off the clock
                             midisend(0, NoteOn, reledY, colorBlack);
                             statclock = 0;
-                            toggleclock(0);
+                            live_post(lrq_kClock, 0, 0, 0);
                         );
                     );
                 );

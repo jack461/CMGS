@@ -619,7 +619,9 @@ Pr7_StudRat = Pr7_StudConf + 8;  // size : 8 * 4 -- panes widths
 Pr7_StudLive = Pr7_StudRat + 8 * 4; // size : 8 -- 1 if the tab uses the "live" display
 Pr7_UiStyle = Pr7_StudLive + 8; // ui_jstyle (look of the GUI)
 Pr7_UiTheme = Pr7_UiStyle + 1; // uix_jtheme (theme of the GUI)
-Pr7_Free = Pr7_UiTheme + 1;
+Pr7_UiSize = Pr7_UiTheme + 1; // the display size, in percent (0 : the default, see ui_jzoom_set)
+Pr7_PrjView = Pr7_UiSize + 1; // size : 8 -- the projector shown by each module "Projector view" (0 : that of its number)
+Pr7_Free = Pr7_PrjView + 8;
 dcbBlocksAll = 0; // allocated by pns_Init()
 
 // Alternate tabs names, edited with "Rename tab..." (right click in the menu bar), saved in @serialize
@@ -1340,6 +1342,34 @@ HP_CpCf = 0;
 spcnt = 0;
 spwh=6/log(2);
 
+// Requests of @block (and @init) for the Live screen, executed by @gfx (live_requests) : the boxes and their strings
+// are drawn and released by @gfx, the actions of the AKAI lists (display, mSL functions) also belong to @gfx.
+// A ring written only by @block (lrq_w) and read only by @gfx (lrq_r) : live_post must not be called from @gfx.
+LRQ_N = 64;
+lrq_kSig = 1; // signal_change(a = obj, b = par), c = the current projector when posted
+lrq_kActs = 2; // perform_actionlist(a)
+lrq_kClock = 3; // toggleclock(a)
+lrq_kMsg = 4; // a message box : #lrq_msg, duration a
+lrq_kind = make_array(LRQ_N);
+lrq_a = make_array(LRQ_N);
+lrq_b = make_array(LRQ_N);
+lrq_c = make_array(LRQ_N);
+lrq_w = lrq_r = 0;
+lrq_lost = 0; // requests refused : the ring is full (@gfx does not run ?)
+#lrq_msg = "";
+
+function live_post(kind, a, b, c)
+local (w, n)
+(
+    w = lrq_w; n = (w + 1) % LRQ_N;
+    (n != atomic_get(lrq_r)) ? (
+        lrq_kind[w] = kind; lrq_a[w] = a; lrq_b[w] = b; lrq_c[w] = c;
+        atomic_set(lrq_w, n); // last : @gfx reads the request when lrq_w changes
+    ) : (
+        lrq_lost += 1;
+    );
+);
+
 
 channelsinp = channelsinpD + 2;
 channelsout = channelsoutD + 2;
@@ -1597,7 +1627,6 @@ function MIDI_init()
 function freemat(mat)
 local (lErMat)
 (
-    //  ((mat & matrmask) || (mat < firstmat) || (mat >= endmatpt) || (mat[1] === 'free') || lErr) ? (
     ((mat < firstmat) || (mat >= endmatpt) || (mat[1] === 'free') || lErr) ? (
         // was not a used block
         (lErr === 0) ? (
@@ -2389,6 +2418,20 @@ function pns_Host_Modules(itdsp)
     blockDispNames[blockScheduler] = "Scheduler";
     blockProcessesMgr = (itdsp += 1);
     blockDispNames[blockProcessesMgr] = "Processes Manager";
+    blockSpace3D = (itdsp += 1);
+    blockDispNames[blockSpace3D] = "Space 3D";
+    // the global settings, and the settings of the projectors (see Diffusion-3-Projectors)
+    blockDiffusion = (itdsp += 1);
+    blockDispNames[blockDiffusion] = "Diffusion";
+    blockPrjView0 = itdsp + 1; // the 8 modules "Projector view" : blockPrjView0 ... blockPrjView0 + 7
+    blockDispNames[(itdsp += 1)] = "Projector view 1";
+    blockDispNames[(itdsp += 1)] = "Projector view 2";
+    blockDispNames[(itdsp += 1)] = "Projector view 3";
+    blockDispNames[(itdsp += 1)] = "Projector view 4";
+    blockDispNames[(itdsp += 1)] = "Projector view 5";
+    blockDispNames[(itdsp += 1)] = "Projector view 6";
+    blockDispNames[(itdsp += 1)] = "Projector view 7";
+    blockDispNames[(itdsp += 1)] = "Projector view 8";
     itdsp;
 );
 
@@ -2400,6 +2443,13 @@ pns_Init();
 mkModuleMenu();
 memoryBox1[19] = blockMemory1; // for keepBlockInfos
 memoryBox2[19] = blockMemory2;
+
+// The module "Space 3D" : 3D view of the speakers and sources (static memory, uses keepBlockInfos)
+<? include("GM-Libs/mSL_ui_Space3D.jsfx-inc"); ?>
+<? include("GM-Libs/Diffusion-3-Space3D.jsfx-inc"); ?>
+
+// The modules "Diffusion" and "Projector view" : the settings of the native sliders (part 2 : after sliderevent)
+<? prv_part = 1; include("GM-Libs/Diffusion-3-Projectors.jsfx-inc"); ?>
 
 // Default configuration : "Logs" as before (2 panes), "Live" with the live display
 serialBlock[Pr7_StudConf] = 2;
@@ -2569,7 +2619,8 @@ GMW2("Init MAIN");
 // Signal a change somewhere that should reflect in the graphic display
 // 1 to 16 is related with the corresponding projector number
 // 16 + n is related to slider "n"
-function signal_change(obj, par)
+// (executed by @gfx, see live_requests ; cproj : the current projector when the change was signaled)
+function live_signal_change(obj, par, cproj)
 local (Err, projnum, ctlblock, ctlname, ctlslid, box, bxid, ppro, s, w)
 (
     projnum = 0;
@@ -2714,7 +2765,7 @@ local (Err, projnum, ctlblock, ctlname, ctlslid, box, bxid, ppro, s, w)
         ctlblock = midictrlref[par];
         ctlname = ctlblock[mctlslname];
         ctlslid = ctlblock[mctlslider];
-        projnum = currentpro[prx_fident];
+        projnum = cproj;
         (ctlblock[mctlflags] & ctrlown) ? (
             bxid = (projnum << 8) | ctlslid;
             sprintf(#xidt, "%d  %s", projnum, ctlname);
@@ -2824,6 +2875,12 @@ local (Err, projnum, ctlblock, ctlname, ctlslid, box, bxid, ppro, s, w)
             );
         );
     );
+);
+
+// Signal a change (called by @block or @init) : the boxes are made by @gfx (live_signal_change)
+function signal_change(obj, par)
+(
+    live_post(lrq_kSig, obj, par, currentpro[prx_fident]);
 );
 
 
@@ -3567,7 +3624,8 @@ local ()
 
     (lErr === 0) ? (
         sprintf(#msg, "Loading:\"%s\"", #actfilname);
-        mk_display_box(0, #msg, 2, -1, 90);
+        strcpy(#lrq_msg, #msg);
+        live_post(lrq_kMsg, 90, 0, 0); // the box : made by @gfx (we are in @block)
         // analyse();
         doMslCompile(#actfilname); // add to compile list
         lErc = FnumLine; lErd = FUPos;
@@ -3972,6 +4030,8 @@ AAAAAW22 = mSL_symbol2("Hello_B");
 
 
 
+<? prv_part = 2; include("GM-Libs/Diffusion-3-Projectors.jsfx-inc"); ?>
+
 <? include("GM-Libs/Diffusion-3-Actions.jsfx-inc"); ?>
 
 
@@ -4136,6 +4196,8 @@ while ((recvlen = midirecv_buf(offset, midirbuf, midirsize)) > 0) (
     //);
 );
 
+// The settings changed in the modules "Diffusion" and "Projector view" (see Diffusion-3-Projectors)
+prv_Block();
 
 slsignal ? sliderevent(0);
 
@@ -5231,6 +5293,9 @@ function do_live_actions() local(gwk, box)
 // (capitals for the displays, see mSL_ui_LibJJ, Keyboard)
 function do_Plugin_Keys()
 (
+    GM_key_take('S') ? (
+        togglesliders(-1); // the native JSFX sliders (as Interstys ; 's' in the Live screen)
+    ) :
     GM_Tab_Keys(); // Tab, Shift + Tab : next, previous tabulation (see ui-lib-JJ-GUI)
 );
 
@@ -5502,7 +5567,7 @@ local (uix_jneed, uix_jmini, k, w, siz, u_ch, ent, nbcol)
             ((k = gmem[UAdd+cbInacFlg]) > 2) ? (gmem[UAdd+cbStat] = uSUnreachable;) ;
 
         // How many columns can we display ?
-        nbcol = floor(gfx_w/gfx_col_width); // need about that
+        nbcol = floor(gfx_w/ui_jscale()/gfx_col_width); // need about that
         glIsiz = 1;
 
         (nbcol >= 1) ? (
@@ -5672,7 +5737,7 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                 );
             );
             nc = max(1, min(8, 0|box[5])); // number of columns to show
-            nc = max(1, min(nc, floor(gfx_w/gfx_colL_width))); // narrow window: fewer columns
+            nc = max(1, min(nc, floor(gfx_w/ui_jscale()/gfx_colL_width))); // narrow window: fewer columns
 
             ui_jshow_color = ui_jcolor_text;
             siz = box[2];
@@ -5944,9 +6009,15 @@ while (g__efi) (
             //sprintf(#s, "*  Compile: %s  (%d)  *", efs, strlen(#efs)); mSL_log(SysLogBox, #s);
             doMslCompile(g__efs); // add to compile list
         ) :
+        (match ("*ala", g__efs)) ? (
+            sx_Drop(g__efs); // a library of GRM Spaces layouts : for the module "Space 3D"
+        ) :
         ((match ("*xml", g__efs)) || (match ("*lay", g__efs))) ? (
+            (match ("*lay", g__efs)) ? sx_Drop(g__efs); // also for the module "Space 3D"
+            // a trajectory exported by GRM Spaces : only for "Space 3D" (not parsed for mSL)
+            g__trj = (match ("*xml", g__efs)) ? sx_DropTraj(g__efs) : 0;
             // Do not accept empty strings
-            (strlen(g__efs) != 0) ? (
+            ((strlen(g__efs) != 0) && (g__trj == 0)) ? (
                 sprintf(#s, "::xml file : \"%s\"", g__efs); mSL_log(SysLogBox, #s);
                 (fHndl >= 0) ? (file_close(fHndl); fHndl = -1;);
                 fHndl = file_open(g__efs);
@@ -6021,39 +6092,40 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
                 (xx === ':') ? (
                     HP_Dr_updsize(mh_cur_box, max(10, floor(mh_cur_box[bx_sfact]  * 0.96)));
                 ) :
+                // the view of Space 3D (sx_*, s3d_* : the same scene as the module Space 3D)
                 (xx === ';') ? (
-                    mh_cur_box[bx_zfact] = min (6, mh_cur_box[bx_zfact] * 1.02);
+                    s3d_dist = max(1.8, s3d_dist * 0.98); // zoom in
                 ) :
                 (xx === ',') ? (
-                    mh_cur_box[bx_zfact] = max (0.20, mh_cur_box[bx_zfact] * 0.98);
+                    s3d_dist = min(12, s3d_dist * 1.02); // zoom out
                 ) :
                 (xx === '?') ? (
-                    mh_cur_box[bx_drmode] = (mh_cur_box[bx_drmode] & 0x7FFFFC) | (((mh_cur_box[bx_drmode] & 0x3) + 1) % 4) ;
+                    sx_SetView((sx_view + 1) % 4); // front, side, top, perspective
                 ) :
                 (xx === '$') ? (
-                    (mh_cur_box[bx_drmode] & bx__ShowPow) ? (mh_cur_box[bx_drmode] &= 0x7FFFFFFF - bx__ShowPow) : (mh_cur_box[bx_drmode] |= bx__ShowPow);
+                    s3d_opt = s3d_opt ~ s3d_oLevels; // the levels of the outputs
                 ) :
                 (xx === '%') ? (
-                    (mh_cur_box[bx_drmode] & bx__ShowConf) ? (mh_cur_box[bx_drmode] &= 0x7FFFFFFF - bx__ShowConf) : (mh_cur_box[bx_drmode] |= bx__ShowConf);
+                    s3d_opt = s3d_opt ~ s3d_oGains; // the gains of the configuration
                 ) :
                 (xx === '/') ? (
-                    (mh_cur_box[bx_drmode] & bx__BlackBg) ? (mh_cur_box[bx_drmode] &= 0x7FFFFFFF - bx__BlackBg) : (mh_cur_box[bx_drmode] |= bx__BlackBg);
+                    sx_lbg = !sx_lbg; // the background : black or that of the live screen
                 ) :
                 (xx === 'home') ? (
-                    mh_cur_box[bx_xshift] = mh_cur_box[bx_yshift] = 0;
-                    mh_cur_box[bx_zfact] = 1;
+                    sx_SetView(sx_view); // the camera of the view
+                    s3d_dist = s3d_Dist3D;
                 ) :
                 (xx === 'up') ? (
-                    mh_cur_box[bx_yshift] -= 0.04;
+                    s3d_el += 0.05;
                 ) :
                 (xx === 'down') ? (
-                    mh_cur_box[bx_yshift] += 0.04;
+                    s3d_el -= 0.05;
                 ) :
                 (xx === 'left') ? (
-                    mh_cur_box[bx_xshift] -= 0.04;
+                    s3d_az -= 0.05;
                 ) :
                 (xx === 'rght') ? (
-                    mh_cur_box[bx_xshift] += 0.04;
+                    s3d_az += 0.05;
                 ) :
                 (
                     xx = 0;  // not a key of the box
@@ -6390,7 +6462,7 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
                     // stop drawing frame, do something...
                     // Are we back to our initial position ? if so, do nothing.
                     ((abs(mh_BoxAdd[bx_xpos] - mh_cbx) + abs(mh_BoxAdd[bx_ypos] - mh_cby)) > 20) ? (
-                        lErr = 0;
+                        // (box_change does not depend on lErr any more : the error of the plugin is kept)
                         // Compute actual box position
                         mx = max(0, 0 | (0.5 + mh_cbx / sqr_w)) ;
                         my = max(0, 0 | (0.5 + mh_cby / sqr_h));
@@ -6552,14 +6624,15 @@ local (lpp, pval, upp, tladd, bval, bxn, box, del)
             ((bval = dispalloc_a[tladd]) >= bx__bxn1) ? (
                 bxn = bval >> bx__shiftn;
                 box = dispboxes + dispboxsize * (bxn - 1); // address
-                // Address consistent ?
-                ((box[bx_posit] === bval) && (box[bx_activ] & bx__used)) ? (
+                // Address consistent ? (bx_bgidt : the code of the top left square ; a box no more shown keeps
+                // its place until it is released, see display_boxes)
+                ((box[bx_bgidt] === bval) && (box[bx_activ] & bx__posfound)) ? (
                     del = 0;
                 ) : (
                     uim_trc6 ? (
                         sprintf(#wxz, "  -++ free box [%d:%d:%06X]", bxn, box, upp); mSL_log(SysLogBox, #wxz);
                     );
-                    uim_free(tladd, 0);
+                    uim_free(uim_ltu(tladd), 0); // (uim_free : an "universal" address)
                 );
             );
             (del) ? (
@@ -6621,10 +6694,38 @@ function show_Module(igb)
     ) :
     (igb === blockProcessesMgr) ? (
         show_ProcessesMgr("Processes Manager", blockProcessesMgr);
+    ) :
+    (igb === blockSpace3D) ? (
+        show_Space3D_Pad(blockSpace3D);
+    ) :
+    (igb === blockDiffusion) ? (
+        show_Diffusion_Pad(blockDiffusion);
+    ) :
+    ((igb >= blockPrjView0) && (igb < blockPrjView0 + PRV_NV)) ? (
+        show_Projector_Pad(igb, igb - blockPrjView0);
     );
 );
 
 <? pns_part = 2; include("GM-Libs/mSL_Panes.jsfx-inc"); ?>
+
+
+// The requests of @block for the Live screen (see live_post), at every run of @gfx (even if the window is closed)
+function live_requests()
+local (r, w, k)
+(
+    r = lrq_r; w = atomic_get(lrq_w);
+    while (r != w) (
+        k = lrq_kind[r];
+        (k === lrq_kSig) ? live_signal_change(lrq_a[r], lrq_b[r], lrq_c[r]) :
+        (k === lrq_kActs) ? perform_actionlist(lrq_a[r]) :
+        (k === lrq_kClock) ? toggleclock(lrq_a[r]) :
+        (k === lrq_kMsg) ? mk_display_box(0, #lrq_msg, 2, -1, lrq_a[r]);
+        r = (r + 1) % LRQ_N;
+        atomic_set(lrq_r, r); // the entry is free
+    );
+);
+
+live_requests();
 
 
 //====== GRAPHIC EXECUTION START ======
@@ -6648,8 +6749,10 @@ must_do_gfx() ? (
     live_tab_active = 0;
     currScreen = ui_screen();
     serialBlock[Pr7_UiTheme] = uix_jtheme; // saved with the project ('stud' block)
+    serialBlock[Pr7_UiSize] = ui_jzoom_pc(ui_jzoomK);
     update_theme();
     GM_key_frame(); // the key of the frame (see mSL_ui_LibJJ, Keyboard)
+    GM_Size_Keys(); // Cmd + '-', '+', '0' : the display size, before the modules (see ui-lib-JJ-GUI)
 
     ui_font();
 

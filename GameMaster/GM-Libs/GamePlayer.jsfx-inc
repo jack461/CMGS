@@ -506,7 +506,7 @@ ui_MinSize2Panes = 2 * ui_MinSize1Pane; // min size for 2 panes
 ui_MaxSize1Pane = 16 * ui_MinSize1Pane; // max size for 1 pane
 ui_BestSize1Pane = 0|(16 * ui_MinSize1Pane); // best size for 1 pane
 ui_MinSubColSize = 0|(ui_MinSize1Pane/2.5);
-ui_lib_JJ_GUI_init(studPrefDispSize);
+ui_lib_JJ_GUI_init(2); // (the display size : see ui_jzoom_set)
 //
 AGMW110 = GMW();
 
@@ -2111,7 +2111,8 @@ Pr7_StudConf = 128;  // size : dcbTabsMax -- number of panes in each tab
 Pr7_StudRat = Pr7_StudConf + dcbTabsMax;  // size : dcbTabsMax * 4
 Pr7_StudLive = Pr7_StudRat + dcbTabsMax * 4; // size : dcbTabsMax -- 1 if the tab uses the "live" display
 Pr7_UiStyle = Pr7_StudLive + dcbTabsMax; // ui_jstyle (look of the GUI)
-Pr7_Free = Pr7_UiStyle + 1; // 225 to 511 : free
+Pr7_UiSize = Pr7_UiStyle + 1; // the display size, in percent (0 : the default, see ui_jzoom_set)
+Pr7_Free = Pr7_UiSize + 1; // 226 to 511 : free
 
 
 // Initialize studio configuration
@@ -3300,7 +3301,7 @@ dcbBSize = dcbWSize * dcbMCount;
 */
 
 // The GM Main menu
-dcbNamesCnt = 128; // up to 128 strings in the dcb Menu - 79+32 used
+dcbNamesCnt = 128; // up to 128 strings in the dcb Menu - 79+32+8 used
 // memory block for the menu
 GUI_Main_Menu_Block = mSL_StM_Alloc(ui_jmenu_items+dcbNamesCnt, 'Menu', mSL_StM_FlClear);
 
@@ -3536,6 +3537,7 @@ local (j, i, tmp, bln, blu, blockStrSpace, blockThemeBlack, blockThemeTron, bloc
     blockDispNames[blockThemeNeonGreen] = "!&1 Neon Green"; //
     blockThemeLightMagenta = (itdsp += 1);
     blockDispNames[blockThemeLightMagenta] = "!&1< Light Magenta"; //
+    itdsp = ui_jzoom_menu_items(blockDispNames, itdsp); // the sub-menu "Display size" (see ui-lib-JJ-GUI)
     (itdsp += 1); // separator
     blockStyleSoft = (itdsp += 1);
     blockDispNames[blockStyleSoft] = "&/Soft style"; // combined with the theme ; see ui_jstyle (saved in serialBlock[Pr7_UiStyle])
@@ -18339,7 +18341,7 @@ loadMode ? (
         padPMVals[0] = serialBlock[Pr7_PMV0];
         GvPlayTyp = serialBlock[Pr7_PlayTyp];
         studPrefDispPanes = serialBlock[Pr7_PrefDPanes]; studDispPPrev = -1;
-        studPrefDispSize = serialBlock[Pr7_PrefDSize];  ui_jGUI_size = 2;
+        studPrefDispSize = serialBlock[Pr7_PrefDSize]; // (obsolete : see Pr7_UiSize)
         UplayControl = serialBlock[Pr7_UplayControl];
         padSensShowSiz = serialBlock[Pr7_SensorSize]; setSensorSize(padSensShowSiz);
         MIDI_Sens_mode = serialBlock[Pr7_SensorNum];
@@ -18354,6 +18356,7 @@ loadMode ? (
         );
 
         ui_jstyle = (serialBlock[Pr7_UiStyle] != 0); // look of the GUI
+        ui_jzoom_set(ui_jzoom_find(serialBlock[Pr7_UiSize], ui_jzoomDef)); // display size (0 : the default)
         // Check pannels configurations
         z__p = serialBlock + Pr7_StudConf;
         z__i = 0; loop(dcbTabsMax, z__p[z__i] = max(1, min(4, 0|z__p[z__i])); z__i += 1;);
@@ -18508,6 +18511,7 @@ loadMode ? (
     serialBlock[Pr7_PlayTyp] = GvPlayTyp;
     serialBlock[Pr7_PrefDPanes] = studPrefDispPanes;
     serialBlock[Pr7_PrefDSize] = studPrefDispSize;
+    serialBlock[Pr7_UiSize] = ui_jzoom_pc(ui_jzoomK);
     serialBlock[Pr7_UplayControl] = UplayControl;
     serialBlock[Pr7_SensorSize] = padSensShowSiz;
     serialBlock[Pr7_SensorNum] = MIDI_Sens_mode;
@@ -20397,7 +20401,7 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                 GM_key_take(u_ch); // the key has been used
             );
             nc = max(1, min(8, 0|box[5])); // number of columns to show
-            nc = max(1, min(nc, floor(gfx_w/gfx_colL_width))); // narrow window: fewer columns
+            nc = max(1, min(nc, floor(gfx_w/ui_jscale()/gfx_colL_width))); // narrow window: fewer columns
 
             ui_jshow_color = ui_jcolor_text;
             siz = box[2];
@@ -26835,6 +26839,7 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in, x
             (serialBlock[Pr7_StudLive + TabIdt]) ? str_setchar(p[blockTabLive], 1, '!');
             ui_jstyle ? str_setchar(p[blockStyleSoft], 1, '!');
             str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
+            ui_jzoom_menu_tick(p); // current display size
             0 ? (
                 sprintf(#dbg_trace1, "*ZZZ* [%d]  \"%s\"  (%d)  \"%s\" ", A99CBlock, blockDispNames[blockDispInverts[A99CBlock]], p[0],#Aws3);
             );
@@ -26904,6 +26909,9 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in, x
                     ui_screen_open("control.prompt");
                     ui_screen_arg(0, altTabsNames[TabIdt]);
                     ui_screen_arg(1, #tmp);
+                ) :
+                ui_jzoom_menu_click(kit) ? (
+                    0; // a display size (see ui-lib-JJ-GUI)
                 ) :
                 (kit === blockStyleSoft) ? (
                     serialBlock[Pr7_UiStyle] = ui_jstyle = !ui_jstyle;
@@ -27125,6 +27133,7 @@ local (p, i, xx, kit)
     str_setchar(p[blockTabLive], 1, '!');
     ui_jstyle ? str_setchar(p[blockStyleSoft], 1, '!');
     str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
+    ui_jzoom_menu_tick(p); // current display size
     xx = control_jmenu(menu_Stud_Mod);
     xx ? (
         ui_GFXdoNow |= 1;
@@ -27138,6 +27147,9 @@ local (p, i, xx, kit)
             ui_screen_open("control.prompt");
             ui_screen_arg(0, altTabsNames[TabIdt]);
             ui_screen_arg(1, #tmp);
+        ) :
+        ui_jzoom_menu_click(kit) ? (
+            0; // a display size (see ui-lib-JJ-GUI)
         ) :
         (kit === blockStyleSoft) ? (
             serialBlock[Pr7_UiStyle] = ui_jstyle = !ui_jstyle;
@@ -27305,6 +27317,7 @@ must_do_gfx() ? (
     live_tab_active = 0;
     update_theme();
     GM_key_frame(); // the key of the frame (see mSL_ui_LibJJ, Keyboard)
+    GM_Size_Keys(); // Cmd + '-', '+', '0' : the display size, before the modules (see ui-lib-JJ-GUI)
     (uix_jtheme_known != uix_jtheme) ? (
         uix_jtheme_known = uix_jtheme;
         parSet(p_uix_jtheme, uix_jtheme);

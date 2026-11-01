@@ -60,11 +60,11 @@ local (bpx, bpy, box, bxn, flact, flags, bty, d, h, bh, w, bpw, bph, i, j, m, p,
                     box[bx_crdate] = timec; // create/reposit. date
                     // gfx_setfont(box[bx_fontx], box[bx_fontn], box[bx_fontsiz]);
                     // Lets mesure string1
-                    gfx_setfont(box[bx_font1], box[bx_fname1], box[bx_fsize1], box[bx_fmods1]);
+                    live_font(box[bx_fname1], box[bx_fsize1] * live_zoom, box[bx_fmods1]);
                     gfx_measurestr(box[bx_string1],gl_w1,gl_h1); // this sets gl_w1 and gl_h1 which MUST be global variables
                     // Is there an extra string ?
                     (flact & bx__2strings) ? (
-                        gfx_setfont(box[bx_font2], box[bx_fname2], box[bx_fsize2], box[bx_fmods2]);
+                        live_font(box[bx_fname2], box[bx_fsize2] * live_zoom, box[bx_fmods2]);
                         gfx_measurestr(box[bx_string2],gl_w2,gl_h2); // set gl_w2 and gl_h2
                         w = max(gl_w1, gl_w2); // min. width
                         h = gl_h1 + gl_h2 + box[bx_interl]; // min. height
@@ -73,8 +73,8 @@ local (bpx, bpy, box, bxn, flact, flags, bty, d, h, bh, w, bpw, bph, i, j, m, p,
                         h = gl_h1;
                     );
                     // Compute the needed size as boxes
-                    w = max(box[bx_minw], w + box[bx_extraw]); // pixels
-                    h = max(box[bx_minh], h + box[bx_extrah]); // pixels
+                    w = max(box[bx_minw], box[bx_extraw] + w / live_zoom) * live_zoom; // pixels (minw, extraw : at 100 %)
+                    h = max(box[bx_minh], box[bx_extrah] + h / live_zoom) * live_zoom; // pixels
                     box[bx_sqw] = bpw = max(box[bx_sqw], ceil(w/sqr_w));
                     box[bx_sqh] = bph = max(box[bx_sqh], ceil(h/sqr_h));
                     p = -1;
@@ -172,7 +172,7 @@ local (bpx, bpy, box, bxn, flact, flags, bty, d, h, bh, w, bpw, bph, i, j, m, p,
                     gfx_a = 1;
                     // Display the box with the appropriate color
                     // First, display str1
-                    gfx_setfont(box[bx_font1], box[bx_fname1], box[bx_fsize1], box[bx_fmods1]);
+                    live_font(box[bx_fname1], box[bx_fsize1] * live_zoom, box[bx_fmods1]);
                     ((flact & bx__col1std) && (!(flact & bx__fading))) ? (
                         gfx_r = gfxstdr; gfx_g = gfxstdg; gfx_b = gfxstdb;
                     ) : (
@@ -197,7 +197,7 @@ local (bpx, bpy, box, bxn, flact, flags, bty, d, h, bh, w, bpw, bph, i, j, m, p,
                     gfx_drawstr(box[bx_string1], 0x5, win_Xfr + box[bx_right], win_Yfr + box[bx_bott1]);
                     // Should we display str2 ?
                     (flact & bx__2strings) ? (
-                        gfx_setfont(box[bx_font2], box[bx_fname2], box[bx_fsize2], box[bx_fmods2]);
+                        live_font(box[bx_fname2], box[bx_fsize2] * live_zoom, box[bx_fmods2]);
                         ((flact & bx__col2std) && (!(flact & bx__fading))) ? (
                             gfx_r = gfxstdr; gfx_g = gfxstdg; gfx_b = gfxstdb;
                         ) : (
@@ -371,6 +371,7 @@ local (bpx, bpy, box, bxn, flact, flags, bty, d, h, bh, w, bpw, bph, i, j, m, p,
 
     abxz = timez;
     abxg = timeg;
+    uix_font_dirty = 1; // ui-lib will set its own font again (the boxes use other slots, see live_font)
 
 
 );
@@ -384,7 +385,7 @@ function live_screen() local(day, ms, gxi, minut, sec)
     (statgraph) ? (
 
         // Window size modified ?
-        (((win_width != gfx_w) || (win_height != gfx_h) || wrefresh) && (win_mod < timec)) ? (
+        (((win_width != gfx_w) || (win_height != gfx_h) || wrefresh || (live_zoom != uix_zoom)) && (win_mod < timec)) ? (
             update_window();
 
             0 ? (
@@ -403,7 +404,7 @@ function live_screen() local(day, ms, gxi, minut, sec)
             (timec % gxdlay === 0) ? (
                 // change some coeff.
                 gxvrinc = gxvrdec = gxvginc = gxvgdec = gxvbinc = gxvbdec = gxbase;
-                gxi = irand(16);
+                gxi = irand(17);
                 (gxi === 0) ? (gxvrinc = gxbase + gxeps;)
                 :
                 (gxi === 1) ? (gxvrdec = gxbase + gxeps;)
@@ -428,15 +429,15 @@ function live_screen() local(day, ms, gxi, minut, sec)
                 :
                 (gxi === 11) ? (gxvbdec = gxbase + gxeps; gxvrdec = gxbase + gxeps;)
                 :
-                (gxi === 10) ? (gxvrinc = gxbase + gxeps; gxvginc = gxbase + gxeps; gxvbinc = gxbase + gxeps;)
+                (gxi === 12) ? (gxvrinc = gxbase + gxeps; gxvginc = gxbase + gxeps; gxvbinc = gxbase + gxeps;)
                 :
-                (gxi === 11) ? (gxvrdec = gxbase + gxeps; gxvgdec = gxbase + gxeps; gxvbdec = gxbase + gxeps;)
+                (gxi === 13) ? (gxvrdec = gxbase + gxeps; gxvgdec = gxbase + gxeps; gxvbdec = gxbase + gxeps;)
                 :
-                (gxi === 12) ? (gxvrinc = gxbase + gxeps; gxvgdec = gxbase + gxeps;)
+                (gxi === 14) ? (gxvrinc = gxbase + gxeps; gxvgdec = gxbase + gxeps;)
                 :
-                (gxi === 13) ? (gxvginc = gxbase + gxeps; gxvbdec = gxbase + gxeps;)
+                (gxi === 15) ? (gxvginc = gxbase + gxeps; gxvbdec = gxbase + gxeps;)
                 :
-                (gxi === 14) ? (gxvbinc = gxbase + gxeps; gxvrdec = gxbase + gxeps;)
+                (gxi === 16) ? (gxvbinc = gxbase + gxeps; gxvrdec = gxbase + gxeps;)
                 ;
             );
 

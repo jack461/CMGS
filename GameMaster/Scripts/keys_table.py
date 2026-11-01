@@ -45,10 +45,11 @@ SHARED = {
     'mSL_ui_Pads.jsfx-inc': ['GamePlayer'],              # interactive leds : GamePlayer only
     'ScriptMaster_Utilities.jsfx-inc': ['ScriptMaster', 'Interstys'],
     'mSL_System_Keys.jsfx-inc': ['FilePlayer', 'ScriptMaster', 'Diffusion-3', 'Interstys'],
-    'ui-lib-JJ-GUI.jsfx-inc': PLUGINS,                    # GM_Tab_Keys (Tab, Shift + Tab)
+    'ui-lib-JJ-GUI.jsfx-inc': PLUGINS,                    # GM_Tab_Keys (Tab, Shift + Tab), GM_Size_Keys (Cmd + - + 0)
 }
 
 # Levels, in the order they see the key during a frame : each level only gets the keys the previous ones left
+#   first     : right after GM_key_frame, before the modules (Cmd + - + = 0 : the display size, GM_Size_Keys)
 #   module    : the mouse is in the module (its own keys, then the keys of its pads)
 #   pane      : genericItemsPos, the pane under the mouse (Shift + arrows : column sizes)
 #   tab       : the commands of the tab or of the screen (do_Generic_Commands, Live screen of Diffusion-3)
@@ -56,18 +57,18 @@ SHARED = {
 #   system    : the system commands (do_System_Keys, mSL_System_Keys.jsfx-inc)
 #   last      : the Studio pad of GamePlayer, when it is displayed
 #   editor    : number editors, called by the modules with the key they got (not in the conflicts)
-LEVELS = ['module', 'pane', 'tab', 'plugin', 'system', 'last', 'editor']
-LEVEL_FR = {'module': 'module', 'pane': 'panneau', 'tab': 'onglet', 'plugin': 'plugin', 'system': 'système',
+LEVELS = ['first', 'module', 'pane', 'tab', 'plugin', 'system', 'last', 'editor']
+LEVEL_FR = {'first': 'début de trame', 'module': 'module', 'pane': 'panneau', 'tab': 'onglet', 'plugin': 'plugin', 'system': 'système',
             'last': 'pad Studio', 'editor': 'éditeur'}
 ORDER = {
-    'GamePlayer': "module sous la souris (puis ses pads) → panneau → commandes d'onglet (do_Generic_Commands) → "
+    'GamePlayer': "Cmd + - + = 0 (taille d'affichage) → module sous la souris (puis ses pads) → panneau → commandes d'onglet (do_Generic_Commands) → "
                   "raccourcis de l'utilisateur (do_Plugin_Keys) → pad Studio, s'il est affiché (do_StudioPadKeyboard) ; "
                   "pendant l'apprentissage d'un raccourci, la touche va d'abord à celui-ci",
-    'FilePlayer': "module sous la souris → panneau → commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys)",
-    'ScriptMaster': "module sous la souris → panneau → commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys)",
-    'Diffusion-3': "module sous la souris (écran Live : la boîte sous la souris) → panneau → écran Live (do_live_actions) "
+    'FilePlayer': "Cmd + - + = 0 (taille d'affichage) → module sous la souris → panneau → commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys)",
+    'ScriptMaster': "Cmd + - + = 0 (taille d'affichage) → module sous la souris → panneau → commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys)",
+    'Diffusion-3': "Cmd + - + = 0 (taille d'affichage) → module sous la souris (écran Live : la boîte sous la souris) → panneau → écran Live (do_live_actions) "
                    "→ commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys)",
-    'Interstys': "module sous la souris (puis ses pads) → panneau → commandes d'onglet (do_Generic_Commands) → "
+    'Interstys': "Cmd + - + = 0 (taille d'affichage) → module sous la souris (puis ses pads) → panneau → commandes d'onglet (do_Generic_Commands) → "
                  "commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys)",
 }
 
@@ -104,11 +105,13 @@ HANDLERS = {
     ('Diffusion-3.jsfx-inc', 'mouse_hover'): ('module', 'écran Live : boîte sous la souris'),
     ('Diffusion-3.jsfx-inc', 'do_Plugin_Keys'): ('plugin', 'commandes de Diffusion-3'),
     ('Diffusion-3.jsfx-inc', 'show_SysLog'): ('module', 'log système'),
+    ('Diffusion-3-Space3D.jsfx-inc', 'show_Space3D_Pad'): ('module', 'Space 3D (la vue)'),
     ('mSL_Dbg_Memory.jsfx-inc', 'show_Memory'): ('module', 'mémoire (débogueur)'),
     ('mSL_Panes.jsfx-inc', 'genericItemsPos'): ('pane', 'largeur des colonnes'),
     ('mSL_ui_Pads.jsfx-inc', 'show_jled'): ('module', 'LED interactive'),
     ('mSL_System_Keys.jsfx-inc', 'do_System_Keys'): ('system', 'commandes système'),
     ('ui-lib-JJ-GUI.jsfx-inc', 'GM_Tab_Keys'): ('plugin', 'onglet suivant / précédent'),
+    ('ui-lib-JJ-GUI.jsfx-inc', 'GM_Size_Keys'): ('first', 'taille d\'affichage'),
 }
 # The commands of the plugins (plugin and system levels), compared between plugins
 SYSTEM = [('Interstys', 'Interstys.jsfx-inc', 'do_Plugin_Keys'), ('Diffusion-3', 'Diffusion-3.jsfx-inc', 'do_Plugin_Keys'),
@@ -355,7 +358,7 @@ def conflicts(rows):
         masked = collections.OrderedDict()
         studio = collections.OrderedDict()
         for c in rs:
-            if c['level'] in ('module', 'editor'): continue
+            if c['level'] in ('first', 'module', 'editor'): continue
             for m in rs:
                 if m['level'] != 'module' or not (values(c) & values(m)) or not mods_meet(c, m): continue
                 if c['level'] == 'pane' and 'Shift' not in mods_set(m): continue

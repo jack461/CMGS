@@ -1,0 +1,1295 @@
+/*
+
+    =============================== Space3D : 3D view of a speaker set ===============================
+
+    A perspective view of the room [-1,1]^3, with its speakers, sources, group center and trajectory,
+    in the spirit of the "Position" view of GRM Spaces 3D.
+
+    Axes (same as the GRM ".lay" layouts) :
+        x : left (-1)   -> right (+1)
+        y : back (-1)   -> front (+1)
+        z : bottom (-1) -> top (+1)
+
+    Usage :
+        @init : next_free = s3d_init(base, maxspk, maxsrc, maxtrj, img);
+                    img : index of an offscreen image (drawing is done in it, then blitted : clipping)
+                speakers : s3d_spk[k * s3d_st + s3d_fx / s3d_fy / s3d_fz] = position,
+                           s3d_spk[k * s3d_st + s3d_fg] = gain (0..1), s3d_fl = level (0..1) ; s3d_nspk
+                sources  : idem in s3d_src, s3d_nsrc
+                group center : s3d_gx, s3d_gy, s3d_gz, shown when s3d_gon
+                trajectory : s3d_trj[k*3 + 0/1/2], s3d_ntrj points, s3d_trjclosed
+        size of the memory needed from "base" : s3d_memsize(maxspk, maxsrc, maxtrj)
+        @gfx  : s3d_mouse(x, y, w, h, wheel);  // orbit (left drag), zoom (wheel), pick (left click), menu (right click)
+                    the trajectory (as the cursors S, R, T of GRM Spaces) : Shift + drag = size,
+                    Cmd + drag = rotation (horizontal : around z, vertical : tilt), Alt + drag = translation ;
+                    s3d_tchanged != 0 when it was changed
+                    controls for the play (horizontal drag) : Cmd + Alt = s3d_speed (turns per minute, -240 ... 240),
+                    Cmd + Shift = s3d_mix (0 ... 1, see s3d_mkmorph) ; the value is shown during the drag
+                    s3d_mtarget = 1 : Shift, Cmd and Alt drags act on the group of sources instead of the trajectory :
+                    Shift = size (s3d_gsc), Cmd = yaw (horizontal) and pitch (vertical), Alt = roll (horizontal)
+                sources : s3d_place_sources(lay, n, spread) : the sources of the layout "lay" (x, y, z in [-1,1]) around
+                    the group center, scaled by spread * s3d_gsc, rotated by s3d_groll (around y), s3d_gpitch
+                    (around x), s3d_gyaw (around z), in the room frame (s3d_grel = 0) or in the frame of the
+                    trajectory (s3d_grel = 1 : the front of the group follows the direction of the motion)
+                    wheel : mouse_wheel, or uix_scroll_y with ui-lib (which clears mouse_wheel) ;
+                    returns 1 when the wheel was used (the host may then clear it)
+                s3d_draw(x, y, w, h);  // draws in the current gfx_dest (the screen, or a ui-lib clip screen)
+                    background s3d_bgr, s3d_bgg, s3d_bgb (black), texts s3d_txr, s3d_txg, s3d_txb (white) : 0..1 ;
+                    the grid, the cross and the halo get colors contrasting with the background (s3d_colors)
+                    s3d_style = 1 : the gains are shown as crosses, the levels as halos (instead of balls)
+                trajectories : s3d_mktraj(kind, cx, cy, cz, r) ; s3d_trjpos(u) : the point at u (0..1) of the path
+                    s3d_mkmorph(ka, kb, w, cx, cy, cz, r) : interpolation between two trajectories (w = 0 : ka, 1 : kb)
+                    kind "File" : a trajectory given by s3d_settraj (read with s3d_load_lay from a GRM Spaces
+                    export : <Trajectory name="" closed="true" order=""> <P x="" y="" z="" end=""/> ...)
+                dynamics : s3d_ease(curve, mode, t)
+                s3d_changed != 0 when the camera or the options were changed by the user (to save them)
+
+    Except s3d_init and s3d_load_lay (which may be called in @init), everything runs in @gfx :
+    the s3d_* work globals are never touched by @block. @block may write the gains and levels.
+
+    Mouse buttons (mouse_cap) : 1 left, 2 right, 4 Cmd, 8 Shift, 16 Alt, 32 Ctrl, 64 middle
+
+*/
+
+@init
+
+// fields of a speaker / source entry
+s3d_fx = 0; s3d_fy = 1; s3d_fz = 2;  // position
+s3d_fg = 3;                          // gain (speakers)
+s3d_fl = 4;                          // level (speakers)
+s3d_fsx = 5; s3d_fsy = 6;            // projection on the screen
+s3d_fsz = 7;                         // depth (<= 0 : not visible)
+s3d_st = 8;                          // size of an entry
+
+// display options (s3d_opt)
+s3d_oGains = 1;             // the gains of the speakers : "Display Diffusers" in the menu
+s3d_oLevels = 2;
+s3d_oInfos = 4;
+s3d_oAllInfos = 8;
+s3d_oBox = 16;
+s3d_oProj = 32;
+s3d_oFade = 64;
+s3d_oStars = 128;
+s3d_oTraj = 256;            // display the trajectory
+s3d_oClamp = 512;           // positions and trajectories limited to the room [-1,1]^3
+s3d_oHideSrc = 1024;        // hide the sources, their group center and their projections ("Display Source" unchecked) ;
+                            // an inverted bit : the options saved before it (e.g. Space3D-Demo, slider 0 ... 1023) show them
+
+s3d_StarsNb = 250;
+s3d_GridN = 12;             // grid divisions on each face
+s3d_near = 0.05;            // near plane
+s3d_Az3D = 0.45;            // the "3D view" camera
+s3d_El3D = 0.30;
+s3d_Dist3D = 4.2;
+s3d_style = 0;              // 0 : gains and levels as balls ; 1 : gains as crosses, levels as halos
+s3d_haloA = 0.9;            // opacity of the center of the halos (< 1 : the cross remains visible)
+s3d_gdark = 0;              // the grid is darker than the background (with hysteresis, see s3d_colors)
+
+// selection : type * 1024 + index
+s3d_tSpk = 1;
+s3d_tSrc = 2;
+
+
+function s3d_memsize(maxspk, maxsrc, maxtrj)
+(
+    maxspk * s3d_st + maxsrc * s3d_st + 4 * maxtrj * 3 + s3d_StarsNb * 4 + 2 * (maxspk + maxsrc + 1) + 24;
+);
+
+function s3d_init(base, maxspk, maxsrc, maxtrj, img)
+local(k, a, b)
+(
+    s3d_mspk = maxspk; s3d_msrc = maxsrc; s3d_mtrj = maxtrj;
+    s3d_img = img;
+    s3d_spk = base;                         base += maxspk * s3d_st;
+    s3d_src = base;                         base += maxsrc * s3d_st;
+    s3d_trj = base;                         base += maxtrj * 3;
+    s3d_ftrj = base;                        base += maxtrj * 3;  // the "File" trajectory, before transformation
+    s3d_ta = base;                          base += maxtrj * 3;  // the two trajectories of s3d_mkmorph
+    s3d_tb = base;                          base += maxtrj * 3;
+    s3d_stars = base;                       base += s3d_StarsNb * 4;
+    s3d_okey = base;                        base += maxspk + maxsrc + 1;
+    s3d_oid = base;                         base += maxspk + maxsrc + 1;
+    s3d_poly = base;                        base += 24;   // a polygon of 12 points (s3d_disc)
+    memset(s3d_spk, 0, base - s3d_spk);
+    s3d_nspk = s3d_nsrc = s3d_ntrj = 0;
+    s3d_trjclosed = 1;
+    s3d_nftrj = 0; s3d_ftclosed = 1;
+    s3d_gon = 0; s3d_gx = s3d_gy = s3d_gz = 0;
+    s3d_az = s3d_Az3D; s3d_el = s3d_El3D; s3d_dist = s3d_Dist3D;
+    s3d_fov = 50 * $pi / 180;
+    s3d_opt = s3d_oGains | s3d_oInfos | s3d_oBox | s3d_oTraj | s3d_oClamp;
+    s3d_bgr = s3d_bgg = s3d_bgb = 0; // the background (black), and the color of the texts (white)
+    s3d_txr = s3d_txg = s3d_txb = 1;
+    s3d_sel = -1;
+    s3d_mdown = s3d_rdown = 0;
+    s3d_iw = s3d_ih = 0;
+    s3d_changed = 0;
+    // transformation of the trajectory : size, rotations (around z, tilt around x), translation
+    s3d_tsc = 1; s3d_trz = s3d_trx = 0; s3d_ttx = s3d_tty = s3d_ttz = 0;
+    s3d_tchanged = 0;
+    // controls for the play
+    s3d_speed = 3; s3d_mix = 0;
+    s3d_dmode = 0; // current drag : 1 orbit, 2 translation, 3 rotation, 4 size, 5 speed, 6 mix, 7 sources
+    // the group of sources : size, rotations (radians), frame (0 room, 1 trajectory), target of the drags
+    s3d_gsc = 1; s3d_gyaw = s3d_gpitch = s3d_groll = 0; s3d_grel = 0; s3d_mtarget = 0;
+    s3d_tdx = 0; s3d_tdy = 1; s3d_tdz = 0; // direction of the trajectory at the group center
+    // the stars : random directions, far away
+    k = 0;
+    loop(s3d_StarsNb,
+        a = rand(2 * $pi); b = asin(rand(2) - 1);
+        s3d_stars[4*k] = 40 * cos(b) * cos(a);
+        s3d_stars[4*k+1] = 40 * cos(b) * sin(a);
+        s3d_stars[4*k+2] = 40 * sin(b);
+        s3d_stars[4*k+3] = 0.2 + rand(0.8); // brightness
+        k += 1;
+    );
+    base;
+);
+
+
+// Compute the camera (orbit around the center of the room) ; the elevation is not limited : beyond the poles,
+// the view continues upside down (s3d_el is kept in ]-pi, pi])
+function s3d_camera(w, h)
+local(ce)
+(
+    s3d_el -= 2 * $pi * floor((s3d_el + $pi) / (2 * $pi));
+    ce = cos(s3d_el);
+    s3d_cpx = s3d_dist * ce * sin(s3d_az);
+    s3d_cpy = - s3d_dist * ce * cos(s3d_az);
+    s3d_cpz = s3d_dist * sin(s3d_el);
+    // forward : towards the center
+    s3d_fwx = - s3d_cpx / s3d_dist; s3d_fwy = - s3d_cpy / s3d_dist; s3d_fwz = - s3d_cpz / s3d_dist;
+    // right : horizontal, given by the azimuth only (forward x (0, 0, 1) would flip over the poles)
+    s3d_rgx = cos(s3d_az); s3d_rgy = sin(s3d_az); s3d_rgz = 0;
+    // up = right x forward
+    s3d_upx = s3d_rgy * s3d_fwz - s3d_rgz * s3d_fwy;
+    s3d_upy = s3d_rgz * s3d_fwx - s3d_rgx * s3d_fwz;
+    s3d_upz = s3d_rgx * s3d_fwy - s3d_rgy * s3d_fwx;
+    s3d_foc = 0.5 * min(w, h) / tan(0.5 * s3d_fov);
+    s3d_ox = 0.5 * w; s3d_oy = 0.5 * h;
+    // depths of the room, for the fade out
+    s3d_zmin = s3d_dist - 1.75; s3d_zmax = s3d_dist + 1.75;
+);
+
+
+// Project a point : result in s3d_px, s3d_py, s3d_pz (depth). Returns 0 when behind the camera.
+function s3d_proj(x, y, z)
+local(dx, dy, dz)
+(
+    dx = x - s3d_cpx; dy = y - s3d_cpy; dz = z - s3d_cpz;
+    s3d_pz = dx * s3d_fwx + dy * s3d_fwy + dz * s3d_fwz;
+    (s3d_pz > s3d_near) ? (
+        s3d_px = s3d_ox + s3d_foc * (dx * s3d_rgx + dy * s3d_rgy + dz * s3d_rgz) / s3d_pz;
+        s3d_py = s3d_oy - s3d_foc * (dx * s3d_upx + dy * s3d_upy + dz * s3d_upz) / s3d_pz;
+        1;
+    ) : 0;
+);
+
+
+function s3d_line(x1, y1, z1, x2, y2, z2)
+local(ax, ay)
+(
+    s3d_proj(x1, y1, z1) ? (
+        ax = s3d_px; ay = s3d_py;
+        s3d_proj(x2, y2, z2) ? gfx_line(ax, ay, s3d_px, s3d_py, 1);
+    );
+);
+
+
+// alpha factor of the fade out, for the depth z
+function s3d_fade(z)
+(
+    (s3d_opt & s3d_oFade) ? 1 - 0.65 * max(0, min(1, (z - s3d_zmin) / (s3d_zmax - s3d_zmin))) : 1;
+);
+
+
+// A shaded ball : concentric circles moving towards the light (top left)
+// a < 1 : translucent ball
+function s3d_ball(x, y, r, cr, cg, cb, a)
+local(n, k, t, rr, ai, hl)
+(
+    r = max(1, r);
+    n = (r < 4) ? 1 : (r < 12) ? 4 : 8;
+    ai = (a < 1) ? a * 0.3 : a;
+    k = 0;
+    loop(n,
+        t = k / n;
+        rr = r * (1 - 0.85 * t);
+        hl = 0.45 * t * t * t;
+        gfx_r = min(1, cr * (0.35 + 0.75 * t) + hl);
+        gfx_g = min(1, cg * (0.35 + 0.75 * t) + hl);
+        gfx_b = min(1, cb * (0.35 + 0.75 * t) + hl);
+        gfx_a = (k === 0) ? a : ai;
+        gfx_circle(x - 0.35 * r * t, y - 0.35 * r * t, rr, 1, 1);
+        k += 1;
+    );
+    (r >= 6) ? (
+        gfx_set(1, 1, 1, 0.5 * a);
+        gfx_circle(x - 0.4 * r, y - 0.4 * r, 0.12 * r, 1, 1);
+    );
+);
+
+
+// The color of hue h (degrees), saturation s, value v (0..1) : result in s3d_cr, s3d_cg, s3d_cb
+function s3d_hsv(h, s, v)
+local(i, f, p, q, t)
+(
+    h = (h - 360 * floor(h / 360)) / 60;
+    i = floor(h); f = h - i;
+    p = v * (1 - s); q = v * (1 - s * f); t = v * (1 - s * (1 - f));
+    (i === 0) ? (s3d_cr = v; s3d_cg = t; s3d_cb = p;) :
+    (i === 1) ? (s3d_cr = q; s3d_cg = v; s3d_cb = p;) :
+    (i === 2) ? (s3d_cr = p; s3d_cg = v; s3d_cb = t;) :
+    (i === 3) ? (s3d_cr = p; s3d_cg = q; s3d_cb = v;) :
+    (i === 4) ? (s3d_cr = t; s3d_cg = p; s3d_cb = v;) :
+                (s3d_cr = v; s3d_cg = p; s3d_cb = q;);
+);
+
+
+// The colors contrasting with the background s3d_bgr, s3d_bgg, s3d_bgb :
+// the grid (s3d_grr...), the names of the faces (s3d_lbr...), the crosses (s3d_xr...), the halos (s3d_hr...)
+function s3d_colors()
+local(mx, mn, c, l, h, a, d1, d2, sp, hc, t, d, k, tr, tg, tb, f)
+(
+    mx = max(s3d_bgr, max(s3d_bgg, s3d_bgb)); mn = min(s3d_bgr, min(s3d_bgg, s3d_bgb));
+    c = mx - mn; // chroma : the hue is meaningless when it is small
+    l = 0.299 * s3d_bgr + 0.587 * s3d_bgg + 0.114 * s3d_bgb; // luminance
+    h = (c <= 0) ? 0 :
+        (mx === s3d_bgr) ? 60 * (s3d_bgg - s3d_bgb) / c :
+        (mx === s3d_bgg) ? 60 * ((s3d_bgb - s3d_bgr) / c + 2) : 60 * ((s3d_bgr - s3d_bgg) / c + 4);
+    (h < 0) ? h += 360;
+    sp = min(1, c / 0.25);
+    t = max(0, min(1, (l - 0.3) / 0.4)); t = t * t * (3 - 2 * t); // 0 : dark background, 1 : light
+    // the grid : the background mixed with a green (neutral when the background is green), lighter or darker,
+    // enough to have a difference of luminance of at least 0.35 ; lighter / darker : with a hysteresis, so that
+    // a background varying around the middle does not make the grid flicker
+    (!s3d_gdark && (l > 0.58)) ? (s3d_gdark = 1;) : (s3d_gdark && (l < 0.42)) ? (s3d_gdark = 0;);
+    k = sp * max(0, 1 - abs(h - 120) / 60);
+    !s3d_gdark ? (
+        tr = 0.6 + 0.3 * k; tg = 1 - 0.1 * k; tb = 0.65 + 0.25 * k;
+    ) : (
+        tr = 0.05 * k; tg = 0.15 - 0.1 * k; tb = 0.05;
+    );
+    f = min(1, max(0.5, 0.35 / max(0.01, abs(0.299 * tr + 0.587 * tg + 0.114 * tb - l))));
+    s3d_grr = s3d_bgr + f * (tr - s3d_bgr); s3d_grg = s3d_bgg + f * (tg - s3d_bgg); s3d_grb = s3d_bgb + f * (tb - s3d_bgb);
+    !s3d_gdark ? (
+        s3d_lbr = s3d_bgr + 0.45 * (1 - s3d_bgr); s3d_lbg = s3d_bgg + 0.45 * (1 - s3d_bgg);
+        s3d_lbb = s3d_bgb + 0.45 * (1 - s3d_bgb);
+    ) : (
+        s3d_lbr = 0.45 * s3d_bgr; s3d_lbg = 0.45 * s3d_bgg; s3d_lbb = 0.45 * s3d_bgb;
+    );
+    // the cross : a hue between yellow (55) and blue (220), as far as possible from that of the background ;
+    // on a grey background : yellow when dark, blue when light
+    a = h + 180; (a >= 360) ? a -= 360;
+    ((a >= 55) && (a <= 220)) ? (
+        hc = a;
+    ) : (
+        d1 = abs(h - 55); d1 = min(d1, 360 - d1);
+        d2 = abs(h - 220); d2 = min(d2, 360 - d2);
+        hc = (d1 > d2) ? 55 : 220;
+    );
+    hc = sp * hc + (1 - sp) * (55 + 165 * t);
+    s3d_hsv(hc, 0.85 + 0.15 * t, 1 - 0.4 * t);
+    s3d_xr = s3d_cr; s3d_xg = s3d_cg; s3d_xb = s3d_cb;
+    // the halo : an orange, moved away from the hue of the background when it is near
+    d = h - 30; (d > 180) ? d -= 360; (d < -180) ? d += 360;
+    s3d_hsv(30 + ((d > 0) ? -15 : 15) * max(0, 1 - abs(d) / 90) * sp, 0.9, 1 - 0.3 * t);
+    s3d_hr = s3d_cr; s3d_hg = s3d_cg; s3d_hb = s3d_cb;
+);
+
+
+// The half width of the cross at the distance v (pixels, vertical) from its center : the vertical bar
+// (a square of half side c at the center, widening obliquely to it from the half width w at a third of
+// its half length vl, then pointed), or the horizontal arms (half length hl, the same profile) at this height
+function s3d_xw(v, hl, vl, w, c)
+local(f, b)
+(
+    v = abs(v);
+    f = (v <= c) ? c : (v <= vl / 3) ? c + (w - c) * (v - c) / (vl / 3 - c) : (v < vl) ? 1.5 * w * (vl - v) / vl : -1;
+    b = (v > c) ? -1 : (v > w) ? hl / 3 + (c - hl / 3) * (v - w) / (c - w) : hl - 2 * hl * v / (3 * w);
+    max(f, b);
+);
+
+
+// A cross centered on (x, y) : horizontal bar of half length hl, vertical bar 2 times longer, half width w ;
+// each bar : a pointed third at each end, a middle third widening obliquely towards the center.
+// Drawn row by row (gfx_triangle leaves holes in thin triangles) : on each row the cross is one centered span,
+// its coverage is computed on 4 sub-rows (antialiasing) ; color : gfx_r, gfx_g, gfx_b, opacity a
+function s3d_cross(x, y, hl, w, a)
+local(vl, c, j, j1, m0, m1, m2, m3, mn, mx, ia, ib, i, d)
+(
+    w = min(w, hl / 4);
+    vl = 2 * hl;
+    c = min(2 * w, 0.28 * hl); // half side of the center square
+    j = floor(y - vl); j1 = floor(y + vl);
+    while (j <= j1) (
+        m0 = s3d_xw(j + 0.125 - y, hl, vl, w, c); m1 = s3d_xw(j + 0.375 - y, hl, vl, w, c);
+        m2 = s3d_xw(j + 0.625 - y, hl, vl, w, c); m3 = s3d_xw(j + 0.875 - y, hl, vl, w, c);
+        mn = min(min(m0, m1), min(m2, m3)); mx = max(max(m0, m1), max(m2, m3));
+        (mx > 0) ? (
+            // the pixels fully covered : one rectangle
+            ia = ceil(x - mn); ib = floor(x + mn - 1);
+            (ib >= ia) ? (
+                gfx_a = a; gfx_rect(ia, j, ib - ia + 1, 1);
+            ) : (
+                ia = floor(x + 0.5); ib = ia - 1;
+            );
+            // the pixels of the edges : partial coverage
+            i = floor(x - mx);
+            while (i <= floor(x + mx)) (
+                (i == ia) ? i = ib + 1;
+                (i <= floor(x + mx)) ? (
+                    d = abs(i + 0.5 - x) - 0.5;
+                    gfx_a = a * 0.25 * (max(0, min(1, m0 - d)) + max(0, min(1, m1 - d))
+                                      + max(0, min(1, m2 - d)) + max(0, min(1, m3 - d)));
+                    (gfx_a > 0.002) ? gfx_rect(i, j, 1, 1);
+                );
+                i += 1;
+            );
+        );
+        j += 1;
+    );
+);
+
+
+// A halo of radius rd : opacity a at the center, decreasing linearly to 0 at the circumference
+// (concentric discs, from the outside ; the color is set by the caller)
+function s3d_halo(x, y, rd, a)
+local(n, k, tp, tt)
+(
+    n = max(4, min(40, ceil(rd / 1.5)));
+    tp = 0; k = 0;
+    loop(n,
+        tt = a * (k + 0.5) / n; // the opacity wanted inside this disc
+        gfx_a = 1 - (1 - tt) / (1 - tp);
+        gfx_circle(x, y, rd * (n - k) / n, 1, 1);
+        tp = tt;
+        k += 1;
+    );
+);
+
+
+// A face of the room, normal to the axis ax (0 x, 1 y, 2 z), at s = -1 or +1
+function s3d_face(ax, s)
+local(i, t, lbl)
+(
+    gfx_set(s3d_grr, s3d_grg, s3d_grb, 1);
+    i = 0;
+    loop(s3d_GridN + 1,
+        t = -1 + 2 * i / s3d_GridN;
+        (ax === 0) ? (
+            s3d_line(s, t, -1, s, t, 1); s3d_line(s, -1, t, s, 1, t);
+        ) : (ax === 1) ? (
+            s3d_line(t, s, -1, t, s, 1); s3d_line(-1, s, t, 1, s, t);
+        ) : (
+            s3d_line(t, -1, s, t, 1, s); s3d_line(-1, t, s, 1, t, s);
+        );
+        i += 1;
+    );
+    // the name of the face, at its center
+    lbl = (ax === 0) ? ((s < 0) ? "L" : "R") : (ax === 1) ? ((s < 0) ? "Bk" : "F") : ((s < 0) ? "B" : "T");
+    ((ax === 0) ? s3d_proj(s, 0, 0) : (ax === 1) ? s3d_proj(0, s, 0) : s3d_proj(0, 0, s)) ? (
+        gfx_set(s3d_lbr, s3d_lbg, s3d_lbb, 0.8);
+        gfx_measurestr(lbl, s3d_tw, s3d_th);
+        gfx_x = s3d_px - s3d_tw / 2; gfx_y = s3d_py - s3d_th / 2;
+        gfx_drawstr(lbl);
+    );
+);
+
+
+// is the face (ax, s) a far face (seen from inside) ?
+function s3d_farface(ax, s)
+(
+    s * ((ax === 0) ? s3d_cpx : (ax === 1) ? s3d_cpy : s3d_cpz) <= 0;
+);
+
+
+// The shadow of a point on the far face (ax, s) : a disc of radius r in the plane of the face
+function s3d_disc(ax, s, x, y, z, r)
+local(k, a, u, v, ok, p)
+(
+    ok = 1; k = 0;
+    loop(12,
+        a = 2 * $pi * k / 12; u = r * cos(a); v = r * sin(a);
+        ok && ((ax === 0) ? s3d_proj(s, y + u, z + v) : (ax === 1) ? s3d_proj(x + u, s, z + v) : s3d_proj(x + u, y + v, s)) ? (
+            s3d_poly[2*k] = s3d_px; s3d_poly[2*k+1] = s3d_py;
+        ) : (
+            ok = 0; // behind the camera
+        );
+        k += 1;
+    );
+    ok ? (
+        p = s3d_poly;
+        gfx_triangle(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], p[10], p[11],
+                     p[12], p[13], p[14], p[15], p[16], p[17], p[18], p[19], p[20], p[21], p[22], p[23]);
+    );
+);
+
+
+// Draw the label of an object, at the right of the ball
+function s3d_label(x, y, r, str)
+(
+    gfx_measurestr(str, s3d_tw, s3d_th);
+    gfx_x = x + r + 3; gfx_y = y - s3d_th / 2;
+    gfx_drawstr(str);
+);
+
+
+// Draw an object of the sorted list
+function s3d_object(id)
+local(ty, k, e, r, r0, hl, g, fa, x, y)
+(
+    ty = (id / 1024) | 0; k = id - ty * 1024;
+    e = (ty === s3d_tSpk) ? s3d_spk + k * s3d_st : s3d_src + k * s3d_st;
+    x = e[s3d_fsx]; y = e[s3d_fsy];
+    fa = s3d_fade(e[s3d_fsz]);
+    (ty === s3d_tSpk) ? (
+        r0 = 0.035 * s3d_foc / e[s3d_fsz];
+        s3d_ball(x, y, r0, 1, 0.75, 0.05, fa);
+        hl = 0; // half length of the cross
+        g = e[s3d_fg];
+        ((s3d_opt & s3d_oGains) && (g > 0.001)) ? (
+            s3d_style ? (
+                // a cross over the ball, more opaque for the higher gains
+                hl = max(6, 3 * r0);
+                gfx_set(s3d_xr, s3d_xg, s3d_xb, 1);
+                s3d_cross(x, y, hl, max(1.5, 0.3 * r0), (0.45 + 0.55 * min(1, g)) * fa);
+            ) : (
+                r = (0.04 + 0.16 * min(1, g)) * s3d_foc / e[s3d_fsz];
+                s3d_ball(x, y, r, 0.1, 0.35, 1, 0.75 * fa);
+            );
+        );
+        g = min(1, e[s3d_fl]);
+        ((s3d_opt & s3d_oLevels) && (g > 0.001)) ? (
+            s3d_style ? (
+                // a halo over the cross (translucent) ; the 4th power of the level marks more the differences
+                gfx_set(s3d_hr, s3d_hg, s3d_hb, 1);
+                s3d_halo(x, y, (0.08 + 1.92 * sqr(sqr(g))) * s3d_foc / e[s3d_fsz], s3d_haloA * fa);
+            ) : (
+                r = (0.04 + 0.16 * min(1, g)) * s3d_foc / e[s3d_fsz];
+                s3d_ball(x, y, r, 0.2, 1, 0.3, 0.6 * fa);
+            );
+        );
+        (s3d_opt & (s3d_oInfos | s3d_oAllInfos)) ? (
+            gfx_set(s3d_txr, s3d_txg, s3d_txb, 0.9 * fa);
+            ((s3d_opt & s3d_oAllInfos) && (e[s3d_fg] > 0.00001)) ? (
+                sprintf(#s3d_lbl, "%d  %.1f dB", k + 1, 20 * log10(e[s3d_fg]));
+            ) : (
+                sprintf(#s3d_lbl, "%d", k + 1);
+            );
+            s3d_label(x, y, max(r0, hl), #s3d_lbl);
+        );
+    ) : (
+        r = 0.03 * s3d_foc / e[s3d_fsz];
+        s3d_ball(x, y, r, 0.1, 0.85, 1, fa);
+        (s3d_opt & (s3d_oInfos | s3d_oAllInfos)) ? (
+            gfx_set(0.7, 0.95, 1, 0.9 * fa);
+            sprintf(#s3d_lbl, "%d", k + 1);
+            s3d_label(x, y, r, #s3d_lbl);
+        );
+    );
+);
+
+
+// The selected object : axes through it, and its coordinates
+function s3d_selection()
+local(ty, k, e, x, y, z, d, x0)
+(
+    (s3d_sel >= 0) ? (
+        ty = (s3d_sel / 1024) | 0; k = s3d_sel - ty * 1024;
+        ((ty === s3d_tSpk) && (k < s3d_nspk)) || ((ty === s3d_tSrc) && (k < s3d_nsrc) && !(s3d_opt & s3d_oHideSrc)) ? (
+            e = (ty === s3d_tSpk) ? s3d_spk + k * s3d_st : s3d_src + k * s3d_st;
+            x = e[s3d_fx]; y = e[s3d_fy]; z = e[s3d_fz];
+            d = 0.15;
+            gfx_set(1, 0.9, 0.7, 0.9);
+            s3d_line(x - d, y, z, x + d, y, z);
+            s3d_line(x, y - d, z, x, y + d, z);
+            s3d_line(x, y, z - d, x, y, z + d);
+            s3d_proj(x, y, z) ? (
+                gfx_set(s3d_txr, s3d_txg, s3d_txb, 1);
+                x0 = s3d_px + 12; gfx_y = s3d_py + 8;
+                gfx_measurestr("0", s3d_tw, s3d_th);
+                sprintf(#s3d_lbl, "%s %d", (ty === s3d_tSpk) ? "speaker" : "source", k + 1);
+                gfx_x = x0; gfx_drawstr(#s3d_lbl); gfx_y += s3d_th;
+                sprintf(#s3d_lbl, "x : %.2f", x); gfx_x = x0; gfx_drawstr(#s3d_lbl); gfx_y += s3d_th;
+                sprintf(#s3d_lbl, "y : %.2f", y); gfx_x = x0; gfx_drawstr(#s3d_lbl); gfx_y += s3d_th;
+                sprintf(#s3d_lbl, "z : %.2f", z); gfx_x = x0; gfx_drawstr(#s3d_lbl); gfx_y += s3d_th;
+                (ty === s3d_tSpk) ? (
+                    sprintf(#s3d_lbl, "g : %.3f", e[s3d_fg]); gfx_x = x0; gfx_drawstr(#s3d_lbl);
+                );
+            );
+        ) : (
+            s3d_sel = -1;
+        );
+    );
+);
+
+
+// Project the speakers and the sources, and sort them : far objects first
+function s3d_sort()
+local(n, k, e, i, j, kk, ki)
+(
+    n = 0;
+    k = 0;
+    loop(s3d_nspk,
+        e = s3d_spk + k * s3d_st;
+        e[s3d_fsz] = 0;
+        s3d_proj(e[s3d_fx], e[s3d_fy], e[s3d_fz]) ? (
+            e[s3d_fsx] = s3d_px; e[s3d_fsy] = s3d_py; e[s3d_fsz] = s3d_pz;
+            s3d_okey[n] = s3d_pz; s3d_oid[n] = s3d_tSpk * 1024 + k; n += 1;
+        );
+        k += 1;
+    );
+    k = 0;
+    loop(s3d_nsrc,
+        e = s3d_src + k * s3d_st;
+        e[s3d_fsz] = 0; // (hidden sources : not drawn, nor picked)
+        (!(s3d_opt & s3d_oHideSrc) && s3d_proj(e[s3d_fx], e[s3d_fy], e[s3d_fz])) ? (
+            e[s3d_fsx] = s3d_px; e[s3d_fsy] = s3d_py; e[s3d_fsz] = s3d_pz;
+            s3d_okey[n] = s3d_pz; s3d_oid[n] = s3d_tSrc * 1024 + k; n += 1;
+        );
+        k += 1;
+    );
+    // insertion sort, decreasing depth
+    i = 1;
+    loop(max(0, n - 1),
+        kk = s3d_okey[i]; ki = s3d_oid[i];
+        j = i - 1;
+        while ((j >= 0) && (s3d_okey[j] < kk)) (
+            s3d_okey[j+1] = s3d_okey[j]; s3d_oid[j+1] = s3d_oid[j];
+            j -= 1;
+        );
+        s3d_okey[j+1] = kk; s3d_oid[j+1] = ki;
+        i += 1;
+    );
+    s3d_nobj = n;
+);
+
+
+function s3d_draw(x, y, w, h)
+local(k, e, ax, s, p, q, r, od, bx, by, bz)
+(
+    od = gfx_dest;
+    w = max(16, w|0); h = max(16, h|0);
+    ((w != s3d_iw) || (h != s3d_ih)) ? (
+        gfx_setimgdim(s3d_img, w, h);
+        s3d_iw = w; s3d_ih = h;
+    );
+    gfx_dest = s3d_img;
+    gfx_mode = 0;
+    gfx_set(s3d_bgr, s3d_bgg, s3d_bgb, 1);
+    gfx_rect(0, 0, w, h);
+    s3d_colors();
+    s3d_camera(w, h);
+
+    // the stars
+    (s3d_opt & s3d_oStars) ? (
+        k = 0;
+        loop(s3d_StarsNb,
+            e = s3d_stars + 4 * k;
+            s3d_proj(s3d_cpx + e[0], s3d_cpy + e[1], s3d_cpz + e[2]) ? (
+                gfx_set(1, 1, 1, e[3]);
+                gfx_rect(s3d_px, s3d_py, 1 + (e[3] > 0.85), 1 + (e[3] > 0.85));
+            );
+            k += 1;
+        );
+    );
+
+    // the far faces of the room
+    (s3d_opt & s3d_oBox) ? (
+        ax = 0;
+        loop(3,
+            s = -1;
+            loop(2,
+                s3d_farface(ax, s) ? s3d_face(ax, s);
+                s += 2;
+            );
+            ax += 1;
+        );
+    );
+
+    // projection on the far faces (as GRM Spaces) : the shadows of the sources,
+    // and lines from the barycenter of the sources to the faces
+    ((s3d_opt & s3d_oProj) && (s3d_nsrc > 0) && !(s3d_opt & s3d_oHideSrc)) ? (
+        bx = by = bz = 0;
+        k = 0;
+        loop(s3d_nsrc,
+            e = s3d_src + k * s3d_st;
+            bx += e[s3d_fx]; by += e[s3d_fy]; bz += e[s3d_fz];
+            ax = 0;
+            loop(3,
+                s = -1;
+                loop(2,
+                    s3d_farface(ax, s) ? (
+                        gfx_set(0.1, 0.25, 0.45, 0.7 * s3d_fade(s3d_dist));
+                        s3d_disc(ax, s, e[s3d_fx], e[s3d_fy], e[s3d_fz], 0.035);
+                    );
+                    s += 2;
+                );
+                ax += 1;
+            );
+            k += 1;
+        );
+        bx /= s3d_nsrc; by /= s3d_nsrc; bz /= s3d_nsrc;
+        ax = 0;
+        loop(3,
+            s = -1;
+            loop(2,
+                s3d_farface(ax, s) ? (
+                    gfx_set(0.6, 0.6, 0.65, 0.8);
+                    (ax === 0) ? s3d_line(bx, by, bz, s, by, bz) :
+                    (ax === 1) ? s3d_line(bx, by, bz, bx, s, bz) : s3d_line(bx, by, bz, bx, by, s);
+                    ((ax === 0) ? s3d_proj(s, by, bz) : (ax === 1) ? s3d_proj(bx, s, bz) : s3d_proj(bx, by, s)) ? (
+                        gfx_set(0.2, 0.45, 0.75, 1);
+                        gfx_circle(s3d_px, s3d_py, 2.5, 1, 1);
+                    );
+                );
+                s += 2;
+            );
+            ax += 1;
+        );
+    );
+
+    // the trajectory
+    ((s3d_opt & s3d_oTraj) && (s3d_ntrj > 1)) ? (
+        gfx_set(0.95, 0.1, 0.1, 0.9);
+        k = 0;
+        loop(s3d_ntrj - 1 + (s3d_trjclosed != 0),
+            p = s3d_trj + 3 * k;
+            q = s3d_trj + 3 * ((k + 1) % s3d_ntrj);
+            s3d_line(p[0], p[1], p[2], q[0], q[1], q[2]);
+            k += 1;
+        );
+    );
+
+    // speakers and sources, far objects first
+    s3d_sort();
+    // the group center : drawn with the objects behind it
+    k = 0;
+    r = s3d_gon && !(s3d_opt & s3d_oHideSrc) && s3d_proj(s3d_gx, s3d_gy, s3d_gz);
+    p = s3d_px; q = s3d_py; s = s3d_pz;
+    loop(s3d_nobj,
+        (r && (s3d_okey[k] < s)) ? (
+            s3d_ball(p, q, 0.012 * s3d_foc / s, 0.1, 0.75, 1, s3d_fade(s));
+            r = 0;
+        );
+        s3d_object(s3d_oid[k]);
+        k += 1;
+    );
+    r ? s3d_ball(p, q, 0.012 * s3d_foc / s, 0.1, 0.75, 1, s3d_fade(s));
+
+    s3d_selection();
+
+    // the value changed by the current drag
+    (s3d_dmode >= 4) ? (
+        (s3d_dmode === 4) ? sprintf(#s3d_lbl, "Size x %.2f", s3d_tsc) :
+        (s3d_dmode === 5) ? sprintf(#s3d_lbl, "Speed %.2f turns / min", s3d_speed) :
+        (s3d_dmode === 7) ? sprintf(#s3d_lbl, "Sources : size x %.2f   yaw %d   pitch %d   roll %d",
+                                    s3d_gsc, floor(s3d_gyaw * 180 / $pi + 0.5),
+                                    floor(s3d_gpitch * 180 / $pi + 0.5), floor(s3d_groll * 180 / $pi + 0.5)) :
+        sprintf(#s3d_lbl, "Mix A-B %d %%", floor(s3d_mix * 100 + 0.5));
+        gfx_set(1, 0.85, 0.4, 1);
+        gfx_x = 10; gfx_y = 8;
+        gfx_drawstr(#s3d_lbl);
+    );
+
+    // copy to the screen (or to the ui-lib clip screen)
+    gfx_dest = od;
+    gfx_x = x; gfx_y = y;
+    gfx_a = 1; gfx_mode = 2; // ignore the alpha of the image
+    gfx_blit(s3d_img, 1, 0);
+    gfx_mode = 0;
+);
+
+
+// Select the nearest object under the mouse (mx, my relative to the view)
+function s3d_pick(mx, my)
+local(k, e, d, bd)
+(
+    s3d_sel = -1; bd = 100; // squared distance max : 10 pixels
+    k = 0;
+    loop(s3d_nspk,
+        e = s3d_spk + k * s3d_st;
+        (e[s3d_fsz] > 0) && ((d = sqr(e[s3d_fsx] - mx) + sqr(e[s3d_fsy] - my)) < bd) ? (
+            bd = d; s3d_sel = s3d_tSpk * 1024 + k;
+        );
+        k += 1;
+    );
+    k = 0;
+    loop(s3d_nsrc,
+        e = s3d_src + k * s3d_st;
+        (e[s3d_fsz] > 0) && ((d = sqr(e[s3d_fsx] - mx) + sqr(e[s3d_fsy] - my)) < bd) ? (
+            bd = d; s3d_sel = s3d_tSrc * 1024 + k;
+        );
+        k += 1;
+    );
+);
+
+
+function s3d_menu()
+local(c, b)
+(
+    // items 1 ... 11 : the options : 1 = bit 1 (s3d_oGains), 2 = s3d_oHideSrc (inverted : checked when not set),
+    // 3 ... 11 = bit 2^(item-2) (s3d_oLevels ... s3d_oClamp) ; 12 ... 15 : the views (as the cell View of Diffusion-3)
+    sprintf(#s3d_mnu, "%sDisplay Diffusers|%sDisplay Source|%sDisplay Levels|%sDisplay Infos|%sDisplay All Infos||%sDisplay Box|%sProjection on planes|%sFade out|%sStarfield|%sDisplay Trajectory||%sLimit to the room||Front view|Side view|Top view|3D view",
+        (s3d_opt & s3d_oGains) ? "!" : "", (s3d_opt & s3d_oHideSrc) ? "" : "!", (s3d_opt & s3d_oLevels) ? "!" : "",
+        (s3d_opt & s3d_oInfos) ? "!" : "", (s3d_opt & s3d_oAllInfos) ? "!" : "",
+        (s3d_opt & s3d_oBox) ? "!" : "", (s3d_opt & s3d_oProj) ? "!" : "",
+        (s3d_opt & s3d_oFade) ? "!" : "", (s3d_opt & s3d_oStars) ? "!" : "",
+        (s3d_opt & s3d_oTraj) ? "!" : "", (s3d_opt & s3d_oClamp) ? "!" : "");
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    c = gfx_showmenu(#s3d_mnu);
+    ((c >= 1) && (c <= 11)) ? (
+        b = (c === 1) ? s3d_oGains : (c === 2) ? s3d_oHideSrc : 2 ^ (c - 2);
+        s3d_opt = (s3d_opt & b) ? s3d_opt - b : s3d_opt + b;
+    ) :
+    (c === 12) ? (s3d_az = 0; s3d_el = 0;) :           // front
+    (c === 13) ? (s3d_az = $pi / 2; s3d_el = 0;) :     // side
+    (c === 14) ? (s3d_az = 0; s3d_el = 1.55;) :        // top
+    (c === 15) ? (s3d_az = s3d_Az3D; s3d_el = s3d_El3D; s3d_dist = s3d_Dist3D;);
+    (c > 0) ? s3d_changed = 1;
+);
+
+
+// Mouse : left drag = orbit, left click = select, wheel = zoom, right click = menu
+function s3d_mouse(x, y, w, h, wheel)
+local(mx, my, inside, used, dx, dy, f, v)
+(
+    used = 0;
+    mx = mouse_x - x; my = mouse_y - y;
+    inside = (mx >= 0) && (my >= 0) && (mx < w) && (my < h);
+    (mouse_cap & 1) ? (
+        (s3d_mdown === 0) ? (
+            inside ? (
+                s3d_mdown = 1; s3d_moved = 0;
+                s3d_mx0 = s3d_lmx = mouse_x; s3d_my0 = s3d_lmy = mouse_y;
+            ) : (
+                s3d_mdown = -1; // pressed outside of the view
+            );
+        ) : (s3d_mdown === 1) ? (
+            (abs(mouse_x - s3d_mx0) + abs(mouse_y - s3d_my0) > 3) ? s3d_moved = 1;
+            s3d_moved ? (
+                dx = mouse_x - s3d_lmx; dy = mouse_y - s3d_lmy;
+                ((mouse_cap & 20) === 20) ? (
+                    // Cmd + Alt : speed ; quadratic scale, fine near 0
+                    v = sign(s3d_speed) * sqrt(abs(s3d_speed) / 240);
+                    v = max(-1, min(1, v + dx * 0.002));
+                    s3d_speed = 240 * sign(v) * v * v;
+                    s3d_dmode = 5;
+                ) : ((mouse_cap & 12) === 12) ? (
+                    // Cmd + Shift : mix of the trajectories A and B
+                    s3d_mix = max(0, min(1, s3d_mix + dx * 0.003));
+                    s3d_dmode = 6;
+                ) : (s3d_mtarget && (mouse_cap & 28)) ? (
+                    // the group of sources
+                    s3d_dmode = 7;
+                    (mouse_cap & 8) ? (
+                        s3d_gsc = max(0.05, min(10, s3d_gsc * exp(- dy * 0.01)));
+                    ) : (mouse_cap & 4) ? (
+                        s3d_gyaw -= dx * 0.01;
+                        s3d_gpitch = max(-$pi, min($pi, s3d_gpitch + dy * 0.01));
+                    ) : (
+                        s3d_groll = max(-$pi, min($pi, s3d_groll + dx * 0.01));
+                    );
+                    s3d_gyaw -= 2 * $pi * floor((s3d_gyaw + $pi) / (2 * $pi));
+                ) : (mouse_cap & 16) ? (
+                    s3d_dmode = 2;
+                    // Alt : translate the trajectory, in the plane of the screen
+                    f = s3d_dist / s3d_foc;
+                    s3d_ttx = max(-4, min(4, s3d_ttx + f * (dx * s3d_rgx - dy * s3d_upx)));
+                    s3d_tty = max(-4, min(4, s3d_tty + f * (dx * s3d_rgy - dy * s3d_upy)));
+                    s3d_ttz = max(-4, min(4, s3d_ttz + f * (dx * s3d_rgz - dy * s3d_upz)));
+                    s3d_tchanged = 1;
+                ) : (mouse_cap & 4) ? (
+                    s3d_dmode = 3;
+                    // Cmd : rotate the trajectory (horizontal : around z ; vertical : tilt)
+                    s3d_trz -= dx * 0.01;
+                    s3d_trx = max(-$pi, min($pi, s3d_trx + dy * 0.01));
+                    s3d_tchanged = 1;
+                ) : (mouse_cap & 8) ? (
+                    s3d_dmode = 4;
+                    // Shift : size of the trajectory
+                    s3d_tsc = max(0.05, min(10, s3d_tsc * exp(- dy * 0.01)));
+                    s3d_tchanged = 1;
+                ) : (
+                    // orbit
+                    s3d_dmode = 1;
+                    s3d_az -= dx * 0.008;
+                    s3d_el += dy * 0.008;
+                    s3d_changed = 1;
+                );
+            );
+            s3d_lmx = mouse_x; s3d_lmy = mouse_y;
+        );
+    ) : (
+        ((s3d_mdown === 1) && (s3d_moved === 0)) ? s3d_pick(mx, my);
+        s3d_mdown = 0;
+        s3d_dmode = 0;
+    );
+    (mouse_cap & 2) ? (
+        ((s3d_rdown === 0) && inside && !(mouse_cap & 8)) ? s3d_menu(); // shift + right clic : left to the host
+        s3d_rdown = 1;
+    ) : (
+        s3d_rdown = 0;
+    );
+    (inside && (wheel != 0)) ? (
+        s3d_dist = max(1.8, min(12, s3d_dist * exp(- wheel / 1000)));
+        s3d_changed = 1;
+        used = 1;
+    );
+    used;
+);
+
+
+/*
+    Trajectories : s3d_trj, s3d_ntrj points, s3d_trjclosed
+    kind : 0 none, 1 circle, 2 square, 3 star, 4 spiral, 5 central point ; horizontal, center (cx, cy, cz), radius r
+*/
+s3d_TrjNames = "None|Circle|Square|Star|Spiral|Central Point|File";
+s3d_TrjCount = 7;
+s3d_TrjFile = 6;
+
+// a coordinate, limited to the room [-1,1] when the option s3d_oClamp is set
+function s3d_lim(v)
+(
+    (s3d_opt & s3d_oClamp) ? max(-1, min(1, v)) : v;
+);
+
+// a point of the trajectory, transformed around the center (s3d_tcx, s3d_tcy, s3d_tcz) :
+// size, tilt around x, rotation around z, translation
+function s3d_trjpt(k, x, y, z)
+local(dx, dy, dz, a)
+(
+    dx = (x - s3d_tcx) * s3d_tsc; dy = (y - s3d_tcy) * s3d_tsc; dz = (z - s3d_tcz) * s3d_tsc;
+    a = dy * cos(s3d_trx) - dz * sin(s3d_trx); dz = dy * sin(s3d_trx) + dz * cos(s3d_trx); dy = a;
+    a = dx * cos(s3d_trz) - dy * sin(s3d_trz); dy = dx * sin(s3d_trz) + dy * cos(s3d_trz); dx = a;
+    s3d_trj[3*k] = s3d_lim(s3d_tcx + s3d_ttx + dx);
+    s3d_trj[3*k+1] = s3d_lim(s3d_tcy + s3d_tty + dy);
+    s3d_trj[3*k+2] = s3d_lim(s3d_tcz + s3d_ttz + dz);
+);
+
+function s3d_mktraj(kind, cx, cy, cz, r)
+local(k, n, a, rr)
+(
+    s3d_trjclosed = 1;
+    s3d_tcx = cx; s3d_tcy = cy; s3d_tcz = cz;
+    (kind === 1) ? (
+        n = min(s3d_mtrj, 64);
+        k = 0; loop(n, a = 2 * $pi * k / n; s3d_trjpt(k, cx + r * sin(a), cy + r * cos(a), cz); k += 1;);
+    ) :
+    (kind === 2) ? (
+        // as GRM Spaces : from the middle of the front side, clockwise
+        n = 5;
+        s3d_trjpt(0, cx, cy + r, cz); s3d_trjpt(1, cx + r, cy + r, cz);
+        s3d_trjpt(2, cx + r, cy - r, cz); s3d_trjpt(3, cx - r, cy - r, cz);
+        s3d_trjpt(4, cx - r, cy + r, cz);
+    ) :
+    (kind === 3) ? (
+        // a star with 5 branches, starting in front
+        n = 10;
+        k = 0; loop(n, a = 2 * $pi * k / n; rr = (k & 1) ? 0.4 * r : r; s3d_trjpt(k, cx + rr * sin(a), cy + rr * cos(a), cz); k += 1;);
+    ) :
+    (kind === 4) ? (
+        // a spiral of 3 turns, from the outside to the center
+        n = min(s3d_mtrj, 150);
+        k = 0; loop(n, a = 6 * $pi * k / (n - 1); rr = r * (1 - 0.95 * k / (n - 1));
+                       s3d_trjpt(k, cx + rr * sin(a), cy + rr * cos(a), cz); k += 1;);
+        s3d_trjclosed = 0;
+    ) :
+    (kind === 5) ? (
+        n = 1;
+        s3d_trjpt(0, cx, cy, cz);
+    ) :
+    (kind === s3d_TrjFile) ? (
+        // transformed around its own center (cx, cy, cz, r are not used)
+        s3d_tcx = s3d_fcx; s3d_tcy = s3d_fcy; s3d_tcz = s3d_fcz;
+        n = s3d_nftrj;
+        k = 0; loop(n, s3d_trjpt(k, s3d_ftrj[3*k], s3d_ftrj[3*k+1], s3d_ftrj[3*k+2]); k += 1;);
+        s3d_trjclosed = s3d_ftclosed;
+    ) : (
+        n = 0;
+    );
+    s3d_ntrj = n;
+);
+
+// The "File" trajectory : n points from src (entries of s3d_st values, as given by s3d_load_lay)
+function s3d_settraj(src, n, closed)
+local(k)
+(
+    s3d_nftrj = n = min(n, s3d_mtrj);
+    s3d_ftclosed = closed;
+    s3d_fcx = s3d_fcy = s3d_fcz = 0;
+    k = 0;
+    loop(n,
+        s3d_ftrj[3*k] = src[k * s3d_st + s3d_fx];
+        s3d_ftrj[3*k+1] = src[k * s3d_st + s3d_fy];
+        s3d_ftrj[3*k+2] = src[k * s3d_st + s3d_fz];
+        s3d_fcx += s3d_ftrj[3*k]; s3d_fcy += s3d_ftrj[3*k+1]; s3d_fcz += s3d_ftrj[3*k+2];
+        k += 1;
+    );
+    (n > 0) ? (s3d_fcx /= n; s3d_fcy /= n; s3d_fcz /= n;);
+    n;
+);
+
+
+// Resample the path src (n points of 3 values, closed or not) in m points equally spaced along its length, in dst
+function s3d_resample(src, n, closed, dst, m)
+local(ns, lt, k, j, d, p, q, u, step, acc, pos)
+(
+    (n <= 1) ? (
+        k = 0; loop(m, dst[3*k] = src[0]; dst[3*k+1] = src[1]; dst[3*k+2] = src[2]; k += 1;);
+    ) : (
+        ns = n - 1 + (closed != 0); // number of segments
+        lt = 0; k = 0;
+        loop(ns,
+            p = src + 3 * k; q = src + 3 * ((k + 1) % n);
+            lt += sqrt(sqr(q[0] - p[0]) + sqr(q[1] - p[1]) + sqr(q[2] - p[2]));
+            k += 1;
+        );
+        step = lt / (closed ? m : max(1, m - 1));
+        j = 0; acc = 0;
+        p = src; q = src + 3;
+        d = sqrt(sqr(q[0] - p[0]) + sqr(q[1] - p[1]) + sqr(q[2] - p[2]));
+        k = 0;
+        loop(m,
+            pos = k * step;
+            while ((pos > acc + d) && (j < ns - 1)) (
+                acc += d; j += 1;
+                p = src + 3 * j; q = src + 3 * ((j + 1) % n);
+                d = sqrt(sqr(q[0] - p[0]) + sqr(q[1] - p[1]) + sqr(q[2] - p[2]));
+            );
+            u = (d > 0) ? max(0, min(1, (pos - acc) / d)) : 0;
+            dst[3*k] = p[0] + u * (q[0] - p[0]);
+            dst[3*k+1] = p[1] + u * (q[1] - p[1]);
+            dst[3*k+2] = p[2] + u * (q[2] - p[2]);
+            k += 1;
+        );
+    );
+);
+
+// The trajectory interpolated between the trajectories ka (w = 0) and kb (w = 1), as the two menus
+// and the slider of GRM Spaces : both are resampled with the same number of points, from their start
+// (for the built-in ones, the front), equally spaced along their length. "None" counts as the center.
+function s3d_mkmorph(ka, kb, w, cx, cy, cz, r)
+local(k, m, ca, cb, n)
+(
+    w = max(0, min(1, w));
+    (w <= 0) ? s3d_mktraj(ka, cx, cy, cz, r) :
+    (w >= 1) ? s3d_mktraj(kb, cx, cy, cz, r) : (
+        m = min(s3d_mtrj, 512);
+        s3d_mktraj(ka, cx, cy, cz, r); ca = s3d_trjclosed;
+        ((n = s3d_ntrj) === 0) ? (s3d_trjpt(0, cx, cy, cz); n = 1;);
+        s3d_resample(s3d_trj, n, ca, s3d_ta, m);
+        s3d_mktraj(kb, cx, cy, cz, r); cb = s3d_trjclosed;
+        ((n = s3d_ntrj) === 0) ? (s3d_trjpt(0, cx, cy, cz); n = 1;);
+        s3d_resample(s3d_trj, n, cb, s3d_tb, m);
+        k = 0;
+        loop(3 * m, s3d_trj[k] = s3d_ta[k] + w * (s3d_tb[k] - s3d_ta[k]); k += 1;);
+        s3d_ntrj = m;
+        s3d_trjclosed = ca && cb;
+    );
+);
+
+
+// The direction of the segment j of the trajectory (points j, j+1), normalized, in s3d_sdx, s3d_sdy, s3d_sdz
+// (0, 0, 0 for a segment of length 0)
+function s3d_segdir(j)
+local(p, q, d)
+(
+    p = s3d_trj + 3 * j; q = s3d_trj + 3 * ((j + 1) % s3d_ntrj);
+    d = sqrt(sqr(q[0] - p[0]) + sqr(q[1] - p[1]) + sqr(q[2] - p[2]));
+    (d > 0) ? (
+        s3d_sdx = (q[0] - p[0]) / d; s3d_sdy = (q[1] - p[1]) / d; s3d_sdz = (q[2] - p[2]) / d;
+    ) : (
+        s3d_sdx = s3d_sdy = s3d_sdz = 0;
+    );
+);
+
+// The point at the fraction u (0..1) of the length of the trajectory, in s3d_gx, s3d_gy, s3d_gz,
+// and the direction of the trajectory there in s3d_tdx, s3d_tdy, s3d_tdz (front : 0, 1, 0 if none).
+// The direction is smoothed : at a vertex, the mean of the two segments ; along a segment, interpolated
+// between its two vertices (else the group, in the frame of the trajectory, would turn by steps)
+function s3d_trjpos(u)
+local(k, ns, lt, d, p, q, cx, cy, cz, ax, ay, az, bx, by, bz, l)
+(
+    s3d_tdx = 0; s3d_tdy = 1; s3d_tdz = 0;
+    (s3d_ntrj === 1) ? (
+        s3d_gx = s3d_trj[0]; s3d_gy = s3d_trj[1]; s3d_gz = s3d_trj[2];
+    ) : (s3d_ntrj > 1) ? (
+        ns = s3d_ntrj - 1 + (s3d_trjclosed != 0); // number of segments
+        // total length
+        lt = 0; k = 0;
+        loop(ns,
+            p = s3d_trj + 3 * k; q = s3d_trj + 3 * ((k + 1) % s3d_ntrj);
+            lt += sqrt(sqr(q[0] - p[0]) + sqr(q[1] - p[1]) + sqr(q[2] - p[2]));
+            k += 1;
+        );
+        u = max(0, min(1, u)) * lt;
+        k = 0; d = 0;
+        while (
+            p = s3d_trj + 3 * k; q = s3d_trj + 3 * ((k + 1) % s3d_ntrj);
+            d = sqrt(sqr(q[0] - p[0]) + sqr(q[1] - p[1]) + sqr(q[2] - p[2]));
+            ((u > d) && (k < ns - 1)) ? (u -= d; k += 1; 1) : 0;
+        );
+        u = (d > 0) ? min(1, u / d) : 0;
+        s3d_gx = p[0] + u * (q[0] - p[0]); s3d_gy = p[1] + u * (q[1] - p[1]); s3d_gz = p[2] + u * (q[2] - p[2]);
+        // the direction : current segment k, its vertices k (a) and k + 1 (b)
+        s3d_segdir(k); cx = s3d_sdx; cy = s3d_sdy; cz = s3d_sdz;
+        ax = cx; ay = cy; az = cz;
+        ((k > 0) || s3d_trjclosed) ? (s3d_segdir((k - 1 + ns) % ns); ax += s3d_sdx; ay += s3d_sdy; az += s3d_sdz;);
+        bx = cx; by = cy; bz = cz;
+        ((k < ns - 1) || s3d_trjclosed) ? (s3d_segdir((k + 1) % ns); bx += s3d_sdx; by += s3d_sdy; bz += s3d_sdz;);
+        l = sqrt(ax * ax + ay * ay + az * az); (l > 0) ? (ax /= l; ay /= l; az /= l;);
+        l = sqrt(bx * bx + by * by + bz * bz); (l > 0) ? (bx /= l; by /= l; bz /= l;);
+        ax += u * (bx - ax); ay += u * (by - ay); az += u * (bz - az);
+        l = sqrt(ax * ax + ay * ay + az * az);
+        (l > 0.000001) ? (
+            s3d_tdx = ax / l; s3d_tdy = ay / l; s3d_tdz = az / l;
+        ) : (cx * cx + cy * cy + cz * cz > 0) ? (
+            s3d_tdx = cx; s3d_tdy = cy; s3d_tdz = cz;
+        );
+    );
+);
+
+
+// Place the n sources of the layout lay (x, y, z in [-1,1] ; x right, y front, z up) around the group center
+// (s3d_gx, s3d_gy, s3d_gz) : scale spread * s3d_gsc, roll (around y), pitch (around x), yaw (around z),
+// then the frame : the room, or (s3d_grel) the trajectory : front = direction of the motion
+// (reversed when s3d_speed < 0), up = as near as possible to the vertical
+function s3d_place_sources(lay, n, spread)
+local(k, e, x, y, z, a, sc, fx, fy, fz, rx, ry, rz, ux, uy, uz, l)
+(
+    // the frame
+    fx = 0; fy = 1; fz = 0; rx = 1; ry = 0; rz = 0; ux = 0; uy = 0; uz = 1;
+    s3d_grel ? (
+        l = (s3d_speed < 0) ? -1 : 1;
+        fx = l * s3d_tdx; fy = l * s3d_tdy; fz = l * s3d_tdz;
+        // right = front x vertical ; vertical motion : front x (0, 1, 0)
+        rx = fy; ry = - fx; rz = 0;
+        l = sqrt(rx * rx + ry * ry);
+        (l < 0.001) ? (rx = - fz; ry = 0; rz = fx; l = sqrt(rx * rx + rz * rz););
+        (l > 0) ? (rx /= l; ry /= l; rz /= l;) : (rx = 1; ry = rz = 0;);
+        // up = right x front
+        ux = ry * fz - rz * fy; uy = rz * fx - rx * fz; uz = rx * fy - ry * fx;
+    );
+    sc = spread * s3d_gsc;
+    s3d_nsrc = n = min(n, s3d_msrc);
+    k = 0;
+    loop(n,
+        x = sc * lay[3*k]; y = sc * lay[3*k+1]; z = sc * lay[3*k+2];
+        a = x * cos(s3d_groll) + z * sin(s3d_groll); z = - x * sin(s3d_groll) + z * cos(s3d_groll); x = a;   // roll
+        a = y * cos(s3d_gpitch) - z * sin(s3d_gpitch); z = y * sin(s3d_gpitch) + z * cos(s3d_gpitch); y = a; // pitch
+        a = x * cos(s3d_gyaw) - y * sin(s3d_gyaw); y = x * sin(s3d_gyaw) + y * cos(s3d_gyaw); x = a;         // yaw
+        e = s3d_src + k * s3d_st;
+        e[s3d_fx] = s3d_lim(s3d_gx + x * rx + y * fx + z * ux);
+        e[s3d_fy] = s3d_lim(s3d_gy + x * ry + y * fy + z * uy);
+        e[s3d_fz] = s3d_lim(s3d_gz + x * rz + y * fz + z * uz);
+        k += 1;
+    );
+);
+
+
+/*
+    Dynamics (easing curves, as in GRM Spaces) : t in 0..1 -> 0..1
+    curve : 0 linear, 1 quad, 2 cubic, 3 quart, 4 quint, 5 expo, 6 circle, 7 sine, 8 elastic, 9 bounce
+    mode  : 0 in, 1 out, 2 in-out, 3 out-in
+*/
+s3d_EaseNames = "Linear|2nd|3rd|4th|5th|Exp|Circle|Sine|Elastic|Bounce";
+s3d_EaseCount = 10;
+s3d_EaseModes = "in|out|in-out|out-in";
+
+// the "in" curve
+function s3d_easein(curve, t)
+local(r)
+(
+    (curve === 0) ? t :
+    (curve <= 4) ? t ^ (curve + 1) :
+    (curve === 5) ? ((t <= 0) ? 0 : 2 ^ (10 * t - 10)) :
+    (curve === 6) ? 1 - sqrt(max(0, 1 - t * t)) :
+    (curve === 7) ? 1 - cos(t * $pi / 2) :
+    (curve === 8) ? (((t <= 0) || (t >= 1)) ? t : - (2 ^ (10 * t - 10)) * sin((t * 10 - 10.75) * 2 * $pi / 3)) :
+    (
+        // bounce in = 1 - bounce out (1 - t)
+        t = 1 - t;
+        r = (t < 1 / 2.75) ? 7.5625 * t * t :
+            (t < 2 / 2.75) ? (t -= 1.5 / 2.75; 7.5625 * t * t + 0.75) :
+            (t < 2.5 / 2.75) ? (t -= 2.25 / 2.75; 7.5625 * t * t + 0.9375) :
+            (t -= 2.625 / 2.75; 7.5625 * t * t + 0.984375);
+        1 - r;
+    );
+);
+
+function s3d_ease(curve, mode, t)
+(
+    t = max(0, min(1, t));
+    (mode === 0) ? s3d_easein(curve, t) :
+    (mode === 1) ? 1 - s3d_easein(curve, 1 - t) :
+    (mode === 2) ? ((t < 0.5) ? 0.5 * s3d_easein(curve, 2 * t) : 1 - 0.5 * s3d_easein(curve, 2 - 2 * t)) :
+    ((t < 0.5) ? 0.5 - 0.5 * s3d_easein(curve, 1 - 2 * t) : 0.5 + 0.5 * s3d_easein(curve, 2 * t - 1));
+);
+
+
+// Read a number in str, between the positions p (included) and e (excluded)
+function s3d_atof(str, p, e)
+local(s, v, f, c, ex, es)
+(
+    s = 1; v = 0; ex = 0; es = 1;
+    c = str_getchar(str, p);
+    (c === '-') ? (s = -1; p += 1;) : (c === '+') ? (p += 1;);
+    while ((p < e) && ((c = str_getchar(str, p)) >= '0') && (c <= '9')) (v = v * 10 + c - '0'; p += 1;);
+    ((p < e) && (str_getchar(str, p) === '.')) ? (
+        p += 1; f = 0.1;
+        while ((p < e) && ((c = str_getchar(str, p)) >= '0') && (c <= '9')) (v += (c - '0') * f; f *= 0.1; p += 1;);
+    );
+    ((p < e) && (((c = str_getchar(str, p)) === 'e') || (c === 'E'))) ? (
+        p += 1;
+        c = str_getchar(str, p);
+        (c === '-') ? (es = -1; p += 1;) : (c === '+') ? (p += 1;);
+        while ((p < e) && ((c = str_getchar(str, p)) >= '0') && (c <= '9')) (ex = ex * 10 + c - '0'; p += 1;);
+        v *= 10 ^ (es * ex);
+    );
+    s * v;
+);
+
+
+// Append to dst the text of src between p0 and p1, decoding the XML entities (&#232; -> UTF-8)
+function s3d_xmltext(dst, src, p0, p1)
+local(c, k, v, u)
+(
+    while (p0 < p1) (
+        c = str_getchar(src, p0, 'cu');
+        p0 += 1;
+        u = 0; // 1 : a character code (entity), to encode in UTF-8
+        (c === '&') ? (
+            u = 1;
+            k = p0;
+            while ((k < p1) && (str_getchar(src, k) !== ';')) (k += 1;);
+            (str_getchar(src, p0) === '#') ? (
+                v = (str_getchar(src, p0 + 1) === 'x') ? 0 : s3d_atof(src, p0 + 1, k);
+                (str_getchar(src, p0 + 1) === 'x') ? (
+                    p0 += 2;
+                    while (p0 < k) (
+                        c = str_getchar(src, p0);
+                        v = v * 16 + ((c >= 'a') ? c - 'a' + 10 : (c >= 'A') ? c - 'A' + 10 : c - '0');
+                        p0 += 1;
+                    );
+                );
+                c = v;
+            ) :
+            (str_getchar(src, p0) === 'a') ? (c = (str_getchar(src, p0 + 1) === 'm') ? '&' : '\'';) :
+            (str_getchar(src, p0) === 'q') ? (c = '"';) :
+            (str_getchar(src, p0) === 'l') ? (c = '<';) :
+            (str_getchar(src, p0) === 'g') ? (c = '>';);
+            p0 = k + 1;
+        );
+        // UTF-8 (the bytes of the file are copied as they are)
+        ((u === 0) || (c < 0x80)) ? (
+            str_setchar(#s3d_ch, 0, c, 'cu'); strcat(dst, #s3d_ch);
+        ) : (c < 0x800) ? (
+            str_setchar(#s3d_ch, 0, 0xC0 | (c >> 6), 'cu'); strcat(dst, #s3d_ch);
+            str_setchar(#s3d_ch, 0, 0x80 | (c & 0x3F), 'cu'); strcat(dst, #s3d_ch);
+        ) : (
+            str_setchar(#s3d_ch, 0, 0xE0 | (c >> 12), 'cu'); strcat(dst, #s3d_ch);
+            str_setchar(#s3d_ch, 0, 0x80 | ((c >> 6) & 0x3F), 'cu'); strcat(dst, #s3d_ch);
+            str_setchar(#s3d_ch, 0, 0x80 | (c & 0x3F), 'cu'); strcat(dst, #s3d_ch);
+        );
+    );
+);
+
+
+// Load a GRM Spaces layout file : a ".lay" (one layout) or a ".ala" (a library of layouts)
+//      .lay : <Speakers name="NHK 22.2"> <S x="" y="" z="" weight="" name=""/> ... </Speakers>
+//      .ala : <SpeakerSet> <Speakers name="Mono"> <S .../> </Speakers> <Speakers name="Stereo"> ... </SpeakerSet>
+// Every element with x / y / z attributes is a point ; it is written in dest (entries of s3d_st values).
+// An element with a "name" and no x / y / z starts a new layout (a group of points).
+// gstart[g], gcnt[g] : first point and number of points of the layout g ; maxn points, maxg layouts at most.
+// Returns the number of layouts, or -1 if the file can't be read.
+// #s3d_laylist : the names of the layouts, separated by "|" ; #s3d_laytag : the name of the root element ;
+// s3d_layclosed : 0 if an attribute closed="false" was found (trajectories), else 1.
+// (dest is not tested against 0 : a table may start at the address 0)
+function s3d_load_lay(fn, dest, maxn, gstart, gcnt, maxg)
+local(h, n, ng, p, len, c, q, a, alen, v0, t0, hasxyz, x, y, z, e, nm0, nm1, tl)
+(
+    ng = -1;
+    h = file_open(fn);
+    (h >= 0) ? (
+        strcpy(#s3d_laylist, "");
+        strcpy(#s3d_laytag, "");
+        strcpy(#s3d_ch, "?");
+        n = 0; ng = 0;
+        s3d_layclosed = 1;
+        // The strings are limited to 16 KB : the file is read line by line ; #s3d_txt keeps
+        // the text up to the last complete element, the rest waits for the next lines
+        strcpy(#s3d_txt, "");
+        while (file_avail(h)) (
+          file_string(h, #s3d_lin);
+          strcat(#s3d_txt, #s3d_lin);
+          tl = strlen(#s3d_txt);
+          len = tl;
+          while ((len > 0) && (str_getchar(#s3d_txt, len - 1) !== '>')) (len -= 1;);
+          p = 0;
+          while (p < len - 1) (
+            c = str_getchar(#s3d_txt, p + 1);
+            ((str_getchar(#s3d_txt, p) === '<') && (((c >= 'A') && (c <= 'Z')) || ((c >= 'a') && (c <= 'z')))) ? (
+                // an element : its name
+                p += 1; t0 = p;
+                while ((p < len) && ((c = str_getchar(#s3d_txt, p)) > ' ') && (c !== '/') && (c !== '>')) (p += 1;);
+                (strlen(#s3d_laytag) === 0) ? strcpy_substr(#s3d_laytag, #s3d_txt, t0, p - t0);
+                hasxyz = 0; x = y = z = 0; nm0 = nm1 = -1;
+                // its attributes : name="value"
+                while ((p < len) && ((c = str_getchar(#s3d_txt, p)) !== '/') && (c !== '>')) (
+                    (c <= ' ') ? (
+                        p += 1;
+                    ) : (
+                        a = c; alen = 0;
+                        while ((p < len) && ((c = str_getchar(#s3d_txt, p)) > ' ') && (c !== '=')) (alen += 1; p += 1;);
+                        while ((p < len) && ((c = str_getchar(#s3d_txt, p)) !== '"') && (c !== '\'')) (p += 1;);
+                        q = c; p += 1; v0 = p;
+                        while ((p < len) && (str_getchar(#s3d_txt, p) !== q)) (p += 1;);
+                        (alen === 1) ? (
+                            (a === 'x') ? (x = s3d_atof(#s3d_txt, v0, p); hasxyz = 1;) :
+                            (a === 'y') ? (y = s3d_atof(#s3d_txt, v0, p); hasxyz = 1;) :
+                            (a === 'z') ? (z = s3d_atof(#s3d_txt, v0, p); hasxyz = 1;);
+                        ) :
+                        ((alen === 4) && (a === 'n')) ? (
+                            nm0 = v0; nm1 = p;
+                        ) :
+                        ((alen === 6) && (a === 'c') && (str_getchar(#s3d_txt, v0) === 'f')) ? (
+                            s3d_layclosed = 0;
+                        );
+                        p += 1;
+                    );
+                );
+                (hasxyz === 0) ? (
+                    // a named element without coordinates : a new layout
+                    ((nm0 >= 0) && (ng < maxg)) ? (
+                        (ng > 0) ? strcat(#s3d_laylist, "|");
+                        s3d_xmltext(#s3d_laylist, #s3d_txt, nm0, nm1);
+                        gstart[ng] = n; gcnt[ng] = 0;
+                        ng += 1;
+                    );
+                ) : (n < maxn) ? (
+                    // a point (in a layout without name : create it)
+                    (ng === 0) ? (gstart[0] = 0; gcnt[0] = 0; ng = 1; strcpy(#s3d_laylist, "?"););
+                    e = dest + n * s3d_st;
+                    memset(e, 0, s3d_st);
+                    e[s3d_fx] = x; e[s3d_fy] = y; e[s3d_fz] = z;
+                    gcnt[ng - 1] += 1;
+                    n += 1;
+                );
+            ) : (
+                p += 1;
+            );
+          );
+          // keep the incomplete element
+          (len < tl) ? (
+              strcpy_substr(#s3d_rest, #s3d_txt, len);
+              strcpy(#s3d_txt, #s3d_rest);
+          ) : (
+              strcpy(#s3d_txt, "");
+          );
+        );
+        file_close(h);
+    );
+    ng;
+);

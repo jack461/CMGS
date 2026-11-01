@@ -975,7 +975,8 @@ Pr7_StudRat = Pr7_StudConf + 8;  // size : 8 * 4
 Pr7_StudLive = Pr7_StudRat + 8 * 4; // size : 8 -- 1 if the tab uses the "live" display
 Pr7_UiStyle = Pr7_StudLive + 8; // ui_jstyle (look of the GUI) - saved with the 'stud' block
 Pr7_UiTheme = Pr7_UiStyle + 1; // uix_jtheme (theme of the GUI) - saved with the 'stud' block
-Pr7_Free = Pr7_UiTheme + 1;
+Pr7_UiSize = Pr7_UiTheme + 1; // the display size, in percent (0 : the default, see ui_jzoom_set) - 'stud' block
+Pr7_Free = Pr7_UiSize + 1;
 
 // Update tabulations width
 i__tab = 0; loop (8,
@@ -1306,7 +1307,6 @@ uix_jtheme_menu = make_jmenu(
 uix_jtheme_rtc_max = 12;  // 12 entries in the menu
 // Correct a few things...
 ui_jcolor_inactive_grey = Color_Dark_Gray;
-ui_jGUI_prev = 0;
 studDispPPrev = -1;
 studDispPCnt = 0;
 prev_gfx_w = 0;
@@ -5504,6 +5504,7 @@ local (i, j, g, it, fid, ttl, gl0, gl1, gl2, gl3, gl4, othFirst, tmp, bln, blu, 
     blockDispNames[blockThemeNeonGreen] = "!&1 Neon Green"; //
     blockThemeLightMagenta = (itdsp += 1);
     blockDispNames[blockThemeLightMagenta] = "!&1< Light Magenta"; //
+    itdsp = ui_jzoom_menu_items(blockDispNames, itdsp); // the sub-menu "Display size" (see ui-lib-JJ-GUI)
     (itdsp += 1); // separator
     blockStyleSoft = (itdsp += 1);
     blockDispNames[blockStyleSoft] = "&/Soft style"; // combined with the theme ; see ui_jstyle (saved in serialBlock[Pr7_UiStyle])
@@ -11950,6 +11951,7 @@ loadMode ? (
                 ldstud = 1;
                 ui_jstyle = (serialBlock[Pr7_UiStyle] != 0); // look of the GUI
                 uix_jtheme = max(0, min(uix_jtheme_rtc_max - 1, 0|serialBlock[Pr7_UiTheme])); // theme of the GUI
+                ui_jzoom_set(ui_jzoom_find(serialBlock[Pr7_UiSize], ui_jzoomDef)); // display size (0 : the default)
             ) : (
                 ldok = 0;
                 lderr = 140; // studio block too large
@@ -13036,7 +13038,7 @@ local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, z
                 );
             );
             nc = max(1, min(8, 0|box[5])); // number of columns to show
-            nc = max(1, min(nc, floor(gfx_w/gfx_colL_width))); // narrow window: fewer columns
+            nc = max(1, min(nc, floor(gfx_w/ui_jscale()/gfx_colL_width))); // narrow window: fewer columns
 
             ui_jshow_color = ui_jcolor_text;
             siz = box[2];
@@ -16232,10 +16234,11 @@ function its_Crv_Move(b, r, x, y, lo) local(n, p, o, i, j, dx, dy, dmin, dmax, e
     shift while moving : fine moves (1/10, no grid) ; the grid (cell 5)
 */
 function its_Crv_Edit(b, k)
-local (x0, y0, w, h, lo, rsc, mx, my, cap, ins, press, rpress, n, p, i, j, hs, hit, xv, yv, ya, f, dxm, dym, x, y, sg)
+local (x0, y0, w, h, lo, rp, mx, my, cap, ins, press, rpress, n, p, i, j, hs, hit, xv, yv, ya, f, dxm, dym, x, y, sg)
 (
     x0 = ui_left_retina(); y0 = ui_top_retina(); w = ui_width_retina(); h = ui_height_retina();
-    rsc = max(1, floor(uix_drawconfig_current[9])); // retina scaling
+    // the distances of the mouse in screen points (screen pixels / rp) : the same at all display sizes
+    rp = gfx_ext_retina ? gfx_ext_retina : 1;
     lo = its_Crv_Lo(b[its_Crv_Type]);
     cap = mouse_cap; mx = mouse_x; my = mouse_y;
     ins = ui_hover();
@@ -16244,7 +16247,7 @@ local (x0, y0, w, h, lo, rsc, mx, my, cap, ins, press, rpress, n, p, i, j, hs, h
     its_CrvMPrev = cap;
     n = b[its_Crv_N]; p = b + its_Crv_Pts;
     // the point under the mouse (the nearest one), the x and y of the mouse
-    hs = 4 * rsc + 2; hit = -1; f = 10^30;
+    hs = 8 * rp; hit = -1; f = 10^30;
     i = 0; loop(n,
         x = abs(mx - its_Crv_Px(x0, w, p[3 * i])); y = abs(my - its_Crv_Py(y0, h, lo, p[3 * i + 1]));
         ((x <= hs) && (y <= hs) && (x + y < f)) ? ( hit = i; f = x + y; );
@@ -16252,7 +16255,7 @@ local (x0, y0, w, h, lo, rsc, mx, my, cap, ins, press, rpress, n, p, i, j, hs, h
     );
     // shift or cmd + clic : the nearest point, a little further (these clics select : no new point, no curvature)
     (press && (hit < 0) && (cap & (shfCap | cmdCap))) ? (
-        hs = 16 * rsc; f = 10^30;
+        hs = 16 * rp; f = 10^30;
         i = 0; loop(n,
             x = abs(mx - its_Crv_Px(x0, w, p[3 * i])); y = abs(my - its_Crv_Py(y0, h, lo, p[3 * i + 1]));
             ((x <= hs) && (y <= hs) && (x + y < f)) ? ( hit = i; f = x + y; );
@@ -16284,7 +16287,7 @@ local (x0, y0, w, h, lo, rsc, mx, my, cap, ins, press, rpress, n, p, i, j, hs, h
             // the segment under the mouse : i ... i + 1
             i = 0; while ((i < n - 2) && (p[3 * (i + 1)] <= xv)) ( i += 1; );
             ya = its_Crv_Py(y0, h, lo, its_Crv_Val(b, xv));
-            ((abs(my - ya) <= 5 * rsc) && (p[3 * (i + 1)] > p[3 * i])) ? (
+            ((abs(my - ya) <= 6 * rp) && (p[3 * (i + 1)] > p[3 * i])) ? (
                 its_CrvDrag = 2; its_CrvDragI = i; its_CrvC0 = p[3 * i + 2];
             ) :
             (n < its_CrvPMx) ? (
@@ -17334,6 +17337,7 @@ local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in
             (serialBlock[Pr7_StudLive + TabIdt]) ? str_setchar(p[blockTabLive], 1, '!');
             ui_jstyle ? str_setchar(p[blockStyleSoft], 1, '!');
             str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
+            ui_jzoom_menu_tick(p); // current display size
             0 ? (
                 sprintf(#dbg_trace1, "*ZZZ* [%d]  \"%s\"  (%d)  \"%s\" ", A99CBlock, blockDispNames[blockDispInverts[A99CBlock]], p[0],#Aws3);
             );
@@ -17402,6 +17406,9 @@ local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in
                     ui_screen_open("control.prompt");
                     ui_screen_arg(0, altTabsNames[TabIdt]);
                     ui_screen_arg(1, #tmp);
+                ) :
+                ui_jzoom_menu_click(kit) ? (
+                    0; // a display size (see ui-lib-JJ-GUI)
                 ) :
                 (kit === blockStyleSoft) ? (
                     serialBlock[Pr7_UiStyle] = ui_jstyle = !ui_jstyle;
@@ -17643,6 +17650,7 @@ local (p, i, xx, kit)
     str_setchar(p[blockTabLive], 1, '!');
     ui_jstyle ? str_setchar(p[blockStyleSoft], 1, '!');
     str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
+    ui_jzoom_menu_tick(p); // current display size
     xx = control_jmenu(menu_Stud_Mod);
     xx ? (
         ui_GFXdoNow |= 1;
@@ -17656,6 +17664,9 @@ local (p, i, xx, kit)
             ui_screen_open("control.prompt");
             ui_screen_arg(0, altTabsNames[TabIdt]);
             ui_screen_arg(1, #tmp);
+        ) :
+        ui_jzoom_menu_click(kit) ? (
+            0; // a display size (see ui-lib-JJ-GUI)
         ) :
         (kit === blockStyleSoft) ? (
             serialBlock[Pr7_UiStyle] = ui_jstyle = !ui_jstyle;
@@ -17772,8 +17783,10 @@ local (p, ww, t, BankLink)
         (live_tab_active == 0) ? uix_gfx_clear = -1; // live background only for "live" tabs
         live_tab_active = 0;
         serialBlock[Pr7_UiTheme] = uix_jtheme; // saved with the preset ('stud' block)
+        serialBlock[Pr7_UiSize] = ui_jzoom_pc(ui_jzoomK);
         update_theme();
         GM_key_frame(); // the key of the frame (see mSL_ui_LibJJ, Keyboard)
+        GM_Size_Keys(); // Cmd + '-', '+', '0' : the display size, before the modules (see ui-lib-JJ-GUI)
 
         currScreen = ui_screen();
         ui_Xtime_period = 1; // refresh screen every second
@@ -17793,7 +17806,7 @@ local (p, ww, t, BankLink)
 
             gui_show_syslog ? show_SysLog(0, SysLogBox);
             gui_show_memory ? (
-                (gfx_w > gfx_colM_width) ? (
+                (gfx_w/ui_jscale() > gfx_colM_width) ? (
                     ui_split_leftratio(0.5);
                     show_Memory(memoryBox1);
                     ui_pop();
@@ -17808,7 +17821,7 @@ local (p, ww, t, BankLink)
             /*
             SysLogBox[4] = 80;
             show_SysLog(0, SysLogBox);
-            (gfx_w > gfx_colM_width) ? (
+            (gfx_w/ui_jscale() > gfx_colM_width) ? (
                 ui_split_leftratio(0.5);
                 show_Memory(memoryBox1);
                 ui_pop();
@@ -17821,7 +17834,7 @@ local (p, ww, t, BankLink)
         ui_screen() === "Dump" ? (
             /*
             memoryBox1[17] = memoryBox2[17] = 96;
-            (gfx_w > gfx_colM_width) ? (
+            (gfx_w/ui_jscale() > gfx_colM_width) ? (
                 ui_split_leftratio(0.5);
                 show_Memory(memoryBox1);
                 ui_pop();

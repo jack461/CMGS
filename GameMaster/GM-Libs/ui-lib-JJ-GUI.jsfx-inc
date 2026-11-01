@@ -13,7 +13,6 @@
 
 
 ui_lib_JJ_inited = 0;
-ui_lib_JJ_GUI_size = 0;
 uix_jtheme_ctlsiz = 0;
 uix_jtheme = 0;
 ui_jstyle = 0; // 0 : classic look ; 1 : "soft" look (no frames, soft cells, thin sliders, hidden tabs bar) - saved by the host
@@ -21,9 +20,96 @@ uix_jtheme_prev = -1;
 uix_jtheme_menu = 0;
 uix_jtheme_rtc_code = 0; // theme menu return code
 uix_jtheme_rtc_max = 3;
-ui_jGUI_size = 2;
 ui_jshow_color = ui_jcolor_text;
 ui_jd_tboxh = 0;
+
+/*
+    Display size : ui-lib draws everything in "ui units", scaled by the retina scaling (screen pixels per unit) ;
+    uix_zoom multiplies it (see ui_start in ui-lib) : the texts, the pads, the sliders, the menus, the graphics and the
+    mouse follow together ; the code that draws itself must use ui_left_retina() ... or uix_drawconfig_current[9]
+    (ui_retina()), and compare the window size with ui units through ui_jscale() (gfx_w / ui_jscale())
+    ui_jzoomCnt sizes, of index ui_jzoomK (ui_jzoom_pc : 50 % ... 120 %) ; each plugin saves its size in percent
+    (serialBlock[Pr7_UiSize], 0 : the default size) ; the sub-menu "Display size" of the menu of the modules
+    (ui_jzoom_menu_items, ui_jzoom_menu_tick, ui_jzoom_menu_click) and the keys (GM_Size_Keys) change it
+*/
+ui_jzoomCnt = 7;
+ui_jzoomDef = 5; // 100 %
+ui_jzoomK = ui_jzoomDef;
+ui_jzoomItem0 = -1; // the item "50 %" in the menu of the modules of the plugin (ui_jzoom_menu_items)
+ui_jfontk = 1.1; // the fonts at 100 % (uix_fontk, see ui_jzoom_set ; 1 for the compact size of ui_lib_JJ_GUI_init)
+
+function ui_jzoom_pc(k)
+(
+    (k <= 0) ? 50 : (k === 1) ? 60 : (k === 2) ? 70 : (k === 3) ? 80 : (k === 4) ? 90 : (k === 5) ? 100 : 120;
+);
+
+function ui_jzoom_set(k)
+(
+    ui_jzoomK = max(0, min(ui_jzoomCnt - 1, 0|k));
+    uix_zoom = ui_jzoom_pc(ui_jzoomK) / 100;
+    // the fonts : ui_jfontk at 100 %, reduced less than the rest (50 % : 0.71 of their size at 100 %, 70 % : 0.87)
+    uix_fontk = ui_jfontk * (uix_zoom ^ (-0.4));
+    uix_jl_gfx_w = -1; // the sizes of the tabs bar are computed again (my_menu_bar_classic)
+    ui_GFXdoNow |= 1; ui_GFXReason = 46;
+);
+
+// the index of the size "pc" (in percent : the nearest one ; 0 or less : the index "def")
+function ui_jzoom_find(pc, def) local(k, b)
+(
+    (pc <= 0) ? def : (
+        b = 0; k = 1;
+        loop(ui_jzoomCnt - 1, (abs(ui_jzoom_pc(k) - pc) < abs(ui_jzoom_pc(b) - pc)) ? b = k; k += 1;);
+        b;
+    );
+);
+
+// screen pixels per ui unit (as ui_retina() after ui_start, usable everywhere)
+function ui_jscale()
+(
+    (gfx_ext_retina ? gfx_ext_retina : 1) * ((uix_zoom > 0) ? uix_zoom : 1);
+);
+
+// the sub-menu "Display size" in the strings "names" of the menu of the modules, after the entry "itdsp" ;
+// returns the last entry
+function ui_jzoom_menu_items(names, itdsp)
+(
+    names[(itdsp += 1)] = ">Display size";
+    ui_jzoomItem0 = itdsp + 1;
+    names[(itdsp += 1)] = "!&2 50 %";
+    names[(itdsp += 1)] = "!&2 60 %";
+    names[(itdsp += 1)] = "!&2 70 %";
+    names[(itdsp += 1)] = "!&2 80 %";
+    names[(itdsp += 1)] = "!&2 90 %";
+    names[(itdsp += 1)] = "!&2 100 %";
+    names[(itdsp += 1)] = "!&2< 120 %";
+    itdsp;
+);
+
+// ticks the current size in the items "p" of the menu
+function ui_jzoom_menu_tick(p)
+(
+    (ui_jzoomItem0 > 0) ? str_setchar(p[ui_jzoomItem0 + ui_jzoomK], 1, '!');
+);
+
+// the item "kit" chosen in the menu : 1 if it is a size (then set)
+function ui_jzoom_menu_click(kit)
+(
+    ((ui_jzoomItem0 > 0) && (kit >= ui_jzoomItem0) && (kit < ui_jzoomItem0 + ui_jzoomCnt)) ? (
+        ui_jzoom_set(kit - ui_jzoomItem0);
+        1;
+    ) : 0;
+);
+
+// Cmd + '-' : smaller ; Cmd + '+' (or '=') : larger ; Cmd + '0' : 100 % ; the same in all the plugins (see mSL_ui_LibJJ,
+// Keyboard) ; returns 1 if the key has been used
+function GM_Size_Keys()
+(
+    (GM_key_mods() & 4) ? (
+        GM_key_take('-') ? (ui_jzoom_set(ui_jzoomK - 1); 1) :
+        (GM_key_take('+') || GM_key_take('=')) ? (ui_jzoom_set(ui_jzoomK + 1); 1) :
+        GM_key_take('0') ? (ui_jzoom_set(ui_jzoomDef); 1) : 0;
+    ) : 0;
+);
 
 function ui_version(v,s,u)
 (
@@ -49,7 +135,8 @@ function ui_lib_JJ_updSiz()
     ui_jd_ctgr = ui_cg_lab_height + ui_cg_pad_top + ui_cg_pad_bottom + ui_spec_jd_ctgr; // add. size for the group label
     ui_jd_min_block = 2 * ui_jd_tboxs; // some arbitrary minimum
     uix_jsl_val = 0; // global slider result
-    uix_jsiz_menu_bar_item_width = min(ui_jd_delta20, max(ui_jd_delta10, 0|(gfx_w / uix_jG_menuscrSz)));
+    // (the width of the window in ui units : it depends on the display size)
+    uix_jsiz_menu_bar_item_width = min(ui_jd_delta20, max(ui_jd_delta10, 0|(gfx_w / ui_jscale() / uix_jG_menuscrSz)));
     ui_cg_lab_height = uix_jtheme_ctlsiz[uix_jtheme];
 );
 
@@ -64,12 +151,14 @@ function uix_jBoxHeight(k) // height of a show box with "k" lines
 );
 
 
+/*
+    the dimensions of the interface, in ui units : size 2, the standard one (Helvetica 15), used by the plugins of the
+    Game Master ; size 1, a compact one (Arial 13), kept for the small plugins (MIDI_In, SmoothMultiLimiter) ;
+    the display size (uix_zoom, see ui_jzoom_set) scales them all
+*/
 function ui_lib_JJ_GUI_init(size)
-local (ii)
+local (ii, std)
 (
-    // We define here some of the generic sizes
-    // for the default graphic interface
-
     (ui_lib_JJ_inited == 0) ? (
         // The "theme" menu
         uix_jtheme_menu = 0;
@@ -79,122 +168,43 @@ local (ii)
         uix_jtheme_ctlsiz = make_array(16); // up to 16 themes
         ui_lib_JJ_inited = 1;
     );
+    std = (size == 2);
+    ui_jfontk = std ? 1.1 : 1;
+    uix_fontk = ui_jfontk * (uix_zoom ^ (-0.4));
 
-
-
-    (size == 2) ? (
-        ui_jGUI_size = 2;
-        ui_jdefault_fontsize = 15;
-        ui_jdefault_fontface = #FONT;
-        strcpy(ui_jdefault_fontface, "Helvetica");
-        // ui_jdefault_fontface = "Arial";
-        // ui_jdefault_fontface = "Verdana";
-        ui_jd_vtext = 20; // text vertical size
-        ui_jd_padb = 4; // pad line border
-        ui_cg_pad_top = 2;
-        ui_cg_pad_bottom = 1;
-        ui_bx_min_w = 170;
-        ui_jd_padTBox1 = 2;
-        ui_jd_padTBox2 = 2;
-        ui_jd_padinter = 4;
-        ui_jd_padTopDec = 4;
-        ui_jd_padTopDec2 = 0|(ui_jd_padTopDec * 3 / 4);
-        ui_js_slLabSize = 100;
-        ui_js_slValSize = 152; // 145; width of the slider text
-        uix_req_h = ui_jd_vtext + 1;
-        uix_javail_Wheight = 0; // avail window height - used by window displayers
-        uix_javail_Bwidth = 0; // used by box displayers
-        uix_javail_Bheight = 0; // avail box height - used by box displayers
-        ui_jcolor_inactive_grey = 0xA9A9A9 ;
-        uix_req_w = 150; // "show" min width for a text box
-        uix_jtheme_prev = -1;
-        uix_jG_menuscrSz = 8;
-        uix_jsiz_menu_bar_item_width = 98;
-        ui_lib_JJ_GUI_size = 2;
-        ui_jd_scale = 1;
-        ui_jd_delta0 = 0;
-        ui_jd_delta1 = 2;
-        ui_jd_delta2 = 3; // was 4
-        ui_jd_delta3 = 8;
-        ui_jd_delta4 = 11;
-        ui_jd_delta10 = 52;
-        ui_jd_delta20 = 90;
-        uix_jtheme_ctlsiz[0] =  ui_cg_lab_height = ui_jd_vtext + 16;
-        uix_jtheme_ctlsiz[1] = ui_jd_vtext + 23; // Black
-        uix_jtheme_ctlsiz[2] = ui_jd_vtext + 36; // Tron
-        uix_jtheme_ctlsiz[3] = ui_jd_vtext + 13;
-        uix_jtheme_ctlsiz[4] = ui_jd_vtext + 13;
-        uix_jtheme_ctlsiz[5] = ui_jd_vtext + 13;
-        uix_jtheme_ctlsiz[6] = ui_jd_vtext + 13;
-        uix_jtheme_ctlsiz[7] = ui_jd_vtext + 13;
-        uix_jtheme_ctlsiz[8] = ui_jd_vtext + 13;
-        uix_jtheme_ctlsiz[9] = ui_jd_vtext + 13;
-        uix_jtheme_ctlsiz[10] = ui_jd_vtext + 13;
-        uix_jtheme_ctlsiz[11] = ui_jd_vtext + 13;
-        uix_jtheme_ctlsiz[12] = ui_jd_vtext + 13;
-        uix_jtheme_ctlsiz[13] = ui_jd_vtext + 13;
-        uix_jtheme_ctlsiz[14] = ui_jd_vtext + 13;
-        uix_jtheme_ctlsiz[15] = ui_jd_vtext + 13;
-    ) :
-
-
-
-
-    (
-        ui_jGUI_size = 1;
-        ui_jdefault_fontsize = 13; // 12; // 15;
-        ui_jdefault_fontface = #FONT;
-        // Helvetica Baskerville Geneva Tahoma Arial
-        strcpy(ui_jdefault_fontface, "Arial");
-        // ui_jdefault_fontface = "Arial";
-        // ui_jdefault_fontface = "Verdana";
-        ui_jd_vtext = 19; // 18; // 19; // text vertical size
-        ui_jd_padb = 4; // pad line border
-        ui_cg_pad_top = 1;
-        ui_cg_pad_bottom = 1;
-        ui_bx_min_w = 132;
-        ui_jd_padTBox1 = 2;
-        ui_jd_padTBox2 = 2;
-        ui_jd_padinter = 4;
-        ui_jd_padTopDec = 4;
-        ui_jd_padTopDec2 = 0|(ui_jd_padTopDec * 3 / 4);
-        ui_js_slLabSize = 80;
-        ui_js_slValSize = 128; // 115; width of the slider text
-        uix_req_h = ui_jd_vtext + 1;
-        uix_javail_Wheight = 0; // avail window height - used by window displayers
-        uix_javail_Bwidth = 0; // used by box displayers
-        uix_javail_Bheight = 0; // avail box height - used by box displayers
-        ui_jcolor_inactive_grey = 0xA9A9A9 ;
-        uix_req_w = 120; // "show" min width for a text box
-        uix_jtheme_prev = -1;
-        uix_jG_menuscrSz = 7;
-        uix_jsiz_menu_bar_item_width = 80;
-        ui_lib_JJ_GUI_size = 1;
-        ui_jd_scale = 0.8;
-        ui_jd_delta0 = 0;
-        ui_jd_delta1 = 2;
-        ui_jd_delta2 = 2; // 3; // was 4
-        ui_jd_delta3 = 8;
-        ui_jd_delta4 = 9;
-        ui_jd_delta10 = 42;
-        ui_jd_delta20 = 75;
-        uix_jtheme_ctlsiz[0] =  ui_cg_lab_height = ui_jd_vtext + 12;
-        uix_jtheme_ctlsiz[1] = ui_jd_vtext + 26; // Black
-        uix_jtheme_ctlsiz[2] = ui_jd_vtext + 36; // Tron
-        uix_jtheme_ctlsiz[3] = ui_jd_vtext + 12;
-        uix_jtheme_ctlsiz[4] = ui_jd_vtext + 12;
-        uix_jtheme_ctlsiz[5] = ui_jd_vtext + 12;
-        uix_jtheme_ctlsiz[6] = ui_jd_vtext + 12;
-        uix_jtheme_ctlsiz[7] = ui_jd_vtext + 12;
-        uix_jtheme_ctlsiz[8] = ui_jd_vtext + 12;
-        uix_jtheme_ctlsiz[9] = ui_jd_vtext + 12;
-        uix_jtheme_ctlsiz[10] = ui_jd_vtext + 12;
-        uix_jtheme_ctlsiz[11] = ui_jd_vtext + 12;
-        uix_jtheme_ctlsiz[12] = ui_jd_vtext + 12;
-        uix_jtheme_ctlsiz[13] = ui_jd_vtext + 12;
-        uix_jtheme_ctlsiz[14] = ui_jd_vtext + 12;
-        uix_jtheme_ctlsiz[15] = ui_jd_vtext + 12;
-    );
+    ui_jdefault_fontface = #FONT;
+    strcpy(ui_jdefault_fontface, std ? "Helvetica" : "Arial");
+    ui_jdefault_fontsize = std ? 15 : 13;
+    ui_jd_vtext = std ? 20 : 19; // text vertical size
+    ui_jd_padb = 4; // pad line border
+    ui_cg_pad_top = std ? 2 : 1;
+    ui_cg_pad_bottom = 1;
+    ui_bx_min_w = std ? 170 : 132;
+    ui_jd_padTBox1 = 2;
+    ui_jd_padTBox2 = 2;
+    ui_jd_padinter = 4;
+    ui_jd_padTopDec = 4;
+    ui_jd_padTopDec2 = 0|(ui_jd_padTopDec * 3 / 4);
+    ui_js_slValSize = std ? 152 : 128; // width of the slider text
+    uix_javail_Wheight = 0; // avail window height - used by window displayers
+    uix_javail_Bwidth = 0; // used by box displayers
+    uix_javail_Bheight = 0; // avail box height - used by box displayers
+    ui_jcolor_inactive_grey = 0xA9A9A9 ;
+    uix_req_w = std ? 150 : 120; // "show" min width for a text box
+    uix_jtheme_prev = -1;
+    uix_jG_menuscrSz = std ? 8 : 7;
+    uix_jsiz_menu_bar_item_width = std ? 98 : 80;
+    ui_jd_delta0 = 0;
+    ui_jd_delta2 = std ? 3 : 2;
+    ui_jd_delta3 = 8;
+    ui_jd_delta4 = std ? 11 : 9;
+    ui_jd_delta10 = std ? 52 : 42;
+    ui_jd_delta20 = std ? 90 : 75;
+    // the height of the group labels, per theme
+    ii = 0; loop(16, uix_jtheme_ctlsiz[ii] = ui_jd_vtext + (std ? 13 : 12); ii += 1;);
+    uix_jtheme_ctlsiz[0] = ui_cg_lab_height = ui_jd_vtext + (std ? 16 : 12);
+    uix_jtheme_ctlsiz[1] = ui_jd_vtext + (std ? 23 : 26); // Black
+    uix_jtheme_ctlsiz[2] = ui_jd_vtext + 36; // Tron
 
     uix_default_fontsize = ui_jdefault_fontsize;
     uix_default_fontface = ui_jdefault_fontface;
@@ -786,6 +796,8 @@ function update_theme() local(main)
     ) : (
         control_start(main, "default");
     );
+    // the same font size in all the themes (the theme "black" sets 20) ; their font faces differ
+    ui_fontsize(uix_default_fontsize);
 
     // did we change the theme ?
     uix_jtheme_prev != uix_jtheme ? (

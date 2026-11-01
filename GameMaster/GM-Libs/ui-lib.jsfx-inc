@@ -50,6 +50,7 @@ set_black_theme_color(210, 130, 80); // some orange as base color
 
 //uix_mousecap_prev = 0;
 uix_mouseblocked = 0;
+uix_clickmods = 0; // (JJG) the modifiers (cmd, shift, alt, ctrl) when the last button was pressed
 uix_mouseblock_until = 0; // (JJG) clicks stay blocked at least until this time (see control_jmenu)
 uix_doubleclicktime = 0.2;
 uix_draglimit = 10;
@@ -68,6 +69,12 @@ uix_interacted = 0;
 
 uix_default_fontsize = 16;
 uix_default_fontface = "Arial";
+// (JJG) the display size : the whole interface is scaled by uix_zoom (with the retina scaling, see ui_start ;
+// set by ui_jzoom_set in ui-lib-JJ-GUI)
+uix_zoom = 1;
+// (JJG) the fonts are also multiplied by uix_fontk (a little larger, and less reduced than the rest at the small
+// display sizes, see ui_jzoom_set)
+uix_fontk = 1;
 uix_font_dirty = 0;
 uix_latestchar = 0;
 uix_char_consumed = 0;
@@ -121,7 +128,7 @@ function uix_setgfxfont() (
 			gfx_setfont(
 				uix_drawconfig_current[6/*uix_DRAWCONFIG:FONTINDEX*/],
 				uix_drawconfig_current[7/*uix_DRAWCONFIG:FONTFACE*/],
-				uix_drawconfig_current[8/*uix_DRAWCONFIG:FONTSIZE*/]*uix_drawconfig_current[9/*uix_DRAWCONFIG:RETINA_SCALING*/],
+				uix_drawconfig_current[8/*uix_DRAWCONFIG:FONTSIZE*/]*uix_drawconfig_current[9/*uix_DRAWCONFIG:RETINA_SCALING*/]*uix_fontk, // (JJG) uix_fontk
 				uix_fontflags()
 			);
 		);
@@ -268,7 +275,7 @@ function ui_start(defaultScreen) local(i, click, clickdelta, imgW, imgH, retina_
 		// Default colours
 		gfx_clear = (uix_gfx_clear >= 0) ? uix_gfx_clear : uix_clearcolor(242, 242, 242);
 
-		retina_scaling = gfx_ext_retina ? gfx_ext_retina : 1;
+		retina_scaling = (gfx_ext_retina ? gfx_ext_retina : 1) * ((uix_zoom > 0) ? uix_zoom : 1); // (JJG) the display size
 		uix_drawconfig_current[9/*uix_DRAWCONFIG:RETINA_SCALING*/] = retina_scaling;
 
 		uix_drawconfig_current[10/*uix_DRAWCONFIG:CLIP_SCREEN*/] = -1;
@@ -318,6 +325,8 @@ function ui_start(defaultScreen) local(i, click, clickdelta, imgW, imgH, retina_
 		mouse_wheel = mouse_hwheel = 0;
 		uix_scroll_y || uix_scroll_x ? uix_interacted = 1;
 
+		// (JJG) the modifiers when a button is pressed : a menu opened on release uses them (see control_jmenu)
+		(mouse_cap & 67 & (67 - (uix_mousecap_prev & 67))) ? uix_clickmods = mouse_cap & 0x3C;
 		uix_unclick1 = (!(mouse_cap&1) && uix_mousecap_prev&1);
 		uix_click1 = (mouse_cap&1 && !(uix_mousecap_prev&1)) ? (
 			clickdelta = time_precise() - uix_click1_t;
@@ -675,7 +684,7 @@ function ui_text(text) local (text_h, text_w, boxwidth, boxheight, valign, halig
 			fontscale = min(boxheight/text_h, fontscale);
 		);
 		fontscale != 1 ? (
-			fontsize = max(8, floor(fontscale*uix_drawconfig_current[8/*uix_DRAWCONFIG:FONTSIZE*/]*uix_drawconfig_current[9/*uix_DRAWCONFIG:RETINA_SCALING*/]));
+			fontsize = max(8, floor(fontscale*uix_drawconfig_current[8/*uix_DRAWCONFIG:FONTSIZE*/]*uix_drawconfig_current[9/*uix_DRAWCONFIG:RETINA_SCALING*/]*uix_fontk)); // (JJG) uix_fontk
 			// TODO: why is fontscale set here?
 			fontscale = fontsize/uix_drawconfig_current[8/*uix_DRAWCONFIG:FONTSIZE*/];
 			gfx_setfont(
@@ -1543,7 +1552,7 @@ function control_start(defaultPage, theme, imageBuffer) local(reset, i, x, y) (
 					gfx_blit(uix_control_theme_buffer, ui_retina(), 0, 20, 20, 120, 120, x, y);
 					x += 120*ui_retina();
 				);
-				y += 120;
+				y += 120*ui_retina(); // (JJG) the tiles are 120*ui_retina() high (gaps with a scale < 1)
 			);
 		);
 
@@ -2732,7 +2741,7 @@ function control_dialog(title, width, height, doneText, cancelText) local(accept
 					gfx_blit(uix_control_theme_buffer, ui_retina(), 0, 20, 20, 120, 120, x, y);
 					x += 120*ui_retina();
 				);
-				y += 120;
+				y += 120*ui_retina(); // (JJG) the tiles are 120*ui_retina() high (gaps with a scale < 1)
 			);
 		) : (
 			ui_color(242, 242, 242);
