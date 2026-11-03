@@ -9,9 +9,10 @@
 
 
 //====== PARAMETERS MANAGEMENT ======
-// paramCount is 256
+// the range of the application [paramBase ... paramNMax] (see mSL_gmem_map) : the tables (paramValues, paramStatus,
+// paramFlags, paramPrevValues, paramBlock) are indexed by these numbers (their addresses minus the base)
 paramEntSize = 20; // use for each parameter
-paramNMax = paramCount - 1;
+paramNMax = paramBase + paramCount - 1;
 #pUndef = "(unassigned)";
 #parEdt = "";
 
@@ -89,7 +90,7 @@ pflg_SpecEdit = 0x100000; // special edit flag
 paramBlock = paramFlags = paramValues = 0;
 BKSummary = 0;
 paramHashTbl = 0;
-paramHSiz = 433; // prime, > 256
+paramHSiz = 433; // prime, > 256 (the count of a range)
 paramHStep = 31;
 parLedA = parLedB = ledR1 = iledColMenu = 0;
 
@@ -101,11 +102,11 @@ function parV(xpnum)
     paramValues[xpnum];
 );
 
-// Get a parameter value with specific conditions on read...
+// Get a parameter value with specific conditions on read... (a parameter of another application : its value in gmem)
 function parGetV(xp)
 (
-    xp = 0|max(0,min(paramNMax,xp)); // minimalistic check
-    paramValues[xp];
+    xp = 0|max(0,min(paramGCount - 1,xp)); // minimalistic check
+    ((xp >= paramBase) && (xp <= paramNMax)) ? paramValues[xp] : gmem[paramGCopy+xp];
 );
 
 
@@ -114,8 +115,8 @@ function
 clone_parameter(dst, src)
 local(pdst, psrc)
 (
-    dst = 0|max(0,min(paramNMax,dst)); // minimalistic check
-    src = 0|max(0,min(paramNMax,src)); // minimalistic check
+    dst = 0|max(paramBase,min(paramNMax,dst)); // minimalistic check
+    src = 0|max(paramBase,min(paramNMax,src)); // minimalistic check
     (src != dst) ? (
         psrc = paramBlock + src * paramEntSize;
         pdst = paramBlock + dst * paramEntSize;
@@ -148,7 +149,7 @@ local(pdst, psrc)
 function parGetPP(xpnum, prop)
 local (value, pp)
 (
-    xpnum = 0|max(0,min(paramNMax,xpnum)); // minimalistic check
+    xpnum = 0|max(paramBase,min(paramNMax,xpnum)); // minimalistic check
     value = 0;
     ((prop >= 0) && (prop < paramEntSize)) ? (
         pp = paramBlock + xpnum * paramEntSize;
@@ -174,7 +175,7 @@ local (value, pp)
 function parSet(xop, value)
 local (f, pp, pq, pv, fspect)
 (
-    xop = 0|max(0,min(paramNMax,xop)); // minimalistic check
+    xop = 0|max(paramBase,min(paramNMax,xop)); // minimalistic check
     pv = paramValues[xop]; // previous value
     pp = paramBlock + xop * paramEntSize;
     value = max(pp[pp_Min], min(pp[pp_Max], value)); // enforce clamp limit
@@ -1790,7 +1791,7 @@ local (f, pp, pq, pv, fspect)
 function parSetPP(xpnum, prop, value)
 local(pp)
 (
-    xpnum = 0|max(0,min(paramNMax,xpnum)); // minimalistic check
+    xpnum = 0|max(paramBase,min(paramNMax,xpnum)); // minimalistic check
     (prop >= 0) ? (
         pp = paramBlock + xpnum * paramEntSize;
         pp[prop] = value;
@@ -1817,7 +1818,7 @@ function parDcl(xpnum, xpname, xmSLName, xptype, xpsfmt, xpmfmt, xpmin, xpmax,
 local(pp, h, pc, er)
 (
     er = 0;
-    ((xpnum >= 0) && (xpnum < paramCount) && (xpnum == (0|xpnum))) ? (
+    ((xpnum >= paramBase) && (xpnum <= paramNMax) && (xpnum == (0|xpnum))) ? (
         pp = paramBlock + xpnum * paramEntSize;
         ((pp[pp_Name] == 0) || (pp[pp_Name] == #pUndef)
             || (strcmp(xpname, pp[pp_Name]) === 0)) ? ( // check it is undefined/similar, etc.
@@ -1864,7 +1865,7 @@ local(pp, h, pc, er)
 function parReset(xpnum)
 local (pp)
 (
-    ((xpnum >= 0) && (xpnum < paramCount) && (xpnum == (0|xpnum))) ? (
+    ((xpnum >= paramBase) && (xpnum <= paramNMax) && (xpnum == (0|xpnum))) ? (
         pp = paramBlock + xpnum * paramEntSize;
         // Reset values and limits
         pp[pp_Max] = pp[pp_SavedMax];
@@ -1875,7 +1876,7 @@ local (pp)
 function parRemove(xpnum)
 local (pp)
 (
-    ((xpnum >= 0) && (xpnum < paramCount) && (xpnum == (0|xpnum))) ? (
+    ((xpnum >= paramBase) && (xpnum <= paramNMax) && (xpnum == (0|xpnum))) ? (
         pp = paramBlock + xpnum * paramEntSize;
         memset(pp, 0, paramEntSize);
         paramStatus[xpnum] = paramFlags[xpnum] = paramValues[xpnum] = 0;
@@ -1918,8 +1919,8 @@ function parDcl(xpnum, xpname, xmSLName, xptype, xpsfmt, xpmfmt, xpmin, xpmax,
 
 function parDclAlt(xpnum, xalt, xpswlim, xpswfact) local(pp, pa)
 (
-    ((xpnum > 0) && (xpnum < paramCount) && (xpnum == (0|xpnum))) ? (
-        ((xalt > 0) && (xalt < paramCount) && (xalt == (0|xalt))) ? (
+    ((xpnum > paramBase) && (xpnum <= paramNMax) && (xpnum == (0|xpnum))) ? (
+        ((xalt > paramBase) && (xalt <= paramNMax) && (xalt == (0|xalt))) ? (
             pp = paramBlock + xpnum * paramEntSize;
             pa = paramBlock + xalt * paramEntSize;
             ((pp[pp_Name] != 0) && (pa[pp_Name] != 0) && (xpnum != xalt)) ? (
@@ -1952,7 +1953,7 @@ function parCtl(xpnum)
 local (r, f, c, pp, ps, val, xledA, xledB, af, app, apn)
 (
     r = xledA = xledB = 0;
-    ((xpnum > 0) && (xpnum < paramCount)) ? (
+    ((xpnum > paramBase) && (xpnum <= paramNMax)) ? (
         pp = paramBlock + xpnum * paramEntSize;
         ps = paramStatus[xpnum];
         (pp[pp_Name] != 0) ? (

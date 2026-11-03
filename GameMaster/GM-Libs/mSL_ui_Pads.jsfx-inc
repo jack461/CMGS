@@ -386,7 +386,7 @@ ui_jpad_selmix = 0.35; // a selected cell is brighter : its color is mixed with 
 // then fades it into the actual background (read in the corner of the rectangle), without leaving the rectangle.
 // The fading is an opaque color gradient (the alpha of gfx_gradrect does not blend with the background).
 function uix_jpad_soft_fill(x, y, w, h, txt, col)
-local (rs, tw, th, cx0, cy0, cx1, cy1, x0, y0, x1, y1, f, fl, fr, ft, fb, cr, cg, cb, br, bg, bb, k, ty, yy)
+local (rs, tw, th, cx0, cy0, cx1, cy1, x0, y0, x1, y1, f, fl, fr, ft, fb, cr, cg, cb, br, bg, bb, k, ty, yy, kl, kr, kt, kb)
 (
     ((txt != 0) && (strlen(txt) > 0)) ? (
         rs = uix_drawconfig_current[9]; // retina scaling
@@ -406,18 +406,28 @@ local (rs, tw, th, cx0, cy0, cx1, cy1, x0, y0, x1, y1, f, fl, fr, ft, fb, cr, cg
         gfx_mode = 0; gfx_a = 1;
         gfx_r = cr; gfx_g = cg; gfx_b = cb;
         gfx_rect(x0, y0, x1 - x0, y1 - y0);
+        // the weight of the color (0 : the background, 1 : the color) is taken at the center of each pixel, (k + 0.5) / f,
+        // on the four sides and in the corners : the fades are symmetric (no shift of half a pixel between the middle
+        // and the sides) ; kl, kr, kt, kb : half a pixel of each fade
+        kl = 0.5 / max(1, fl); kr = 0.5 / max(1, fr); kt = 0.5 / max(1, ft); kb = 0.5 / max(1, fb);
         // sides : from the background (outside) to the color (inside)
-        (fl >= 1) ? gfx_gradrect(x0 - fl, y0, fl, y1 - y0, br, bg, bb, 1, (cr - br) / fl, (cg - bg) / fl, (cb - bb) / fl, 0);
-        (fr >= 1) ? gfx_gradrect(x1, y0, fr, y1 - y0, cr, cg, cb, 1, (br - cr) / fr, (bg - cg) / fr, (bb - cb) / fr, 0);
-        (ft >= 1) ? gfx_gradrect(x0, y0 - ft, x1 - x0, ft, br, bg, bb, 1, 0, 0, 0, 0, (cr - br) / ft, (cg - bg) / ft, (cb - bb) / ft, 0);
-        (fb >= 1) ? gfx_gradrect(x0, y1, x1 - x0, fb, cr, cg, cb, 1, 0, 0, 0, 0, (br - cr) / fb, (bg - cg) / fb, (bb - cb) / fb, 0);
+        (fl >= 1) ? gfx_gradrect(x0 - fl, y0, fl, y1 - y0, br + kl * (cr - br), bg + kl * (cg - bg), bb + kl * (cb - bb), 1,
+            (cr - br) / fl, (cg - bg) / fl, (cb - bb) / fl, 0);
+        (fr >= 1) ? gfx_gradrect(x1, y0, fr, y1 - y0, cr + kr * (br - cr), cg + kr * (bg - cg), cb + kr * (bb - cb), 1,
+            (br - cr) / fr, (bg - cg) / fr, (bb - cb) / fr, 0);
+        (ft >= 1) ? gfx_gradrect(x0, y0 - ft, x1 - x0, ft, br + kt * (cr - br), bg + kt * (cg - bg), bb + kt * (cb - bb), 1,
+            0, 0, 0, 0, (cr - br) / ft, (cg - bg) / ft, (cb - bb) / ft, 0);
+        (fb >= 1) ? gfx_gradrect(x0, y1, x1 - x0, fb, cr + kb * (br - cr), cg + kb * (bg - cg), cb + kb * (bb - cb), 1,
+            0, 0, 0, 0, (br - cr) / fb, (bg - cg) / fb, (bb - cb) / fb, 0);
         // corners, one line at a time : the color weight is the product of the horizontal and vertical weights
         (ft >= 1) ? (
             yy = 0; loop(ft,
                 ty = (yy + 0.5) / ft; // 0 outside, 1 near the text
-                (fl >= 1) ? gfx_gradrect(x0 - fl, y0 - ft + yy, fl, 1, br, bg, bb, 1,
+                (fl >= 1) ? gfx_gradrect(x0 - fl, y0 - ft + yy, fl, 1,
+                    br + ty * kl * (cr - br), bg + ty * kl * (cg - bg), bb + ty * kl * (cb - bb), 1,
                     ty * (cr - br) / fl, ty * (cg - bg) / fl, ty * (cb - bb) / fl, 0);
-                (fr >= 1) ? gfx_gradrect(x1, y0 - ft + yy, fr, 1, br + ty * (cr - br), bg + ty * (cg - bg), bb + ty * (cb - bb), 1,
+                (fr >= 1) ? gfx_gradrect(x1, y0 - ft + yy, fr, 1,
+                    br + ty * (1 - kr) * (cr - br), bg + ty * (1 - kr) * (cg - bg), bb + ty * (1 - kr) * (cb - bb), 1,
                     -ty * (cr - br) / fr, -ty * (cg - bg) / fr, -ty * (cb - bb) / fr, 0);
                 yy += 1;
             );
@@ -425,9 +435,11 @@ local (rs, tw, th, cx0, cy0, cx1, cy1, x0, y0, x1, y1, f, fl, fr, ft, fb, cr, cg
         (fb >= 1) ? (
             yy = 0; loop(fb,
                 ty = 1 - (yy + 0.5) / fb; // 1 near the text, 0 outside
-                (fl >= 1) ? gfx_gradrect(x0 - fl, y1 + yy, fl, 1, br, bg, bb, 1,
+                (fl >= 1) ? gfx_gradrect(x0 - fl, y1 + yy, fl, 1,
+                    br + ty * kl * (cr - br), bg + ty * kl * (cg - bg), bb + ty * kl * (cb - bb), 1,
                     ty * (cr - br) / fl, ty * (cg - bg) / fl, ty * (cb - bb) / fl, 0);
-                (fr >= 1) ? gfx_gradrect(x1, y1 + yy, fr, 1, br + ty * (cr - br), bg + ty * (cg - bg), bb + ty * (cb - bb), 1,
+                (fr >= 1) ? gfx_gradrect(x1, y1 + yy, fr, 1,
+                    br + ty * (1 - kr) * (cr - br), bg + ty * (1 - kr) * (cg - bg), bb + ty * (1 - kr) * (cb - bb), 1,
                     -ty * (cr - br) / fr, -ty * (cg - bg) / fr, -ty * (cb - bb) / fr, 0);
                 yy += 1;
             );

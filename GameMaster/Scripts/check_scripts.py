@@ -25,6 +25,8 @@ the script ; they should therefore name the script (e.g. "Ex-0001. s vaut 55").
 A line  // Expected error 1629  announces an error : a log line "ERR: 1629 ..." (compilation)
 or "*** ERR: thread: ... Error:1629 ..." (execution, the thread stops) after the "Using" line of
 the script. Repeat it to expect the same error several times.
+A line  // Allowed error 0621  allows an error that may appear or not (a message logged once per
+session, for example) : found after the "Using" line, it is not reported ; missing, it is not a failure.
 The error lines after the first "Using" which are not expected by a script are reported at the
 end, and make the check fail.
 
@@ -53,6 +55,7 @@ USING = re.compile(r'^(?:::-> Using "(.*)"\s*$|\*\s+(?:Compile|Script):\s+(.*?\.
 SEPARATOR = '_' * 17
 EXPECTED = re.compile(r'//\s*Expect(?:ed)?\s*"(.*)"[ \t]*$', re.M)  # (the text may hold double quotes)
 EXPECTED_ERR = re.compile(r'//\s*Expect(?:ed)?\s+error\s+(\d+)')
+ALLOWED_ERR = re.compile(r'//\s*Allowed\s+error\s+(\d+)')
 # the plug-in specific series of scripts (first digit of the number), named as in "syslog-<Plugin>-<date>.txt"
 SERIES = {'1': 'Interstys', '2': 'GamePlayer', '3': 'Diffusion3'}
 SERIES_NAME = re.compile(r'^Ex-(\d)\d{3}\.mSL$')
@@ -185,6 +188,7 @@ def main():
         name = os.path.basename(path)
         src = open(path, encoding='utf-8', errors='replace').read()
         expected, experr = EXPECTED.findall(src), [int(c) for c in EXPECTED_ERR.findall(src)]
+        allowed = [int(c) for c in ALLOWED_ERR.findall(src)]
         owner = other_plugin(name, plugin)
         if owner:
             if name in runs:
@@ -210,9 +214,14 @@ def main():
                 errmiss.append(c)
             else:
                 e[2] = True
+        # the allowed errors (found : not reported ; missing : no failure)
+        for c in allowed:
+            e = next((e for e in errors if e[1] == c and not e[2] and e[0] > start[name]), None)
+            if e is not None:
+                e[2] = True
         # the errors of the previous runs (the texts are checked in the last run only)
         for _ in range(nruns.get(name, 1) - 1):
-            for c in experr:
+            for c in experr + allowed:
                 e = next((e for e in errors if e[1] == c and not e[2] and e[0] > firsts[name]), None)
                 if e is not None:
                     e[2] = True

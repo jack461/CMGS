@@ -1,0 +1,36 @@
+print("Ex-1032. Interstys table : la loi des entrees de modulation (law, shape, polarity, bypass).");
+
+/*
+  Un filtre fm dont la coupure est modulee par Ctl 1 : action Scale, forme Exp, unipolaire, en bypass ; le Dump ecrit la
+  loi, le Check la compare. Puis l'action par defaut de la coupure (Oct : elle ne s'ecrit plus), la forme Curve (la courbe
+  cm, ecrite par son nom), bipolaire, sans bypass ; la profondeur et l'attenuverteur restent.
+  Erreurs (rien n'est cree) : r2 : le biais d'une saturation n'a pas l'action Oct (2754) ; r3 : une forme inconnue (2754) ;
+  r4 : une polarite inconnue (2754).
+*/
+
+var r1 = table(data(
+    Interstys
+    Curve cm  type Wave  points 0 -1 0  1 1 0
+    Effect fm  type Filter  status On  phase Std  chan 2  limiter Off  source In:0  freq 1000
+        mod Cutoff Ctl 1  depth 0.5  att 2  law Scale  shape Exp  polarity Uni  bypass On
+    Dump Effect fm
+    Check Effect fm  mod Cutoff Ctl 1  depth 0.5  att 2  law Scale  shape Exp  polarity Uni  bypass On
+    Effect fm  mod Cutoff Ctl 1  law Oct  shape Curve cm  polarity Bi  bypass Off
+    Dump Effect fm
+    Check Effect fm  mod Cutoff Ctl 1  law Oct  shape Curve cm  polarity Bi  bypass Off
+    Free Effect fm
+    Free Curve cm
+));
+var r2 = table(data( Interstys  Effect sx  type Saturation  mod Bias Ctl 1  law Oct ));
+var r3 = table(data( Interstys  Effect fx  type Filter  mod Cutoff Ctl 1  shape Square ));
+var r4 = table(data( Interstys  Effect fx  type Filter  mod Reso Ctl 2  polarity Tri ));
+print(sprintf(0, "Ex-1032. resultats : %d %d %d %d", r1, r2, r3, r4));
+
+// Expected "Effect %d status On type Filter phase Std chan 2 out Own limiter Off source In:0 gain 0 freq 1000 q 0.707 mode LP stages 1 mod Cutoff Ctl 1 depth 0.5 att 2 law Scale shape Exp polarity Uni bypass On"
+// Expected "Check Effect %d OK"
+// Expected "Effect %d status On type Filter phase Std chan 2 out Own limiter Off source In:0 gain 0 freq 1000 q 0.707 mode LP stages 1 mod Cutoff Ctl 1 depth 0.5 att 2 shape Curve cm"
+// Expected "Check Effect %d OK"
+// Expected error 2754
+// Expected error 2754
+// Expected error 2754
+// Expected "Ex-1032. resultats : 0 2754 2754 2754"

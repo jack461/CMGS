@@ -39,9 +39,6 @@ p_FODlay_Undf = 0.1;
 #path5 = "<? printf("%s", user_directory); ?>/Library/Application Support/REAPER/Data/Diffusions" ;
 
 
-// The description of shared memory
-<? include("GM-Libs/mSL_clip_map.jsfx-inc"); ?>
-
 // The Static memory management
 <? include("GM-Libs/mSL_StM_Memory.jsfx-inc"); ?>
 
@@ -63,8 +60,8 @@ p_FODlay_Undf = 0.1;
 // The Scheduler
 <? include("GM-Libs/mSL_Scheduler.jsfx-inc"); ?>
 
-// clip-lib
-<? include("GM-Libs/mSL_clip_map.jsfx-inc"); ?>
+// the description of the shared memory (gmem)
+<? include("GM-Libs/mSL_gmem_map.jsfx-inc"); ?>
 
 // clip-lib-2
 <? include("GM-Libs/mSL_clip_lib.jsfx-inc"); ?>
@@ -791,6 +788,8 @@ mm_bl_mini = 0;
 
 user_actions = mm_rem_mm; // also used as a reference to 128 user actions.
 // Hash table for parameters coded names
+// no parameter of its own (an empty range, see mSL_gmem_map) : the parameters of the other applications are read in gmem
+paramBase = paramGCount; paramCount = 0; paramNMax = paramGCount - 1;
 paramHashTbl = mSL_makeHT(paramHSiz, paramHStep);
 paramHStep = paramHashTbl[-1]; // in case the func updated the step
 
@@ -1738,17 +1737,18 @@ mSL_basePVSize = 128;
 
 
 
+// (a parameter of another application : its value in gmem, see mSL_gmem_map)
 function parGetV(xp)
 local (val, act)
 (
-    xp = 0|max(0,min(paramNMax,xp)); // minimalistic check
-    val = paramValues[xp];
+    xp = 0|max(0,min(paramGCount - 1,xp)); // minimalistic check
+    val = ((xp >= paramBase) && (xp <= paramNMax)) ? paramValues[xp] : gmem[paramGCopy+xp];
 );
 
 function parSet(xop, value)
 local (f, pp, pq, pv, fspect)
 (
-    xop = 0|max(0,min(paramNMax,xop)); // minimalistic check
+    xop = 0|max(paramBase,min(paramNMax,xop)); // minimalistic check
     pv = paramValues[xop]; // previous value
 );
 
@@ -1802,7 +1802,7 @@ local (pfid, ref, addr, res, flg, kod, size, s, ip, k, k2, pt, kid, pid)
                     pid = mSL_getinHTaux;
                 );
             ) :
-            ((ref >= 0) && (ref < paramNMax)) ? (
+            ((ref >= 0) && (ref < paramGCount)) ? ( // (a number of any application, see mSL_gmem_map)
                 pid = ref;
             );
             (pid >= 0) ? (
@@ -1913,14 +1913,19 @@ local (pfid, ref, value, force, addr, res, flg, kod, size, s, ip, k, k2, pt, kid
                     pid = mSL_getinHTaux; // use the auxiliary result
                 );
             ) :
-            ((ref >= 0) && (ref < paramNMax)) ? (
+            ((ref >= 0) && (ref < paramGCount)) ? ( // (a number of any application, see mSL_gmem_map)
                 pid = ref;
             );
-            // Set the value of a parameter
+            // Set the value of a parameter (of this application : the others are read only)
             (pid >= 0) ? (
-                pid = 0|max(0,min(paramNMax,pid));
-                res = paramValues[pid];
-                parSet(pid, value);
+                res = parGetV(pid);
+                ((pid >= paramBase) && (pid <= paramNMax)) ? (
+                    parSet(pid, value);
+                ) :
+                (parOwnErr === 0) ? (
+                    parOwnErr = 1; // said once
+                    mSL_log(SysLogBox, "ERR: 0621    set(`ParamV, ...) : this parameter belongs to another application");
+                );
             );
         ) :
         (
