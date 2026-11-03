@@ -1167,6 +1167,7 @@ EffectsStructI = idx; idx += LinesBlockSize;
 EffectsStructJ = idx; idx += LinesBlockSize;
 ControlsStruct = idx; idx += 8; // the module "Controls" : [0] the page of sliders shown
 PatchStruct = idx; idx += 8; // the module "Patch" : [0] the view (its_PchV...), [1] the page, [2] the pinned entry + 1, [3] its view
+SummaryStruct = idx; idx += 8; // the modules "Readers", "Writers", "Effects" (show_Summary_Pad) : [0], [1], [2] their pages
 // the display blocks of the modules above (number of the object shown, display options) : saved in the 'disp' block
 DispStructsSize = idx - ReadersStructA;
 
@@ -1285,7 +1286,7 @@ mm_lowblocks[0] = 'Low_'; mm_lowblocks[1] = '_Mem';
 */
 
 // The Main menu
-dcbNamesCnt = 160; // up to 160 strings in the dcb Menu - 117 used with 32 user modules
+dcbNamesCnt = 160; // up to 160 strings in the dcb Menu - 150 used with 32 user modules
 // memory block for the menu
 GUI_Main_Menu_Block = mSL_StM_Alloc(ui_jmenu_items+dcbNamesCnt, 'Menu', mSL_StM_FlClear);
 
@@ -4332,6 +4333,71 @@ pad_PchG_Labs = pad_PatchG + pad_PatchG[ui_jpad_labs];
 pad_PchG_Colrs = pad_PatchG + pad_PatchG[ui_jpad_clrs];
 i__ii = 0; loop(pad_Pch_Siz, pad_Pch_Colrs[i__ii] = Col_Inactive; pad_Pch_Labs[i__ii] = ""; i__ii += 1;);
 i__ii = 0; loop(pad_PchG_Siz, pad_PchG_Colrs[i__ii] = Col_Inactive; pad_PchG_Labs[i__ii] = ""; i__ii += 1;);
+// Pads of the modules "Readers", "Writers" and "Effects" (see show_Summary_Pad, shared by the 3 modules) : the counts,
+// then one cell per object (8 x 8 per page)
+pad_Sum_Siz = 8;
+pad_Sum = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    1, pad_Sum_Siz, pad_Sum_Siz);
+pad_Sum_Labs = pad_Sum + pad_Sum[ui_jpad_labs];
+pad_Sum_Colrs = pad_Sum + pad_Sum[ui_jpad_clrs];
+pad_SumG_NL = 8;
+pad_SumG_Siz = 8 * pad_SumG_NL;
+pad_SumG = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    pad_SumG_NL, 8, pad_SumG_Siz);
+pad_SumG_Labs = pad_SumG + pad_SumG[ui_jpad_labs];
+pad_SumG_Colrs = pad_SumG + pad_SumG[ui_jpad_clrs];
+i__ii = 0; loop(pad_Sum_Siz, pad_Sum_Colrs[i__ii] = Col_Inactive; pad_Sum_Labs[i__ii] = ""; i__ii += 1;);
+i__ii = 0; loop(pad_SumG_Siz, pad_SumG_Colrs[i__ii] = Col_Inactive; pad_SumG_Labs[i__ii] = ""; i__ii += 1;);
+its_SumL = make_array(max(RD_CNT, max(WR_CNT, FX_CNT))); // the numbers of the objects that exist (show_Summary_Pad)
+// the short names of the types of effects (the cells of the module "Effects")
+its_EfxTyS = make_array(its_Efx_TyCnt);
+its_EfxTyS[0] = "?";
+its_EfxTyS[1] = "None";
+its_EfxTyS[2] = "Mixer";
+its_EfxTyS[3] = "A.Mixer";
+its_EfxTyS[4] = "Mover";
+its_EfxTyS[5] = "Action";
+its_EfxTyS[6] = "Script";
+its_EfxTyS[7] = "LFO";
+its_EfxTyS[8] = "Filter";
+its_EfxTyS[9] = "Satur.";
+// the menus of a cell of these modules (right clic, see its_Sum_Menu) : the states, (readers) mute and solo, open the
+// object in a module of the tab, in a new module ; results : 1-3 the states, then (readers : 4 mute, 5 solo) open, open new
+menu_SumR_N = make_array(9);
+menu_SumR_N[0] = "Ready";
+menu_SumR_N[1] = "Paused";
+menu_SumR_N[2] = "Reading";
+menu_SumR_N[3] = "";
+menu_SumR_N[4] = "Mute";
+menu_SumR_N[5] = "Solo";
+menu_SumR_N[6] = "";
+menu_SumR_N[7] = "Open in a module";
+menu_SumR_N[8] = "Open in a new module";
+menu_SumR = make_jmenu(
+    ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "summary-reader", 9, menu_SumR_N);
+menu_SumW_N = make_array(6);
+menu_SumW_N[0] = "Ready";
+menu_SumW_N[1] = "Paused";
+menu_SumW_N[2] = "Writing";
+menu_SumW_N[3] = "";
+menu_SumW_N[4] = "Open in a module";
+menu_SumW_N[5] = "Open in a new module";
+menu_SumW = make_jmenu(
+    ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "summary-writer", 6, menu_SumW_N);
+menu_SumE_N = make_array(6);
+menu_SumE_N[0] = "On";
+menu_SumE_N[1] = "Off";
+menu_SumE_N[2] = "Bypass";
+menu_SumE_N[3] = "";
+menu_SumE_N[4] = "Open in a module";
+menu_SumE_N[5] = "Open in a new module";
+menu_SumE = make_jmenu(
+    ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "summary-effect", 6, menu_SumE_N);
 // Pads of the module "Instances" (see show_Instances_Pad) : line 1, then one cell per instance (8 x 8 : 1 ... its_InsMx)
 pad_Ins_Siz = 8;
 pad_Ins = make_jpad(
@@ -6021,7 +6087,7 @@ local (cb, lcbl, cpy)
 
 
 function mkModuleMenu()
-local (i, j, g, it, fid, ttl, gl0, gl1, gl2, gl3, gl4, othFirst, tmp, bln, blu, itdsp, MM2, blockStrSpace, blockThemeBlack, blockThemeTron, blockThemeLightCyan, blockThemeOrange, blockThemeBlue, blockThemeDarkCyan, blockThemeDarkGreen, blockThemeDarkRed, blockThemeLightAmber, blockThemeNeonGreen, blockThemeLightMagenta)
+local (i, j, g, it, fid, sid, ttl, gl0, gl1, gl2, gl3, gl4, othFirst, tmp, bln, blu, itdsp, MM2, blockStrSpace, blockThemeBlack, blockThemeTron, blockThemeLightCyan, blockThemeOrange, blockThemeBlue, blockThemeDarkCyan, blockThemeDarkGreen, blockThemeDarkRed, blockThemeLightAmber, blockThemeNeonGreen, blockThemeLightMagenta)
 (
 
     i = 0; loop(dcbNamesCnt,
@@ -6138,6 +6204,12 @@ local (i, j, g, it, fid, ttl, gl0, gl1, gl2, gl3, gl4, othFirst, tmp, bln, blu, 
     blockDispNames[blockCurvesG] = "Curves G"; //
     blockCurvesH = (itdsp += 1);
     blockDispNames[blockCurvesH] = "Curves H"; //
+    blockReaders = (itdsp += 1);
+    blockDispNames[blockReaders] = "Readers"; // see show_Summary_Pad (blockReaders ... blockEffects : consecutive)
+    blockWriters = (itdsp += 1);
+    blockDispNames[blockWriters] = "Writers"; //
+    blockEffects = (itdsp += 1);
+    blockDispNames[blockEffects] = "Effects"; //
 
     blockUsrFirst = itdsp+1;
     // Add users modules
@@ -6153,17 +6225,18 @@ local (i, j, g, it, fid, ttl, gl0, gl1, gl2, gl3, gl4, othFirst, tmp, bln, blu, 
     blockUsrLast = itdsp;
     //
     // The numbers above are the module numbers (kept in the panes descriptions, saved with the project).
-    // The "Modules" submenu shows them in another order : first 5 sub-menus (Lines, Readers, Writers, Effects, Curves),
-    // then the other modules, sorted alphabetically.
+    // The "Modules" submenu shows them in another order : first 5 sub-menus (Lines, Readers, Writers, Effects, Curves ;
+    // the sub-menus Readers, Writers, Effects start with their summary module), then the other modules, sorted alphabetically.
     // blockDispIdts[menu item] = module number (0 for a sub-menu title), blockDispInverts[module number] = menu item
     i = 0; loop(blockUsrLast + 1, blockModNames[i] = blockDispNames[i]; i += 1;);
     it = blockFirst;
     g = 0; loop(5,
-        (g === 0) ? (ttl = ">Lines"; fid = blockLineA;) :
-        (g === 1) ? (ttl = ">Readers"; fid = blockReaderA;) :
-        (g === 2) ? (ttl = ">Writers"; fid = blockWriterA;) :
-        (g === 3) ? (ttl = ">Effects"; fid = blockEffectA;) : (ttl = ">Curves"; fid = blockCurvesA;);
+        (g === 0) ? (ttl = ">Lines"; fid = blockLineA; sid = 0;) :
+        (g === 1) ? (ttl = ">Readers"; fid = blockReaderA; sid = blockReaders;) :
+        (g === 2) ? (ttl = ">Writers"; fid = blockWriterA; sid = blockWriters;) :
+        (g === 3) ? (ttl = ">Effects"; fid = blockEffectA; sid = blockEffects;) : (ttl = ">Curves"; fid = blockCurvesA; sid = 0;);
         blockDispNames[it] = ttl; blockDispIdts[it] = 0; it += 1;
+        (sid > 0) ? (blockDispNames[it] = blockModNames[sid]; blockDispIdts[it] = sid; it += 1;);
         i = 0; loop(8, blockDispNames[it] = blockModNames[fid + i]; blockDispIdts[it] = fid + i; it += 1; i += 1;);
         (g === 0) ? (gl0 = it - 1) : (g === 1) ? (gl1 = it - 1) : (g === 2) ? (gl2 = it - 1) : (g === 3) ? (gl3 = it - 1) : (gl4 = it - 1);
         g += 1;
@@ -6172,7 +6245,7 @@ local (i, j, g, it, fid, ttl, gl0, gl1, gl2, gl3, gl4, othFirst, tmp, bln, blu, 
     i = blockFirst; while (i <= blockUsrLast) (
         !(((i >= blockLineA) && (i <= blockLineH)) || ((i >= blockReaderA) && (i <= blockReaderH))
             || ((i >= blockWriterA) && (i <= blockWriterH)) || ((i >= blockEffectA) && (i <= blockEffectH))
-            || ((i >= blockCurvesA) && (i <= blockCurvesH))) ? (
+            || ((i >= blockCurvesA) && (i <= blockCurvesH)) || ((i >= blockReaders) && (i <= blockEffects))) ? (
             blockDispNames[it] = blockModNames[i]; blockDispIdts[it] = i; it += 1;
         );
         i += 1;
@@ -14608,6 +14681,8 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                         pad_Rdr_Colrs[3] = pad_Rdr_Colrs[4] = pad_Rdr_Colrs[5] =
                         pad_Rdr_Colrs[6] = pad_Rdr_Colrs[7] = Color_Heliotrope;
                         its_Out_Label(pad_Rdr_Labs[10], rcbl[its_Rdr_OutK], rcbl[its_Rdr_OutOff]);
+                    ) : (
+                        strcpy(pad_Rdr_Labs[3], "Line: None"); // (a reader just created : no line yet)
                     );
                     // Mute
                     (rcbl[its_Rdr_StFlgs] & its_RdrFlg_mute) ? (
@@ -15074,10 +15149,10 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                         );
                         // (the reader must exist : rcbl is 0 otherwise)
                         ((zzmcl === 1) && rok) ? (
-                            // status : Paused -> Reading ; Ready or Reading -> Paused
+                            // status : Ready or Paused -> Reading ; Reading -> Paused
                             w = rcbl[its_Rdr_Status];
                             ((w === its_RdrStat_Ready) || (w === its_RdrStat_Paused) || (w === its_RdrStat_Reading)) ? (
-                                Rd_Set_Status(rdr, (w === its_RdrStat_Paused) ? its_RdrStat_Reading : its_RdrStat_Paused);
+                                Rd_Set_Status(rdr, (w === its_RdrStat_Reading) ? its_RdrStat_Paused : its_RdrStat_Reading);
                             );
                         );
                         ((zzmcl === 8) && rok) ? (
@@ -16710,10 +16785,10 @@ local (h1, h2, h3, h4, h5, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl
                             WDBL[0] = (jmc & shfCap) ? (wrt + WR_CNT - 1) % WR_CNT : (wrt + 1) % WR_CNT;
                         );
                         ((zzmcl === 1) && wok) ? (
-                            // status : Paused -> Writing ; Ready or Writing -> Paused
+                            // status : Ready or Paused -> Writing ; Writing -> Paused
                             w = wcbl[its_Wrt_Status];
                             ((w === its_WrtStat_Ready) || (w === its_WrtStat_Paused) || (w === its_WrtStat_Writing)) ? (
-                                r = Wr_Set_Status(wrt, (w === its_WrtStat_Paused) ? its_WrtStat_Writing : its_WrtStat_Paused);
+                                r = Wr_Set_Status(wrt, (w === its_WrtStat_Writing) ? its_WrtStat_Paused : its_WrtStat_Writing);
                             );
                         );
                         ((zzmcl === 10) && wok) ? (
@@ -16956,12 +17031,13 @@ local (c, m)
 );
 
 /*
-    open the module "t" ('R' reader, 'W' writer, 'E' effect) n° "n" (menu of a cell of the module "Patch") : nothing to do if
-    a display module (Reader A ... H, Writer A ... H, Effect A ... H) of the visible panes of the tab shows it ; else the first
-    one of these panes shows it ; else a display module not used in the tab is added just below "Patch", in its pane
-    (blockDesc : the pane being drawn) ; 0 : no room
+    open the module "t" ('R' reader, 'W' writer, 'E' effect) n° "n" (menu of a cell of the module "Patch", the modules
+    "Readers", "Writers", "Effects") : nothing to do if a display module (Reader A ... H, Writer A ... H, Effect A ... H) of
+    the visible panes of the tab shows it ; else the first one of these panes shows it ("nw" : not this way) ; else a display
+    module not used in the tab is added just below the module "bk" (the one that asks), in its pane (blockDesc : the pane
+    being drawn) ; 0 : no room
 */
-function its_Pch_Open(t, n)
+function its_Mod_Open(t, n, bk, nw)
 local (b0, st, sz, p, d, i, m, fd, fs, used, k)
 (
     (t === 'R') ? (b0 = blockReaderA; st = ReadersStructA; sz = ReadersBlockSize;) :
@@ -16983,12 +17059,12 @@ local (b0, st, sz, p, d, i, m, fd, fs, used, k)
         p += 1;
     );
     (fs >= 0) ? 1 :
-    (fd >= 0) ? (
+    ((fd >= 0) && !nw) ? (
         st[fd * sz] = n;
         1;
     ) : (
         m = 0; while ((m < 8) && (used & (2 ^ m))) (m += 1;);
-        k = 0; while ((k < dcbMax) && (blockDesc[k] !== blockPatch)) (k += 1;);
+        k = 0; while ((k < dcbMax) && (blockDesc[k] !== bk)) (k += 1;);
         ((blockDesc > 0) && (m < 8) && (k < dcbMax - 1) && (blockDesc[dcbMax - 1] === 0)) ? (
             i = dcbMax - 1; while (i > k + 1) (blockDesc[i] = blockDesc[i - 1]; i -= 1;);
             blockDesc[k + 1] = b0 + m;
@@ -17005,7 +17081,7 @@ local (b0, st, sz, p, d, i, m, fd, fs, used, k)
     cables not read)
     the grid : one cell of the patch per entry (the cables : one cable per entry) ; colors : green written and read,
     orange written but not read, red read but not written (buses), grey unused ; left clic : pins the entry (again : unpins it),
-    shown [between brackets] ; right clic : the menu of the modules that write or read it, the chosen one is opened (its_Pch_Open)
+    shown [between brackets] ; right clic : the menu of the modules that write or read it, the chosen one is opened (its_Mod_Open)
     the text : the cell under the mouse (else the pinned one), its value, who writes it, who reads it
 */
 function show_Patch_Pad(blockId)
@@ -17162,7 +17238,7 @@ local (h1, h2, h3, uix_jneed, zzmi, i, k, c, w, v, pg, npg, ncel, nl, zz, zzmcl,
                             );
                             xx = control_jmenu(menu_Pch_Mods);
                             ((xx >= 1) && (xx <= its_PchLstN)) ? (
-                                !its_Pch_Open(its_PchLstT[xx - 1], its_PchLstM[xx - 1]) ?
+                                !its_Mod_Open(its_PchLstT[xx - 1], its_PchLstM[xx - 1], blockId, 0) ?
                                     mSL_log(SysLogBox, "Patch : no room in the pane to open this module");
                             );
                         );
@@ -17210,6 +17286,380 @@ local (h1, h2, h3, uix_jneed, zzmi, i, k, c, w, v, pg, npg, ncel, nl, zz, zzmcl,
                     ui_split_top(ui_texth()); ui_text("Mouse over a cell : who writes it, who reads it."); ui_pop();
                     ui_split_top(ui_texth()); ui_text(#its_PchTxt); ui_pop();
                 );
+            ui_pop();
+
+        ui_pop();
+    );
+);
+
+/*
+    The modules "Readers", "Writers" and "Effects" (show_Summary_Pad) : "t" is 'R', 'W' or 'E'
+*/
+// the state of the object block "b" of the module "t" : 1 running (reading, writing ; effects : on), 2 paused (effects :
+// off), 3 ready (effects : bypass), 0 another one (created : no line, no source)
+function its_Sum_State(t, b)
+local (s)
+(
+    (t === 'R') ? (
+        s = b[its_Rdr_Status]; // (stopping, starting : reading)
+        (s >= its_RdrStat_Reading) ? 1 : (s === its_RdrStat_Paused) ? 2 : (s === its_RdrStat_Ready) ? 3 : 0;
+    ) :
+    (t === 'W') ? (
+        s = b[its_Wrt_Status];
+        (s === its_WrtStat_Writing) ? 1 : (s === its_WrtStat_Paused) ? 2 : (s === its_WrtStat_Ready) ? 3 : 0;
+    ) : (
+        s = b[its_Efx_Status];
+        (s === its_EfxStat_Bypass) ? 3 : (s !== its_EfxStat_Off) ? 1 : 2;
+    );
+);
+
+// the color of the state "k" (its_Sum_State) : as in the modules of the objects
+function its_Sum_Color(t, k)
+(
+    (k === 1) ? Color_Limegreen : (k === 2) ? Color_Dark_Orange :
+    (k === 3) ? ((t === 'E') ? Color_Goldenrod : Color_Light_Steel_Blue) : Col_InfoA;
+);
+
+// the circles mute (k = 1) and solo (2) of a cell of the module "Readers" : the x of their center from the left of the
+// cell (radius "rr", the solo on the right ; they take the 4 rr + 11 pixels on the right, the text is centered in the
+// rest : ui_jpad_txt_rpad) ; its_Sum_DotAt : the circle at "lx" from the left of the cell (0 : none)
+function its_Sum_DotX(k, rr)
+(
+    ui_jpad_lst_wi - rr - 7 - ((k === 1) ? 2 * rr + 4 : 0);
+);
+function its_Sum_DotAt(lx, rr)
+(
+    (lx < its_Sum_DotX(1, rr) - rr - 2) ? 0 : (lx < (its_Sum_DotX(1, rr) + its_Sum_DotX(2, rr)) / 2) ? 1 : 2;
+);
+
+// the color of a ring "off" centered at (x, y) (pixels) : dark on a light background, light on a dark one (the color under
+// it : the themes, the soft style)
+function its_Sum_RingCol(x, y)
+local (r, g, b)
+(
+    gfx_x = x; gfx_y = y;
+    r = g = b = 0;
+    gfx_getpixel(r, g, b);
+    (0.299 * r + 0.587 * g + 0.114 * b < 0.5) ? gfx_set(0.85, 0.85, 0.85, 0.8) : gfx_set(0.15, 0.15, 0.15, 0.7);
+);
+
+// draws the circles of the reader block "b" in the cell at ui_jpad_cx, ui_jpad_cy (radius "rr", retina scaling "rsc") :
+// mute (red) and solo (yellow), filled when on, else a ring (its_Sum_RingCol) ; muted by another reader in solo : a red ring
+function its_Sum_Dots(b, rr, rsc)
+local (f, x, y, u)
+(
+    f = b[its_Rdr_StFlgs];
+    u = (its_RdrSolos !== 0) && !(f & its_RdrFlg_solo);
+    y = rsc * (ui_jpad_cy + (0|((ui_jpad_lst_he - ui_jd_padinter) / 2)) + 1);
+    x = rsc * (ui_jpad_cx + its_Sum_DotX(1, rr));
+    ((f & its_RdrFlg_mute) || u) ? gfx_set(0.9, 0.1, 0.1, 1) : its_Sum_RingCol(x, y);
+    gfx_circle(x, y, rsc * rr, (f & its_RdrFlg_mute) ? 1 : 0, 1);
+    x = rsc * (ui_jpad_cx + its_Sum_DotX(2, rr));
+    (f & its_RdrFlg_solo) ? gfx_set(0.95, 0.85, 0.1, 1) : its_Sum_RingCol(x, y);
+    gfx_circle(x, y, rsc * rr, (f & its_RdrFlg_solo) ? 1 : 0, 1);
+);
+
+// draws a red circle in the cell of the effect block "b" (at ui_jpad_cx, ui_jpad_cy) when it is in error and not off (as
+// "Err: nnnn" in its module), at the place of the circle solo of the readers (the text keeps 2 rr + 8 pixels on the right)
+function its_Sum_ErrDot(b, rr, rsc)
+(
+    ((b[its_Efx_Error] !== 0) && (b[its_Efx_Status] !== its_EfxStat_Off)) ? (
+        gfx_set(0.9, 0.1, 0.1, 1);
+        gfx_circle(rsc * (ui_jpad_cx + its_Sum_DotX(2, rr)),
+            rsc * (ui_jpad_cy + (0|((ui_jpad_lst_he - ui_jd_padinter) / 2)) + 1), rsc * rr, 1, 1);
+    );
+);
+
+// left clic on the object "o" (block "b") of the module "t" : a reader or a writer starts (from ready or paused) or
+// pauses ; an effect, on or off (bypass : on, as the left clic on the cell of its state)
+function its_Sum_Toggle(t, o, b)
+local (k)
+(
+    k = its_Sum_State(t, b);
+    (t === 'R') ? (
+        (k === 1) ? Rd_Set_Status(o, its_RdrStat_Paused) : (k >= 2) ? Rd_Set_Status(o, its_RdrStat_Reading);
+    ) :
+    (t === 'W') ? (
+        (k === 1) ? Wr_Set_Status(o, its_WrtStat_Paused) : (k >= 2) ? Wr_Set_Status(o, its_WrtStat_Writing);
+    ) : (
+        b[its_Efx_Status] = (b[its_Efx_Status] === its_EfxStat_On) ? its_EfxStat_Off : its_EfxStat_On;
+        its_Run_Check(b);
+    );
+);
+
+// opens the object "o" of the module "t" in a module of the tab (its_Mod_Open ; "bk" : the summary module, "nw" : in a
+// new module)
+function its_Sum_Open(t, o, bk, nw)
+(
+    !its_Mod_Open(t, o, bk, nw) ? mSL_log(SysLogBox, "Open : no free module of this kind in the tab, or no room in the pane");
+);
+
+// right clic on the object "o" (block "b") of the module "t" ("bk") : the menu of its states, (readers) mute and solo,
+// open it in a module of the tab, in a new module (menu_SumR, menu_SumW, menu_SumE)
+function its_Sum_Menu(t, o, b, bk)
+local (m, k, f, xx)
+(
+    m = (t === 'R') ? menu_SumR : (t === 'W') ? menu_SumW : menu_SumE;
+    k = its_Sum_State(t, b); // its item : running 3 (effects : on 1), paused 2, ready 1 (effects : bypass 3)
+    ui_menu_tick(m, -1, 0);
+    (k > 0) ? ui_menu_tick(m, (t === 'E') ? k : 4 - k, 1);
+    (t === 'R') ? (
+        f = b[its_Rdr_StFlgs];
+        (f & its_RdrFlg_mute) ? ui_menu_tick(m, 4, 1);
+        (f & its_RdrFlg_solo) ? ui_menu_tick(m, 5, 1);
+    );
+    xx = control_jmenu(m);
+    ui_menu_tick(m, -1, 0);
+    ((xx >= 1) && (xx <= 3)) ? (
+        (t === 'R') ? Rd_Set_Status(o, its_RdrStat_Ready + xx - 1) :
+        (t === 'W') ? Wr_Set_Status(o, its_WrtStat_Ready + xx - 1) : (
+            b[its_Efx_Status] = (xx === 1) ? its_EfxStat_On : (xx === 2) ? its_EfxStat_Off : its_EfxStat_Bypass;
+            its_Run_Check(b);
+        );
+    ) :
+    ((t === 'R') && (xx === 4)) ? (b[its_Rdr_StFlgs] = b[its_Rdr_StFlgs] ~ its_RdrFlg_mute) :
+    ((t === 'R') && (xx === 5)) ? (b[its_Rdr_StFlgs] = b[its_Rdr_StFlgs] ~ its_RdrFlg_solo) :
+    (xx > 3) ? its_Sum_Open(t, o, bk, xx === ((t === 'R') ? 7 : 5));
+);
+
+// the text of the object "o" (block "b") of the module "t" (under the mouse) : in #its_SumTxt
+function its_Sum_Text(t, o, b)
+local (s, k, f)
+(
+    k = b[(t === 'R') ? its_Rdr_Owner : (t === 'W') ? its_Wrt_Owner : its_Efx_Owner];
+    sprintf(#its_SumTxt, "%s %d", (t === 'R') ? "Reader" : (t === 'W') ? "Writer" : "Effect", o + 1);
+    (k > 0) ? (sprintf(#its_SumT2, " (%s)", its_Al_OwnName(#its_OwnN, k)); strcat(#its_SumTxt, #its_SumT2););
+    (t === 'R') ? (
+        s = b[its_Rdr_Status];
+        sprintf(#its_SumT2, " : %s, mode %s", menu_Rdr_Status_N[(s > 4) ? 4 : max(0, s)], menu_Rdr_Type_N[b[its_Rdr_Mode]]);
+        strcat(#its_SumTxt, #its_SumT2);
+        (b[its_Rdr_LineNb] >= 0) ? sprintf(#its_SumT2, ", line %d", b[its_Rdr_LineNb] + 1) : strcpy(#its_SumT2, ", no line");
+        strcat(#its_SumTxt, #its_SumT2);
+        f = b[its_Rdr_StFlgs];
+        (f & its_RdrFlg_mute) ? strcat(#its_SumTxt, ", muted") :
+        ((its_RdrSolos !== 0) && !(f & its_RdrFlg_solo)) ? strcat(#its_SumTxt, ", muted by a solo");
+        (f & its_RdrFlg_solo) ? strcat(#its_SumTxt, ", solo");
+        ((k = b[its_Rdr_Error]) !== 0) ? (sprintf(#its_SumT2, ", error %04d", k); strcat(#its_SumTxt, #its_SumT2););
+    ) :
+    (t === 'W') ? (
+        s = b[its_Wrt_Status];
+        k = b[its_Wrt_Mode];
+        sprintf(#its_SumT2, " : %s, %s", menu_Wrt_Status_N[max(0, min(4, s))],
+            (k === its_WrtMode_WMix) ? "W-Mix" : (k === its_WrtMode_Sum) ? "Overdub Sum" : "Overdub X-fade");
+        strcat(#its_SumTxt, #its_SumT2);
+        (k !== its_WrtMode_WMix) ? (
+            sprintf(#its_SumT2, ", %s", menu_Wrt_Dir_N[max(0, min(its_WrtDirCnt - 1, 0|b[its_Wrt_Dir]))]);
+            strcat(#its_SumTxt, #its_SumT2);
+        );
+        (b[its_Wrt_LineNb] >= 0) ? sprintf(#its_SumT2, ", line %d", b[its_Wrt_LineNb] + 1) : strcpy(#its_SumT2, ", no line");
+        strcat(#its_SumTxt, #its_SumT2);
+    ) : (
+        s = b[its_Efx_Status];
+        sprintf(#its_SumT2, " : %s, %s", (s === its_EfxStat_Bypass) ? "Bypass" : (s !== its_EfxStat_Off) ? "On" : "Off",
+            menu_Efx_Type_N[max(0, min(its_Efx_TyCnt - 1, b[its_Efx_Type]))]);
+        strcat(#its_SumTxt, #its_SumT2);
+        ((k = b[its_Efx_Error]) !== 0) ? (sprintf(#its_SumT2, ", error %04d", k); strcat(#its_SumTxt, #its_SumT2););
+    );
+);
+
+/*
+    The modules "Readers", "Writers" and "Effects" ("t" : 'R', 'W', 'E') : the objects that exist, one cell each
+    line 1 : 0 the name, 1 the count, 2 ... 4 the counts by state (readers, writers : running, paused, ready ; effects : on,
+    off, bypass ; left clic on 2 : all the running ones pause, effects off ; on 3 : all the paused ones run, effects on ;
+    effects, on 4 : all the bypassed ones on) ; readers : 5 the muted ones, 6 the ones in solo (left clic : none) ; 7 the
+    page (left clic : the next one ; right clic : the previous one)
+    the grid (8 cells per line, up to pad_SumG_NL lines per page) : one cell per object, its number (effects : and their
+    type) ; its color : its state, as in its module (running green, paused orange, ready light blue ; effects : on green,
+    off orange, bypass golden) ; readers : two small circles on the right, mute (red) and solo (yellow), filled when on (a
+    red ring : muted by another reader in solo) ; effects : a red circle on the right when in error (its_Sum_ErrDot)
+    left clic : starts or pauses the object (effects : on or off) ; readers, on a circle : mute or solo on or off ;
+    Alt + left clic : opens it in a module of the tab (its_Mod_Open) ; right clic : a menu (its_Sum_Menu)
+    the text : the object under the mouse
+*/
+function show_Summary_Pad(t, blockId)
+local (h1, h2, h3, uix_jneed, zzmi, jmc, tb, kw, ki, ns, n1, n2, n3, n4, n5, i, k, o, b, f, pg, npg, nl, zz, e, hk, hx, hy,
+       rr, rsc)
+(
+    tb = (t === 'R') ? Readers_set : (t === 'W') ? Writers_set : Effects_set;
+    kw = (t === 'R') ? KW_read : (t === 'W') ? KW_writ : KW_effx;
+    ki = (t === 'R') ? 0 : (t === 'W') ? 1 : 2;
+    // the objects that exist (its_SumL), their counts by state (n1 running, n2 paused, n3 ready ; readers : n4 muted, n5 solo)
+    ns = n1 = n2 = n3 = n4 = n5 = 0;
+    i = 0; loop((t === 'R') ? RD_CNT : (t === 'W') ? WR_CNT : FX_CNT,
+        b = tb[i];
+        ((b > BASE_MEMORY) && (b[-2] === kw)) ? (
+            its_SumL[ns] = i; ns += 1;
+            k = its_Sum_State(t, b);
+            (k === 1) ? (n1 += 1) : (k === 2) ? (n2 += 1) : (k === 3) ? (n3 += 1);
+            (t === 'R') ? (
+                (b[its_Rdr_StFlgs] & its_RdrFlg_mute) ? (n4 += 1);
+                (b[its_Rdr_StFlgs] & its_RdrFlg_solo) ? (n5 += 1);
+            );
+        );
+        i += 1;
+    );
+    npg = max(1, ceil(ns / pad_SumG_Siz));
+    pg = SummaryStruct[ki] = max(0, min(npg - 1, 0|SummaryStruct[ki]));
+    nl = max(1, min(pad_SumG_NL, ceil((ns - pg * pad_SumG_Siz) / 8)));
+    h1 = uix_jpadHeight(1);
+    h2 = uix_jpadHeight(nl);
+    h3 = uix_jBoxHeight(2);
+    uix_jneed = h1+h2+h3+ui_jd_ctgr;
+    (ui_height() >= uix_jneed) ? (
+        ui_split_top(uix_jneed);
+        ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
+            zzmi = ui_hover();
+            jmc = ui_jmouse_cap;
+            keepBlockInfos(blockId);
+            (zzmi) ? (
+                ui_push();
+                    // stack is now 2 levels deep
+                    ui_color(Col_Frame);
+                    ui_border(); // draws in purple
+                ui_pop();
+            );
+            control_group(blockDispNames[blockDispInverts[blockId]]);
+            ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+
+            // the counts
+            ui_split_top(h1);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_Sum_Labs, pad_Sum_Siz);
+                i = 0; loop(pad_Sum_Siz, pad_Sum_Colrs[i] = Col_Inactive; strcpy(pad_Sum_Labs[i], ""); i += 1;);
+                strcpy(pad_Sum_Labs[0], blockDispNames[blockDispInverts[blockId]]);
+                pad_Sum_Colrs[0] = Col_InfoA;
+                sprintf(pad_Sum_Labs[1], "Count %d", ns);
+                pad_Sum_Colrs[1] = Col_P1;
+                sprintf(pad_Sum_Labs[2], (t === 'R') ? "Reading %d" : (t === 'W') ? "Writing %d" : "On %d", n1);
+                sprintf(pad_Sum_Labs[3], (t === 'E') ? "Off %d" : "Paused %d", n2);
+                sprintf(pad_Sum_Labs[4], (t === 'E') ? "Bypass %d" : "Ready %d", n3);
+                (n1 > 0) ? (pad_Sum_Colrs[2] = its_Sum_Color(t, 1));
+                (n2 > 0) ? (pad_Sum_Colrs[3] = its_Sum_Color(t, 2));
+                (n3 > 0) ? (pad_Sum_Colrs[4] = its_Sum_Color(t, 3));
+                (t === 'R') ? (
+                    sprintf(pad_Sum_Labs[5], "Muted %d", n4);
+                    sprintf(pad_Sum_Labs[6], "Solo %d", n5);
+                    (n4 > 0) ? (pad_Sum_Colrs[5] = Col_P6);
+                    (n5 > 0) ? (pad_Sum_Colrs[6] = Col_P7);
+                );
+                sprintf(pad_Sum_Labs[7], "Page %d / %d", pg + 1, npg);
+                pad_Sum_Colrs[7] = (npg > 1) ? Col_P3 : Col_Inactive;
+                zz = control_jpad(pad_Sum);
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4; ui_GFXReason = 36;
+                    e = pad_Sum[ui_jpad_last] - 1;
+                    (e === 7) ? (
+                        (zz & ui_jpad_ev_lmc) ? (SummaryStruct[ki] = (pg + 1) % npg) :
+                        (zz & ui_jpad_ev_rmc) ? (SummaryStruct[ki] = (pg + npg - 1) % npg);
+                    ) :
+                    ((zz & ui_jpad_ev_lmc) && ((e === 2) || (e === 3) || ((t === 'E') && (e === 4)))) ? (
+                        // all the objects running (2) pause, all the paused ones (3) run ; effects : on (2) -> off,
+                        // off (3) -> on, bypass (4) -> on (as a clic on their cell)
+                        k = e - 1; // the state (its_Sum_State)
+                        i = 0; loop(ns,
+                            o = its_SumL[i]; b = tb[o];
+                            (its_Sum_State(t, b) === k) ? its_Sum_Toggle(t, o, b);
+                            i += 1;
+                        );
+                    ) :
+                    ((t === 'R') && (zz & ui_jpad_ev_lmc) && ((e === 5) || (e === 6))) ? (
+                        // no more reader muted (5), in solo (6)
+                        f = (e === 5) ? its_RdrFlg_mute : its_RdrFlg_solo;
+                        i = 0; loop(ns, b = Readers_set[its_SumL[i]]; b[its_Rdr_StFlgs] &= -1 ~ f; i += 1;);
+                    );
+                );
+            ui_pop();
+
+            // the grid of the objects
+            ui_split_top(h2);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_SumG_Labs, 8 * nl);
+                i = 0; loop(8 * nl,
+                    k = pg * pad_SumG_Siz + i;
+                    pad_SumG_Colrs[i] = Col_Inactive;
+                    (k < ns) ? (
+                        o = its_SumL[k]; b = tb[o];
+                        (t === 'E') ? sprintf(pad_SumG_Labs[i], "E%d %s", o + 1, its_EfxTyS[max(0, min(its_Efx_TyCnt - 1, b[its_Efx_Type]))]) :
+                            sprintf(pad_SumG_Labs[i], (t === 'R') ? "R%d" : "W%d", o + 1);
+                        pad_SumG_Colrs[i] = its_Sum_Color(t, its_Sum_State(t, b));
+                    ) : (
+                        strcpy(pad_SumG_Labs[i], "");
+                    );
+                    i += 1;
+                );
+                // readers : the radius of the circles mute and solo (smaller if the cells are narrow : the text keeps
+                // at least 20 pixels), the room they take on the right of the text ; effects : the circle of the errors
+                rr = 0;
+                (t !== 'W') ? (
+                    i = 0|(ui_width() / 8); // the width of the cells (as computed by control_jpad)
+                    rr = max(2, min(0|(ui_jd_padline / 4), 0|((i - 32) / 4)));
+                    ui_jpad_txt_rpad = (t === 'R') ? 4 * rr + 12 : 2 * rr + 8;
+                );
+                zz = control_jpad(pad_SumG, nl, -1, 1);
+                ui_jpad_txt_rpad = 0;
+                // readers : the circles mute and solo ; effects : the circle of the errors
+                (t !== 'W') ? (
+                    rsc = uix_drawconfig_current[9]; // retina scaling
+                    i = 0; loop(min(8 * nl, ns - pg * pad_SumG_Siz),
+                        ui_jpad_cell_pos(i);
+                        b = tb[its_SumL[pg * pad_SumG_Siz + i]];
+                        (t === 'R') ? its_Sum_Dots(b, rr, rsc) : its_Sum_ErrDot(b, rr, rsc);
+                        i += 1;
+                    );
+                );
+                // the object under the mouse (geometry of the pad just drawn, see ui_jpad_cell_pos)
+                hk = 0;
+                (ui_hover() && (ui_jpad_lst_wi > 0) && (ui_jpad_lst_he > 0)) ? (
+                    hx = floor((uix_mouse_x - ui_jpad_lst_left) / ui_jpad_lst_wi);
+                    hy = floor((uix_mouse_y - ui_jpad_lst_top) / ui_jpad_lst_he);
+                    k = pg * pad_SumG_Siz + hy * 8 + hx;
+                    ((hx >= 0) && (hx < 8) && (hy >= 0) && (hy < nl) && (k < ns)) ? (hk = k + 1);
+                );
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4; ui_GFXReason = 36;
+                    e = pad_SumG[ui_jpad_last] - 1; // the cell in the page
+                    k = pg * pad_SumG_Siz + e;
+                    ((e >= 0) && (e < 8 * nl) && (k < ns)) ? (
+                        o = its_SumL[k]; b = tb[o];
+                        ((zz & ui_jpad_ev_lmc) && (jmc & altCap)) ? (
+                            its_Sum_Open(t, o, blockId, 0);
+                        ) :
+                        (zz & ui_jpad_ev_lmc) ? (
+                            // readers : on a circle, mute or solo
+                            ui_jpad_cell_pos(e);
+                            k = (t === 'R') ? its_Sum_DotAt(uix_mouse_x - ui_jpad_cx, rr) : 0;
+                            (k === 1) ? (b[its_Rdr_StFlgs] = b[its_Rdr_StFlgs] ~ its_RdrFlg_mute) :
+                            (k === 2) ? (b[its_Rdr_StFlgs] = b[its_Rdr_StFlgs] ~ its_RdrFlg_solo) :
+                            its_Sum_Toggle(t, o, b);
+                        ) :
+                        (zz & ui_jpad_ev_rmc) ? (
+                            its_Sum_Menu(t, o, b, blockId);
+                        );
+                    );
+                );
+            ui_pop();
+
+            // the text : the object under the mouse
+            ui_split_top(h3);
+                ui_pad(4,2,4,2);
+                ui_pcolor(ui_jcolor_text);
+                ui_align(0, 0);
+                (hk > 0) ? (
+                    o = its_SumL[hk - 1];
+                    its_Sum_Text(t, o, tb[o]);
+                ) :
+                (ns === 0) ? (
+                    strcpy(#its_SumTxt, (t === 'R') ? "No reader." : (t === 'W') ? "No writer." : "No effect.");
+                ) : (
+                    strcpy(#its_SumTxt, (t === 'R') ? "Mouse over a cell : its reader." :
+                        (t === 'W') ? "Mouse over a cell : its writer." : "Mouse over a cell : its effect.");
+                );
+                ui_split_top(ui_texth()); ui_text(#its_SumTxt); ui_pop();
+                ui_split_top(ui_texth());
+                    ui_text((t === 'R') ? "Clic : start or pause ; on a circle : mute, solo ; Alt + clic : open ; right clic : menu" :
+                        (t === 'W') ? "Clic : start or pause ; Alt + clic : open it in a module ; right clic : menu" :
+                        "Clic : on or off ; red circle : in error ; Alt + clic : open ; right clic : menu");
+                ui_pop();
             ui_pop();
 
         ui_pop();
@@ -18775,6 +19225,9 @@ local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in
                 ) :
                 ((igb >= blockCurvesA) && (igb <= blockCurvesH)) ? (
                     show_Curves_Pad(igb, igb - blockCurvesA);
+                ) :
+                ((igb >= blockReaders) && (igb <= blockEffects)) ? (
+                    show_Summary_Pad((igb === blockReaders) ? 'R' : (igb === blockWriters) ? 'W' : 'E', igb);
                 ) :
                 ((igb >= blockUsrFirst) && (igb <= blockUsrLast)) && (blockUsrChecks[blockUsrNum[igb - blockUsrFirst]]) ? (
                     show_UserModule(igb);
