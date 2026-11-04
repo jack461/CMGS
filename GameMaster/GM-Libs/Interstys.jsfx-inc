@@ -545,14 +545,18 @@ its_Efx_WkOld = idx; idx += 1; //  la zone remplacée par @block, libérée par 
 // Flanger, Chorus : Par1 le retard (ms), Par2 le mode (its_Fl...), Par3 l'amortissement de la réinjection (Hz, 0 : aucun),
 // Par4 mix [-1, 1], Par5 le déphasage d'un canal au suivant (tours), Par6 la courbe de la forme Curve, Par7 la réinjection
 // [-2, 2], Par8 la forme du balayage (its_LfoSine ... its_FlShHold), Par9 la graine, Par10 les voix, Par11 passe-haut de la
-// réinjection (Hz, 0 : aucun), Par12 cross [-1, 1] (la part du canal voisin dans la réinjection))
+// réinjection (Hz, 0 : aucun), Par12 cross [-1, 1] (la part du canal voisin dans la réinjection) ; Phaser : Par1 la fréquence
+// (Hz), Par2 le mode (its_Ph...), Par3 le balayage (octaves), Par4 mix [-1, 1], Par5 le déphasage d'un canal au suivant
+// (tours), Par6 la courbe de la forme Curve, Par7 la réinjection [-2, 2], Par8 la forme du balayage, Par9 la graine, Par10
+// les étages (1 ... its_PhMaxS), Par11 le Q (mode Resonant), Par12 cross [-1, 1])
 its_Efx_Par1 = idx; idx += 12;
 its_Efx_St1 = idx; idx += 4;
 its_Efx_Harm1 = idx; idx += 16; // Saturation, mode Cheb. sum : les poids des harmoniques 1 ... 16 (its_SatHarm), dans [-1, 1]
 // Matrix : les mêmes mots, ses réglages en plus de Par1 ... Par12 : 0 wow (ms : la profondeur de la modulation des retards),
 // 1 rate (Hz : sa vitesse), 2 spread (tours : le déphasage d'une ligne à la suivante), 3 glide (s : le glissement des retards)
 // Flanger, Chorus : 0 sweep (ms : l'amplitude du balayage du retard), 1 rate (Hz : sa vitesse), 3 glide (s : le glissement
-// du retard et du balayage), 4 jitter [0, 1] (les écarts des vitesses et des retards des voix)
+// du retard et du balayage), 4 jitter [0, 1] (les écarts des vitesses et des retards des voix) ; Phaser : 0 spacing (octaves
+// d'un étage au suivant), 1 rate (Hz), 3 glide (s), 4 jitter [0, 1] (les écarts des vitesses des canaux)
 its_Efx_MxX = its_Efx_Harm1;
 // 3 entrées de modulation (Filter : 0 la fréquence de coupure (octaves), 1 la résonance (octaves) ; Saturation : 0 le drive (dB),
 // 1 le biais, 2 l'ordre, ou l'étirement en mode Cheb. sum)
@@ -621,7 +625,8 @@ its_Efx_TySat = 9;
 its_Efx_TyMatrix = 10; // a feedback delay network (see exec_matrix)
 its_Efx_TyFlanger = 11; // modulated delays (see exec_flanger)
 its_Efx_TyChorus = 12; // the same engine, other default values (see its_Fl_Def)
-its_Efx_TyCnt = 13; // count of types
+its_Efx_TyPhaser = 13; // swept allpass filters (see exec_phaser)
+its_Efx_TyCnt = 14; // count of types
 // Filter modes (its_Efx_Par3)
 its_FltLP1 = 0; // low pass, 1 pole
 its_FltHP1 = 1; // high pass, 1 pole
@@ -703,6 +708,12 @@ its_FlMaxW = 16777216; // samples of all the lines at most (more channels : shor
 its_FlH = 16; // words of its header (after the one of the work area)
 its_FlCW = 4; // words per channel
 its_FlVW = 8; // words per voice
+// Phaser : the modes (its_Efx_Par2) : Classic (one pole allpass stages), Resonant (two pole allpass stages, their Q : Par11),
+// Barber up / down (two chains half a period apart, each one in a window, their frequency ramps up / down : an endless sweep)
+its_PhClassic = 0; its_PhReson = 1; its_PhBarbUp = 2; its_PhBarbDown = 3; its_PhModeCnt = 4;
+its_PhMaxS = 64; // stages at most
+its_PhH = 16; // words of its header (after the one of the work area)
+its_PhCW = 8; // words per channel
 
 its_EfxStat_Off = 0; // its_Efx_Status : the effect is not executed
 its_EfxStat_On = 1; // (= its_Efx_Unspecified, set by FX_Clear)
@@ -1307,6 +1318,13 @@ p_fxFlCross = idx; idx += 1; // the cross feedback [-1 ... 1]
 p_fxFlJitter = idx; idx += 1; // the jitter of the voices [0 ... 1]
 p_fxFlModD1 = idx; idx += 3; // depths of the 3 modulation inputs : delay, rate (octaves), feedback
 p_fxFlModA1 = idx; idx += 3; // their attenuverters [-10 ... 10]
+p_fxPhFreq = idx; idx += 1; // Phaser : the frequency (Hz)
+p_fxPhSweep = idx; idx += 1; // the sweep (octaves)
+p_fxPhStages = idx; idx += 1; // the stages [1 ... its_PhMaxS]
+p_fxPhSpacing = idx; idx += 1; // the spacing of the stages (octaves from a stage to the next)
+p_fxPhQ = idx; idx += 1; // the Q of the stages (mode Resonant)
+p_fxPhModD1 = idx; idx += 3; // depths of the 3 modulation inputs : frequency, rate (octaves), feedback
+p_fxPhModA1 = idx; idx += 3; // their attenuverters [-10 ... 10]
 its_ParLast = idx - 1; // the last parameter of Interstys : in its range (paramNMax), see the error 2716
 
 // Global variables
@@ -2274,6 +2292,29 @@ local (d, b, n)
 // Flanger, Chorus : the longest delay possible (s), see its_Fl_BufSize
 function its_Fl_MaxDelay(fx) ( (its_Fl_BufSize(fx) - 2) / srate; );
 
+// Phaser : the barber modes (two chains, each one in a window)
+function its_Ph_Barber(fx) ( (fx[its_Efx_Par1 + 1] === its_PhBarbUp) || (fx[its_Efx_Par1 + 1] === its_PhBarbDown); );
+
+/*
+    Phaser : the label "str" of its notches : their count, then "+ LP", "+ HP" or "+ BP" when the chain also cuts the highs,
+    the lows or both ; a one pole stage turns the phase from 0 (low) to -180 degrees (Nyquist), a two pole stage (Resonant)
+    from 0 to -360 : with mix >= 0 a notch at each odd multiple of 180, with mix < 0 at each multiple of 360 (0 : the lows) ;
+    the phase at Nyquist (n x 180, or n x 360) tells if the highs pass or are cut
+*/
+function its_Ph_Label(str, fx) local(n, k, t)
+(
+    n = max(1, min(its_PhMaxS, floor(fx[its_Efx_Par1 + 9])));
+    (fx[its_Efx_Par1 + 1] === its_PhReson) ? (
+        (fx[its_Efx_Par1 + 3] >= 0) ? ( k = n; t = 0; ) : ( k = n - 1; t = 3; );
+    ) : (
+        (fx[its_Efx_Par1 + 3] >= 0) ? ( k = floor(n / 2); t = (n & 1) ? 1 : 0; ) : ( k = floor((n - 1) / 2); t = (n & 1) ? 2 : 3; );
+    );
+    (k === 0) ? strcpy(str, (t === 0) ? "No notch" : "") : (k === 1) ? strcpy(str, "1 notch") : sprintf(str, "%d notches", k);
+    (t > 0) ? strcat(str, (k === 0) ? ((t === 1) ? "Low pass" : (t === 2) ? "High pass" : "Band pass") :
+                                     ((t === 1) ? " + LP" : (t === 2) ? " + HP" : " + BP"));
+    str;
+);
+
 // Flanger, Chorus : the loop can grow (a feedback of 1 or more ; the barber modes with jitter : the windows of the voices no
 // longer sum to 1) : it saturates (its_Mx_Sat)
 function its_Fl_Grows(fx, fb)
@@ -2311,6 +2352,10 @@ local (ns)
     its_Fl_Is(fx[its_Efx_Type]) ? (
         ns = max(1, min(128, floor(fx[its_Efx_CCnt])));
         its_FxW_Hdr + its_FlH + (its_FlCW + its_FlVW * its_FlMaxV) * ns + ns * its_Fl_BufSize(fx);
+    ) :
+    (fx[its_Efx_Type] === its_Efx_TyPhaser) ? (
+        ns = max(1, min(128, floor(fx[its_Efx_CCnt])));
+        its_FxW_Hdr + its_PhH + its_PhMaxS + (its_PhCW + 4 * its_PhMaxS) * ns;
     ) : 0;
 );
 
@@ -2318,7 +2363,7 @@ local (ns)
 function its_Fx_NSrc(ty)
 (
     ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? 8 :
-    ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || (ty === its_Efx_TyMatrix) || its_Fl_Is(ty)) ? 1 :
+    ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || (ty === its_Efx_TyMatrix) || its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)) ? 1 :
     (ty === its_Efx_TyLFO) ? 0 : -1;
 );
 
@@ -2747,7 +2792,8 @@ local (i, b, w, f, n, ty, p)
             (ty === its_Efx_TyFilter) ? its_Pch_Mods(b + its_Efx_Mod1, 2, its_ModN_Flt, its_Flt_ModOk(b), "Effect", i) :
             (ty === its_Efx_TySat) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Sat, its_Sat_ModOk(b), "Effect", i) :
             (ty === its_Efx_TyMatrix) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Mx, its_Mx_ModOk(b), "Effect", i) :
-            its_Fl_Is(ty) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Fl, 7, "Effect", i);
+            its_Fl_Is(ty) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Fl, 7, "Effect", i) :
+            (ty === its_Efx_TyPhaser) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Ph, 7, "Effect", i);
         );
         i += 1;
     );
@@ -2904,7 +2950,8 @@ local (r, j, p, ns, nm)
     p = fx + its_Efx_Src1; j = 0;
     while (!r && (j < ns)) ( r = (p[0] !== 0) && (its_Fx_RKey(p[0]) === wk); p += its_EfxDist; j += 1; );
     nm = (fx[its_Efx_Type] === its_Efx_TyFilter) ? 2 :
-        ((fx[its_Efx_Type] === its_Efx_TySat) || (fx[its_Efx_Type] === its_Efx_TyMatrix) || its_Fl_Is(fx[its_Efx_Type])) ? 3 : 0;
+        ((fx[its_Efx_Type] === its_Efx_TySat) || (fx[its_Efx_Type] === its_Efx_TyMatrix) || its_Fl_Is(fx[its_Efx_Type])
+        || (fx[its_Efx_Type] === its_Efx_TyPhaser)) ? 3 : 0;
     p = fx + its_Efx_Mod1; j = 0;
     while (!r && (j < nm)) ( r = (p[its_Mod_Src] !== 0) && (its_Fx_RKey(p[its_Mod_Src]) === wk); p += its_ModDist; j += 1; );
     r;
@@ -4580,6 +4627,7 @@ its_EfxTyS[9] = "Satur.";
 its_EfxTyS[10] = "Matrix";
 its_EfxTyS[11] = "Flanger";
 its_EfxTyS[12] = "Chorus";
+its_EfxTyS[13] = "Phaser";
 // the menus of a cell of these modules (right clic, see its_Sum_Menu) : the states, (readers) mute and solo, open the
 // object in a module of the tab, in a new module ; results : 1-3 the states, then (readers : 4 mute, 5 solo) open, open new
 menu_SumR_N = make_array(9);
@@ -4865,6 +4913,23 @@ local (k)
         fx[its_Efx_MxX + 3] = 0.05; fx[its_Efx_MxX + 4] = its_Fl_Def(ty, 5); // glide (s), jitter
         fx[its_Efx_Lim] = 1; // the auto-limiter in service
     );
+    ((ty === its_Efx_TyPhaser) && (k !== ty)) ? (
+        fx[its_Efx_Par1] = 800; // the frequency (Hz)
+        fx[its_Efx_Par1 + 1] = its_PhClassic; // the mode
+        fx[its_Efx_Par1 + 2] = 4; // the sweep (octaves)
+        fx[its_Efx_Par1 + 3] = 0.5; // mix : 50 %
+        fx[its_Efx_Par1 + 4] = 0.25; // spread (turns per channel)
+        fx[its_Efx_Par1 + 5] = 0; // the curve (shape Curve)
+        fx[its_Efx_Par1 + 6] = 0.5; // feedback
+        fx[its_Efx_Par1 + 7] = its_LfoSine; // the shape of the sweep
+        fx[its_Efx_Par1 + 8] = 1; // seed
+        fx[its_Efx_Par1 + 9] = 8; // stages
+        fx[its_Efx_Par1 + 10] = 2; // Q (Resonant)
+        fx[its_Efx_Par1 + 11] = 0; // cross
+        fx[its_Efx_MxX] = 0; fx[its_Efx_MxX + 1] = 0.3; fx[its_Efx_MxX + 2] = 0; // spacing (octaves), rate (Hz)
+        fx[its_Efx_MxX + 3] = 0.05; fx[its_Efx_MxX + 4] = 0; // glide (s), jitter
+        fx[its_Efx_Lim] = 1; // the auto-limiter in service
+    );
 );
 
 
@@ -4891,6 +4956,7 @@ menu_Efx_Type_N[9] = "Saturation";
 menu_Efx_Type_N[10] = "Matrix";
 menu_Efx_Type_N[11] = "Flanger";
 menu_Efx_Type_N[12] = "Chorus";
+menu_Efx_Type_N[13] = "Phaser";
 menu_Efx_Type = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "effect-type", its_Efx_TyCnt, menu_Efx_Type_N);
@@ -5008,6 +5074,12 @@ its_ModD_Fl = make_array(3); its_ModD_Fl[0] = 1; its_ModD_Fl[1] = 1; its_ModD_Fl
 its_ModK_Fl = make_array(3);
 its_ModK_Fl[0] = its_ModK_Fl[1] = its_ModKind(its_ModA_Oct, i__o | i__s);
 its_ModK_Fl[2] = its_ModKind(its_ModA_Add, i__a | i__s);
+// Phaser : frequency (octaves), rate (octaves), feedback
+its_ModN_Ph = make_array(3); its_ModN_Ph[0] = "Freq"; its_ModN_Ph[1] = "Rate"; its_ModN_Ph[2] = "Feedback";
+its_ModD_Ph = make_array(3); its_ModD_Ph[0] = 2; its_ModD_Ph[1] = 1; its_ModD_Ph[2] = 0.5;
+its_ModK_Ph = make_array(3);
+its_ModK_Ph[0] = its_ModK_Ph[1] = its_ModKind(its_ModA_Oct, i__o | i__s);
+its_ModK_Ph[2] = its_ModKind(its_ModA_Add, i__a | i__s);
 // the actions and the shapes : their names (menu, labels of the cells), the first depth of an action that is not the default one
 its_ModA_Name = make_array(5); its_ModA_Name[1] = "Add"; its_ModA_Name[2] = "Scale"; its_ModA_Name[3] = "Octaves"; its_ModA_Name[4] = "Decibels";
 its_ModA_Tag = make_array(5); its_ModA_Tag[1] = " +"; its_ModA_Tag[2] = " scale"; its_ModA_Tag[3] = " oct"; its_ModA_Tag[4] = " dB";
@@ -5056,6 +5128,13 @@ menu_Efx_FlShape_N[its_FlShRand] = "Random"; menu_Efx_FlShape_N[its_FlShHold] = 
 menu_Efx_FlShape = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "flanger-shape", its_FlShCnt, menu_Efx_FlShape_N);
+// the modes of the Phaser (its_Ph...) ; its shapes : those of the Flanger
+menu_Efx_PhMode_N = make_array(its_PhModeCnt);
+menu_Efx_PhMode_N[its_PhClassic] = "Classic"; menu_Efx_PhMode_N[its_PhReson] = "Resonant";
+menu_Efx_PhMode_N[its_PhBarbUp] = "Barber up"; menu_Efx_PhMode_N[its_PhBarbDown] = "Barber down";
+menu_Efx_PhMode = make_jmenu(
+    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "phaser-mode", its_PhModeCnt, menu_Efx_PhMode_N);
 
 // Menu 3 for Effects : the phase (entry n is the phase n)
 menu_Efx_Phase_N = make_array(3);
@@ -7439,6 +7518,17 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_fxFlModA1, "Delay atten.",  "FlAttD",  i_UB|i_SP, "%.3f", "Delay atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_fxFlModA1+1, "Rate atten.",  "FlAttR",  i_UB|i_SP, "%.3f", "Rate atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_fxFlModA1+2, "Feedback atten.",  "FlAttF",  i_UB|i_SP, "%.3f", "Feedback atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxPhFreq, "Frequency",  "PhFreq",  i_UB|i_SP, "%.1f Hz", "Frequency: %.1f Hz",   10,   20000,    800,  0.1, 7);
+    parDcl(p_fxPhSweep, "Sweep",  "PhSweep",  i_UB|i_SP, "%.3f oct", "Sweep: %.3f oct",   0,   10,    4,  0.001, 0);
+    parDcl(p_fxPhStages, "Stages",  "PhStages",  i_UB|i_SP, "%.0f", "Stages: %.0f",   1,   64,    8,  1, 2);
+    parDcl(p_fxPhSpacing, "Spacing",  "PhSpace",  i_UB|i_SP, "%.3f oct", "Spacing of the stages: %.3f oct",   -2,   2,    0,  0.001, 0);
+    parDcl(p_fxPhQ, "Q",  "PhQ",  i_UB|i_SP, "%.3f", "Q of the stages: %.3f",   0.1,   100,    2,  0.001, 9);
+    parDcl(p_fxPhModD1, "Freq depth",  "PhModF",  i_UB|i_SP, "%.3f oct", "Freq depth: %.3f oct",   0,   10,    2,  0.001, 2);
+    parDcl(p_fxPhModD1+1, "Rate depth",  "PhModR",  i_UB|i_SP, "%.3f oct", "Rate depth: %.3f oct",   0,   10,    1,  0.001, 2);
+    parDcl(p_fxPhModD1+2, "Feedback depth",  "PhModB",  i_UB|i_SP, "%.3f", "Feedback depth: %.3f",   0,   4,    0.5,  0.001, 0);
+    parDcl(p_fxPhModA1, "Freq atten.",  "PhAttF",  i_UB|i_SP, "%.3f", "Freq atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxPhModA1+1, "Rate atten.",  "PhAttR",  i_UB|i_SP, "%.3f", "Rate atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxPhModA1+2, "Feedback atten.",  "PhAttB",  i_UB|i_SP, "%.3f", "Feedback atten.: %.3f",   -10,   10,    1,  0.001, 0);
 );
 
 
@@ -9097,6 +9187,161 @@ local (wk, hd, cw, vw, bf, bs, msk, src, g, mp, md, sh, nv, bm, dl, sw, rt, fb, 
     );
 );
 
+// a tangent for the coefficients of the Phaser (Padé 3/2 : x (15 - x²) / (15 - 6 x²), x in [0, 0.45 pi] : 3 % low at the top
+// (the frequency a little lower), the stages stay stable)
+function its_Tan_P(x) local(a) ( a = x * x; x * (15 - a) / (15 - 6 * a); );
+
+/*
+    Phaser : a chain of "ns" allpass stages (trapezoidal : modulated without clics), the input "u", the frequency "f" (Hz), the
+    factors of the frequencies of the stages "sf" (spacing ; all 1 : the coefficients of the first stage for all), their
+    states "s" (2 per stage) ; "rs" : two pole stages (a state variable filter, its allpass x - 2 band / Q, kq = 1 / Q), else
+    one pole stages (2 lp - x) ; returns the output of the chain
+*/
+function its_Ph_Chain(u, f, ns, sf, s, rs, kq)
+local (k, one, fk, gg, cg, a1, a2, a3, v, v1, v2)
+(
+    one = (sf[0] === 1);
+    k = 0;
+    loop(ns,
+        ((k === 0) || !one) ? (
+            fk = max(5, min(0.45 * srate, f * sf[k]));
+            gg = its_Tan_P($pi * fk / srate);
+            rs ? ( a1 = 1 / (1 + gg * (gg + kq)); a2 = gg * a1; a3 = gg * a2; ) : ( cg = gg / (1 + gg); );
+        );
+        rs ? (
+            v = u - s[1];
+            v1 = a1 * s[0] + a2 * v;
+            v2 = s[1] + a2 * s[0] + a3 * v;
+            s[0] = 2 * v1 - s[0]; s[1] = 2 * v2 - s[1];
+            u -= 2 * kq * v1;
+        ) : (
+            v = (u - s[0]) * cg; v1 = v + s[0]; s[0] = v1 + v;
+            u = 2 * v1 - u;
+        );
+        s += 2; k += 1;
+    );
+    u;
+);
+
+/*
+    Phaser : per channel of its source, a chain of allpass stages (Par10, 1 ... its_PhMaxS ; its_Ph_Chain) whose frequency is
+    swept : the frequency (Par1, modulated in octaves) times 2^(sweep / 2 x the shape of the phase) (the sweep : Par3,
+    octaves ; the shape : Par8) ; the stages spread by the spacing (MxX, octaves from a stage to the next, centered) ; the
+    phases turn at the rate (MxX + 1, modulated in octaves ; jitter MxX + 4 : x [1 - j, 1 + j] per channel), shifted by the
+    spread (Par5) from a channel to the next ; the input of the chain : the input plus the feedback (Par7, modulated) of the
+    output of the chain at the previous sample (cross, Par12 : the share of the next channel, < 0 : of the previous one),
+    through a saturation (its_Mx_Sat) when the feedback reaches 1 ; the output : (1 - |mix|) x + mix (the chain), mix Par4 ;
+    the modes : Classic (one pole stages), Resonant (two pole stages, the Q : Par11), Barber up / down (two chains of one pole
+    stages half a period apart, each one in a window 0.5 - 0.5 cos of its phase, their frequency ramps up / down over the
+    sweep : an endless sweep) ; the frequency and the sweep glide (MxX + 3)
+    its work area : the header (its_FxW_Hdr ; its_FxW_Md : 1 when it is in use), then its_PhH words (0 the frequency and 1 the
+    sweep, gliding (-1 : to set), 2 the glide and 3 its coefficient, 4 the seed and 5 the jitter of the factors computed, 6 the
+    stages and 7 the spacing of the factors of the stages, 8 the mode of the states), the factors of the stages (its_PhMaxS),
+    its_PhCW words per channel (0 the output of its chain at the previous sample, 1 its phase, 2 the factor of its rate, 3 4
+    its random values (Random : from 3 to 4 ; Hold : 4), 5 the value held, 6 its last phase with the offset, 7 the output of
+    the current sample), then the states (4 x its_PhMaxS per channel : the chain A, then the chain B of the barber modes)
+*/
+function exec_phaser(fx, ccnt, out)
+local (wk, hd, sf, cw, st, src, g, mp, md, sh, ns, bm, rs, f0, sw, rt, fb, mix, spr, cr, jt, gk, ls, ct, kq, c, p, s, k, x, u, v,
+       y, ph, pe, pb, wa, dr)
+(
+    wk = fx[its_Efx_Work];
+    ((wk > BASE_MEMORY) && (wk[its_FxW_Size] === its_Fx_WorkSize(fx))) ? (
+        hd = wk + its_FxW_Hdr; sf = hd + its_PhH; cw = sf + its_PhMaxS; st = cw + its_PhCW * ccnt;
+        src = smpl_tab + fx[its_Efx_Cell1]; g = fx[its_Efx_Vol1];
+        mp = fx + its_Efx_Mod1;
+        md = fx[its_Efx_Par1 + 1]; sh = fx[its_Efx_Par1 + 7];
+        bm = (md === its_PhBarbUp) || (md === its_PhBarbDown);
+        rs = (md === its_PhReson);
+        ns = max(1, min(its_PhMaxS, floor(fx[its_Efx_Par1 + 9])));
+        // a new area, after a bypass, after a value not finite : the states from zero
+        (wk[its_FxW_Md] !== 1) ? (
+            memset(hd, 0, its_PhH + its_PhMaxS + (its_PhCW + 4 * its_PhMaxS) * ccnt);
+            hd[0] = hd[2] = hd[4] = hd[6] = hd[8] = -1; // (the frequency, the glide, the factors, the stages, the mode to compute)
+            p = cw; loop(ccnt, p[3] = rand(2) - 1; p[4] = p[5] = rand(2) - 1; p += its_PhCW;);
+            wk[its_FxW_Md] = 1;
+        );
+        // another mode : another use of the states, from zero
+        (md !== hd[8]) ? (
+            hd[8] = md;
+            memset(st, 0, 4 * its_PhMaxS * ccnt);
+            p = cw; loop(ccnt, p[0] = p[7] = 0; p += its_PhCW;);
+        );
+        // the factors of the frequencies of the stages (the spacing, centered)
+        ((ns !== hd[6]) || (fx[its_Efx_MxX] !== hd[7])) ? (
+            hd[6] = ns; hd[7] = fx[its_Efx_MxX];
+            k = 0; loop(ns, sf[k] = 2 ^ (hd[7] * (k - 0.5 * (ns - 1))); k += 1;);
+        );
+        // the factors of the rates of the channels, from the seed (jitter)
+        jt = max(0, min(1, fx[its_Efx_MxX + 4]));
+        ((hd[4] !== fx[its_Efx_Par1 + 8]) || (hd[5] !== jt)) ? (
+            hd[4] = fx[its_Efx_Par1 + 8]; hd[5] = jt;
+            p = cw; k = 0;
+            loop(ccnt,
+                u = sin(12.9898 * (k + 1) + 78.233 * (hd[4] + 1)) * 43758.5453; u -= floor(u);
+                p[2] = 1 + jt * (2 * u - 1);
+                p += its_PhCW; k += 1;
+            );
+        );
+        // the frequency (modulated, octaves) and the sweep glide
+        (fx[its_Efx_MxX + 3] !== hd[2]) ? ( hd[2] = fx[its_Efx_MxX + 3]; hd[3] = (hd[2] <= 0) ? 1 : 1 - exp(-1 / (hd[2] * srate)); );
+        gk = hd[3];
+        f0 = max(1, its_Mod_Apply(mp, fx[its_Efx_Par1], its_ModA_Oct, 1));
+        sw = max(0, min(10, fx[its_Efx_Par1 + 2]));
+        (hd[0] < 0) ? ( hd[0] = f0; hd[1] = sw; ) : ( hd[0] += gk * (f0 - hd[0]); hd[1] += gk * (sw - hd[1]); );
+        f0 = hd[0]; sw = hd[1];
+        rt = max(0, its_Mod_Apply(mp + its_ModDist, fx[its_Efx_MxX + 1], its_ModA_Oct, 1)) / srate; // (turns per sample)
+        fb = max(-2, min(2, its_Mod_Apply(mp + 2 * its_ModDist, fx[its_Efx_Par1 + 6], its_ModA_Add, 1)));
+        ls = (abs(fb) >= 1); // the loop saturates
+        mix = max(-1, min(1, fx[its_Efx_Par1 + 3]));
+        spr = fx[its_Efx_Par1 + 4];
+        cr = max(-1, min(1, fx[its_Efx_Par1 + 11]));
+        kq = 1 / max(0.1, min(100, fx[its_Efx_Par1 + 10]));
+        ct = its_CrvTab + max(0, min(its_CrvMx - 1, 0|fx[its_Efx_Par1 + 5])) * its_CrvTbSz + its_CrvTbG;
+        dr = (md === its_PhBarbUp) ? 1 : -1; // (barber : the direction of the ramps)
+        c = 0; p = cw;
+        loop(ccnt,
+            x = g * src[c];
+            // the feedback : the output of the chain of the channel, or of its neighbour (cross), at the previous sample
+            v = p[0];
+            (cr !== 0) ? (
+                k = (cr > 0) ? ((c + 1 < ccnt) ? c + 1 : 0) : ((c > 0) ? c - 1 : ccnt - 1);
+                v += abs(cr) * (cw[k * its_PhCW] - v);
+            );
+            u = x + fb * v;
+            ls ? (u = its_Mx_Sat(u));
+            ph = p[1] + rt * p[2]; ph -= floor(ph); p[1] = ph;
+            pe = ph + c * spr; pe -= floor(pe); // its phase, with the offset of the channel
+            s = st + c * 4 * its_PhMaxS;
+            bm ? (
+                // two chains half a period apart, their frequency ramps over the sweep, each one in its window
+                wa = 0.5 - 0.5 * cos(2 * $pi * pe);
+                pb = pe + 0.5; pb -= floor(pb);
+                v = wa * its_Ph_Chain(u, f0 * 2 ^ (dr * sw * (pe - 0.5)), ns, sf, s, 0, kq)
+                    + (1 - wa) * its_Ph_Chain(u, f0 * 2 ^ (dr * sw * (pb - 0.5)), ns, sf, s + 2 * its_PhMaxS, 0, kq);
+            ) : (
+                y = (sh === its_LfoSine) ? sin(2 * $pi * pe) :
+                    (sh === its_LfoTri) ? ((pe < 0.5) ? 4 * pe - 1 : 3 - 4 * pe) :
+                    (sh === its_LfoSawUp) ? 2 * pe - 1 :
+                    (sh === its_LfoSawDown) ? 1 - 2 * pe :
+                    (sh === its_LfoSquare) ? ((pe < 0.5) ? 1 : -1) :
+                    (sh === its_LfoCurve) ? its_Crv_Cyc(ct, pe) :
+                    (
+                        (pe < p[6]) ? ( p[3] = p[4]; p[4] = rand(2) - 1; ); // a new period : a new random value
+                        (sh === its_FlShRand) ? p[3] + (p[4] - p[3]) * (0.5 - 0.5 * cos($pi * pe)) : (p[5] += gk * (p[4] - p[5]));
+                    );
+                v = its_Ph_Chain(u, f0 * 2 ^ (0.5 * sw * y), ns, sf, s, rs, kq);
+            );
+            p[6] = pe;
+            !(abs(v) < its_FinMax) ? ( memset(s, 0, 4 * its_PhMaxS); v = 0; its_NaNCnt += 1; );
+            p[7] = v;
+            out[c] += (1 - abs(mix)) * x + mix * v;
+            p += its_PhCW; c += 1;
+        );
+        p = cw; loop(ccnt, p[0] = p[7]; p += its_PhCW;);
+    );
+);
+
 /*
     execute the effect "fx" (number "nbr") : called by @sample, in the phase of the effect
     the output is the own cable of the effect (assigned), or Out or a bus (added)
@@ -9118,6 +9363,7 @@ local (wk, hd, cw, vw, bf, bs, msk, src, g, mp, md, sh, nv, bm, dl, sw, rt, fb, 
         the stretch in Par8 (Cheb. sum), each one modulated by the third input ; the weights of Cheb. sum in its_Efx_Harm1
     Matrix : a feedback delay network on the channels of its source, see exec_matrix
     Flanger, Chorus : modulated delays on the channels of its source (Through-zero, barber pole, voices), see exec_flanger
+    Phaser : swept allpass stages on the channels of its source (one pole, two pole, barber pole), see exec_phaser
     Bypass (its_EfxStat_Bypass) : Out = the first source not null, unchanged (an LFO : nothing)
     Auto-limiter (its_Efx_Lim, not the LFO) : the output of the type, divided by max(1, its smoothed peak), then the output gain
     the structure is checked again after each modification (its_Efx_Check reset to 0) ; the error is kept in its_Efx_Error
@@ -9165,7 +9411,7 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                 );
             );
             // the modulation inputs : an error is not fatal (no modulation, the error is shown)
-            ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || (ty === its_Efx_TyMatrix) || its_Fl_Is(ty)) ?
+            ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || (ty === its_Efx_TyMatrix) || its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)) ?
                 (mbad = its_Mod_Resolve(fx + its_Efx_Mod1, (ty === its_Efx_TyFilter) ? 2 : 3));
         );
         fx[its_Efx_Error] = (err === 0) && mbad ? 2715 : err; // 2715 : a modulation input is not valid
@@ -9317,6 +9563,9 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
         ) :
         its_Fl_Is(fx[its_Efx_Type]) ? (
             exec_flanger(fx, ccnt, out);
+        ) :
+        (fx[its_Efx_Type] === its_Efx_TyPhaser) ? (
+            exec_phaser(fx, ccnt, out);
         ) :
         (fx[its_Efx_Type] === its_Efx_TySat) ? (
             wk = fx[its_Efx_Work];
@@ -10319,8 +10568,8 @@ i__ii = 0; loop(6, its_TbRLp[i__ii] = mSL_symbol(menu_Rdr_Loop_N[i__ii]); i__ii 
 
 // the keys of the effects (one table for all the types : its_Tb_FxOk tells which keys a type takes) ; "source" and "gain"
 // are src1 and gain1 ; the keys its_TbFMod ... : "mod" for each modulation input (its_TbFMI)
-its_TbFMod = 62;
-its_TbFMINb = 11;
+its_TbFMod = 66;
+its_TbFMINb = 12;
 its_TbFNk = its_TbFMod + its_TbFMINb;
 its_TbFKey = make_array(its_TbFNk); its_TbFNam = make_array(its_TbFNk);
 its_TbKey(its_TbFKey, its_TbFNam, 0, "type"); its_TbKey(its_TbFKey, its_TbFNam, 1, "status");
@@ -10361,12 +10610,22 @@ its_TbKey(its_TbFKey, its_TbFNam, 54, "delay"); its_TbKey(its_TbFKey, its_TbFNam
 its_TbKey(its_TbFKey, its_TbFNam, 56, "feedback"); its_TbKey(its_TbFKey, its_TbFNam, 57, "wave");
 its_TbKey(its_TbFKey, its_TbFNam, 58, "voices"); its_TbKey(its_TbFKey, its_TbFNam, 59, "cross");
 its_TbKey(its_TbFKey, its_TbFNam, 60, "jitter"); its_TbKey(its_TbFKey, its_TbFNam, 61, "mix");
+// Phaser : sweep (Par3, octaves : a word of the Flanger too), stages (Par10, 1 ... its_PhMaxS : a word of the Filter too), q (Par11 :
+// the Filter too), spacing (MxX) ; and the keys of the others : freq (Par1), mode (Par2), mix (Par4), spread (Par5), curve
+// (Par6), feedback (Par7), wave (Par8), seed (Par9), cross (Par12), rate (MxX + 1), glide (MxX + 3), jitter (MxX + 4)
+its_TbKey(its_TbFKey, its_TbFNam, 62, "sweep"); its_TbKey(its_TbFKey, its_TbFNam, 63, "stages");
+its_TbKey(its_TbFKey, its_TbFNam, 64, "q"); its_TbKey(its_TbFKey, its_TbFNam, 65, "spacing");
 // the order of the keys of a Flanger, of a Chorus in a Dump (from the key 22 ; the others : 22, not one of their keys)
 its_TbFlOrdN = 16; its_TbFlOrd = make_array(its_TbFlOrdN);
 its_TbFlOrd[0] = 24; its_TbFlOrd[1] = 54; its_TbFlOrd[2] = 55; its_TbFlOrd[3] = 51; its_TbFlOrd[4] = 57; // mode delay sweep rate wave
 its_TbFlOrd[5] = 38; its_TbFlOrd[6] = 56; its_TbFlOrd[7] = 61; its_TbFlOrd[8] = 28; // curve feedback mix spread
 its_TbFlOrd[9] = 58; its_TbFlOrd[10] = 60; its_TbFlOrd[11] = 46; its_TbFlOrd[12] = 59; // voices jitter seed cross
 its_TbFlOrd[13] = 41; its_TbFlOrd[14] = 48; its_TbFlOrd[15] = 53; // damp hp glide
+its_TbPhOrd = make_array(its_TbFlOrdN); // (the Phaser)
+its_TbPhOrd[0] = 24; its_TbPhOrd[1] = 22; its_TbPhOrd[2] = 62; its_TbPhOrd[3] = 51; its_TbPhOrd[4] = 57; // mode freq sweep rate wave
+its_TbPhOrd[5] = 38; its_TbPhOrd[6] = 56; its_TbPhOrd[7] = 61; its_TbPhOrd[8] = 63; // curve feedback mix stages
+its_TbPhOrd[9] = 65; its_TbPhOrd[10] = 64; its_TbPhOrd[11] = 28; its_TbPhOrd[12] = 60; // spacing q spread jitter
+its_TbPhOrd[13] = 46; its_TbPhOrd[14] = 59; its_TbPhOrd[15] = 53; // seed cross glide
 i__ii = its_TbFMod; loop(its_TbFMINb, its_TbFKey[i__ii] = its_TK_mod; its_TbFNam[i__ii] = "mod"; i__ii += 1;);
 // a word may name several keys, for different types (each one with its own slot, range or kind of value : the key of the
 // type is chosen when the block is read, see its_Tb_FxKey) : its_TbFAlt[k] the next key of the same word (0 : none)
@@ -10377,29 +10636,37 @@ i__ii = 0; loop(its_TbFMod,
     i__ii += 1;
 );
 its_Tb_fxk = -1; its_Tb_fxty = -1; // the effect of the block being read, its type (its_Tb_FxTyAhead)
-// the modulation inputs : symbol, name, type of effect, input number, default depth
+// the modulation inputs : symbol, name, the types of effect (a mask : 1 << type), input number, default depth
 its_TbFMI = make_array(its_TbFMINb); its_TbFMIN = make_array(its_TbFMINb); its_TbFMIt = make_array(its_TbFMINb);
 its_TbFMIj = make_array(its_TbFMINb); its_TbFMId = make_array(its_TbFMINb); its_TbFMIk = make_array(its_TbFMINb); // (its law)
 its_TbFMIN[0] = "Cutoff"; its_TbFMIN[1] = "Reso"; // (as its_ModN_Flt)
 its_TbFMIN[2] = "Drive"; its_TbFMIN[3] = "Bias"; its_TbFMIN[4] = "Order"; // (as its_ModN_Sat : "Order" is also the stretch)
 its_TbFMIN[5] = "Decay"; its_TbFMIN[6] = "Damping"; its_TbFMIN[7] = "Diffusion"; // (as its_ModN_Mx)
-its_TbFMIN[8] = "Delay"; its_TbFMIN[9] = "Rate"; its_TbFMIN[10] = "Feedback"; // (as its_ModN_Fl : the Flanger and the Chorus)
+its_TbFMIN[8] = "Delay"; its_TbFMIN[9] = "Rate"; its_TbFMIN[10] = "Feedback"; // (as its_ModN_Fl : the Flanger and the Chorus ;
+its_TbFMIN[11] = "Freq"; // Rate and Feedback : the Phaser too, its_ModN_Ph)
 i__ii = 0; loop(its_TbFMINb,
     its_TbFMI[i__ii] = its_TK(its_TbFMIN[i__ii]);
     (i__ii < 2) ? (
-        its_TbFMIt[i__ii] = its_Efx_TyFilter; its_TbFMIj[i__ii] = i__ii; its_TbFMId[i__ii] = its_ModD_Flt[i__ii];
+        its_TbFMIt[i__ii] = 1 << its_Efx_TyFilter; its_TbFMIj[i__ii] = i__ii; its_TbFMId[i__ii] = its_ModD_Flt[i__ii];
         its_TbFMIk[i__ii] = its_ModK_Flt[i__ii];
     ) :
     (i__ii < 5) ? (
-        its_TbFMIt[i__ii] = its_Efx_TySat; its_TbFMIj[i__ii] = i__ii - 2; its_TbFMId[i__ii] = its_ModD_Sat[i__ii - 2];
+        its_TbFMIt[i__ii] = 1 << its_Efx_TySat; its_TbFMIj[i__ii] = i__ii - 2; its_TbFMId[i__ii] = its_ModD_Sat[i__ii - 2];
         its_TbFMIk[i__ii] = its_ModK_Sat[i__ii - 2];
     ) :
     (i__ii < 8) ? (
-        its_TbFMIt[i__ii] = its_Efx_TyMatrix; its_TbFMIj[i__ii] = i__ii - 5; its_TbFMId[i__ii] = its_ModD_Mx[i__ii - 5];
+        its_TbFMIt[i__ii] = 1 << its_Efx_TyMatrix; its_TbFMIj[i__ii] = i__ii - 5; its_TbFMId[i__ii] = its_ModD_Mx[i__ii - 5];
         its_TbFMIk[i__ii] = its_ModK_Mx[i__ii - 5];
-    ) : (
-        its_TbFMIt[i__ii] = its_Efx_TyFlanger; its_TbFMIj[i__ii] = i__ii - 8; its_TbFMId[i__ii] = its_ModD_Fl[i__ii - 8];
+    ) :
+    (i__ii < 11) ? (
+        // Delay : the Flanger, the Chorus ; Rate, Feedback : the Phaser too (its inputs 1 and 2)
+        its_TbFMIt[i__ii] = (1 << its_Efx_TyFlanger) | (1 << its_Efx_TyChorus) | ((i__ii > 8) ? 1 << its_Efx_TyPhaser : 0);
+        its_TbFMIj[i__ii] = i__ii - 8; its_TbFMId[i__ii] = its_ModD_Fl[i__ii - 8];
         its_TbFMIk[i__ii] = its_ModK_Fl[i__ii - 8];
+    ) : (
+        // Freq : the Phaser (its input 0)
+        its_TbFMIt[i__ii] = 1 << its_Efx_TyPhaser; its_TbFMIj[i__ii] = 0; its_TbFMId[i__ii] = its_ModD_Ph[0];
+        its_TbFMIk[i__ii] = its_ModK_Ph[0];
     );
     i__ii += 1;
 );
@@ -10409,7 +10676,7 @@ its_TbFTyN = make_array(its_Efx_TyCnt); its_TbFTy = make_array(its_Efx_TyCnt);
 its_TbFTyN[0] = "Undefined"; its_TbFTyN[1] = "None"; its_TbFTyN[2] = "Mixer"; its_TbFTyN[3] = "AutoMix";
 its_TbFTyN[4] = "Mover"; its_TbFTyN[5] = "Action"; its_TbFTyN[6] = "Script"; its_TbFTyN[7] = "LFO";
 its_TbFTyN[8] = "Filter"; its_TbFTyN[9] = "Saturation"; its_TbFTyN[10] = "Matrix"; its_TbFTyN[11] = "Flanger";
-its_TbFTyN[12] = "Chorus";
+its_TbFTyN[12] = "Chorus"; its_TbFTyN[13] = "Phaser";
 i__ii = 0; loop(its_Efx_TyCnt, its_TbFTy[i__ii] = its_TK(its_TbFTyN[i__ii]); i__ii += 1;);
 its_TbFStN = make_array(4); its_TbFSt = make_array(4);
 its_TbFStN[0] = "Off"; its_TbFStN[1] = "On"; its_TbFStN[2] = "Bypass"; its_TbFStN[3] = "Undefined";
@@ -10448,6 +10715,10 @@ its_TbFlShN = make_array(its_FlShCnt); its_TbFlSh = make_array(its_FlShCnt);
 i__ii = 0; loop(its_LfoCnt, its_TbFlShN[i__ii] = its_TbLShN[i__ii]; i__ii += 1;);
 its_TbFlShN[its_FlShRand] = "Random"; its_TbFlShN[its_FlShHold] = "Hold";
 i__ii = 0; loop(its_FlShCnt, its_TbFlSh[i__ii] = mSL_symbol(its_TbFlShN[i__ii]); i__ii += 1;);
+its_TbPhMdN = make_array(its_PhModeCnt); its_TbPhMd = make_array(its_PhModeCnt); // the modes of a Phaser
+its_TbPhMdN[its_PhClassic] = "Classic"; its_TbPhMdN[its_PhReson] = "Resonant"; its_TbPhMdN[its_PhBarbUp] = "BarberUp";
+its_TbPhMdN[its_PhBarbDown] = "BarberDown";
+i__ii = 0; loop(its_PhModeCnt, its_TbPhMd[i__ii] = mSL_symbol(its_TbPhMdN[i__ii]); i__ii += 1;);
 its_TbHarm = make_array(its_SatHarm); // the weights of the key "harm" (its_TbK1 : their count)
 // the keys of the block Global ; track samples (its_GlSmpl), actions (index : its_GlAct_..., see its_actions)
 its_TbGNk = 5;
@@ -11270,6 +11541,7 @@ its_CrvNmMx = 31; // characters of a name at most
 its_CrvNm = make_array(its_CrvMx); its_CrvSimN = make_array(its_CrvMx);
 <? i = 0; loop(64, printf("its_CrvNm[%d] = #its_CrvNm%d; its_CrvSimN[%d] = #its_CrvSN%d; ", i, i, i, i); ((i % 4) == 3) ? printf("\n"); i += 1;); ?>
 its_CrvRenK = -1; // the curve renamed by the prompt of the module (see its_Crv_Rename)
+its_FxEdN = -1; // the effect whose value is edited by the prompt (-1 : none, see its_FxEd_Open)
 // the types : their names in a table, in the pad ; the order of the cell "type" of the pad (envelopes, then waveforms)
 its_CrvTyN = make_array(its_CrvTyCnt); its_CrvTy = make_array(its_CrvTyCnt); its_CrvTyL = make_array(its_CrvTyCnt);
 its_CrvTyN[0] = "Env"; its_CrvTyN[1] = "Wave"; its_CrvTyN[2] = "HEnv"; its_CrvTyN[3] = "QWave"; its_CrvTyN[4] = "HWave";
@@ -11964,13 +12236,15 @@ function its_Tb_FxOk(ty, ki)
 (
     (ki <= 4) ? 1 :
     (ki === 5) ? (ty !== its_Efx_TyLFO) :
-    (ki >= its_TbFMod) ? (its_TbFMIt[ki - its_TbFMod] === (its_Fl_Is(ty) ? its_Efx_TyFlanger : ty)) :
+    (ki >= its_TbFMod) ? ((its_TbFMIt[ki - its_TbFMod] & (1 << ty)) !== 0) :
     ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? ((ki < 14) || ((ki < 22) && (ty === its_Efx_TyMixer))) :
     (ty === its_Efx_TyFilter) ? ((ki === 6) || (ki === 14) || ((ki >= 22) && (ki <= 25))) :
     (ty === its_Efx_TySat) ? ((ki === 6) || (ki === 14) || (ki === 24) || ((ki >= 29) && (ki <= 39))) :
     (ty === its_Efx_TyMatrix) ? ((ki === 6) || (ki === 14) || (ki === 24) || (ki === 31) || ((ki >= 40) && (ki <= 53))) :
     its_Fl_Is(ty) ? ((ki === 6) || (ki === 14) || (ki === 24) || (ki === 28) || (ki === 38) || (ki === 41) || (ki === 46)
         || (ki === 48) || (ki === 51) || (ki === 53) || ((ki >= 54) && (ki <= 61))) :
+    (ty === its_Efx_TyPhaser) ? ((ki === 6) || (ki === 14) || (ki === 22) || (ki === 24) || (ki === 28) || (ki === 38) || (ki === 46)
+        || (ki === 51) || (ki === 53) || ((ki >= 56) && (ki <= 65) && (ki !== 58))) :
     (ty === its_Efx_TyLFO) ? ((ki === 22) || (ki === 24) || ((ki >= 26) && (ki <= 28)) || (ki === 38)) : 0;
 );
 
@@ -12099,6 +12373,10 @@ function its_Tb_FxKey(w) local(ki, i, nm, n, sk)
         (ki === 59) ? ( its_Tb_v1 = its_Tb_Num(nm, -1, 1); ) : // cross
         (ki === 60) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 1); ) : // jitter
         (ki === 61) ? ( its_Tb_v1 = its_Tb_Num(nm, -100, 100); ) : // mix (%) of a Flanger, of a Chorus
+        (ki === 62) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 10); ) : // Phaser : sweep (octaves)
+        (ki === 63) ? ( its_Tb_v1 = its_Tb_Int(nm, 1, its_PhMaxS); ) : // stages
+        (ki === 64) ? ( its_Tb_v1 = its_Tb_Num(nm, 0.1, 100); ) : // q
+        (ki === 65) ? ( its_Tb_v1 = its_Tb_Num(nm, -2, 2); ) : // spacing (octaves)
         (
             // mod : the input, its source, then "depth" and "att" (optional)
             w = its_Tb_Next();
@@ -12549,7 +12827,8 @@ function its_Tb_FxMode(ty, w) local(syms, n, k, i)
     (ty === its_Efx_TyFilter) ? ( syms = its_TbFMd; n = 6; ) :
     (ty === its_Efx_TySat) ? ( syms = its_TbSMd; n = its_SatModeCnt; ) :
     (ty === its_Efx_TyMatrix) ? ( syms = its_TbMxMd; n = its_MxTypeCnt; ) :
-    its_Fl_Is(ty) ? ( syms = its_TbFlMd; n = its_FlModeCnt; ) : ( syms = its_TbLSh; n = its_LfoCnt; );
+    its_Fl_Is(ty) ? ( syms = its_TbFlMd; n = its_FlModeCnt; ) :
+    (ty === its_Efx_TyPhaser) ? ( syms = its_TbPhMd; n = its_PhModeCnt; ) : ( syms = its_TbLSh; n = its_LfoCnt; );
     k = -1; i = 0; while ((k < 0) && (i < n)) ( (syms[i] === w) ? (k = i); i += 1; );
     (k < 0) ? (
         sprintf(#its_TbW, "mode : %s is not a mode of a %s", mSL_edit_value(#its_TbV, w), its_TbFTyN[ty]);
@@ -12630,6 +12909,10 @@ function its_Tb_FxGet(ki, fx) local(p)
     (ki === 59) ? fx[its_Efx_Par1 + 11] :
     (ki === 60) ? fx[its_Efx_MxX + 4] :
     (ki === 61) ? fx[its_Efx_Par1 + 3] * 100 :
+    (ki === 62) ? fx[its_Efx_Par1 + 2] : // Phaser : sweep Par3, stages Par10, q Par11, spacing MxX
+    (ki === 63) ? fx[its_Efx_Par1 + 9] :
+    (ki === 64) ? fx[its_Efx_Par1 + 10] :
+    (ki === 65) ? fx[its_Efx_MxX] :
     (ki < its_TbFMod) ? fx[its_Efx_Par1 + ki - 28] : // bias Par3, output Par6, order Par7, stretch Par8, amount Par9
     its_Tb_ModGet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist);
 );
@@ -12651,7 +12934,8 @@ function its_Tb_FxText(str, ki, ty, v1, v2, v3, v4, v5)
     (ki === 24) ? strcpy(str, (ty === its_Efx_TyFilter) ? its_TbFMdN[max(0, min(5, v1))] :
         (ty === its_Efx_TySat) ? its_TbSMdN[max(0, min(its_SatModeCnt - 1, v1))] :
         (ty === its_Efx_TyMatrix) ? its_TbMxMdN[max(0, min(its_MxTypeCnt - 1, v1))] :
-        its_Fl_Is(ty) ? its_TbFlMdN[max(0, min(its_FlModeCnt - 1, v1))] : its_TbLShN[max(0, min(its_LfoCnt - 1, v1))]) :
+        its_Fl_Is(ty) ? its_TbFlMdN[max(0, min(its_FlModeCnt - 1, v1))] :
+        (ty === its_Efx_TyPhaser) ? its_TbPhMdN[max(0, min(its_PhModeCnt - 1, v1))] : its_TbLShN[max(0, min(its_LfoCnt - 1, v1))]) :
     (ki === 38) ? (((v1 >= 0) && (v1 < its_CrvMx)) ? its_Crv_TbName(str, v1) : sprintf(str, "%d", v1 + 1)) :
     (ki < its_TbFMod) ? sprintf(str, "%.10g", v1) :
     its_Tb_ModText(str, its_TbFMIN[ki - its_TbFMod], v1, v2, v3, v4, v5); // mod : the input, the source, depth, att, the law
@@ -12675,10 +12959,12 @@ function its_Tb_DumpFx(k) local(fx, ty, ki, p, j)
         ki = 0; loop(its_TbFNk,
             // the status first ; the sources connected only, each one followed by its gain ; the modulations connected only
             p = (ki === 0) ? 1 : (ki === 1) ? 0 : ((ki >= 6) && (ki < 22)) ? 6 + ((ki - 6) >> 1) + ((ki - 6) & 1) * 8 :
-                (its_Fl_Is(ty) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbFlOrdN) ? its_TbFlOrd[ki - 22] : 22) : ki;
+                (its_Fl_Is(ty) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbFlOrdN) ? its_TbFlOrd[ki - 22] : 23) :
+                ((ty === its_Efx_TyPhaser) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbFlOrdN) ? its_TbPhOrd[ki - 22] : 23) : ki;
             (its_Tb_FxOk(ty, p) && ((p < 6) || (p >= 22) || (fx[its_Efx_Src1 + ((p - 6) % 8) * its_EfxDist] !== 0))
                 && ((ty !== its_Efx_TySat) || its_Tb_SatUsed(fx, p))
-                && ((p !== 38) || (ty === its_Efx_TySat) || (fx[its_Efx_Par1 + (its_Fl_Is(ty) ? 7 : 1)] === its_LfoCurve))) ? (
+                && ((p !== 38) || (ty === its_Efx_TySat)
+                    || (fx[its_Efx_Par1 + ((its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)) ? 7 : 1)] === its_LfoCurve))) ? (
                 its_Tb_FxGet(p, fx);
                 ((p < its_TbFMod) || (its_Tb_g1 !== 0)) ? (
                     strcat(#its_TbW, " ");
@@ -12764,6 +13050,10 @@ function its_Tb_SetFx(k) local(fx, ty, j, p, ki)
         its_TbKS[59] ? ( fx[its_Efx_Par1 + 11] = its_TbK1[59]; ); // cross
         its_TbKS[60] ? ( fx[its_Efx_MxX + 4] = its_TbK1[60]; ); // jitter
         its_TbKS[61] ? ( fx[its_Efx_Par1 + 3] = its_TbK1[61] / 100; ); // mix
+        its_TbKS[62] ? ( fx[its_Efx_Par1 + 2] = its_TbK1[62]; ); // Phaser : sweep
+        its_TbKS[63] ? ( fx[its_Efx_Par1 + 9] = its_TbK1[63]; ); // stages
+        its_TbKS[64] ? ( fx[its_Efx_Par1 + 10] = its_TbK1[64]; ); // q
+        its_TbKS[65] ? ( fx[its_Efx_MxX] = its_TbK1[65]; ); // spacing
         // the modulations : a new connection gets the attenuverter 1 and the default depth (as in the pad)
         ki = its_TbFMod; loop(its_TbFMINb,
             its_TbKS[ki] ? its_Tb_ModSet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist, ki, its_TbFMId[ki - its_TbFMod]);
@@ -17386,10 +17676,39 @@ local (k, r, xx)
     );
 );
 
+/*
+    a value of an effect edited in the prompt (the numeric edit window of the sliders ; Shift + left clic on its cell : the
+    seed) : the effect "fxn", the word "w" of its block, its bounds (an integer) ; taken when the prompt is closed with a
+    new text (its_FxEd_Take, at the start of show_Effect_Pad), if the effect still exists with the same type
+*/
+function its_FxEd_Open(fx, fxn, w, mini, maxi, title)
+(
+    its_FxEdN = fxn; its_FxEdW = w; its_FxEdT = fx[its_Efx_Type]; its_FxEdMin = mini; its_FxEdMax = maxi;
+    sprintf(#its_FxEdO, "%d", fx[w]);
+    strcpy(#its_FxEdS, #its_FxEdO);
+    sprintf(#its_FxEdTt, "New value for  %s (%d ... %d)", title, mini, maxi);
+    ui_screen_open("control.prompt");
+    ui_screen_arg(0, #its_FxEdS);
+    ui_screen_arg(1, #its_FxEdTt);
+);
+
+function its_FxEd_Take()
+local (fx)
+(
+    ((its_FxEdN >= 0) && !(ui_screen() == "control.prompt")) ? (
+        fx = Effects_set[its_FxEdN];
+        ((strcmp(#its_FxEdS, #its_FxEdO) !== 0) && (fx > BASE_MEMORY) && (fx[-2] === KW_effx) && (fx[its_Efx_Type] === its_FxEdT)) ? (
+            fx[its_FxEdW] = max(its_FxEdMin, min(its_FxEdMax, floor(ui_parsenumber(#its_FxEdS, fx[its_FxEdW]) + 0.5)));
+        );
+        its_FxEdN = -1;
+    );
+);
+
 // Matrix : line 1, cell 8 = the source (right clic : menu ; left clic : its first channel), cell 9 = the matrix (left clic :
 // the next one ; right clic : menu), cell 10 = the loop Decay / Freeze / Grow (left clic : the next one ; right clic : menu),
 // cell 11 = the lines (Hadamard : with the inner ones) and the longest delay possible, cell 12 = the seed of the delays
-// (left clic : + 1 ; right clic : - 1), cell 13 = the spread of the delays (left clic : the next one ; right clic : menu),
+// (left clic : + 1 ; right clic : - 1 ; Shift + left clic : the prompt), cell 13 = the spread of the delays (left clic : the
+// next one ; right clic : menu),
 // cell 14 = the input Direct / Spread (clic), cell 15 = "Loop sat." when the loop saturates (it can grow) ; line 2 : the
 // modulation inputs (decay, damping, diffusion) ; sliders : decay, damping, high pass, mix, delay min, delay max, diffusion
 // (not Hadamard), input gain, and the modulations used
@@ -17473,6 +17792,7 @@ local (k, r, xx, ok, np, lm)
             );
         ) :
         (cell === 12) ? (
+            ((ev & ui_jpad_ev_lmc) && (its_PadJmc & shfCap)) ? its_FxEd_Open(fx, fxn, its_Efx_Par1 + 8, 0, 100000, "the seed") :
             (ev & ui_jpad_ev_rmc) ? (fx[its_Efx_Par1 + 8] = max(0, fx[its_Efx_Par1 + 8] - 1)) :
             (ev & ui_jpad_ev_lmc) ? (fx[its_Efx_Par1 + 8] = min(100000, fx[its_Efx_Par1 + 8] + 1));
         ) :
@@ -17548,7 +17868,8 @@ local (k, r, xx, ok, np, lm)
 // clic : the next one ; right clic : menu), cell 10 = the shape of the sweep (left clic : the next one ; right clic : menu ;
 // gray in the barber modes : their ramps), cell 11 = the curve of the shape Curve (left clic : the next curve that exists ;
 // right clic : menu), cell 12 = the voices (left clic : + 1 ; right clic : - 1), cell 13 = the seed of the jitter (left
-// clic : + 1 ; right clic : - 1), cell 14 = the longest delay possible, cell 15 = "Loop sat." when the loop saturates (it
+// clic : + 1 ; right clic : - 1 ; Shift + left clic : the prompt), cell 14 = the longest delay possible, cell 15 = "Loop
+// sat." when the loop saturates (it
 // can grow) ; line 2 : the modulation inputs (delay, rate, feedback) ; sliders : delay, sweep, rate, feedback, mix, spread,
 // cross, jitter, damping, high pass, glide, input gain, and the modulations used
 function FX_Flanger_Pad(RDBL, fx, fxn, what, cell, ev)
@@ -17636,6 +17957,7 @@ local (k, r, xx, ty, md, sh, nv, bm)
             (ev & ui_jpad_ev_lmc) ? (fx[its_Efx_Par1 + 9] = min(its_FlMaxV, nv + 1));
         ) :
         (cell === 13) ? (
+            ((ev & ui_jpad_ev_lmc) && (its_PadJmc & shfCap)) ? its_FxEd_Open(fx, fxn, its_Efx_Par1 + 8, 0, 100000, "the seed") :
             (ev & ui_jpad_ev_rmc) ? (fx[its_Efx_Par1 + 8] = max(0, fx[its_Efx_Par1 + 8] - 1)) :
             (ev & ui_jpad_ev_lmc) ? (fx[its_Efx_Par1 + 8] = min(100000, fx[its_Efx_Par1 + 8] + 1));
         ) :
@@ -17690,6 +18012,151 @@ local (k, r, xx, ty, md, sh, nv, bm)
     );
 );
 
+// Phaser : line 1, cell 8 = the source (right clic : menu ; left clic : its first channel), cell 9 = the mode (left clic :
+// the next one ; right clic : menu), cell 10 = the shape of the sweep (left clic : the next one ; right clic : menu ; gray
+// in the barber modes : their ramps), cell 11 = the curve of the shape Curve (left clic : the next curve that exists ; right
+// clic : menu), cell 12 = the seed of the jitter (left clic : + 1 ; right clic : - 1 ; Shift + left clic : the prompt),
+// cell 13 = the count of notches and the cut of the highs, the lows or both (its_Ph_Label), cell
+// 15 = "Loop sat." when the loop saturates ; line 2 : the modulation inputs (frequency, rate, feedback) ; sliders :
+// frequency, sweep, rate, feedback, mix, stages, spacing, Q (Resonant), spread, cross, jitter, glide, input gain, and the
+// modulations used
+function FX_Phaser_Pad(RDBL, fx, fxn, what, cell, ev)
+local (k, r, xx, md, sh, bm, rs)
+(
+    md = max(0, min(its_PhModeCnt - 1, fx[its_Efx_Par1 + 1]));
+    bm = its_Ph_Barber(fx);
+    rs = (md === its_PhReson);
+    sh = max(0, min(its_FlShCnt - 1, fx[its_Efx_Par1 + 7]));
+    (what === FXP_Dims) ? (
+        RDBL[3] = 3;
+        RDBL[5] = 12 + rs + its_Mod_SlCount(fx + its_Efx_Mod1, 3, 7);
+        RDBL[6] = 0;
+    ) :
+    (what === FXP_Fill) ? (
+        (fx[its_Efx_Src1] !== 0) ? (
+            its_Src_Label(pad_Efx_Labs[8], fx[its_Efx_Src1], fx[its_Efx_Off1]);
+            pad_Efx_Colrs[8] = Col_P3;
+        ) : (
+            strcpy(pad_Efx_Labs[8], "Source");
+            pad_Efx_Colrs[8] = Col_P1;
+        );
+        strcpy(pad_Efx_Labs[9], menu_Efx_PhMode_N[md]);
+        pad_Efx_Colrs[9] = bm ? Col_P2 : Col_P3;
+        strcpy(pad_Efx_Labs[10], menu_Efx_FlShape_N[sh]);
+        pad_Efx_Colrs[10] = bm ? Col_Inactive : Col_P3;
+        ((sh === its_LfoCurve) && !bm) ? FX_Crv_Fill(fx + its_Efx_Par1 + 5, 11);
+        sprintf(pad_Efx_Labs[12], "Seed %d", fx[its_Efx_Par1 + 8]);
+        pad_Efx_Colrs[12] = Col_P3;
+        its_Ph_Label(pad_Efx_Labs[13], fx);
+        pad_Efx_Colrs[13] = Col_InfoA;
+        (abs(fx[its_Efx_Par1 + 6]) >= 1) ? (
+            strcpy(pad_Efx_Labs[15], "Loop sat.");
+            pad_Efx_Colrs[15] = Color_Dark_Orange;
+        );
+        strcpy(pad_Efx_Labs[16], "Modulation");
+        its_Mod_Fill(pad_Efx_Labs, pad_Efx_Colrs, 17, fx + its_Efx_Mod1, 3, its_ModN_Ph, 7);
+    ) :
+    (what === FXP_Click) ? (
+        (cell === 8) ? (
+            (ev & ui_jpad_ev_rmc) ? (
+                ((k = its_Src_Choose(fx[its_Efx_Src1], fx[its_Efx_Off1])) >= 0) ? (
+                    fx[its_Efx_Src1] = k;
+                    fx[its_Efx_Off1] = its_Src_ChOff;
+                    fx[its_Efx_Check] = 0;
+                );
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                ((k = its_Off_Choose(fx[its_Efx_Off1])) >= 0) ? (
+                    fx[its_Efx_Off1] = k;
+                    fx[its_Efx_Check] = 0;
+                );
+            );
+        ) :
+        (cell === 9) ? (
+            (ev & ui_jpad_ev_rmc) ? (
+                ui_menu_tick(menu_Efx_PhMode, -1, 0);
+                ui_menu_tick(menu_Efx_PhMode, md + 1, 1);
+                xx = control_jmenu(menu_Efx_PhMode);
+                (xx != 0) ? (fx[its_Efx_Par1 + 1] = xx - 1);
+                ui_menu_tick(menu_Efx_PhMode, -1, 0);
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                fx[its_Efx_Par1 + 1] = (md + 1) % its_PhModeCnt;
+            );
+        ) :
+        (cell === 10) ? (
+            (ev & ui_jpad_ev_rmc) ? (
+                ui_menu_tick(menu_Efx_FlShape, -1, 0);
+                ui_menu_tick(menu_Efx_FlShape, sh + 1, 1);
+                xx = control_jmenu(menu_Efx_FlShape);
+                (xx != 0) ? (fx[its_Efx_Par1 + 7] = xx - 1);
+                ui_menu_tick(menu_Efx_FlShape, -1, 0);
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                fx[its_Efx_Par1 + 7] = (sh + 1) % its_FlShCnt;
+            );
+        ) :
+        ((cell === 11) && (sh === its_LfoCurve) && !bm) ? FX_Crv_Click(fx + its_Efx_Par1 + 5, ev) :
+        (cell === 12) ? (
+            ((ev & ui_jpad_ev_lmc) && (its_PadJmc & shfCap)) ? its_FxEd_Open(fx, fxn, its_Efx_Par1 + 8, 0, 100000, "the seed") :
+            (ev & ui_jpad_ev_rmc) ? (fx[its_Efx_Par1 + 8] = max(0, fx[its_Efx_Par1 + 8] - 1)) :
+            (ev & ui_jpad_ev_lmc) ? (fx[its_Efx_Par1 + 8] = min(100000, fx[its_Efx_Par1 + 8] + 1));
+        ) :
+        ((cell >= 17) && (cell <= 19)) ? (
+            its_Mod_Click(fx + its_Efx_Mod1, cell - 17, ev, its_PadJmc, its_ModD_Ph, its_ModK_Ph) ? (fx[its_Efx_Check] = 0);
+        );
+    ) :
+    (what === FXP_Sliders) ? (
+        // read at each sample
+        paramValues[p_fxPhFreq] = fx[its_Efx_Par1];
+        r = parCtl(p_fxPhFreq);
+        (r != 0) ? (fx[its_Efx_Par1] = (r === 8) ? 800 : parV(p_fxPhFreq));
+        paramValues[p_fxPhSweep] = fx[its_Efx_Par1 + 2];
+        r = parCtl(p_fxPhSweep);
+        (r != 0) ? (fx[its_Efx_Par1 + 2] = (r === 8) ? 4 : parV(p_fxPhSweep));
+        paramValues[p_fxFlRate] = fx[its_Efx_MxX + 1];
+        r = parCtl(p_fxFlRate);
+        (r != 0) ? (fx[its_Efx_MxX + 1] = (r === 8) ? 0.3 : parV(p_fxFlRate));
+        paramValues[p_fxFlFb] = fx[its_Efx_Par1 + 6];
+        r = parCtl(p_fxFlFb);
+        (r != 0) ? (fx[its_Efx_Par1 + 6] = (r === 8) ? 0.5 : parV(p_fxFlFb));
+        paramValues[p_fxFlMix] = 100 * fx[its_Efx_Par1 + 3];
+        r = parCtl(p_fxFlMix);
+        (r != 0) ? (fx[its_Efx_Par1 + 3] = (r === 8) ? 0.5 : parV(p_fxFlMix) / 100);
+        paramValues[p_fxPhStages] = fx[its_Efx_Par1 + 9];
+        r = parCtl(p_fxPhStages);
+        (r != 0) ? (fx[its_Efx_Par1 + 9] = (r === 8) ? 8 : max(1, min(its_PhMaxS, floor(parV(p_fxPhStages) + 0.5))));
+        paramValues[p_fxPhSpacing] = fx[its_Efx_MxX];
+        r = parCtl(p_fxPhSpacing);
+        (r != 0) ? (fx[its_Efx_MxX] = (r === 8) ? 0 : parV(p_fxPhSpacing));
+        rs ? (
+            paramValues[p_fxPhQ] = fx[its_Efx_Par1 + 10];
+            r = parCtl(p_fxPhQ);
+            (r != 0) ? (fx[its_Efx_Par1 + 10] = (r === 8) ? 2 : parV(p_fxPhQ));
+        );
+        paramValues[p_fxFlSpread] = fx[its_Efx_Par1 + 4];
+        r = parCtl(p_fxFlSpread);
+        (r != 0) ? (fx[its_Efx_Par1 + 4] = (r === 8) ? 0.25 : parV(p_fxFlSpread));
+        paramValues[p_fxFlCross] = fx[its_Efx_Par1 + 11];
+        r = parCtl(p_fxFlCross);
+        (r != 0) ? (fx[its_Efx_Par1 + 11] = (r === 8) ? 0 : parV(p_fxFlCross));
+        paramValues[p_fxFlJitter] = fx[its_Efx_MxX + 4];
+        r = parCtl(p_fxFlJitter);
+        (r != 0) ? (fx[its_Efx_MxX + 4] = (r === 8) ? 0 : parV(p_fxFlJitter));
+        paramValues[p_fxMxGlide] = fx[its_Efx_MxX + 3];
+        r = parCtl(p_fxMxGlide);
+        (r != 0) ? (fx[its_Efx_MxX + 3] = (r === 8) ? 0.05 : parV(p_fxMxGlide));
+        // input gain : its linear value is computed by the check
+        paramValues[p_fxGain1] = fx[its_Efx_VoldB1];
+        r = parCtl(p_fxGain1);
+        (r != 0) ? (
+            fx[its_Efx_VoldB1] = (r === 8) ? 0 : parV(p_fxGain1);
+            fx[its_Efx_Check] = 0;
+        );
+        its_Mod_Sliders(fx + its_Efx_Mod1, 3, 7, p_fxPhModD1, p_fxPhModA1, its_ModN_Ph, its_ModK_Ph);
+    );
+);
+
 // the dispatcher : calls the function of the type of the effect (a type without function : the common line only)
 function FX_Type_Pad(RDBL, fx, fxn, what, cell, ev)
 local (ty)
@@ -17712,6 +18179,9 @@ local (ty)
     ) :
     its_Fl_Is(ty) ? (
         FX_Flanger_Pad(RDBL, fx, fxn, what, cell, ev);
+    ) :
+    (ty === its_Efx_TyPhaser) ? (
+        FX_Phaser_Pad(RDBL, fx, fxn, what, cell, ev);
     ) : (
         (what === FXP_Dims) ? (RDBL[3] = 1; RDBL[5] = 0;);
     );
@@ -17737,6 +18207,7 @@ local (ty)
 function show_Effect_Pad(RDBL, blockId)
 local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh, zz, zzmcl, act)
 (
+    its_FxEd_Take(); // (a value edited in the prompt, its_FxEd_Open)
     fxn = RDBL[0]; // number of the effect to be displayed
     fx = Effects_set[fxn];
     fok = (fx > BASE_MEMORY) && (fx[-2] === KW_effx);

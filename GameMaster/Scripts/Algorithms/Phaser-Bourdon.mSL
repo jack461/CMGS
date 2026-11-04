@@ -1,0 +1,48 @@
+print("Phaser-Bourdon. Un bourdon : le balayage a vitesse audio, le son vrombit.");
+
+/*
+  Balayer les creux des centaines de fois par seconde (pace) module le son : il vrombit, des bandes laterales a la
+  vitesse du balayage, un bourdon accroche a sa hauteur (110 Hz : un la grave). width regle la richesse ; regen pres de 1
+  donne un timbre de tole.
+
+  Parametres :
+      nch       canaux
+      center    la frequence centrale (Hz)
+      width     l'etendue du balayage (octaves)
+      pace      sa vitesse (Hz : la hauteur du bourdon)
+      regen     la reinjection
+      blend     le melange (%)
+      level     le niveau de sortie (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son traite sort vers Out:0 (le son direct est dans l'effet : son
+  melange, blend ou mix).
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. Les autres reglages se
+  changent a la main dans le pad des effets de l'instance (le module Instances la montre ; le module Effect montre ses
+  effets, "pre", "ph", "post").
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance bourdon )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Bourdon
+        input src
+        output dst
+        param nch 2 1 128
+        param center 800 10 20000
+        param width 3 0 10
+        param pace 110 0 5000
+        param regen 0.5 -2 2
+        param blend 50 -100 100
+        param level -3 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect ph  type Phaser  chan nch  source Effect pre  mode Classic  stages 16  freq center  sweep width  rate pace
+                   wave Sine  feedback regen  mix blend  spread 0
+        Effect post  type Mixer  chan nch  src1 Effect ph  gain1 level  out dst
+    End
+    Instance bourdon Bourdon  src In:0  dst Out:0  nch 2  center 800  width 3  pace 110  regen 0.5  blend 50  level -3
+));
+print(sprintf(0, "Phaser-Bourdon. instance bourdon : %d (0 : OK)", r));

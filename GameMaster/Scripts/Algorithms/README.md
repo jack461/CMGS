@@ -59,3 +59,17 @@ Chorus), `post` (la sortie ; le mélange sec et traité pour `Escalier`, `Cloche
 
 `Flanger-Hurle` ne s'arrête plus une fois excité (la boucle s'entretient) : `regen` sous 1, ou
 `Free-All.mSL`.
+
+## Les recettes du Phaser (filtres passe-tout balayés)
+
+| Fichier | Ce qu'il fait |
+|---|---|
+| `Phaser-Vent` | Un vent : le phaser classique, lent et profond, la réinjection creuse des sifflements |
+| `Phaser-Vortex` | Un tourbillon sans fin : le barber pole, des creux qui montent toujours (et tournent entre les haut-parleurs) |
+| `Phaser-Cristal` | Un cristal : trente-deux étages résonants, espacés, une réinjection forte |
+| `Phaser-Grele` | Une grêle : les creux sautent au hasard, plusieurs fois par seconde |
+| `Phaser-Bourdon` | Un bourdon : le balayage à vitesse audio, le son vrombit |
+| `Phaser-Laser` | Un laser : soixante-quatre étages fixes, chaque attaque devient un chirp |
+
+Les effets sont `pre`, `ph` (le Phaser) et `post`. Le son direct passe dans le Phaser (son mélange
+`blend`), sauf dans `Phaser-Laser` (`dry` et `wet`).
