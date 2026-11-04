@@ -1,0 +1,86 @@
+print("Ex-1035. Interstys table : modes Stretch, Brage, Grains, boucle qui suit un writer, sens des writers, modulations.");
+
+/*
+  Writer : direction Forward|Backward|Both (modes XFade et Sum ; le Dump ne l'ecrit que si elle n'est pas Forward),
+  mod Gain|Overdub|... (le Dump ecrit les entrees connectees qui ont un sens dans le mode).
+  Reader : mode Stretch (block, overlap, search, transp, stretch), Brage (les memes, sans stretch), Grains (size ...
+  onsetrnd, curve : une courbe ou none), follow W|none (la boucle suit un writer), mod Offset|Speed|Volume|LoopSpd|Desync
+  (Offset : doppler On|Off). Le Dump ecrit le mode (sauf Read et Delay, donnes par line et writer) et ses reglages.
+  Erreurs (rien n'est cree) : e1 mode Delay avec une ligne (2774) ; e2 mode Grains avec un writer (2774) ; e3 suivre un
+  writer qui n'existe pas (2763) ; e4 suivre un writer d'une autre ligne (2775) ; e5 doppler sur Speed (2754) ; e6 une
+  entree inconnue (2754) ; e7 size hors de [10, 10000] (2754) ; e8 une direction inconnue (2754).
+  Les numeros des modules dependent du projet (%d).
+*/
+
+var r = table(data(
+    Interstys
+    Line ll  length 2  chan 2
+    Curve ge  type Env  points 0 0 0  0.3 1 0  1 0 0
+    Writer ww  line ll  source In:0  direction Backward  mod Gain Ctl 1
+    Dump Writer ww
+    Check Writer ww  direction Backward  mod Gain Ctl 1  depth 6  att 1
+    Writer ww  direction Both  mod Overdub Ctl 2  depth 10  att -2  law Scale
+    Dump Writer ww
+    Check Writer ww  direction Both  mod Overdub Ctl 2  depth 10  att -2  law Scale
+    Writer ww  direction Forward  mod Gain none
+    Dump Writer ww
+    Reader rs  line ll  mode Stretch  first 0  used 1  block 100  overlap 20  search 10  transp 3  stretch 0.5  status Paused
+    Dump Reader rs
+    Check Reader rs  mode Stretch  block 100  overlap 20  search 10  transp 3  stretch 0.5
+    Reader rs  mode Brage
+    Dump Reader rs
+    Reader rs  mode Grains  size 200  sizernd 2  plateau 40  platrnd 1.5  fadein 30  fadernd 1  curve ge  gvol -6
+        volrnd 2  speedrnd 1.2  direction 0.5  density 20  onsetrnd 0.5
+    Dump Reader rs
+    Check Reader rs  mode Grains  size 200  curve ge  density 20  onsetrnd 0.5
+    Reader rs  follow ww
+    Dump Reader rs
+    Check Reader rs  follow ww
+    Reader rs  follow none  curve none
+    Check Reader rs  follow none  curve none
+    Reader rs  mode Read  mod Speed Ctl 3  depth 0.2  att -1  law Oct  mod Offset Ctl 4  doppler On
+    Dump Reader rs
+    Check Reader rs  mode Read  mod Speed Ctl 3  depth 0.2  att -1  law Oct  mod Offset Ctl 4  doppler On
+    Free Reader rs
+    Free Writer ww
+    Free Line ll
+    Free Curve ge
+));
+print(sprintf(0, "Ex-1035. resultat : %d", r));
+
+var e1 = table(data( Interstys  Line l1  length 1  Reader 250  line l1  mode Delay ));
+var e2 = table(data( Interstys  Line l1  length 1  Writer w1  line l1  source In:0  Reader 250  writer w1  mode Grains ));
+var e3 = table(data( Interstys  Line l1  length 1  Reader 250  line l1  follow 250 ));
+var e4 = table(data( Interstys  Line l1  length 1  Line l2  length 1  Writer w2  line l2  source In:0
+    Reader 250  line l1  follow w2 ));
+var e5 = table(data( Interstys  Reader 250  mod Speed Ctl 1  doppler On ));
+var e6 = table(data( Interstys  Writer 250  mod Cutoff Ctl 1 ));
+var e7 = table(data( Interstys  Reader 250  mode Grains  size 5 ));
+var e8 = table(data( Interstys  Writer 250  direction Sideways ));
+print(sprintf(0, "Ex-1035. erreurs : %d %d %d %d %d %d %d %d", e1, e2, e3, e4, e5, e6, e7, e8));
+
+// Expected "Writer %d status Ready line %d source In:0 gain 0 overdub 0 mode XFade first 0 used 0 direction Backward mod Gain Ctl 1 depth 6 att 1"
+// Expected "Check Writer %d OK"
+// Expected "Writer %d status Ready line %d source In:0 gain 0 overdub 0 mode XFade first 0 used 0 direction Both mod Gain Ctl 1 depth 6 att 1 mod Overdub Ctl 2 depth 10 att -2 law Scale"
+// Expected "Check Writer %d OK"
+// Expected "Writer %d status Ready line %d source In:0 gain 0 overdub 0 mode XFade first 0 used 0 mod Overdub Ctl 2 depth 10 att -2 law Scale"
+// Expected "Reader %d status Paused line %d mode Stretch speed 1 out Out:0 vol 0 first 0 used 1 loop once block 100 overlap 20 search 10 transp 3 stretch 0.5"
+// Expected "Check Reader %d OK"
+// Expected "Reader %d status Paused line %d mode Brage speed 1 out Out:0 vol 0 first 0 used 1 loop once block 100 overlap 20 search 10 transp 3"
+// Expected "Reader %d status Paused line %d mode Grains speed 1 out Out:0 vol 0 first 0 used 1 loop once size 200 sizernd 2 plateau 40 platrnd 1.5 fadein 30 fadernd 1 curve ge gvol -6 volrnd 2 speedrnd 1.2 direction 0.5 density 20 onsetrnd 0.5"
+// Expected "Check Reader %d OK"
+// Expected "Reader %d status Paused line %d mode Grains speed 1 out Out:0 vol 0 first 0 used 1 loop once size 200 sizernd 2 plateau 40 platrnd 1.5 fadein 30 fadernd 1 curve ge gvol -6 volrnd 2 speedrnd 1.2 direction 0.5 density 20 onsetrnd 0.5 follow %d"
+// Expected "Check Reader %d OK"
+// Expected "Check Reader %d OK"
+// Expected "Reader %d status Paused line %d speed 1 out Out:0 vol 0 first 0 used 1 loop once mod Offset Ctl 4 depth 2 att 1 doppler On mod Speed Ctl 3 depth 0.2 att -1 law Oct"
+// Expected "Check Reader %d OK"
+// Expected "Ex-1035. resultat : 0"
+// Expected error 2774
+// Expected error 2774
+// Expected error 2763
+// Expected error 2775
+// Expected error 2754
+// Expected error 2754
+// Expected error 2754
+// Expected error 2754
+// Expected "Ex-1035. erreurs : 2774 2774 2763 2775 2754 2754 2754 2754"

@@ -9392,11 +9392,22 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
                                         spls are then ignored) ; a relative name is in the folder of the project
                                         (its writers and readers follow, Ln_Rebind) ; "status" and "freq" are
                                         accepted and ignored, so that a Dump can be read again
-        Writer id  line L  source S  status Ready|Paused|Writing  gain dB  overdub %  mode XFade|Sum  first n  used n
+        Writer id  line L  source S  status Ready|Paused|Writing  gain dB  overdub %  mode XFade|Sum|WMix  first n  used n
+                   direction Forward|Backward|Both (modes XFade, Sum)
+                   WMix : fade s  plateau s  wait s  direction d (a number in [-1, 1])  desync %
+                   mod Gain|Overdub|Fade|Plateau|Wait|Dir|Desync S [options] (the inputs of the pad)
         Reader id  line L | writer W  delay s  speed x  status Ready|Paused|Reading  out D  vol dB  first n  used n
-                   loop once|repeat|catch|loop|exit|stop  cross On|Off (the free loop at the end of the line : it
-                   crosses it, or it jumps to the other end)
-                                        "line" : reader mode, "writer" : delay mode ; the status is set last
+                   loop once|repeat|catch|loop|exit|stop  loopspeed s/s  desync s  outchan n
+                   cross On|Off (the free loop at the end of the line : it crosses it, or it jumps to the other end)
+                   follow W|none (the loop follows the writer W : a forward writer of the line, not in W-Mix)
+                   mode Read|Delay|Stretch|Brage|Grains ("Reader" : Read)
+                   Stretch, Brage : block ms  overlap %  search ms  transp st ; Stretch : stretch x (the tempo)
+                   Grains : size ms  sizernd r  plateau %  platrnd r  fadein %  fadernd r  curve id|none  gvol dB
+                            volrnd r  speedrnd r  direction d  density /s  onsetrnd u (r : a random factor in [1, 5])
+                   mod Offset|Speed|Volume|LoopSpd|Desync S [options] (Offset : doppler Off|On, modes Delay and Read)
+                                        "line" : the modes on a line (Read by default), "writer" : the mode Delay ; the
+                                        mode is set after them ; Dump : the keys of the mode, the optional ones when
+                                        they are not the default, the modulations connected ; the status is set last
         Effect id  type T  status On|Off|Bypass  phase Std|Pre|Post  chan n  out D  limiter On|Off  (+ the keys of the type)
                    T : None, Mixer : src1 S gain1 dB ... src8 S gain8 dB ; AutoMix : src1 S ... src8 S (gains computed) ;
                    Filter : source S  gain dB  freq Hz  q x  mode LP1|HP1|LP|HP|BP|Notch  stages 1|2|4|8|16|32
@@ -9411,7 +9422,8 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
                                         (FX_Set_Type, as in the pad), the status is set last ; "mod X none" disconnects
                    mod : after the source, in any order, depth d  att a  law Add|Scale|Oct|dB  shape Lin|Exp|Log|Curve id
                             polarity Bi|Uni  bypass Off|On (the law of the input, see its_Mod_Law ; the actions possible
-                            depend on the input ; Dump : the law when it is not the default one)
+                            depend on the input ; Dump : the law when it is not the default one) ; the same for the
+                            writers and the readers
         Global  samples Merge|Ignore|Pass  input dB  output dB
                 action StartAll|StopAll|PauseAll|ResumeAll|RewindAll|MuteAll|UnmuteAll|ClearAll  chan n
                                         the settings of the module "Globals" ; the action is performed last, at once ;
@@ -9445,7 +9457,7 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
         0 marks the modules designated by a number, 1 gives a module to the names of the headers,
         2 checks everything on a simulation (lines, channels...), 3 executes.
     Algorithm, Instance, Free Instance|Algorithm, Dump Instance : see "Algorithms" below.
-    Errors 2750 ... 2773, 2780 ... 2790, 2792 ... 2797 ; the result of "table" is 0, or the first error.
+    Errors 2750 ... 2775, 2780 ... 2790, 2792 ... 2799 ; the result of "table" is 0, or the first error.
     It runs in @gfx (the mSL threads of Interstys) : the state of the analysis is global.
 */
 its_TK_Cnt = 0;
@@ -9487,6 +9499,7 @@ its_TK_law = its_TK("law"); // the law of a modulation input : law, shape, polar
 its_TK_shape = its_TK("shape");
 its_TK_polarity = its_TK("polarity");
 its_TK_bypass = its_TK("bypass");
+its_TK_doppler = its_TK("doppler"); // (the offset of a reader in mode Delay or Read : its_ModF_Dop)
 its_TK_file = its_TK("file");
 its_TK_Algorithm = its_TK("Algorithm");
 its_TK_Instance = its_TK("Instance");
@@ -9511,10 +9524,13 @@ its_TbM_Set = its_TbM_Base - 5; // the begin of a Set (followed by the index of 
 its_TbM_SetEnd = its_TbM_Base - 6;
 its_TbM_Chg = its_TbM_Base - 7; // the value which follows comes from a changed argument (Set)
 
-// the keys of the writers and of the readers : their symbol, their name ; values (enumerations : the symbol of each value)
-its_TbWNk = 13;
+// the keys of the writers and of the readers : their symbol, their name ; values (enumerations : the symbol of each value) ;
+// the keys its_TbWMod ..., its_TbRMod ... : "mod" for each modulation input (its_TbWMI, its_TbRMI)
+its_TbWMod = 14; its_TbWMINb = its_Wrt_ModN;
+its_TbWNk = its_TbWMod + its_TbWMINb;
 its_TbWKey = make_array(its_TbWNk); its_TbWNam = make_array(its_TbWNk);
-its_TbRNk = 14;
+its_TbRMod = 34; its_TbRMINb = its_Rdr_ModN;
+its_TbRNk = its_TbRMod + its_TbRMINb;
 its_TbRKey = make_array(its_TbRNk); its_TbRNam = make_array(its_TbRNk);
 function its_TbKey(keys, nams, i, name) ( nams[i] = name; keys[i] = its_TK(name); );
 its_TbKey(its_TbWKey, its_TbWNam, 0, "line"); its_TbKey(its_TbWKey, its_TbWNam, 1, "source");
@@ -9532,6 +9548,42 @@ its_TbKey(its_TbRKey, its_TbRNam, 8, "used"); its_TbKey(its_TbRKey, its_TbRNam, 
 its_TbKey(its_TbRKey, its_TbRNam, 10, "loopspeed"); its_TbKey(its_TbRKey, its_TbRNam, 11, "desync");
 its_TbKey(its_TbRKey, its_TbRNam, 12, "outchan"); // count of output channels (0 : the count of channels used)
 its_TbKey(its_TbRKey, its_TbRNam, 13, "cross"); // the free loop at the end of the line : Off it jumps, On it crosses
+// the writer : "direction" Forward|Backward|Both (modes X-fade, Sum : its_Wrt_Dir), the same word as the direction of W-Mix
+// (a number : the key 11), see its_Tb_Key
+its_TbKey(its_TbWKey, its_TbWNam, 13, "direction");
+// the reader : its mode (Read, Delay, Stretch, Brage, Grains), the settings of the modes Stretch and Brage (block ...
+// transp : the fields its_Rdr_StBlkMs ... in this order ; stretch : mode Stretch), of the mode Grains (size ... onsetrnd :
+// the fields its_Rdr_GrSize ... in this order), the writer that its loop follows
+its_TbKey(its_TbRKey, its_TbRNam, 14, "mode");
+its_TbKey(its_TbRKey, its_TbRNam, 15, "block"); its_TbKey(its_TbRKey, its_TbRNam, 16, "overlap");
+its_TbKey(its_TbRKey, its_TbRNam, 17, "search"); its_TbKey(its_TbRKey, its_TbRNam, 18, "transp");
+its_TbKey(its_TbRKey, its_TbRNam, 19, "stretch");
+its_TbKey(its_TbRKey, its_TbRNam, 20, "size"); its_TbKey(its_TbRKey, its_TbRNam, 21, "sizernd");
+its_TbKey(its_TbRKey, its_TbRNam, 22, "plateau"); its_TbKey(its_TbRKey, its_TbRNam, 23, "platrnd");
+its_TbKey(its_TbRKey, its_TbRNam, 24, "fadein"); its_TbKey(its_TbRKey, its_TbRNam, 25, "fadernd");
+its_TbKey(its_TbRKey, its_TbRNam, 26, "curve"); its_TbKey(its_TbRKey, its_TbRNam, 27, "gvol");
+its_TbKey(its_TbRKey, its_TbRNam, 28, "volrnd"); its_TbKey(its_TbRKey, its_TbRNam, 29, "speedrnd");
+its_TbKey(its_TbRKey, its_TbRNam, 30, "direction"); its_TbKey(its_TbRKey, its_TbRNam, 31, "density");
+its_TbKey(its_TbRKey, its_TbRNam, 32, "onsetrnd");
+its_TbKey(its_TbRKey, its_TbRNam, 33, "follow");
+i__ii = its_TbWMod; loop(its_TbWMINb, its_TbWKey[i__ii] = its_TK_mod; its_TbWNam[i__ii] = "mod"; i__ii += 1;);
+i__ii = its_TbRMod; loop(its_TbRMINb, its_TbRKey[i__ii] = its_TK_mod; its_TbRNam[i__ii] = "mod"; i__ii += 1;);
+// the modulation inputs of the writers and of the readers in a table : their name, their symbol (as its_ModN_Wrt, its_ModN_Rdr)
+its_TbWMIN = make_array(its_TbWMINb); its_TbWMI = make_array(its_TbWMINb);
+its_TbWMIN[0] = "Gain"; its_TbWMIN[1] = "Overdub"; its_TbWMIN[2] = "Fade"; its_TbWMIN[3] = "Plateau"; its_TbWMIN[4] = "Wait";
+its_TbWMIN[5] = "Dir"; its_TbWMIN[6] = "Desync";
+i__ii = 0; loop(its_TbWMINb, its_TbWMI[i__ii] = its_TK(its_TbWMIN[i__ii]); i__ii += 1;);
+its_TbRMIN = make_array(its_TbRMINb); its_TbRMI = make_array(its_TbRMINb);
+its_TbRMIN[0] = "Offset"; its_TbRMIN[1] = "Speed"; its_TbRMIN[2] = "Volume"; its_TbRMIN[3] = "LoopSpd"; its_TbRMIN[4] = "Desync";
+i__ii = 0; loop(its_TbRMINb, its_TbRMI[i__ii] = its_TK(its_TbRMIN[i__ii]); i__ii += 1;);
+// the modes of the reader (its_RdrMode_... ; "Reader" is also accepted for Read), the directions of the writer (its_WrtDir_...)
+its_TbRMdN = make_array(its_RdrModeCnt); its_TbRMd = make_array(its_RdrModeCnt);
+its_TbRMdN[its_RdrMode_Read] = "Read"; its_TbRMdN[its_RdrMode_Delay] = "Delay"; its_TbRMdN[its_RdrMode_Stretch] = "Stretch";
+its_TbRMdN[its_RdrMode_Brage] = "Brage"; its_TbRMdN[its_RdrMode_Grains] = "Grains";
+i__ii = 0; loop(its_RdrModeCnt, its_TbRMd[i__ii] = mSL_symbol(its_TbRMdN[i__ii]); i__ii += 1;);
+its_TbWDrN = make_array(its_WrtDirCnt); its_TbWDr = make_array(its_WrtDirCnt);
+its_TbWDrN[its_WrtDir_Fwd] = "Forward"; its_TbWDrN[its_WrtDir_Bwd] = "Backward"; its_TbWDrN[its_WrtDir_Both] = "Both";
+i__ii = 0; loop(its_WrtDirCnt, its_TbWDr[i__ii] = mSL_symbol(its_TbWDrN[i__ii]); i__ii += 1;);
 // statuses (its_WrtStat_..., its_RdrStat_... : 0 ... 4), modes of the writer, loops of the reader (its_RdrLoopType...)
 its_TbWSt = make_array(5); its_TbRSt = make_array(5);
 its_TbWSt[0] = its_TbRSt[0] = its_TK_Undefined; its_TbWSt[1] = its_TbRSt[1] = its_TK("Created");
@@ -10393,45 +10445,7 @@ local (k, n)
     strcpy(str, "???");
 );
 
-// the key "w" of a writer or a reader (type "ty") : its index (its value in its_Tb_v1, its_Tb_v2), -1 if unknown
-function its_Tb_Key(ty, w) local(keys, nk, ki, i, nm)
-(
-    (ty === its_TK_Writer) ? ( keys = its_TbWKey; nk = its_TbWNk; ) : ( keys = its_TbRKey; nk = its_TbRNk; );
-    ki = -1; i = 0; while ((ki < 0) && (i < nk)) ( (keys[i] === w) ? (ki = i); i += 1; );
-    its_Tb_v2 = 0;
-    (ki >= 0) ? (
-        nm = (ty === its_TK_Writer) ? its_TbWNam[ki] : its_TbRNam[ki];
-        (ty === its_TK_Writer) ? (
-            (ki === 0) ? ( its_Tb_v1 = its_Tb_Id(its_TK_Line, its_Tb_Next(), 0); ) :
-            (ki === 1) ? ( its_Tb_Src(nm, 0); ) :
-            (ki === 2) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbWSt, 5); ) :
-            (ki === 3) ? ( its_Tb_v1 = its_Tb_Num(nm, -120, 40); ) :
-            (ki === 4) ? ( its_Tb_v1 = its_Tb_Num(nm, -150, 150); ) :
-            (ki === 5) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbWMd, its_WrtModeCnt); ) :
-            (ki === 6) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 127); ) :
-            (ki === 7) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 128); ) :
-            (ki === 8) ? ( its_Tb_v1 = its_Tb_Num(nm, 0.001, 10); ) :
-            ((ki === 9) || (ki === 10)) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 100); ) :
-            (ki === 11) ? ( its_Tb_v1 = its_Tb_Num(nm, -1, 1); ) :
-            ( its_Tb_v1 = its_Tb_Num(nm, 0, 100); );
-        ) : (
-            (ki === 0) ? ( its_Tb_v1 = its_Tb_Id(its_TK_Line, its_Tb_Next(), 0); ) :
-            (ki === 1) ? ( its_Tb_v1 = its_Tb_Id(its_TK_Writer, its_Tb_Next(), 0); ) :
-            (ki === 2) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 67108864 / srate); ) :
-            (ki === 3) ? ( its_Tb_v1 = its_Tb_Num(nm, -SPDMAX, SPDMAX); ) :
-            (ki === 4) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbRSt, 5); ) :
-            (ki === 5) ? ( its_Tb_Src(nm, 1); ) :
-            (ki === 6) ? ( its_Tb_v1 = its_Tb_Num(nm, -120, 40); ) :
-            (ki === 7) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 127); ) :
-            (ki === 8) ? ( its_Tb_v1 = its_Tb_Int(nm, 1, 128); ) :
-            (ki === 9) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbRLp, 6); ) :
-            (ki === 12) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 128); ) :
-            (ki === 13) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbFSt, 2); ) : // Off, On
-            ( its_Tb_v1 = its_Tb_Num(nm, -1, 1); ); // loopspeed, desync
-        );
-    );
-    ki;
-);
+// (the keys of the writers and of the readers : its_Tb_Key, after the curves and the options of the modulations)
 
 //—— Curves : envelopes and waveforms (the module "Curves")
 /*
@@ -11045,9 +11059,10 @@ function its_Crv_Free() local(k)
 
 /*
     the options of a modulation input after its source, in any order : depth d, att a, law Add|Scale|Oct|dB, shape Lin|Exp|Log
-    and Curve id, polarity Bi|Uni, bypass Off|On ; its_Tb_v3 the depth, its_Tb_v4 the attenuverter (Undef : not given),
-    its_Tb_v5 the flags given (its_Mod_Flags), its_Tb_v6 their mask ; "kd" the law of the input (its_ModK_...), "nm" its name :
-    an action it does not have is an error, its default action gives 0 (see its_Mod_Law)
+    and Curve id, polarity Bi|Uni, bypass Off|On, doppler Off|On (the offset of a reader : modes Delay and Read) ; its_Tb_v3
+    the depth, its_Tb_v4 the attenuverter (Undef : not given), its_Tb_v5 the flags given (its_Mod_Flags), its_Tb_v6 their
+    mask ; "kd" the law of the input (its_ModK_...), "nm" its name : an action it does not have is an error, its default
+    action gives 0 (see its_Mod_Law)
 */
 function its_Tb_ModOpts(kd, nm) local(w, r, k)
 (
@@ -11094,8 +11109,68 @@ function its_Tb_ModOpts(kd, nm) local(w, r, k)
                 its_Tb_v6 |= its_ModF_Byp;
             );
         ) :
+        (w === its_TK_doppler) ? (
+            its_Tb_Next();
+            ((k = its_Tb_Enum("doppler", its_TbFSt, 2)) >= 0) ? (
+                ((kd & its_ModK_Dop) === 0) ? (
+                    sprintf(#its_TbW, "mod %s : doppler is only for the offset of a reader", nm);
+                    its_Tb_Err(2754, #its_TbW);
+                );
+                its_Tb_v5 = its_Tb_v5 - (its_Tb_v5 & its_ModF_Dop) + k * its_ModF_Dop;
+                its_Tb_v6 |= its_ModF_Dop;
+            );
+        ) :
         (r = 0);
     );
+);
+
+// the text of a modulation in a table : the input "nm", the source "v1" (its channel "v2"), then if it is connected the
+// depth "v3", the attenuverter "v4" (Undef : not given), the law "v5" (the flags of its_Mod_Flags) when it is not the default one
+function its_Tb_ModText(str, nm, v1, v2, v3, v4, v5)
+local (a, c)
+(
+    sprintf(str, "%s ", nm);
+    strcat(str, its_Tb_SrcText(#its_TbV3, v1, v2));
+    (v1 !== 0) ? (
+        (v3 !== Undef) ? strcat(str, sprintf(#its_TbV3, " depth %.10g", v3));
+        (v4 !== Undef) ? strcat(str, sprintf(#its_TbV3, " att %.10g", v4));
+        ((a = (v5 >> 2) & 7) > 0) ? strcat(str, sprintf(#its_TbV3, " law %s", its_TbMLawN[a]));
+        ((a = (v5 >> 5) & 3) > 0) ? (
+            strcat(str, sprintf(#its_TbV3, " shape %s", its_TbMShpN[a]));
+            (a === its_ModS_Crv) ? ( c = (v5 >> 8) & 63; strcat(str, " "); strcat(str, its_Crv_TbName(#its_TbV5, c)); );
+        );
+        (v5 & its_ModF_Uni) ? strcat(str, " polarity Uni");
+        (v5 & its_ModF_Byp) ? strcat(str, " bypass On");
+        (v5 & its_ModF_Dop) ? strcat(str, " doppler On");
+    );
+    str;
+);
+
+// the modulation input "p" (its_Mod_...) : its_Tb_g1 its source, its_Tb_g2 its channel, its_Tb_g3 the depth, its_Tb_g4 the
+// attenuverter, its_Tb_g5 the flags of its law (as given in a table : its_Tb_ModOpts)
+function its_Tb_ModGet(p)
+(
+    its_Tb_g2 = p[its_Mod_Off]; its_Tb_g3 = p[its_Mod_Depth]; its_Tb_g4 = p[its_Mod_Att];
+    its_Tb_g5 = p[its_Mod_Flags] & (its_ModF_Law | its_ModF_Byp | its_ModF_Dop);
+    its_Tb_g1 = p[its_Mod_Src];
+);
+
+// pass 3 : the modulation input "p" set from the key "ki" (its_TbK1 ... its_TbK6) ; a new connection gets the attenuverter
+// 1 and the default depth "d0" (as in the pad)
+function its_Tb_ModSet(p, ki, d0)
+(
+    (its_TbK1[ki] === 0) ? (
+        p[its_Mod_Src] = p[its_Mod_Off] = 0;
+    ) : (
+        (p[its_Mod_Src] === 0) ? (
+            p[its_Mod_Att] = 1;
+            (p[its_Mod_Depth] === 0) ? (p[its_Mod_Depth] = d0);
+        );
+        p[its_Mod_Src] = its_TbK1[ki]; p[its_Mod_Off] = its_TbK2[ki];
+    );
+    (its_TbK3[ki] !== Undef) ? (p[its_Mod_Depth] = its_TbK3[ki]);
+    (its_TbK4[ki] !== Undef) ? (p[its_Mod_Att] = its_TbK4[ki]);
+    (its_TbK6[ki] !== 0) ? (p[its_Mod_Flags] = p[its_Mod_Flags] - (p[its_Mod_Flags] & its_TbK6[ki]) + its_TbK5[ki]);
 );
 
 // the key "w" of an effect : its index (its value in its_Tb_v1 ... its_Tb_v4), -1 if unknown ; the word of "mode" is
@@ -11188,6 +11263,111 @@ function its_Tb_FxOk(ty, ki)
     (ty === its_Efx_TyLFO) ? ((ki === 22) || (ki === 24) || ((ki >= 26) && (ki <= 28)) || (ki === 38)) : 0;
 );
 
+//—— Writers and readers (2)
+
+// the next word is a number (or a "-" before a number)
+function its_Tb_IsNum() local(w) ( ((w = its_Tb_Peek()) === mSL_cstMinus) || (abs(w) < mSL_CharConst); );
+
+// the modulation input of the key "mod" (writer, reader) : its index in "syms" ("n" inputs), -1 and an error if unknown
+function its_Tb_ModIn(syms, n) local(w, i, j)
+(
+    w = its_Tb_Next();
+    j = -1; i = 0; while ((j < 0) && (i < n)) ( (syms[i] === w) ? (j = i); i += 1; );
+    (j < 0) ? (
+        sprintf(#its_TbW, "mod : %s is not a modulation input", mSL_edit_value(#its_TbV, w));
+        its_Tb_Err(2754, #its_TbW);
+    );
+    j;
+);
+
+/*
+    the key "w" of a writer or a reader (type "ty") : its index (its value in its_Tb_v1, its_Tb_v2 ; mod : as an effect,
+    its_Tb_v3 ... its_Tb_v6), -1 if unknown ; the writer : "direction" is a number in mode W-Mix (key 11), else
+    Forward|Backward|Both (key 13) ; the reader : "curve" and "follow" take "none" (-1 : linear ramps, a free loop) ; the
+    offset takes all the actions of the mode Delay (and doppler : modes Delay and Read)
+*/
+function its_Tb_Key(ty, w) local(keys, nk, ki, i, nm, j)
+(
+    (ty === its_TK_Writer) ? ( keys = its_TbWKey; nk = its_TbWNk; ) : ( keys = its_TbRKey; nk = its_TbRNk; );
+    ki = -1; i = 0; while ((ki < 0) && (i < nk)) ( (keys[i] === w) ? (ki = i); i += 1; );
+    its_Tb_v2 = 0;
+    (ki >= 0) ? (
+        nm = (ty === its_TK_Writer) ? its_TbWNam[ki] : its_TbRNam[ki];
+        (ty === its_TK_Writer) ? (
+            (ki === 0) ? ( its_Tb_v1 = its_Tb_Id(its_TK_Line, its_Tb_Next(), 0); ) :
+            (ki === 1) ? ( its_Tb_Src(nm, 0); ) :
+            (ki === 2) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbWSt, 5); ) :
+            (ki === 3) ? ( its_Tb_v1 = its_Tb_Num(nm, -120, 40); ) :
+            (ki === 4) ? ( its_Tb_v1 = its_Tb_Num(nm, -150, 150); ) :
+            (ki === 5) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbWMd, its_WrtModeCnt); ) :
+            (ki === 6) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 127); ) :
+            (ki === 7) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 128); ) :
+            (ki === 8) ? ( its_Tb_v1 = its_Tb_Num(nm, 0.001, 10); ) :
+            ((ki === 9) || (ki === 10)) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 100); ) :
+            (ki === 11) ? (
+                its_Tb_IsNum() ? ( its_Tb_v1 = its_Tb_Num(nm, -1, 1); ) : ( its_Tb_v1 = its_Tb_Enum(nm, its_TbWDr, its_WrtDirCnt); ki = 13; );
+            ) :
+            (ki === 12) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 100); ) :
+            (
+                // mod : the input, its source, then its options (depth, att, law...)
+                ((j = its_Tb_ModIn(its_TbWMI, its_TbWMINb)) >= 0) ? (
+                    ki = its_TbWMod + j;
+                    its_Tb_Src("mod", 0);
+                    its_Tb_ModOpts(its_ModK_Wrt[j], its_TbWMIN[j]);
+                );
+            );
+        ) : (
+            (ki === 0) ? ( its_Tb_v1 = its_Tb_Id(its_TK_Line, its_Tb_Next(), 0); ) :
+            (ki === 1) ? ( its_Tb_v1 = its_Tb_Id(its_TK_Writer, its_Tb_Next(), 0); ) :
+            (ki === 2) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 67108864 / srate); ) :
+            ((ki === 3) || (ki === 19)) ? ( its_Tb_v1 = its_Tb_Num(nm, -SPDMAX, SPDMAX); ) : // speed, stretch
+            (ki === 4) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbRSt, 5); ) :
+            (ki === 5) ? ( its_Tb_Src(nm, 1); ) :
+            (ki === 6) ? ( its_Tb_v1 = its_Tb_Num(nm, -120, 40); ) :
+            (ki === 7) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 127); ) :
+            (ki === 8) ? ( its_Tb_v1 = its_Tb_Int(nm, 1, 128); ) :
+            (ki === 9) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbRLp, 6); ) :
+            ((ki === 10) || (ki === 11)) ? ( its_Tb_v1 = its_Tb_Num(nm, -1, 1); ) : // loopspeed, desync
+            (ki === 12) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 128); ) :
+            (ki === 13) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbFSt, 2); ) : // Off, On
+            (ki === 14) ? (
+                (its_Tb_Peek() === its_TK_Reader) ? ( its_Tb_Next(); its_Tb_v1 = its_RdrMode_Read; ) :
+                    ( its_Tb_v1 = its_Tb_Enum(nm, its_TbRMd, its_RdrModeCnt); );
+            ) :
+            // Stretch, Brage (the ranges of the pad, its_RdSt_Range) : block, overlap, search, transp
+            (ki === 15) ? ( its_Tb_v1 = its_Tb_Num(nm, 10, 5000); ) :
+            (ki === 16) ? ( its_Tb_v1 = its_Tb_Int(nm, 5, 50); ) :
+            (ki === 17) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 200); ) :
+            (ki === 18) ? ( its_Tb_v1 = its_Tb_Num(nm, -24, 24); ) :
+            // Grains (its_RdGr_Range) : size, plateau, fadein, curve, gvol, direction, density, onsetrnd ; the random
+            // factors (sizernd, platrnd, fadernd, volrnd, speedrnd) in [1, 5]
+            (ki === 20) ? ( its_Tb_v1 = its_Tb_Num(nm, 10, 10000); ) :
+            ((ki === 22) || (ki === 24)) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 100); ) :
+            (ki === 26) ? (
+                (its_Tb_Peek() === its_TK_none) ? ( its_Tb_Next(); its_Tb_v1 = -1; ) : ( its_Tb_v1 = its_Crv_Id(its_Tb_Next(), 0); );
+            ) :
+            (ki === 27) ? ( its_Tb_v1 = its_Tb_Num(nm, -20, 20); ) :
+            (ki === 30) ? ( its_Tb_v1 = its_Tb_Num(nm, -1, 1); ) :
+            (ki === 31) ? ( its_Tb_v1 = its_Tb_Num(nm, 0.01, 100); ) :
+            (ki === 32) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 1); ) :
+            (ki < 30) ? ( its_Tb_v1 = its_Tb_Num(nm, 1, 5); ) : // the random factors
+            (ki === 33) ? (
+                // follow : the writer (-1 : none, a free loop)
+                (its_Tb_Peek() === its_TK_none) ? ( its_Tb_Next(); its_Tb_v1 = -1; ) :
+                    ( its_Tb_v1 = its_Tb_Id(its_TK_Writer, its_Tb_Next(), 0); );
+            ) : (
+                // mod : the input, its source, then its options
+                ((j = its_Tb_ModIn(its_TbRMI, its_TbRMINb)) >= 0) ? (
+                    ki = its_TbRMod + j;
+                    its_Tb_Src("mod", 0);
+                    its_Tb_ModOpts((j === 0) ? its_ModK_OffDly : its_ModK_Rdr[j], its_TbRMIN[j]);
+                );
+            );
+        );
+    );
+    ki;
+);
+
 // the keys of the block, until the next header : its_TbKS, its_TbK1 ... its_TbK4
 function its_Tb_Keys(ty) local(w, ki)
 (
@@ -11207,10 +11387,11 @@ function its_Tb_Keys(ty) local(w, ki)
     );
 );
 
-// the value of the key "ki" of the module "b" (type "ty") : its_Tb_g1, its_Tb_g2 ; b === 0 : no module
+// the value of the key "ki" of the module "b" (type "ty") : its_Tb_g1, its_Tb_g2 (mod : its_Tb_g1 ... its_Tb_g5, see
+// its_Tb_ModGet) ; b === 0 : no module
 function its_Tb_Get(ty, ki, b)
 (
-    its_Tb_g2 = 0;
+    its_Tb_g2 = its_Tb_g3 = its_Tb_g4 = its_Tb_g5 = 0;
     its_Tb_g1 = (b === 0) ? (((ty === its_TK_Writer) ? (ki === 2) : (ki === 4)) ? its_WrtStat_UnDef : -1) :
     (ty === its_TK_Writer) ? (
         (ki === 0) ? b[its_Wrt_LineNb] :
@@ -11220,7 +11401,10 @@ function its_Tb_Get(ty, ki, b)
         (ki === 4) ? b[its_Wrt_Ovrdb] :
         (ki === 5) ? b[its_Wrt_Mode] :
         (ki === 6) ? b[its_Wrt_Bf1stChan] :
-        (ki === 7) ? b[its_Wrt_BfChanUsed] : b[its_Wrt_WFade + ki - 8];
+        (ki === 7) ? b[its_Wrt_BfChanUsed] :
+        (ki < 13) ? b[its_Wrt_WFade + ki - 8] : // W-Mix : fade ... desync
+        (ki === 13) ? b[its_Wrt_Dir] :
+        its_Tb_ModGet(b + its_Wrt_Mod1 + (ki - its_TbWMod) * its_ModDist);
     ) : (
         (ki === 0) ? (its_Rd_Lined(b[its_Rdr_Mode]) ? b[its_Rdr_LineNb] : -1) :
         (ki === 1) ? ((b[its_Rdr_Mode] === its_RdrMode_Delay) ? b[its_Rdr_WrSrc] : -1) :
@@ -11234,12 +11418,20 @@ function its_Tb_Get(ty, ki, b)
         (ki === 9) ? b[its_Rdr_LoopType] :
         (ki === 10) ? b[its_Rdr_LoopSpd] :
         (ki === 11) ? b[its_Rdr_Desync] :
-        (ki === 12) ? b[its_Rdr_OutCnt] : (b[its_Rdr_LoopCross] !== 0);
+        (ki === 12) ? b[its_Rdr_OutCnt] :
+        (ki === 13) ? (b[its_Rdr_LoopCross] !== 0) :
+        (ki === 14) ? b[its_Rdr_Mode] :
+        (ki < 19) ? b[its_Rdr_StBlkMs + ki - 15] : // block, overlap, search, transp
+        (ki === 19) ? b[its_Rdr_Stretch] :
+        (ki === 26) ? b[its_Rdr_GrCurve] - 1 : // (-1 : none)
+        (ki < 33) ? b[its_Rdr_GrSize + ki - 20] : // size ... onsetrnd
+        (ki === 33) ? b[its_Rdr_LoopWr] - 1 : // (-1 : none)
+        its_Tb_ModGet(b + its_Rdr_Mod1 + (ki - its_TbRMod) * its_ModDist);
     );
 );
 
-// the text of the value "v1", "v2" of the key "ki" (type "ty")
-function its_Tb_ValText(str, ty, ki, v1, v2)
+// the text of the value "v1" ... "v5" of the key "ki" (type "ty" ; mod : v3, v4 Undef if not given, v5 the flags of the law)
+function its_Tb_ValText(str, ty, ki, v1, v2, v3, v4, v5)
 (
     (ty === its_TK_Writer) ? (
         (ki === 0) ? ((v1 < 0) ? strcpy(str, "none") : sprintf(str, "%d", v1 + 1)) :
@@ -11247,14 +11439,19 @@ function its_Tb_ValText(str, ty, ki, v1, v2)
         (ki === 2) ? strcpy(str, menu_Wrt_Status_N[max(0, min(4, v1))]) :
         (ki === 5) ? strcpy(str, (v1 === its_WrtMode_WMix) ? "WMix" : (v1 === its_WrtMode_Sum) ? "Sum" : "XFade") :
         ((ki === 6) || (ki === 7)) ? sprintf(str, "%d", v1) :
+        (ki === 13) ? strcpy(str, its_TbWDrN[max(0, min(its_WrtDirCnt - 1, 0|v1))]) :
+        (ki >= its_TbWMod) ? its_Tb_ModText(str, its_TbWMIN[ki - its_TbWMod], v1, v2, v3, v4, v5) :
         sprintf(str, "%.10g", v1);
     ) : (
-        ((ki === 0) || (ki === 1)) ? ((v1 < 0) ? strcpy(str, "none") : sprintf(str, "%d", v1 + 1)) :
+        ((ki === 0) || (ki === 1) || (ki === 33)) ? ((v1 < 0) ? strcpy(str, "none") : sprintf(str, "%d", v1 + 1)) :
         (ki === 4) ? strcpy(str, menu_Rdr_Status_N[(v1 > 4) ? 4 : max(0, v1)]) : // (stopping, starting : Reading)
         (ki === 5) ? ((v1 === 0) ? strcpy(str, "Own") : its_Tb_SrcText(str, v1, v2)) :
         ((ki === 7) || (ki === 8) || (ki === 12)) ? sprintf(str, "%d", v1) :
         (ki === 9) ? strcpy(str, menu_Rdr_Loop_N[max(0, min(5, v1))]) :
         (ki === 13) ? strcpy(str, v1 ? "On" : "Off") :
+        (ki === 14) ? strcpy(str, its_TbRMdN[max(0, min(its_RdrModeCnt - 1, 0|v1))]) :
+        (ki === 26) ? (((v1 >= 0) && (v1 < its_CrvMx)) ? its_Crv_TbName(str, v1) : strcpy(str, "none")) :
+        (ki >= its_TbRMod) ? its_Tb_ModText(str, its_TbRMIN[ki - its_TbRMod], v1, v2, v3, v4, v5) :
         sprintf(str, "%.10g", v1);
     );
     str;
@@ -11267,7 +11464,7 @@ function its_Tb_Cat(ty, ki, b)
     strcat(#its_TbW, " ");
     strcat(#its_TbW, (ty === its_TK_Writer) ? its_TbWNam[ki] : its_TbRNam[ki]);
     strcat(#its_TbW, " ");
-    strcat(#its_TbW, its_Tb_ValText(#its_TbV1, ty, ki, its_Tb_g1, its_Tb_g2));
+    strcat(#its_TbW, its_Tb_ValText(#its_TbV1, ty, ki, its_Tb_g1, its_Tb_g2, its_Tb_g3, its_Tb_g4, its_Tb_g5));
 );
 
 // the block of the writer, the reader or the effect "k" (0 : none)
@@ -11286,7 +11483,12 @@ function its_Tb_Blk(ty, k) local(b)
     );
 );
 
-function its_Tb_DumpMod(ty, k) local(b, i)
+/*
+    Dump Writer|Reader k : the keys of the module in the syntax of a table ; only the ones that have a meaning in its mode,
+    the optional ones when they are not the default (a writer : its direction ; a reader : its mode, the moving loop...),
+    the modulation inputs connected
+*/
+function its_Tb_DumpMod(ty, k) local(b, i, md, ok)
 (
     sprintf(#its_TbW, "%s %d", its_Tb_TyName(ty), k + 1);
     ((b = its_Tb_Blk(ty, k)) === 0) ? (
@@ -11297,11 +11499,19 @@ function its_Tb_DumpMod(ty, k) local(b, i)
         (b[its_Wrt_LineNb] >= 0) ? its_Tb_Cat(ty, 0, b);
         (b[its_Wrt_Src] !== 0) ? its_Tb_Cat(ty, 1, b);
         i = 3; loop(5, its_Tb_Cat(ty, i, b); i += 1;);
-        (b[its_Wrt_Mode] === its_WrtMode_WMix) ? ( i = 8; loop(5, its_Tb_Cat(ty, i, b); i += 1;); ); // its settings
+        (b[its_Wrt_Mode] === its_WrtMode_WMix) ? ( i = 8; loop(5, its_Tb_Cat(ty, i, b); i += 1;); ) : // its settings
+        (b[its_Wrt_Dir] !== its_WrtDir_Fwd) ? its_Tb_Cat(ty, 13, b); // X-fade, Sum : the direction, if not forward
+        ok = its_Wrt_ModOk(b);
+        i = 0; loop(its_TbWMINb,
+            ((b[its_Wrt_Mod1 + i * its_ModDist + its_Mod_Src] !== 0) && (ok & (1 << i))) ? its_Tb_Cat(ty, its_TbWMod + i, b);
+            i += 1;
+        );
     ) : (
+        md = b[its_Rdr_Mode];
         its_Tb_Cat(ty, 4, b);
-        its_Rd_Lined(b[its_Rdr_Mode]) ? (
+        its_Rd_Lined(md) ? (
             (b[its_Rdr_LineNb] >= 0) ? its_Tb_Cat(ty, 0, b);
+            (md !== its_RdrMode_Read) ? its_Tb_Cat(ty, 14, b); // Stretch, Brage, Grains
         ) : (
             (b[its_Rdr_WrSrc] >= 0) ? its_Tb_Cat(ty, 1, b);
             its_Tb_Cat(ty, 2, b);
@@ -11312,6 +11522,15 @@ function its_Tb_DumpMod(ty, k) local(b, i)
         (its_Rd_Lined(b[its_Rdr_Mode]) && (b[its_Rdr_LoopCross] !== 0)) ? its_Tb_Cat(ty, 13, b); // it crosses the end of the line
         (its_Rd_Lined(b[its_Rdr_Mode]) && (b[its_Rdr_Desync] !== 0)) ? its_Tb_Cat(ty, 11, b); // channels desynchronized
         (b[its_Rdr_OutCnt] > 0) ? its_Tb_Cat(ty, 12, b); // a count of output channels chosen
+        // the settings of the mode : Stretch and Brage (block, overlap, search, transp ; stretch : Stretch), Grains
+        its_Rd_Blocks(md) ? ( i = 15; loop((md === its_RdrMode_Stretch) ? 5 : 4, its_Tb_Cat(ty, i, b); i += 1;); );
+        (md === its_RdrMode_Grains) ? ( i = 20; loop(13, its_Tb_Cat(ty, i, b); i += 1;); );
+        (its_Rd_Lined(md) && (b[its_Rdr_LoopWr] > 0)) ? its_Tb_Cat(ty, 33, b); // the loop follows a writer
+        ok = its_Rdr_ModOk(b);
+        i = 0; loop(its_TbRMINb,
+            ((b[its_Rdr_Mod1 + i * its_ModDist + its_Mod_Src] !== 0) && (ok & (1 << i))) ? its_Tb_Cat(ty, its_TbRMod + i, b);
+            i += 1;
+        );
     );
     mSL_log(SysLogBox, #its_TbW);
 );
@@ -11365,6 +11584,30 @@ function its_Tb_SimMod(ty, k) local(l, w, sp, ch)
                 its_Tb_Err(2765, #its_TbW);
             );
         );
+        // the mode : Delay follows a writer (the key writer), the other modes read a line (the key line)
+        ((its_Tb_error === 0) && its_TbKS[14]) ? (
+            ((its_TbK1[14] === its_RdrMode_Delay) && its_TbKS[0]) ? (
+                sprintf(#its_TbW, "Reader %d : mode Delay and a line (a delay follows a writer : the key writer)", k + 1);
+                its_Tb_Err(2774, #its_TbW);
+            ) :
+            ((its_TbK1[14] !== its_RdrMode_Delay) && its_TbKS[1]) ? (
+                sprintf(#its_TbW, "Reader %d : mode %s and a writer (the key writer gives the mode Delay)", k + 1,
+                    its_TbRMdN[its_TbK1[14]]);
+                its_Tb_Err(2774, #its_TbW);
+            );
+        );
+        // the loop follows a writer : it exists ; it writes the line of the reader, when the block gives the line
+        ((its_Tb_error === 0) && its_TbKS[33] && (its_TbK1[33] >= 0)) ? (
+            w = its_TbK1[33];
+            (its_TbSimWE[w] == 0) ? (
+                sprintf(#its_TbW, "Reader %d : follow : Writer %d is not defined", k + 1, w + 1);
+                its_Tb_Err(2763, #its_TbW);
+            ) :
+            (its_TbKS[0] && (its_TbSimWL[w] !== its_TbK1[0])) ? (
+                sprintf(#its_TbW, "Reader %d : follow : Writer %d does not write Line %d", k + 1, w + 1, its_TbK1[0] + 1);
+                its_Tb_Err(2775, #its_TbW);
+            );
+        );
     );
 );
 
@@ -11389,6 +11632,15 @@ function its_Tb_SetMod(ty, k) local(b, v)
         its_TbKS[6] ? ( b[its_Wrt_Bf1stChan] = its_TbK1[6]; b[its_Wrt_Check] = 0; );
         its_TbKS[7] ? ( b[its_Wrt_BfChanUsed] = its_TbK1[7]; b[its_Wrt_Check] = 0; );
         v = 8; loop(5, its_TbKS[v] ? ( b[its_Wrt_WFade + v - 8] = its_TbK1[v]; ); v += 1;); // W-Mix : fade ... desync
+        its_TbKS[13] ? Wr_Set_Dir(b, its_TbK1[13]); // X-fade, Sum : the direction
+        // the modulations : a new connection gets the attenuverter 1 and the default depth (as in the pad)
+        v = 0; loop(its_TbWMINb,
+            its_TbKS[its_TbWMod + v] ? (
+                its_Tb_ModSet(b + its_Wrt_Mod1 + v * its_ModDist, its_TbWMod + v, its_ModD_Wrt[v]);
+                b[its_Wrt_Check] = 0;
+            );
+            v += 1;
+        );
         (its_Tb_own > 0) ? (b[its_Wrt_Owner] = its_Tb_own);
         Wr_Set_Status(k, its_TbKS[2] ? its_TbK1[2] : b[its_Wrt_Status]); // no line or no source : "Created"
     ) : (
@@ -11401,6 +11653,21 @@ function its_Tb_SetMod(ty, k) local(b, v)
         (its_TbKS[1] && ((b[its_Rdr_Mode] !== its_RdrMode_Delay) || (b[its_Rdr_WrSrc] !== its_TbK1[1]))) ? (
             b[its_Rdr_Mode] = its_RdrMode_Delay;
             Rd_Set_Writer(k, its_TbK1[1] + 1);
+        );
+        // the mode (as the pad : between the modes on a line, the line, the loop, the speed and the position are kept),
+        // then its settings : Stretch and Brage, Grains (the curve : its number + 1, 0 linear ramps)
+        its_TbKS[14] ? Rd_Set_Mode(k, its_TbK1[14]);
+        v = 15; loop(4, its_TbKS[v] ? ( b[its_Rdr_StBlkMs + v - 15] = its_TbK1[v]; ); v += 1;);
+        its_TbKS[19] ? ( b[its_Rdr_Stretch] = its_TbK1[19]; );
+        v = 20; loop(13, its_TbKS[v] ? ( b[its_Rdr_GrSize + v - 20] = its_TbK1[v] + ((v === 26) ? 1 : 0); ); v += 1;);
+        its_TbKS[33] ? ( b[its_Rdr_LoopWr] = its_TbK1[33] + 1; ); // the writer followed + 1 (0 : a free loop)
+        // the modulations
+        v = 0; loop(its_TbRMINb,
+            its_TbKS[its_TbRMod + v] ? (
+                its_Tb_ModSet(b + its_Rdr_Mod1 + v * its_ModDist, its_TbRMod + v, its_ModD_Rdr[v]);
+                b[its_Rdr_Check] = 0;
+            );
+            v += 1;
         );
         its_TbKS[5] ? ( b[its_Rdr_OutK] = its_TbK1[5]; b[its_Rdr_OutOff] = its_TbK2[5]; b[its_Rdr_Check] = 0; );
         its_TbKS[6] ? ( b[its_Rdr_OutVoldB] = v = its_TbK1[6]; b[its_Rdr_OutVol] = (v <= -120) ? 0 : 10^(v/20); );
@@ -11492,18 +11759,12 @@ function its_Tb_FxGet(ki, fx) local(p)
     (ki === 37) ? its_Tb_HarmN(fx) : // harm : the count of weights up to the last one not null
     (ki === 38) ? fx[its_Efx_Par1 + ((fx[its_Efx_Type] === its_Efx_TySat) ? 9 : 5)] : // curve (LFO Par6, Saturation Par10)
     (ki < its_TbFMod) ? fx[its_Efx_Par1 + ki - 28] : // bias Par3, output Par6, order Par7, stretch Par8, amount Par9
-    (
-        p = fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist;
-        its_Tb_g2 = p[its_Mod_Off]; its_Tb_g3 = p[its_Mod_Depth]; its_Tb_g4 = p[its_Mod_Att];
-        its_Tb_g5 = p[its_Mod_Flags] & (its_ModF_Law | its_ModF_Byp);
-        p[its_Mod_Src];
-    );
+    its_Tb_ModGet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist);
 );
 
 // the text of the value "v1" ... "v5" of the key "ki" (effect of type "ty") ; v3, v4 : Undef if not given ; v5 : the flags
 // of the law (mod)
 function its_Tb_FxText(str, ki, ty, v1, v2, v3, v4, v5)
-local (a, c)
 (
     (ki === 0) ? strcpy(str, its_TbFTyN[max(0, min(its_Efx_TyCnt - 1, v1))]) :
     ((ki === 1) || (ki === 5)) ? strcpy(str, its_TbFStN[max(0, min(3, v1))]) :
@@ -11515,24 +11776,7 @@ local (a, c)
         (ty === its_Efx_TySat) ? its_TbSMdN[max(0, min(its_SatModeCnt - 1, v1))] : its_TbLShN[max(0, min(its_LfoCnt - 1, v1))]) :
     (ki === 38) ? (((v1 >= 0) && (v1 < its_CrvMx)) ? its_Crv_TbName(str, v1) : sprintf(str, "%d", v1 + 1)) :
     (ki < its_TbFMod) ? sprintf(str, "%.10g", v1) :
-    (
-        // mod : the input, the source, depth, att
-        sprintf(str, "%s ", its_TbFMIN[ki - its_TbFMod]);
-        strcat(str, its_Tb_SrcText(#its_TbV3, v1, v2));
-        (v1 !== 0) ? (
-            (v3 !== Undef) ? strcat(str, sprintf(#its_TbV3, " depth %.10g", v3));
-            (v4 !== Undef) ? strcat(str, sprintf(#its_TbV3, " att %.10g", v4));
-            // the law, when it is not the default one
-            ((a = (v5 >> 2) & 7) > 0) ? strcat(str, sprintf(#its_TbV3, " law %s", its_TbMLawN[a]));
-            ((a = (v5 >> 5) & 3) > 0) ? (
-                strcat(str, sprintf(#its_TbV3, " shape %s", its_TbMShpN[a]));
-                (a === its_ModS_Crv) ? ( c = (v5 >> 8) & 63; strcat(str, " "); strcat(str, its_Crv_TbName(#its_TbV5, c)); );
-            );
-            (v5 & its_ModF_Uni) ? strcat(str, " polarity Uni");
-            (v5 & its_ModF_Byp) ? strcat(str, " bypass On");
-        );
-        str;
-    );
+    its_Tb_ModText(str, its_TbFMIN[ki - its_TbFMod], v1, v2, v3, v4, v5); // mod : the input, the source, depth, att, the law
     str;
 );
 
@@ -11630,21 +11874,7 @@ function its_Tb_SetFx(k) local(fx, ty, j, p, ki)
         its_TbKS[38] ? ( fx[its_Efx_Par1 + ((ty === its_Efx_TySat) ? 9 : 5)] = its_TbK1[38]; );
         // the modulations : a new connection gets the attenuverter 1 and the default depth (as in the pad)
         ki = its_TbFMod; loop(its_TbFMINb,
-            its_TbKS[ki] ? (
-                p = fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist;
-                (its_TbK1[ki] === 0) ? (
-                    p[its_Mod_Src] = p[its_Mod_Off] = 0;
-                ) : (
-                    (p[its_Mod_Src] === 0) ? (
-                        p[its_Mod_Att] = 1;
-                        (p[its_Mod_Depth] === 0) ? (p[its_Mod_Depth] = its_TbFMId[ki - its_TbFMod]);
-                    );
-                    p[its_Mod_Src] = its_TbK1[ki]; p[its_Mod_Off] = its_TbK2[ki];
-                );
-                (its_TbK3[ki] !== Undef) ? (p[its_Mod_Depth] = its_TbK3[ki]);
-                (its_TbK4[ki] !== Undef) ? (p[its_Mod_Att] = its_TbK4[ki]);
-                (its_TbK6[ki] !== 0) ? (p[its_Mod_Flags] = p[its_Mod_Flags] - (p[its_Mod_Flags] & its_TbK6[ki]) + its_TbK5[ki]);
-            );
+            its_TbKS[ki] ? its_Tb_ModSet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist, ki, its_TbFMId[ki - its_TbFMod]);
             ki += 1;
         );
         its_TbKS[1] ? ( fx[its_Efx_Status] = its_TbK1[1]; );
@@ -11723,13 +11953,17 @@ function its_Tb_CheckMod(ty, k) local(b, ki, ok, nk, same)
         ki = 0; loop(nk,
             its_TbKS[ki] ? (
                 its_Tb_Get(ty, ki, b);
+                // (mod : also the depth and the attenuverter if given, the flags of the law given ; see its_Tb_Keys)
                 same = ((ty === its_TK_Reader) && (ki === 2)) ? (abs(its_Tb_g1 - its_TbK1[ki]) < 0.6 / srate) :
-                    (abs(its_Tb_g1 - its_TbK1[ki]) < 0.0000001) && (its_Tb_g2 === its_TbK2[ki]);
+                    (abs(its_Tb_g1 - its_TbK1[ki]) < 0.0000001) && (its_Tb_g2 === its_TbK2[ki])
+                    && ((its_TbK3[ki] === Undef) || (abs(its_Tb_g3 - its_TbK3[ki]) < 0.0000001))
+                    && ((its_TbK4[ki] === Undef) || (abs(its_Tb_g4 - its_TbK4[ki]) < 0.0000001))
+                    && ((its_Tb_g5 & its_TbK6[ki]) === its_TbK5[ki]);
                 (!same) ? (
                     sprintf(#its_TbMsg, "ERR: 2759    Interstys table : Check %s %d : %s %s (expected %s)",
                         its_Tb_TyName(ty), k + 1, (ty === its_TK_Writer) ? its_TbWNam[ki] : its_TbRNam[ki],
-                        its_Tb_ValText(#its_TbV1, ty, ki, its_Tb_g1, its_Tb_g2),
-                        its_Tb_ValText(#its_TbV2, ty, ki, its_TbK1[ki], its_TbK2[ki]));
+                        its_Tb_ValText(#its_TbV1, ty, ki, its_Tb_g1, its_Tb_g2, its_Tb_g3, its_Tb_g4, its_Tb_g5),
+                        its_Tb_ValText(#its_TbV2, ty, ki, its_TbK1[ki], its_TbK2[ki], its_TbK3[ki], its_TbK4[ki], its_TbK5[ki]));
                     mSL_log(SysLogBox, #its_TbMsg);
                     (its_Tb_res === 0) ? (its_Tb_res = 2759);
                     ok = 0;
