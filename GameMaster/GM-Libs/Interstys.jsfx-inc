@@ -537,7 +537,8 @@ its_Efx_WkOld = idx; idx += 1; //  la zone remplacée par @block, libérée par 
 // Par5 déphasage entre les canaux (en tours), Par6 la courbe de la forme "Curve" (0 ... its_CrvMx-1) ; St1 phase [0, 1[ ; Filter : Par1 fréquence de coupure (Hz), Par2 Q,
 // Par3 mode, Par4 pente (2^Par4 étages) ; Saturation : Par1 drive (dB), Par2 mode, Par3 biais, Par4 mix [0, 1],
 // Par5 suréchantillonnage (2^Par5 fois), Par6 gain de sortie (dB), Par7 ordre (x - A sin, Chebyshev), Par8 étirement (Cheb. sum),
-// Par9 amplitude A du sinus (x - A sin), Par10 la courbe du mode Curve (0 ... its_CrvMx-1))
+// Par9 amplitude A du sinus (x - A sin), Par10 la courbe du mode Curve (0 ... its_CrvMx-1), Par11 ADAA (1 : en service,
+// les modes qui ont une primitive, voir its_Sat_Adaa))
 its_Efx_Par1 = idx; idx += 12;
 its_Efx_St1 = idx; idx += 4;
 its_Efx_Harm1 = idx; idx += 16; // Saturation, mode Cheb. sum : les poids des harmoniques 1 ... 16 (its_SatHarm), dans [-1, 1]
@@ -627,7 +628,11 @@ its_SatModeCnt = 8; // count of modes
 its_SatHarm = 16; // count of the weights of the mode Cheb. sum (its_Efx_Harm1)
 its_HarmH = 90; // height of the editor of the weights (pixels)
 its_SatOSCnt = 4; // oversampling (its_Efx_Par5) : 1, 2, 4 or 8 times
-its_SatChW = 12; // words per channel in the work area : previous input, DC blocker (2), anti-aliasing biquads (4 x 2)
+// words per channel in the work area : previous input, DC blocker (2), anti-aliasing biquads (4 x 2), ADAA : the previous
+// input of the shape and its primitive (see its_Sat_Adaa)
+its_SatChW = 13;
+its_SatAdEps = 0.00001; // ADAA : below this difference of the inputs, the shape of their middle (see its_Sat_Adaa)
+its_SatLn2 = log(2);
 its_SatDcK = 1 - 2 * $pi * 10 / srate; // DC blocker : pole
 its_LimAtt = 1 - exp(-1 / (0.005 * srate)); // auto-limiter of the effects : attack about 5 ms
 its_LimRel = 1 - exp(-1 / (1.5 * srate)); // release about 1.5 s
@@ -641,6 +646,9 @@ its_FxW_Size = 0; // size of the area (words)
 its_FxW_F = 1; // frequency, Q and mode of the coefficients
 its_FxW_Q = 2;
 its_FxW_Md = 3;
+// Saturation : the biquads of the anti-aliasing filter (2 with ADAA, else 4) ; the shape of the primitives kept (its mode,
+// -1 : none ; its order, its A), see its_Sat_Adaa
+its_FxW_Nb = 4; its_FxW_AdK = 5; its_FxW_AdN = 6; its_FxW_AdA = 7;
 its_FxW_Hdr = 8; // first coefficient
 // LFO shapes (its_Efx_Par2)
 its_LfoSine = 0;
@@ -2194,10 +2202,15 @@ function its_Sat_Curve(u, fx)
 );
 
 // Saturation : the curve of the mode "md" (in [-1, 1], except x - A sin : about 0.5 * u, Cheb. sum : the sum of the |weights|) ;
-// n : the order (x - A sin, Chebyshev) or the stretch (Cheb. sum) ; fx : the effect (A, the weights of Cheb. sum, the curve)
+// n : the order (x - A sin, Chebyshev) or the stretch (Cheb. sum) ; fx : the effect (A, the weights of Cheb. sum, the curve) ;
+// tanh : a rational function (Padé 7/6, error < 0.0001, 1 beyond 4.97)
 function its_Sat_Shape(u, md, n, fx)
+local (a)
 (
-    (md === its_SatSoft) ? (u = max(-20, min(20, u)); 1 - 2 / (exp(2 * u) + 1)) : // tanh
+    (md === its_SatSoft) ? (
+        (u >= 4.97) ? 1 : (u <= -4.97) ? -1 :
+        ( a = u * u; u * (135135 + a * (17325 + a * (378 + a))) / (135135 + a * (62370 + a * (3150 + 28 * a))); );
+    ) :
     (md === its_SatHard) ? max(-1, min(1, u)) :
     (md === its_SatFold) ? (u = 0.25 * (u + 1); 1 - 4 * abs(u - floor(u) - 0.5)) : // folds back at -1 and 1
     (md === its_SatXSin) ? 0.5 * (u - fx[its_Efx_Par1 + 8] * sin(0.5 * $pi * n * u)) :
@@ -2205,6 +2218,55 @@ function its_Sat_Shape(u, md, n, fx)
     (md === its_SatChebSum) ? its_Cheb_Sum(u, n, fx + its_Efx_Harm1) :
     (md === its_SatCurve) ? its_Sat_Curve(u, fx) :
     sin(0.5 * $pi * u);
+);
+
+// Saturation : the modes that have a primitive (ADAA, its_Sat_Adaa) : Soft, Hard, Fold, SineFold, XSin
+function its_Sat_AdOk(md) ( (md >= its_SatSoft) && (md <= its_SatXSin); );
+
+/*
+    Saturation : the primitive F of the shape of the mode "md" (its_Sat_Shape), F(0) = 0 : tanh, log(cosh(u)) ; hard clip,
+    u² / 2, then |u| - 1/2 ; fold (a triangle of period 4 : F is periodic, its integral over a period is 0), by the phase
+    t = u + 1 modulo 4 ; sine fold, (2 / pi) (1 - cos(pi u / 2)) ; x - A sin(n x pi / 2), with a = n pi / 2 :
+    (u² / 2 + A (cos(a u) - 1) / a) / 2
+*/
+function its_Sat_Prim(u, md, n, fx)
+local (a, t)
+(
+    (md === its_SatSoft) ? (
+        a = abs(u);
+        (a > 20) ? a - its_SatLn2 : a + log(1 + exp(-2 * a)) - its_SatLn2;
+    ) :
+    (md === its_SatHard) ? (
+        a = abs(u);
+        (a <= 1) ? 0.5 * u * u : a - 0.5;
+    ) :
+    (md === its_SatFold) ? (
+        t = u + 1; t -= 4 * floor(0.25 * t);
+        (t <= 2) ? 0.5 * (t - 1) * (t - 1) : 1 - 0.5 * (3 - t) * (3 - t);
+    ) :
+    (md === its_SatSine) ? (2 / $pi) * (1 - cos(0.5 * $pi * u)) :
+    (md === its_SatXSin) ? (
+        a = 0.5 * $pi * n;
+        0.5 * (0.5 * u * u + ((abs(a) > 0.000001) ? fx[its_Efx_Par1 + 8] * (cos(a * u) - 1) / a : 0));
+    ) : 0;
+);
+
+/*
+    Saturation, ADAA (antiderivative anti-aliasing, first order) : the output for the input "u" of the shape is the mean of the
+    shape between the previous input u0 and u, (F(u) - F(u0)) / (u - u0) ; close inputs : the shape of their middle ; u0 and
+    F(u0) are kept in s[11], s[12] (the states of the channel) ; "fr" : F(u0) is valid (the shape has not changed), else it
+    is computed again ; the output is half a sample late and, where the shape is linear, filtered as the mean of two
+    samples (cos(pi f / fs) : -12 dB at 20 kHz without oversampling at 48 kHz, -2 dB at 2x)
+*/
+function its_Sat_Adaa(u, s, md, n, fx, fr)
+local (u0, f0, f1, d)
+(
+    u0 = s[11];
+    f0 = fr ? s[12] : its_Sat_Prim(u0, md, n, fx);
+    f1 = its_Sat_Prim(u, md, n, fx);
+    s[11] = u; s[12] = f1;
+    d = u - u0;
+    (abs(d) > its_SatAdEps) ? (f1 - f0) / d : its_Sat_Shape(0.5 * (u + u0), md, n, fx);
 );
 
 // free the work areas of the effect "fx" (deleted)
@@ -4605,7 +4667,8 @@ local (k)
         fx[its_Efx_Par1 + 1] = its_SatSoft;
         fx[its_Efx_Par1 + 2] = 0; // bias
         fx[its_Efx_Par1 + 3] = 1; // mix : 100 %
-        fx[its_Efx_Par1 + 4] = 2; // oversampling 4x
+        fx[its_Efx_Par1 + 4] = 1; // oversampling 2x, with ADAA (at 1x, ADAA attenuates the highs : -12 dB at 20 kHz, 48 kHz)
+        fx[its_Efx_Par1 + 10] = 1; // ADAA
         fx[its_Efx_Par1 + 5] = -6; // output (dB)
         fx[its_Efx_Par1 + 6] = 3; // order (x - sin, Chebyshev)
         fx[its_Efx_Par1 + 7] = 1; // stretch (Cheb. sum)
@@ -8412,7 +8475,9 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md, ic, mp, lg, d)
         states are in its work area (silent until @block has put in place an area of the right size)
     Saturation : Out = Par6 * ((1 - Par4) * x + Par4 * (shape(Par1 * x + Par3) - shape(Par3))), x = Vol_1 * Src_1, with the drive
         (Par1, dB) and the bias (Par3) modulated ; computed 2^Par5 times per sample (linear interpolation of x, then an
-        anti-aliasing low pass, 8th order Butterworth at 0.45 * srate), then a DC blocker ; in its work area
+        anti-aliasing low pass, Butterworth at 0.45 * srate : order 8, order 4 with ADAA), then a DC blocker ; ADAA (Par11,
+        the modes Soft, Hard, Fold, SineFold, XSin) : the shape is replaced by its mean between two inputs (its_Sat_Adaa) ;
+        in its work area
         the shape : mode Par2 (tanh, hard clip, fold, sine fold, x - A sin(n x), Chebyshev T_n, Cheb. sum, Curve), the order n
         in Par7, A in Par9, the curve in Par10 (see its_Sat_Curve),
         the stretch in Par8 (Cheb. sum), each one modulated by the third input ; the weights of Cheb. sum in its_Efx_Harm1
@@ -8422,7 +8487,7 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md, ic, mp, lg, d)
 */
 function exec_fx(fx, nbr)
 local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, mbad, mp, f, q, md, cf, st, w, cw, sw, al, a0, b0, b1, b2, y,
-       wk, ns, k, qk, s, os, gd, bi, shb, mix, og, u, p, yd, on, lim, out, go, m, e, ct, fg, fk, fa, fn, fb)
+       wk, ns, k, qk, s, os, gd, bi, shb, mix, og, u, p, yd, on, lim, out, go, m, e, ct, fg, fk, fa, fn, fb, ad, nb, fr, f2)
 (
     (fx[its_Efx_Check] !== BLOCK_CHECK) ? (
         err = mbad = 0;
@@ -8630,31 +8695,39 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                 // the order (Par7), or the stretch (Par8) in the mode Cheb. sum, modulated
                 on = max(-64, min(64, its_Mod_Apply(mp + 2 * its_ModDist, fx[its_Efx_Par1 + ((md === its_SatChebSum) ? 7 : 6)], its_ModA_Add, 1)));
                 shb = its_Sat_Shape(bi, md, on, fx); // the output for a null input : removed
+                ad = (fx[its_Efx_Par1 + 10] !== 0) && its_Sat_AdOk(md); // ADAA
+                nb = ad ? 2 : 4; // the biquads of the anti-aliasing filter
                 cf = wk + its_FxW_Hdr;
                 st = cf + 5 * 4;
-                (os !== wk[its_FxW_Md]) ? (
-                    // another oversampling : the anti-aliasing filter, 4 biquads (Butterworth, order 8) at 0.45 * srate
-                    wk[its_FxW_Md] = os;
+                ((os !== wk[its_FxW_Md]) || (nb !== wk[its_FxW_Nb])) ? (
+                    // another oversampling, ADAA or not : the anti-aliasing filter, nb biquads (Butterworth, order 2 nb) at 0.45 * srate
+                    wk[its_FxW_Md] = os; wk[its_FxW_Nb] = nb;
                     memset(st, 0, its_SatChW * ccnt);
                     w = 2 * $pi * 0.45 / os; cw = cos(w); sw = sin(w);
-                    c = cf; k = 0; loop(4,
-                        qk = 0.5 / cos((2 * k + 1) * $pi / 16);
+                    c = cf; k = 0; loop(nb,
+                        qk = 0.5 / cos((2 * k + 1) * $pi / (4 * nb));
                         al = sw / (2 * qk); a0 = 1 + al;
                         c[0] = (1 - cw) / (2 * a0); c[1] = (1 - cw) / a0; c[2] = c[0]; c[3] = -2 * cw / a0; c[4] = (1 - al) / a0;
                         c += 5; k += 1;
                     );
                 );
+                // ADAA : the primitives kept (s[12]) are valid while the shape does not change (its mode ; x - A sin : its order, A)
+                fr = ad && (wk[its_FxW_AdK] === md)
+                    && ((md !== its_SatXSin) || ((wk[its_FxW_AdN] === on) && (wk[its_FxW_AdA] === fx[its_Efx_Par1 + 8])));
+                wk[its_FxW_AdK] = ad ? md : -1; wk[its_FxW_AdN] = on; wk[its_FxW_AdA] = fx[its_Efx_Par1 + 8];
                 i = 0; loop(ccnt,
                     x = g * src[i];
                     s = st + its_SatChW * i;
                     (os === 1) ? (
-                        y = its_Sat_Shape(gd * x + bi, md, on, fx) - shb;
+                        y = (ad ? its_Sat_Adaa(gd * x + bi, s, md, on, fx, fr) : its_Sat_Shape(gd * x + bi, md, on, fx)) - shb;
                     ) : (
+                        f2 = fr;
                         k = 1; loop(os,
                             u = s[0] + (x - s[0]) * k / os; // linear interpolation from the previous input
-                            v = its_Sat_Shape(gd * u + bi, md, on, fx) - shb;
+                            v = (ad ? its_Sat_Adaa(gd * u + bi, s, md, on, fx, f2) : its_Sat_Shape(gd * u + bi, md, on, fx)) - shb;
+                            f2 = 1;
                             c = cf; p = s + 3;
-                            loop(4,
+                            loop(nb,
                                 y = c[0] * v + p[0];
                                 p[0] = c[1] * v - c[3] * y + p[1];
                                 p[1] = c[2] * v - c[4] * y;
@@ -9416,6 +9489,7 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
                             curve id (the mode Curve : a curve, its number or its name) (no limiter) ;
                    Saturation : source S  gain dB  mode Soft|Hard|Fold|SineFold|XSin|Cheb|ChebSum|Curve  drive dB  bias b
                             mix %  os 1|2|4|8  output dB  order n  stretch s  amount A  harm w1 [... w16]  curve id
+                            adaa On|Off (the modes Soft, Hard, Fold, SineFold, XSin ; a new Saturation : On, os 2)
                             mod Drive|Bias|Order S [depth d] [att a]  ("Order" : the stretch in the mode ChebSum) ;
                             harm : 1 to 16 weights, the others are 0 ; Dump : only the keys used by the mode
                                         "source", "gain" : src1, gain1 ; a new type gives its default values first
@@ -9596,7 +9670,7 @@ i__ii = 0; loop(6, its_TbRLp[i__ii] = mSL_symbol(menu_Rdr_Loop_N[i__ii]); i__ii 
 
 // the keys of the effects (one table for all the types : its_Tb_FxOk tells which keys a type takes) ; "source" and "gain"
 // are src1 and gain1 ; the keys its_TbFMod ... : "mod" for each modulation input (its_TbFMI)
-its_TbFMod = 39;
+its_TbFMod = 40;
 its_TbFMINb = 5;
 its_TbFNk = its_TbFMod + its_TbFMINb;
 its_TbFKey = make_array(its_TbFNk); its_TbFNam = make_array(its_TbFNk);
@@ -9620,6 +9694,7 @@ its_TbKey(its_TbFKey, its_TbFNam, 31, "mix"); its_TbKey(its_TbFKey, its_TbFNam, 
 its_TbKey(its_TbFKey, its_TbFNam, 33, "output"); its_TbKey(its_TbFKey, its_TbFNam, 34, "order");
 its_TbKey(its_TbFKey, its_TbFNam, 35, "stretch"); its_TbKey(its_TbFKey, its_TbFNam, 36, "amount");
 its_TbKey(its_TbFKey, its_TbFNam, 37, "harm"); its_TbKey(its_TbFKey, its_TbFNam, 38, "curve");
+its_TbKey(its_TbFKey, its_TbFNam, 39, "adaa"); // Saturation : ADAA On|Off (Par11)
 i__ii = its_TbFMod; loop(its_TbFMINb, its_TbFKey[i__ii] = its_TK_mod; its_TbFNam[i__ii] = "mod"; i__ii += 1;);
 // the modulation inputs : symbol, name, type of effect, input number, default depth
 its_TbFMI = make_array(its_TbFMINb); its_TbFMIN = make_array(its_TbFMINb); its_TbFMIt = make_array(its_TbFMINb);
@@ -11234,6 +11309,7 @@ function its_Tb_FxKey(w) local(ki, i, nm, n)
             // curve : its number (0 ... its_CrvMx-1 ; a name not yet known in passes 0 and 1 : -2), see its_Crv_Id
             its_Tb_v1 = its_Crv_Id(its_Tb_Next(), 0);
         ) :
+        (ki === 39) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbFSt, 2); ) : // adaa : Off, On
         (
             // mod : the input, its source, then "depth" and "att" (optional)
             w = its_Tb_Next();
@@ -11259,7 +11335,7 @@ function its_Tb_FxOk(ty, ki)
     (ki >= its_TbFMod) ? (its_TbFMIt[ki - its_TbFMod] === ty) :
     ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? ((ki < 14) || ((ki < 22) && (ty === its_Efx_TyMixer))) :
     (ty === its_Efx_TyFilter) ? ((ki === 6) || (ki === 14) || ((ki >= 22) && (ki <= 25))) :
-    (ty === its_Efx_TySat) ? ((ki === 6) || (ki === 14) || (ki === 24) || ((ki >= 29) && (ki <= 38))) :
+    (ty === its_Efx_TySat) ? ((ki === 6) || (ki === 14) || (ki === 24) || ((ki >= 29) && (ki <= 39))) :
     (ty === its_Efx_TyLFO) ? ((ki === 22) || (ki === 24) || ((ki >= 26) && (ki <= 28)) || (ki === 38)) : 0;
 );
 
@@ -11758,6 +11834,7 @@ function its_Tb_FxGet(ki, fx) local(p)
     (ki === 32) ? 2^max(0, min(its_SatOSCnt - 1, floor(fx[its_Efx_Par1 + 4]))) : // oversampling
     (ki === 37) ? its_Tb_HarmN(fx) : // harm : the count of weights up to the last one not null
     (ki === 38) ? fx[its_Efx_Par1 + ((fx[its_Efx_Type] === its_Efx_TySat) ? 9 : 5)] : // curve (LFO Par6, Saturation Par10)
+    (ki === 39) ? (fx[its_Efx_Par1 + 10] !== 0) : // adaa (Par11)
     (ki < its_TbFMod) ? fx[its_Efx_Par1 + ki - 28] : // bias Par3, output Par6, order Par7, stretch Par8, amount Par9
     its_Tb_ModGet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist);
 );
@@ -11767,7 +11844,7 @@ function its_Tb_FxGet(ki, fx) local(p)
 function its_Tb_FxText(str, ki, ty, v1, v2, v3, v4, v5)
 (
     (ki === 0) ? strcpy(str, its_TbFTyN[max(0, min(its_Efx_TyCnt - 1, v1))]) :
-    ((ki === 1) || (ki === 5)) ? strcpy(str, its_TbFStN[max(0, min(3, v1))]) :
+    ((ki === 1) || (ki === 5) || (ki === 39)) ? strcpy(str, its_TbFStN[max(0, min(3, v1))]) :
     (ki === 2) ? strcpy(str, its_TbFPhN[max(0, min(2, v1))]) :
     ((ki === 3) || (ki === 25) || (ki === 32)) ? sprintf(str, "%d", v1) :
     (ki === 4) ? ((v1 === 0) ? strcpy(str, "Own") : its_Tb_SrcText(str, v1, v2)) :
@@ -11872,6 +11949,7 @@ function its_Tb_SetFx(k) local(fx, ty, j, p, ki)
         ki = 33; loop(4, its_TbKS[ki] ? ( fx[its_Efx_Par1 + ki - 28] = its_TbK1[ki]; ); ki += 1;);
         its_TbKS[37] ? ( j = 0; loop(its_SatHarm, fx[its_Efx_Harm1 + j] = (j < its_TbK1[37]) ? its_TbHarm[j] : 0; j += 1;); );
         its_TbKS[38] ? ( fx[its_Efx_Par1 + ((ty === its_Efx_TySat) ? 9 : 5)] = its_TbK1[38]; );
+        its_TbKS[39] ? ( fx[its_Efx_Par1 + 10] = its_TbK1[39]; );
         // the modulations : a new connection gets the attenuverter 1 and the default depth (as in the pad)
         ki = its_TbFMod; loop(its_TbFMINb,
             its_TbKS[ki] ? its_Tb_ModSet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist, ki, its_TbFMId[ki - its_TbFMod]);
@@ -16367,6 +16445,7 @@ local (k, r, xx, zi, ns, md)
 
 // Saturation : line 1, cell 8 = the source (right clic : menu ; left clic : its first channel), cell 9 = the mode (left clic :
 // the next one ; right clic : menu), cell 10 = the oversampling (left clic : the next one ; right clic : the previous one) ;
+// cell 12 = ADAA (clic : On / Off ; gray in the modes without a primitive : Cheb, Cheb. sum, Curve) ;
 // cell 11 = the presets of the weights (menu, mode Cheb. sum) or the curve (mode Curve : left clic, the next curve that exists ;
 // right clic, menu) ; line 2 : the modulation inputs (drive, bias, order or stretch) ;
 // sliders : drive, bias, mix, output, order (modes x - A sin, Chebyshev) and A (x - A sin) or stretch (Cheb. sum), input gain, and the modulations
@@ -16392,6 +16471,8 @@ local (k, r, xx)
         pad_Efx_Colrs[9] = Col_P3;
         sprintf(pad_Efx_Labs[10], "Oversampling %dx", 2^max(0, min(its_SatOSCnt - 1, floor(fx[its_Efx_Par1 + 4]))));
         pad_Efx_Colrs[10] = Col_P3;
+        strcpy(pad_Efx_Labs[12], (fx[its_Efx_Par1 + 10] !== 0) ? "ADAA On" : "ADAA Off");
+        pad_Efx_Colrs[12] = !its_Sat_AdOk(fx[its_Efx_Par1 + 1]) ? Col_Inactive : (fx[its_Efx_Par1 + 10] !== 0) ? Col_P2 : Col_P3;
         (fx[its_Efx_Par1 + 1] === its_SatChebSum) ? (
             strcpy(pad_Efx_Labs[11], "Harmonics");
             pad_Efx_Colrs[11] = Col_P3;
@@ -16439,6 +16520,9 @@ local (k, r, xx)
             (xx != 0) ? its_Harm_Preset(fx + its_Efx_Harm1, xx - 1);
         ) :
         ((cell === 11) && (fx[its_Efx_Par1 + 1] === its_SatCurve)) ? FX_Crv_Click(fx + its_Efx_Par1 + 9, ev) :
+        ((cell === 12) && (ev & (ui_jpad_ev_lmc | ui_jpad_ev_rmc))) ? (
+            fx[its_Efx_Par1 + 10] = (fx[its_Efx_Par1 + 10] !== 0) ? 0 : 1;
+        ) :
         ((cell >= 17) && (cell <= 19)) ? (
             its_Mod_Click(fx + its_Efx_Mod1, cell - 17, ev, its_PadJmc, its_ModD_Sat, its_ModK_Sat) ? (fx[its_Efx_Check] = 0);
         );
