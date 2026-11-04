@@ -1,0 +1,50 @@
+print("Matrix-Traines. Des traines locales : chaque canal garde la sienne (Householder, couplage faible).");
+
+/*
+  Une Matrix en Householder : avec beaucoup de canaux, chaque ligne ne recoit qu'un peu des autres ; chaque haut-parleur
+  garde sa propre traine, qui deborde lentement sur les autres. coupling 0 : des peignes independants, metalliques ;
+  coupling 1 : le couplage le plus fort sans perte ; au-dela de 1 ou au-dessous de 0, la boucle s'emballe et sature
+  (voir Matrix-Pompe).
+
+  Parametres :
+      nch       canaux
+      tail      duree de la traine (s, -60 dB)
+      coupling  couplage entre les lignes (la diffusion)
+      lowpass   amortissement des aigus (Hz, 0 : aucun)
+      short     retard le plus court (ms)
+      long      retard le plus long (ms)
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0.
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. dry, wet : les niveaux du son
+  sec et du son traite (dB). Les autres reglages se changent a la main dans le pad des effets de l'instance (le module
+  Instances la montre ; le module Effect montre ses effets, "pre", "fdn", "post").
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance traines )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Traines
+        input src
+        output dst
+        param nch 2 1 128
+        param tail 3 0.01 1000
+        param coupling 0.3 -2 2
+        param lowpass 7000 0 24000
+        param short 15 0.02 20000
+        param long 60 0.02 20000
+        param dry 0 -120 40
+        param wet -6 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect fdn  type Matrix  chan nch  source Effect pre  mode Householder  mix 100  loop Decay  decay tail
+                    diffusion coupling  damp lowpass  dmin short  dmax long  delays Geometric
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect fdn  gain2 wet  out dst
+    End
+    Instance traines Traines  src In:0  dst Out:0  nch 2  tail 3  coupling 0.3  lowpass 7000  short 15  long 60  dry 0  wet -6
+));
+print(sprintf(0, "Matrix-Traines. instance traines : %d (0 : OK)", r));

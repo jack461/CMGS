@@ -1,0 +1,41 @@
+print("Sources. Des sources d'essai sur le bus 64 : des clics (par defaut) ou un buzz.");
+
+/*
+  Toutes les recettes de la bibliotheque ecoutent le bus 64 en plus de leur entree : deposer ce fichier les fait sonner
+  sans materiau. Deux modeles : Clics (un LFO carre, dephase par canal, puis un passe-haut : chaque canal claque a son
+  tour) et Buzz (une dent de scie a "pitch" Hz, dephasee par canal, filtree). L'instance "essai" joue les clics ; pour le
+  buzz, remplacer en bas "essai Clics ... pace 0.25" par "essai Buzz  dst Bus 64  nch 8  pitch 110  level 0.15".
+      nch       canaux (8 : chaque recette en lit autant qu'elle en a)
+      pace      Clics : la vitesse du carre (Hz ; 2 clics par periode et par canal)
+      pitch     Buzz : la hauteur (Hz)
+      level     le niveau (0.25 : -12 dB)
+      stagger   le dephasage entre les canaux (en tours ; 1 / nch : un tour regulier)
+      lowpass   Buzz : le filtre (Hz)
+  Pour l'arreter : Sources-Stop.mSL. La premiere fois, le journal note une erreur 2787 (sans consequence).
+*/
+
+table(data( Free Instance essai )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Clics
+        output dst
+        param nch 8 1 128
+        param pace 0.25 0.001 100
+        param level 0.25 0 10
+        param stagger 0.125 0 1
+        Effect osc  type LFO  chan nch  freq pace  mode Square  amp level  offset 0  spread stagger
+        Effect flt  type Filter  chan nch  source Effect osc  mode HP  freq 2000  q 0.707  stages 2  out dst
+    End
+    Algorithm Buzz
+        output dst
+        param nch 8 1 128
+        param pitch 110 1 20000
+        param level 0.15 0 10
+        param stagger 0.37 0 1
+        param lowpass 1500 1 24000
+        Effect osc  type LFO  chan nch  freq pitch  mode SawUp  amp level  offset 0  spread stagger
+        Effect flt  type Filter  chan nch  source Effect osc  mode LP  freq lowpass  q 0.707  stages 2  out dst
+    End
+    Instance essai Clics  dst Bus 64  nch 8  pace 0.25  level 0.25  stagger 0.125
+));
+print(sprintf(0, "Sources. instance essai : %d (0 : OK)", r));

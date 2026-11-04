@@ -1,0 +1,47 @@
+print("Matrix-Accord. Un accord metallique : des retards multiples d'une periode (serie harmonique).");
+
+/*
+  Les retards sont des multiples de period, jusqu'a span : des peignes accordes sur une serie (1000 / period Hz et ses
+  sous-multiples) ; les lignes qui tombent sur le meme multiple sont decalees de quelques echantillons et battent. Un
+  accord metallique qui resonne longtemps.
+
+  Parametres :
+      nch       canaux
+      period    la periode de base (ms)
+      span      le retard le plus long (ms)
+      tail      duree de la resonance (s)
+      lowpass   amortissement des aigus (Hz, 0 : aucun)
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0.
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. dry, wet : les niveaux du son
+  sec et du son traite (dB). Les autres reglages se changent a la main dans le pad des effets de l'instance (le module
+  Instances la montre ; le module Effect montre ses effets, "pre", "fdn", "post").
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance accord )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Accord
+        input src
+        output dst
+        param nch 2 1 128
+        param period 2 0.02 20000
+        param span 16 0.02 20000
+        param tail 8 0.01 1000
+        param lowpass 9000 0 24000
+        param dry 0 -120 40
+        param wet -9 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect fdn  type Matrix  chan nch  source Effect pre  mode Hadamard  mix 100  loop Decay  decay tail  damp lowpass
+                    dmin period  dmax span  delays Harmonic
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect fdn  gain2 wet  out dst
+    End
+    Instance accord Accord  src In:0  dst Out:0  nch 2  period 2  span 16  tail 8  lowpass 9000  dry 0  wet -9
+));
+print(sprintf(0, "Matrix-Accord. instance accord : %d (0 : OK)", r));

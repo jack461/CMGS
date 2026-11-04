@@ -538,10 +538,16 @@ its_Efx_WkOld = idx; idx += 1; //  la zone remplacée par @block, libérée par 
 // Par3 mode, Par4 pente (2^Par4 étages) ; Saturation : Par1 drive (dB), Par2 mode, Par3 biais, Par4 mix [0, 1],
 // Par5 suréchantillonnage (2^Par5 fois), Par6 gain de sortie (dB), Par7 ordre (x - A sin, Chebyshev), Par8 étirement (Cheb. sum),
 // Par9 amplitude A du sinus (x - A sin), Par10 la courbe du mode Curve (0 ... its_CrvMx-1), Par11 ADAA (1 : en service,
-// les modes qui ont une primitive, voir its_Sat_Adaa))
+// les modes qui ont une primitive, voir its_Sat_Adaa) ; Matrix : Par1 decay T60 (s), Par2 la matrice (its_Mx...), Par3
+// l'amortissement passe-bas (Hz, 0 : aucun), Par4 mix [0, 1], Par5 Par6 les retards min et max (ms), Par7 diffusion
+// [-2, 2] (hors de [0, 1] la boucle peut croître : elle sature), Par8 la boucle (its_MxLp...), Par9 graine des retards,
+// Par10 leur répartition (its_MxSp...), Par11 passe-haut dans la boucle (Hz, 0 : aucun), Par12 l'entrée (its_MxIn...))
 its_Efx_Par1 = idx; idx += 12;
 its_Efx_St1 = idx; idx += 4;
 its_Efx_Harm1 = idx; idx += 16; // Saturation, mode Cheb. sum : les poids des harmoniques 1 ... 16 (its_SatHarm), dans [-1, 1]
+// Matrix : les mêmes mots, ses réglages en plus de Par1 ... Par12 : 0 wow (ms : la profondeur de la modulation des retards),
+// 1 rate (Hz : sa vitesse), 2 spread (tours : le déphasage d'une ligne à la suivante), 3 glide (s : le glissement des retards)
+its_Efx_MxX = its_Efx_Harm1;
 // 3 entrées de modulation (Filter : 0 la fréquence de coupure (octaves), 1 la résonance (octaves) ; Saturation : 0 le drive (dB),
 // 1 le biais, 2 l'ordre, ou l'étirement en mode Cheb. sum)
 its_Efx_Mod1 = idx; idx += 3 * its_ModDist;
@@ -606,7 +612,8 @@ its_Efx_TyScript = 6;
 its_Efx_TyLFO = 7;
 its_Efx_TyFilter = 8;
 its_Efx_TySat = 9;
-its_Efx_TyCnt = 10; // count of types
+its_Efx_TyMatrix = 10; // a feedback delay network (see exec_matrix)
+its_Efx_TyCnt = 11; // count of types
 // Filter modes (its_Efx_Par3)
 its_FltLP1 = 0; // low pass, 1 pole
 its_FltHP1 = 1; // high pass, 1 pole
@@ -625,6 +632,23 @@ its_SatCheb = 5; // Chebyshev polynomial T_n (n real : cos(n * acos(x))), x fold
 its_SatChebSum = 6; // weighted sum of the T_k (k in [1 ... its_SatHarm], weights its_Efx_Harm1), stretched by its_Efx_Par8
 its_SatCurve = 7; // the table of a curve (its number : Par10, its_Efx_Par1 + 9), see its_Sat_Curve
 its_SatModeCnt = 8; // count of modes
+// Matrix : its matrices (its_Efx_Par2), the work area (see exec_matrix)
+its_MxHouse = 0; // Householder : I - d (2 / n) 1 1^T (d the diffusion ; 1 : lossless)
+its_MxHadam = 1; // Hadamard : the fast transform / sqrt(n), on a power of 2 lines (the extra ones inside)
+its_MxRing = 2; // Ring : rotations between the neighbouring lines (c, c + 1, the last one with the first), the angle d pi / 4
+its_MxTypeCnt = 3;
+// the loop (its_Efx_Par8) : Decay (-60 dB after T60), Freeze (no loss, no input), Grow (+60 dB per T60, the loop saturates)
+its_MxLpDecay = 0; its_MxLpFreeze = 1; its_MxLpGrow = 2; its_MxLpCnt = 3;
+// the spread of the delays (its_Efx_Par10) : geometric, linear, harmonic (multiples of the shortest one : pitched,
+// metallic), equal (all the shortest one : one comb, the most metallic), random (geometric)
+its_MxSpGeom = 0; its_MxSpLin = 1; its_MxSpHarm = 2; its_MxSpEqual = 3; its_MxSpRand = 4; its_MxSpCnt = 5;
+// the input (its_Efx_Par12) : Direct (the channel c into the line c), Spread (the channel 0 into all the lines, signs alternated)
+its_MxInDirect = 0; its_MxInSpread = 1;
+its_MxMaxL = 128; // lines at most
+its_MxMaxB = 1048576; // samples of a line at most (a power of 2)
+its_MxMaxW = 16777216; // samples of all the lines at most (fewer lines : longer delays)
+its_MxH = 24; // words of its header (after the one of the work area)
+its_MxLW = 8; // words per line
 its_SatHarm = 16; // count of the weights of the mode Cheb. sum (its_Efx_Harm1)
 its_HarmH = 90; // height of the editor of the weights (pixels)
 its_SatOSCnt = 4; // oversampling (its_Efx_Par5) : 1, 2, 4 or 8 times
@@ -1237,6 +1261,19 @@ p_rdStretch = idx; idx += 1; // stretch of a reader (mode Stretch) : the progres
 p_modDepSc = idx; idx += 1; // the depth of a modulation input whose action is Scale, Oct or dB but not its default one
 p_modDepOct = idx; idx += 1; // (one parameter per action, shared by the inputs : see its_Mod_DepPar)
 p_modDepDb = idx; idx += 1;
+p_fxMxDecay = idx; idx += 1; // Matrix : decay T60 (s)
+p_fxMxDamp = idx; idx += 1; // Matrix : damping (Hz)
+p_fxMxMix = idx; idx += 1; // Matrix : mix (%)
+p_fxMxDmin = idx; idx += 1; // Matrix : the shortest delay (ms)
+p_fxMxDmax = idx; idx += 1; // Matrix : the longest delay (ms)
+p_fxMxDiff = idx; idx += 1; // Matrix : diffusion [-2 ... 2]
+p_fxMxHp = idx; idx += 1; // Matrix : high pass in the loop (Hz)
+p_fxMxWow = idx; idx += 1; // Matrix : wow, the depth of the modulation of the delays (ms)
+p_fxMxRate = idx; idx += 1; // Matrix : its rate (Hz)
+p_fxMxSpread = idx; idx += 1; // Matrix : its phase from a line to the next (turns)
+p_fxMxGlide = idx; idx += 1; // Matrix : the glide of the delays (s)
+p_fxMxModD1 = idx; idx += 3; // depths of the 3 modulation inputs of a matrix : decay, damping (octaves), diffusion
+p_fxMxModA1 = idx; idx += 3; // their attenuverters [-10 ... 10]
 its_ParLast = idx - 1; // the last parameter of Interstys : in its range (paramNMax), see the error 2716
 
 // Global variables
@@ -2140,6 +2177,41 @@ function its_Sat_ModOk(fx)
     3 | (((fx[its_Efx_Par1 + 1] >= its_SatXSin) && (fx[its_Efx_Par1 + 1] <= its_SatChebSum)) ? 4 : 0);
 );
 
+// Matrix : the modulation inputs meaningful (decay, damping ; the diffusion : not Hadamard)
+function its_Mx_ModOk(fx)
+(
+    3 | ((fx[its_Efx_Par1 + 1] !== its_MxHadam) ? 4 : 0);
+);
+
+// Matrix : its count of lines (Hadamard : the power of 2 above its channels, the extra lines inside, without input nor output)
+function its_Mx_Lines(fx)
+local (n, k)
+(
+    n = max(1, min(its_MxMaxL, floor(fx[its_Efx_CCnt])));
+    (fx[its_Efx_Par1 + 1] === its_MxHadam) ? ( k = 1; while (k < n) (k *= 2); k; ) : n;
+);
+
+// Matrix : the size of a line, a power of 2 above the longest delay (and the room to make the delays all different), at
+// most its_MxMaxB, and its_MxMaxW for all the lines (the delays are then shorter)
+function its_Mx_BufSize(fx)
+local (d, b, n)
+(
+    d = (max(fx[its_Efx_Par1 + 4], fx[its_Efx_Par1 + 5]) + max(0, fx[its_Efx_MxX])) * srate / 1000 + 2 * its_MxMaxL + 4;
+    b = 64; while ((b < d) && (b < its_MxMaxB)) (b *= 2);
+    n = its_Mx_Lines(fx);
+    while ((b > 64) && (b * n > its_MxMaxW)) (b /= 2);
+    b;
+);
+
+// Matrix : the longest delay possible (s), see its_Mx_BufSize
+function its_Mx_MaxDelay(fx) ( (its_Mx_BufSize(fx) - 2 * its_MxMaxL - 4) / srate; );
+
+// Matrix : the loop can grow (Grow, or a Householder diffusion out of [0, 1]) : it saturates (its_Mx_Sat)
+function its_Mx_Grows(fx, df)
+(
+    (fx[its_Efx_Par1 + 7] === its_MxLpGrow) || ((fx[its_Efx_Par1 + 1] === its_MxHouse) && ((df < 0) || (df > 1)));
+);
+
 // Filter : count of stages (biquads, or one pole filters)
 function its_Flt_Stages(fx)
 (
@@ -2162,6 +2234,10 @@ local (ns)
     ) :
     (fx[its_Efx_Type] === its_Efx_TySat) ? (
         its_FxW_Hdr + 5 * 4 + its_SatChW * max(1, min(128, floor(fx[its_Efx_CCnt])));
+    ) :
+    (fx[its_Efx_Type] === its_Efx_TyMatrix) ? (
+        ns = its_Mx_Lines(fx);
+        its_FxW_Hdr + its_MxH + (its_MxLW + 2) * ns + ns * its_Mx_BufSize(fx);
     ) : 0;
 );
 
@@ -2169,7 +2245,7 @@ local (ns)
 function its_Fx_NSrc(ty)
 (
     ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? 8 :
-    ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat)) ? 1 :
+    ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || (ty === its_Efx_TyMatrix)) ? 1 :
     (ty === its_Efx_TyLFO) ? 0 : -1;
 );
 
@@ -2596,7 +2672,8 @@ local (i, b, w, f, n, ty, p)
                 n += 1; p += its_EfxDist;
             );
             (ty === its_Efx_TyFilter) ? its_Pch_Mods(b + its_Efx_Mod1, 2, its_ModN_Flt, its_Flt_ModOk(b), "Effect", i) :
-            (ty === its_Efx_TySat) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Sat, its_Sat_ModOk(b), "Effect", i);
+            (ty === its_Efx_TySat) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Sat, its_Sat_ModOk(b), "Effect", i) :
+            (ty === its_Efx_TyMatrix) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Mx, its_Mx_ModOk(b), "Effect", i);
         );
         i += 1;
     );
@@ -2752,7 +2829,7 @@ local (r, j, p, ns, nm)
     ns = max(0, its_Fx_NSrc(fx[its_Efx_Type]));
     p = fx + its_Efx_Src1; j = 0;
     while (!r && (j < ns)) ( r = (p[0] !== 0) && (its_Fx_RKey(p[0]) === wk); p += its_EfxDist; j += 1; );
-    nm = (fx[its_Efx_Type] === its_Efx_TyFilter) ? 2 : (fx[its_Efx_Type] === its_Efx_TySat) ? 3 : 0;
+    nm = (fx[its_Efx_Type] === its_Efx_TyFilter) ? 2 : ((fx[its_Efx_Type] === its_Efx_TySat) || (fx[its_Efx_Type] === its_Efx_TyMatrix)) ? 3 : 0;
     p = fx + its_Efx_Mod1; j = 0;
     while (!r && (j < nm)) ( r = (p[its_Mod_Src] !== 0) && (its_Fx_RKey(p[its_Mod_Src]) === wk); p += its_ModDist; j += 1; );
     r;
@@ -4425,6 +4502,7 @@ its_EfxTyS[6] = "Script";
 its_EfxTyS[7] = "LFO";
 its_EfxTyS[8] = "Filter";
 its_EfxTyS[9] = "Satur.";
+its_EfxTyS[10] = "Matrix";
 // the menus of a cell of these modules (right clic, see its_Sum_Menu) : the states, (readers) mute and solo, open the
 // object in a module of the tab, in a new module ; results : 1-3 the states, then (readers : 4 mute, 5 solo) open, open new
 menu_SumR_N = make_array(9);
@@ -4677,6 +4755,22 @@ local (k)
         fx[its_Efx_Lim] = 1; // the auto-limiter in service
         its_Harm_Preset(fx + its_Efx_Harm1, 0); // the fundamental only
     );
+    ((ty === its_Efx_TyMatrix) && (k !== its_Efx_TyMatrix)) ? (
+        fx[its_Efx_Par1] = 2; // decay (s)
+        fx[its_Efx_Par1 + 1] = its_MxHouse;
+        fx[its_Efx_Par1 + 2] = 6000; // damping (Hz)
+        fx[its_Efx_Par1 + 3] = 1; // mix : 100 %
+        fx[its_Efx_Par1 + 4] = 20; // delays (ms)
+        fx[its_Efx_Par1 + 5] = 80;
+        fx[its_Efx_Par1 + 6] = 1; // diffusion
+        fx[its_Efx_Par1 + 7] = its_MxLpDecay; // the loop
+        fx[its_Efx_Par1 + 8] = 1; // seed
+        fx[its_Efx_Par1 + 9] = its_MxSpGeom; // the spread of the delays
+        fx[its_Efx_Par1 + 10] = 0; // high pass (Hz) : none
+        fx[its_Efx_Par1 + 11] = its_MxInDirect; // the input
+        fx[its_Efx_MxX] = 0; fx[its_Efx_MxX + 1] = 0.2; fx[its_Efx_MxX + 2] = 0.25; fx[its_Efx_MxX + 3] = 0.05; // wow, rate, spread, glide
+        fx[its_Efx_Lim] = 1; // the auto-limiter in service
+    );
 );
 
 
@@ -4700,6 +4794,7 @@ menu_Efx_Type_N[6] = "Script";
 menu_Efx_Type_N[7] = "LFO";
 menu_Efx_Type_N[8] = "Filter";
 menu_Efx_Type_N[9] = "Saturation";
+menu_Efx_Type_N[10] = "Matrix";
 menu_Efx_Type = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "effect-type", its_Efx_TyCnt, menu_Efx_Type_N);
@@ -4729,6 +4824,26 @@ menu_Efx_SatMode_N[7] = "Curve";
 menu_Efx_SatMode = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "saturation-mode", its_SatModeCnt, menu_Efx_SatMode_N);
+// the matrices of the type Matrix (its_Mx...)
+menu_Efx_MxType_N = make_array(its_MxTypeCnt);
+menu_Efx_MxType_N[its_MxHouse] = "Householder";
+menu_Efx_MxType_N[its_MxHadam] = "Hadamard";
+menu_Efx_MxType_N[its_MxRing] = "Ring";
+menu_Efx_MxType = make_jmenu(
+    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "matrix-type", its_MxTypeCnt, menu_Efx_MxType_N);
+menu_Efx_MxLoop_N = make_array(its_MxLpCnt); // the loop (its_MxLp...)
+menu_Efx_MxLoop_N[its_MxLpDecay] = "Decay"; menu_Efx_MxLoop_N[its_MxLpFreeze] = "Freeze"; menu_Efx_MxLoop_N[its_MxLpGrow] = "Grow";
+menu_Efx_MxLoop = make_jmenu(
+    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "matrix-loop", its_MxLpCnt, menu_Efx_MxLoop_N);
+menu_Efx_MxSpread_N = make_array(its_MxSpCnt); // the spread of the delays (its_MxSp...)
+menu_Efx_MxSpread_N[its_MxSpGeom] = "Geometric"; menu_Efx_MxSpread_N[its_MxSpLin] = "Linear";
+menu_Efx_MxSpread_N[its_MxSpHarm] = "Harmonic"; menu_Efx_MxSpread_N[its_MxSpEqual] = "Equal";
+menu_Efx_MxSpread_N[its_MxSpRand] = "Random";
+menu_Efx_MxSpread = make_jmenu(
+    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "matrix-spread", its_MxSpCnt, menu_Efx_MxSpread_N);
 
 // Menu 8 for Effects : the weights of the harmonics of the Saturation, mode Cheb. sum (see its_Harm_Preset)
 menu_Efx_Harm_N = make_array(8);
@@ -4785,6 +4900,12 @@ its_ModK_Flt[0] = its_ModK_Flt[1] = its_ModKind(its_ModA_Oct, i__o | i__s); // c
 its_ModK_Sat = make_array(3);
 its_ModK_Sat[0] = its_ModK_Sat[1] = its_ModKind(its_ModA_Add, i__a); // drive (dB), bias
 its_ModK_Sat[2] = its_ModKind(its_ModA_Add, i__a | i__s); // order, stretch
+// Matrix : decay (octaves), damping (octaves), diffusion
+its_ModN_Mx = make_array(3); its_ModN_Mx[0] = "Decay"; its_ModN_Mx[1] = "Damping"; its_ModN_Mx[2] = "Diffusion";
+its_ModD_Mx = make_array(3); its_ModD_Mx[0] = 1; its_ModD_Mx[1] = 2; its_ModD_Mx[2] = 0.5;
+its_ModK_Mx = make_array(3);
+its_ModK_Mx[0] = its_ModK_Mx[1] = its_ModKind(its_ModA_Oct, i__o | i__s);
+its_ModK_Mx[2] = its_ModKind(its_ModA_Add, i__a | i__s);
 // the actions and the shapes : their names (menu, labels of the cells), the first depth of an action that is not the default one
 its_ModA_Name = make_array(5); its_ModA_Name[1] = "Add"; its_ModA_Name[2] = "Scale"; its_ModA_Name[3] = "Octaves"; its_ModA_Name[4] = "Decibels";
 its_ModA_Tag = make_array(5); its_ModA_Tag[1] = " +"; its_ModA_Tag[2] = " scale"; its_ModA_Tag[3] = " oct"; its_ModA_Tag[4] = " dB";
@@ -7164,6 +7285,23 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_fxSatModA1+1, "Bias atten.",  "SatAttB",  i_UB|i_SP, "%.3f", "Bias atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_fxSatModD1+2, "Order depth",  "SatModO",  i_UB|i_SP, "%.3f", "Order depth: %.3f",   0,   32,    2,  0.001, 2);
     parDcl(p_fxSatModA1+2, "Order atten.",  "SatAttO",  i_UB|i_SP, "%.3f", "Order atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxMxDecay, "Decay",  "MxDecay",  i_UB|i_SP, "%.2f s", "Decay (T60): %.2f s",   0.01,   1000,    2,  0.01, 7);
+    parDcl(p_fxMxDamp, "Damping",  "MxDamp",  i_UB|i_SP, "%.0f Hz", "Damping (low pass): %.0f Hz",   1,   24000,    6000,  1, 7);
+    parDcl(p_fxMxHp, "High pass",  "MxHp",  i_UB|i_SP, "%.0f Hz", "High pass: %.0f Hz",   1,   24000,    1,  1, 7);
+    parDcl(p_fxMxMix, "Mix",  "MxMix",  i_UB|i_SP, "%.1f %%", "Mix: %.1f %%",   0,   100,    100,  0.1, 0);
+    parDcl(p_fxMxDmin, "Delay min",  "MxDmin",  i_UB|i_SP, "%.2f ms", "Delay min: %.2f ms",   0.02,   20000,    20,  0.01, 7);
+    parDcl(p_fxMxDmax, "Delay max",  "MxDmax",  i_UB|i_SP, "%.2f ms", "Delay max: %.2f ms",   0.02,   20000,    80,  0.01, 7);
+    parDcl(p_fxMxDiff, "Diffusion",  "MxDiff",  i_UB|i_SP, "%.3f", "Diffusion: %.3f",   -2,   2,    1,  0.001, 0);
+    parDcl(p_fxMxWow, "Wow",  "MxWow",  i_UB|i_SP, "%.2f ms", "Wow (delay modulation): %.2f ms",   0,   2000,    0,  0.01, 2);
+    parDcl(p_fxMxRate, "Wow rate",  "MxRate",  i_UB|i_SP, "%.3f Hz", "Wow rate: %.3f Hz",   0.001,   1000,    0.2,  0.001, 7);
+    parDcl(p_fxMxSpread, "Wow spread",  "MxSpread",  i_UB|i_SP, "%.3f", "Wow spread (turns per line): %.3f",   0,   1,    0.25,  0.001, 0);
+    parDcl(p_fxMxGlide, "Glide",  "MxGlide",  i_UB|i_SP, "%.3f s", "Glide of the delays: %.3f s",   0,   10,    0.05,  0.001, 2);
+    parDcl(p_fxMxModD1, "Decay depth",  "MxModT",  i_UB|i_SP, "%.3f oct", "Decay depth: %.3f oct",   0,   10,    1,  0.001, 2);
+    parDcl(p_fxMxModD1+1, "Damping depth",  "MxModF",  i_UB|i_SP, "%.3f oct", "Damping depth: %.3f oct",   0,   10,    2,  0.001, 2);
+    parDcl(p_fxMxModD1+2, "Diffusion depth",  "MxModD",  i_UB|i_SP, "%.3f", "Diffusion depth: %.3f",   0,   4,    0.5,  0.001, 0);
+    parDcl(p_fxMxModA1, "Decay atten.",  "MxAttT",  i_UB|i_SP, "%.3f", "Decay atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxMxModA1+1, "Damping atten.",  "MxAttF",  i_UB|i_SP, "%.3f", "Damping atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxMxModA1+2, "Diffusion atten.",  "MxAttD",  i_UB|i_SP, "%.3f", "Diffusion atten.: %.3f",   -10,   10,    1,  0.001, 0);
 );
 
 
@@ -8463,6 +8601,200 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md, ic, mp, lg, d)
 );
 
 /*
+    Matrix : the delays of the "np" lines (samples, below bs) from dmin to dmax (Par5, Par6, ms), in a low-discrepancy order
+    (the golden ratio : the neighbouring lines differ) shifted by the seed (Par9), according to the spread (Par10) :
+    geometric, linear, harmonic (the multiples of dmin up to dmax), random (geometric, a hash of the line and the seed) :
+    odd and all different (a line already there : 2 samples more) ; equal : all dmin, exactly (one comb) ;
+    for each line, the log of its gain for a decay of 1 s (-60 dB after T60 s : the gain exp(L / T60), see exec_matrix)
+*/
+function its_Mx_Delays(fx, ln, np, bs)
+local (d0, d1, c, u, d, q, dup, sp, k)
+(
+    d0 = max(1, min(fx[its_Efx_Par1 + 4], fx[its_Efx_Par1 + 5]) * srate / 1000);
+    d1 = min(bs - 2 * its_MxMaxL - 4, max(d0, max(fx[its_Efx_Par1 + 4], fx[its_Efx_Par1 + 5]) * srate / 1000));
+    d0 = min(d0, d1);
+    sp = fx[its_Efx_Par1 + 9];
+    c = 0;
+    loop(np,
+        u = (c + 0.5) * 0.6180339887 + 0.1 * fx[its_Efx_Par1 + 8];
+        (sp === its_MxSpRand) ? (u = sin(12.9898 * (c + 1) + 78.233 * (fx[its_Efx_Par1 + 8] + 1)) * 43758.5453);
+        u -= floor(u);
+        (sp === its_MxSpEqual) ? (
+            d = floor(d0 + 0.5);
+        ) : (
+            (sp === its_MxSpLin) ? ( d = d0 + (d1 - d0) * u; ) :
+            (sp === its_MxSpHarm) ? ( k = max(1, floor(d1 / d0)); d = d0 * min(k, 1 + floor(u * k)); ) :
+            ( d = d0 * (d1 / d0) ^ u; );
+            d = floor(d) | 1;
+            dup = 1;
+            while (dup) (
+                dup = 0; q = ln; loop(c, (q[0] === d) ? (dup = 1); q += its_MxLW;);
+                dup ? (d += 2);
+            );
+        );
+        q = ln + c * its_MxLW;
+        q[0] = max(1, min(bs - 1, d));
+        q[1] = -3 * log(10) * q[0] / srate;
+        (q[5] <= 0) ? (q[5] = q[0]); // (the current delay : glides toward q[0], see exec_matrix)
+        c += 1;
+    );
+);
+
+// Matrix : the saturation of the loop when it can grow (a rational tanh, as the Saturation, see its_Sat_Shape)
+function its_Mx_Sat(u)
+local (a)
+(
+    (u >= 4.97) ? 1 : (u <= -4.97) ? -1 :
+    ( a = u * u; u * (135135 + a * (17325 + a * (378 + a))) / (135135 + a * (62370 + a * (3150 + 28 * a))); );
+);
+
+/*
+    Matrix (a feedback delay network) : "np" delay lines (its_Mx_Lines), the line c fed by the channel c of the source (c below
+    the channels ; Hadamard : the extra lines have no input and no output ; input Spread : the channel 0 into all the lines,
+    with alternated signs) ; at each sample : the outputs of the lines (their delay, then a one-pole low pass : the damping,
+    and a one-pole high pass), the matrix (Householder : I - d (2 / np) 1 1^T, d the diffusion ; Hadamard : the fast
+    transform, / sqrt(np) ; Ring : rotations of the angle d pi / 4 between the lines (0, 1) (2, 3) ..., then (1, 2) (3, 4)
+    ... and (np - 1, 0) : lossless whatever d, at d = 2 the energy hops to the next line), times the gain of each line
+    (Decay : -60 dB after T60 ; Grow : +60 dB per T60 ; Freeze : 1, no input and no filter), plus the input : written in the
+    lines, through a saturation (its_Mx_Sat) when the loop can grow (Grow, a Householder diffusion out of [0, 1] :
+    its_Mx_Grows) ; the output c : (1 - mix) x + mix (the output of the line c) ; each delay glides toward its value (glide),
+    and is modulated by a sine of its line (wow : the depth, rate, spread : the phase from a line to the next ; the read is
+    interpolated)
+    its work area : the header (its_FxW_Hdr ; its_FxW_Md : 1 when it is in use), then its_MxH words (0 dmin, 1 dmax, 2 the
+    lines, 3 the seed, 12 the spread : those of the delays computed ; 4 the T60 of the gains, 7 the loop of the gains (-1 :
+    to compute) ; 5 the low pass (Hz) and 6 its coefficient, 10 the high pass (Hz) and 11 its coefficient ; 8 the write
+    position ; 9 the samples written since the start, up to bs : an older sample is read as silence, the lines are never
+    cleared ; 13 the rate and 15 its increment, 14 the spread of the phases, 16 the glide and 17 its coefficient, 20 the
+    diffusion of 18 19 the cosine and the sine of the Ring), its_MxLW words per line (0 its delay (samples), 1 the log of its
+    gain for T60 = 1 s, 2 its gain, 3 4 the states of its low pass and high pass, 5 its current delay (gliding), 6 7 its sine
+    (cosine, sine)), the outputs of the lines (np), the vector of the matrix (np), then the lines (np x bs samples, bs a power
+    of 2 : its_Mx_BufSize)
+*/
+function exec_matrix(fx, ccnt, out)
+local (wk, hd, ln, tp, vv, bf, np, bs, msk, src, g, mp, md, lm, t60, fz, fc, a, hb, df, mix, w, c, p, v, s, x, h, i, j,
+       a0, b0, e, sc, ls, sp, x0, wd, ew, gk, rd, q, cs, sn)
+(
+    wk = fx[its_Efx_Work];
+    ((wk > BASE_MEMORY) && (wk[its_FxW_Size] === its_Fx_WorkSize(fx))) ? (
+        np = its_Mx_Lines(fx); bs = its_Mx_BufSize(fx); msk = bs - 1;
+        hd = wk + its_FxW_Hdr; ln = hd + its_MxH; tp = ln + its_MxLW * np; vv = tp + np; bf = vv + np;
+        src = smpl_tab + fx[its_Efx_Cell1]; g = fx[its_Efx_Vol1];
+        mp = fx + its_Efx_Mod1;
+        md = fx[its_Efx_Par1 + 1];
+        lm = fx[its_Efx_Par1 + 7];
+        // a new area, after a bypass, after a value not finite : silence (the old samples of the lines are not read, hd[9])
+        (wk[its_FxW_Md] !== 1) ? (
+            memset(hd, 0, its_MxH + (its_MxLW + 2) * np);
+            hd[0] = hd[7] = hd[14] = hd[16] = -1; hd[20] = -1000; // (the delays, the gains, the phases, the glide, the Ring to compute)
+            wk[its_FxW_Md] = 1;
+        );
+        // the delays, when dmin, dmax, the lines, the seed or the spread change
+        ((hd[0] !== fx[its_Efx_Par1 + 4]) || (hd[1] !== fx[its_Efx_Par1 + 5]) || (hd[2] !== np) || (hd[3] !== fx[its_Efx_Par1 + 8])
+            || (hd[12] !== fx[its_Efx_Par1 + 9])) ? (
+            its_Mx_Delays(fx, ln, np, bs);
+            hd[0] = fx[its_Efx_Par1 + 4]; hd[1] = fx[its_Efx_Par1 + 5]; hd[2] = np; hd[3] = fx[its_Efx_Par1 + 8];
+            hd[12] = fx[its_Efx_Par1 + 9];
+            hd[7] = -1;
+        );
+        // the gains : the decay or the growth (T60 modulated, octaves), computed again when T60 moves by more than 0.5 % ;
+        // Freeze : 1
+        fz = (lm === its_MxLpFreeze);
+        fz ? (
+            (hd[7] !== lm) ? ( p = ln; loop(np, p[2] = 1; p += its_MxLW;); hd[7] = lm; );
+        ) : (
+            t60 = max(0.01, min(10000, its_Mod_Apply(mp, fx[its_Efx_Par1], its_ModA_Oct, 1)));
+            ((hd[7] !== lm) || (abs(t60 - hd[4]) > 0.005 * hd[4])) ? (
+                p = ln; loop(np, p[2] = exp(((lm === its_MxLpGrow) ? -p[1] : p[1]) / t60); p += its_MxLW;);
+                hd[4] = t60; hd[7] = lm;
+            );
+        );
+        // the filters of the loop (low pass : the damping, modulated in octaves ; high pass) : off at 0 Hz, from 0.45 srate,
+        // and in freeze
+        fc = fz ? 0 : its_Mod_Apply(mp + its_ModDist, fx[its_Efx_Par1 + 2], its_ModA_Oct, 1);
+        (fc !== hd[5]) ? ( hd[5] = fc; hd[6] = ((fc <= 0) || (fc >= 0.45 * srate)) ? 0 : exp(-2 * $pi * fc / srate); );
+        a = hd[6];
+        fc = fz ? 0 : fx[its_Efx_Par1 + 10];
+        (fc !== hd[10]) ? ( hd[10] = fc; hd[11] = ((fc <= 1) || (fc >= 0.45 * srate)) ? 0 : exp(-2 * $pi * fc / srate); );
+        hb = hd[11];
+        df = max(-2, min(2, its_Mod_Apply(mp + 2 * its_ModDist, fx[its_Efx_Par1 + 6], its_ModA_Add, 1))); // diffusion
+        ls = its_Mx_Grows(fx, df); // the loop saturates
+        mix = max(0, min(1, fx[its_Efx_Par1 + 3]));
+        sp = (fx[its_Efx_Par1 + 11] === its_MxInSpread); x0 = g * src[0];
+        w = hd[8];
+        // the wow : a sine per line (the magic circle x -= e y, y += e x), its phases spread ; the glide of the delays
+        wd = max(0, fx[its_Efx_MxX]) * srate / 1000;
+        (fx[its_Efx_MxX + 2] !== hd[14]) ? (
+            hd[14] = fx[its_Efx_MxX + 2];
+            p = ln; c = 0; loop(np, x = 2 * $pi * c * hd[14]; p[6] = cos(x); p[7] = sin(x); p += its_MxLW; c += 1;);
+        );
+        (fx[its_Efx_MxX + 1] !== hd[13]) ? ( hd[13] = fx[its_Efx_MxX + 1]; hd[15] = 2 * $pi * hd[13] / srate; );
+        ew = hd[15];
+        (fx[its_Efx_MxX + 3] !== hd[16]) ? (
+            hd[16] = fx[its_Efx_MxX + 3]; hd[17] = (hd[16] <= 0) ? 1 : 1 - exp(-1 / (hd[16] * srate));
+        );
+        gk = hd[17];
+        // the outputs of the lines (interpolated), filtered : kept (tp), and the vector of the matrix (vv)
+        e = 0; p = ln; c = 0;
+        loop(np,
+            p[5] += gk * (p[0] - p[5]); // the glide toward the delay of the line
+            rd = p[5];
+            (wd > 0) ? ( p[6] -= ew * p[7]; p[7] += ew * p[6]; rd += wd * p[7]; );
+            rd = max(1, min(bs - 2, rd));
+            (rd <= hd[9]) ? (
+                x = w - rd; i = floor(x); x -= i; q = bf + c * bs;
+                v = q[i & msk]; v += x * (q[(i + 1) & msk] - v);
+            ) : (v = 0);
+            (a > 0) ? ( v = p[3] = v + a * (p[3] - v); ); // low pass
+            (hb > 0) ? ( p[4] = v + hb * (p[4] - v); v -= p[4]; ); // high pass : v minus its low pass
+            tp[c] = vv[c] = v; e += abs(v);
+            p += its_MxLW; c += 1;
+        );
+        (e < its_FinMax) ? (
+            // the matrix
+            (md === its_MxHadam) ? (
+                h = 1;
+                while (h < np) (
+                    i = 0;
+                    loop(np / (2 * h),
+                        j = i; loop(h, a0 = vv[j]; b0 = vv[j + h]; vv[j] = a0 + b0; vv[j + h] = a0 - b0; j += 1;);
+                        i += 2 * h;
+                    );
+                    h *= 2;
+                );
+                sc = 1 / sqrt(np);
+            ) :
+            (md === its_MxRing) ? (
+                (df !== hd[20]) ? ( hd[20] = df; hd[18] = cos(0.25 * $pi * df); hd[19] = sin(0.25 * $pi * df); );
+                cs = hd[18]; sn = hd[19];
+                j = 0; loop(floor(np / 2), a0 = vv[j]; b0 = vv[j + 1]; vv[j] = cs * a0 - sn * b0; vv[j + 1] = sn * a0 + cs * b0; j += 2;);
+                j = 1; loop(floor((np - 1) / 2), a0 = vv[j]; b0 = vv[j + 1]; vv[j] = cs * a0 - sn * b0; vv[j + 1] = sn * a0 + cs * b0; j += 2;);
+                (np > 2) ? ( a0 = vv[np - 1]; b0 = vv[0]; vv[np - 1] = cs * a0 - sn * b0; vv[0] = sn * a0 + cs * b0; );
+                sc = 1;
+            ) : (
+                s = 0; c = 0; loop(np, s += vv[c]; c += 1;);
+                s *= 2 * df / np;
+                c = 0; loop(np, vv[c] -= s; c += 1;);
+                sc = 1;
+            );
+            // the lines written (the gain, the input, the saturation), the outputs
+            p = ln; c = 0;
+            loop(np,
+                x = (c < ccnt) ? g * src[c] : 0;
+                v = p[2] * sc * vv[c] + (fz ? 0 : sp ? ((c & 1) ? -x0 : x0) : x);
+                bf[c * bs + w] = ls ? its_Mx_Sat(v) : v;
+                (c < ccnt) ? (out[c] += (1 - mix) * x + mix * tp[c]);
+                p += its_MxLW; c += 1;
+            );
+            hd[8] = (w + 1) & msk;
+            (hd[9] < bs) ? (hd[9] += 1);
+        ) : (
+            wk[its_FxW_Md] = -1; // (silence from the next sample)
+            its_NaNCnt += 1;
+        );
+    );
+);
+
+/*
     execute the effect "fx" (number "nbr") : called by @sample, in the phase of the effect
     the output is the own cable of the effect (assigned), or Out or a bus (added)
     Mixer and Auto Mixer (the Auto Mixer only sets equal gains, see FX_Auto_Gains) :
@@ -8481,6 +8813,7 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md, ic, mp, lg, d)
         the shape : mode Par2 (tanh, hard clip, fold, sine fold, x - A sin(n x), Chebyshev T_n, Cheb. sum, Curve), the order n
         in Par7, A in Par9, the curve in Par10 (see its_Sat_Curve),
         the stretch in Par8 (Cheb. sum), each one modulated by the third input ; the weights of Cheb. sum in its_Efx_Harm1
+    Matrix : a feedback delay network on the channels of its source, see exec_matrix
     Bypass (its_EfxStat_Bypass) : Out = the first source not null, unchanged (an LFO : nothing)
     Auto-limiter (its_Efx_Lim, not the LFO) : the output of the type, divided by max(1, its smoothed peak), then the output gain
     the structure is checked again after each modification (its_Efx_Check reset to 0) ; the error is kept in its_Efx_Error
@@ -8528,7 +8861,8 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                 );
             );
             // the modulation inputs : an error is not fatal (no modulation, the error is shown)
-            ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat)) ? (mbad = its_Mod_Resolve(fx + its_Efx_Mod1, (ty === its_Efx_TySat) ? 3 : 2));
+            ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || (ty === its_Efx_TyMatrix)) ?
+                (mbad = its_Mod_Resolve(fx + its_Efx_Mod1, (ty === its_Efx_TyFilter) ? 2 : 3));
         );
         fx[its_Efx_Error] = (err === 0) && mbad ? 2715 : err; // 2715 : a modulation input is not valid
         (err === 0) ? (
@@ -8678,6 +9012,9 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                     );
                 );
             );
+        ) :
+        (fx[its_Efx_Type] === its_Efx_TyMatrix) ? (
+            exec_matrix(fx, ccnt, out);
         ) :
         (fx[its_Efx_Type] === its_Efx_TySat) ? (
             wk = fx[its_Efx_Work];
@@ -9490,6 +9827,10 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
                    Saturation : source S  gain dB  mode Soft|Hard|Fold|SineFold|XSin|Cheb|ChebSum|Curve  drive dB  bias b
                             mix %  os 1|2|4|8  output dB  order n  stretch s  amount A  harm w1 [... w16]  curve id
                             adaa On|Off (the modes Soft, Hard, Fold, SineFold, XSin ; a new Saturation : On, os 2)
+                   Matrix : source S  gain dB  mode Householder|Hadamard|Ring  mix %  decay s  damp Hz  dmin ms  dmax ms
+                            diffusion d  loop Decay|Freeze|Grow  seed n  delays Geometric|Linear|Harmonic|Equal|Random
+                            hp Hz  inject Direct|Spread  wow ms  rate Hz  spread turns  glide s
+                            mod Decay|Damping|Diffusion S [options] ;
                             mod Drive|Bias|Order S [depth d] [att a]  ("Order" : the stretch in the mode ChebSum) ;
                             harm : 1 to 16 weights, the others are 0 ; Dump : only the keys used by the mode
                                         "source", "gain" : src1, gain1 ; a new type gives its default values first
@@ -9670,8 +10011,8 @@ i__ii = 0; loop(6, its_TbRLp[i__ii] = mSL_symbol(menu_Rdr_Loop_N[i__ii]); i__ii 
 
 // the keys of the effects (one table for all the types : its_Tb_FxOk tells which keys a type takes) ; "source" and "gain"
 // are src1 and gain1 ; the keys its_TbFMod ... : "mod" for each modulation input (its_TbFMI)
-its_TbFMod = 40;
-its_TbFMINb = 5;
+its_TbFMod = 54;
+its_TbFMINb = 8;
 its_TbFNk = its_TbFMod + its_TbFMINb;
 its_TbFKey = make_array(its_TbFNk); its_TbFNam = make_array(its_TbFNk);
 its_TbKey(its_TbFKey, its_TbFNam, 0, "type"); its_TbKey(its_TbFKey, its_TbFNam, 1, "status");
@@ -9695,20 +10036,44 @@ its_TbKey(its_TbFKey, its_TbFNam, 33, "output"); its_TbKey(its_TbFKey, its_TbFNa
 its_TbKey(its_TbFKey, its_TbFNam, 35, "stretch"); its_TbKey(its_TbFKey, its_TbFNam, 36, "amount");
 its_TbKey(its_TbFKey, its_TbFNam, 37, "harm"); its_TbKey(its_TbFKey, its_TbFNam, 38, "curve");
 its_TbKey(its_TbFKey, its_TbFNam, 39, "adaa"); // Saturation : ADAA On|Off (Par11)
+// Matrix : decay (Par1), damp (Par3), dmin dmax (Par5, Par6), diffusion (Par7), loop (Par8), seed (Par9), delays (Par10 : their spread),
+// hp (Par11), inject (Par12) ; its matrix : "mode"
+its_TbKey(its_TbFKey, its_TbFNam, 40, "decay"); its_TbKey(its_TbFKey, its_TbFNam, 41, "damp");
+its_TbKey(its_TbFKey, its_TbFNam, 42, "dmin"); its_TbKey(its_TbFKey, its_TbFNam, 43, "dmax");
+its_TbKey(its_TbFKey, its_TbFNam, 44, "diffusion"); its_TbKey(its_TbFKey, its_TbFNam, 45, "loop");
+its_TbKey(its_TbFKey, its_TbFNam, 46, "seed"); its_TbKey(its_TbFKey, its_TbFNam, 47, "delays"); // ("spread" : the LFO)
+its_TbKey(its_TbFKey, its_TbFNam, 48, "hp"); its_TbKey(its_TbFKey, its_TbFNam, 49, "inject");
+// Matrix : wow, rate, spread (the phases : a word of the LFO too, see its_TbFAlt), glide (its_Efx_MxX ...)
+its_TbKey(its_TbFKey, its_TbFNam, 50, "wow"); its_TbKey(its_TbFKey, its_TbFNam, 51, "rate");
+its_TbKey(its_TbFKey, its_TbFNam, 52, "spread"); its_TbKey(its_TbFKey, its_TbFNam, 53, "glide");
 i__ii = its_TbFMod; loop(its_TbFMINb, its_TbFKey[i__ii] = its_TK_mod; its_TbFNam[i__ii] = "mod"; i__ii += 1;);
+// a word may name several keys, for different types (each one with its own slot, range or kind of value : the key of the
+// type is chosen when the block is read, see its_Tb_FxKey) : its_TbFAlt[k] the next key of the same word (0 : none)
+its_TbFAlt = make_array(its_TbFNk);
+i__ii = 0; loop(its_TbFMod,
+    i__jj = i__ii + 1; its_TbFAlt[i__ii] = 0;
+    while ((its_TbFAlt[i__ii] === 0) && (i__jj < its_TbFMod)) ( (its_TbFKey[i__jj] === its_TbFKey[i__ii]) ? (its_TbFAlt[i__ii] = i__jj); i__jj += 1; );
+    i__ii += 1;
+);
+its_Tb_fxk = -1; its_Tb_fxty = -1; // the effect of the block being read, its type (its_Tb_FxTyAhead)
 // the modulation inputs : symbol, name, type of effect, input number, default depth
 its_TbFMI = make_array(its_TbFMINb); its_TbFMIN = make_array(its_TbFMINb); its_TbFMIt = make_array(its_TbFMINb);
 its_TbFMIj = make_array(its_TbFMINb); its_TbFMId = make_array(its_TbFMINb); its_TbFMIk = make_array(its_TbFMINb); // (its law)
 its_TbFMIN[0] = "Cutoff"; its_TbFMIN[1] = "Reso"; // (as its_ModN_Flt)
 its_TbFMIN[2] = "Drive"; its_TbFMIN[3] = "Bias"; its_TbFMIN[4] = "Order"; // (as its_ModN_Sat : "Order" is also the stretch)
+its_TbFMIN[5] = "Decay"; its_TbFMIN[6] = "Damping"; its_TbFMIN[7] = "Diffusion"; // (as its_ModN_Mx)
 i__ii = 0; loop(its_TbFMINb,
     its_TbFMI[i__ii] = its_TK(its_TbFMIN[i__ii]);
     (i__ii < 2) ? (
         its_TbFMIt[i__ii] = its_Efx_TyFilter; its_TbFMIj[i__ii] = i__ii; its_TbFMId[i__ii] = its_ModD_Flt[i__ii];
         its_TbFMIk[i__ii] = its_ModK_Flt[i__ii];
-    ) : (
+    ) :
+    (i__ii < 5) ? (
         its_TbFMIt[i__ii] = its_Efx_TySat; its_TbFMIj[i__ii] = i__ii - 2; its_TbFMId[i__ii] = its_ModD_Sat[i__ii - 2];
         its_TbFMIk[i__ii] = its_ModK_Sat[i__ii - 2];
+    ) : (
+        its_TbFMIt[i__ii] = its_Efx_TyMatrix; its_TbFMIj[i__ii] = i__ii - 5; its_TbFMId[i__ii] = its_ModD_Mx[i__ii - 5];
+        its_TbFMIk[i__ii] = its_ModK_Mx[i__ii - 5];
     );
     i__ii += 1;
 );
@@ -9717,7 +10082,7 @@ i__ii = 0; loop(its_TbFMINb,
 its_TbFTyN = make_array(its_Efx_TyCnt); its_TbFTy = make_array(its_Efx_TyCnt);
 its_TbFTyN[0] = "Undefined"; its_TbFTyN[1] = "None"; its_TbFTyN[2] = "Mixer"; its_TbFTyN[3] = "AutoMix";
 its_TbFTyN[4] = "Mover"; its_TbFTyN[5] = "Action"; its_TbFTyN[6] = "Script"; its_TbFTyN[7] = "LFO";
-its_TbFTyN[8] = "Filter"; its_TbFTyN[9] = "Saturation";
+its_TbFTyN[8] = "Filter"; its_TbFTyN[9] = "Saturation"; its_TbFTyN[10] = "Matrix";
 i__ii = 0; loop(its_Efx_TyCnt, its_TbFTy[i__ii] = its_TK(its_TbFTyN[i__ii]); i__ii += 1;);
 its_TbFStN = make_array(4); its_TbFSt = make_array(4);
 its_TbFStN[0] = "Off"; its_TbFStN[1] = "On"; its_TbFStN[2] = "Bypass"; its_TbFStN[3] = "Undefined";
@@ -9738,6 +10103,15 @@ its_TbSMdN[its_SatSoft] = "Soft"; its_TbSMdN[its_SatHard] = "Hard"; its_TbSMdN[i
 its_TbSMdN[its_SatSine] = "SineFold"; its_TbSMdN[its_SatXSin] = "XSin"; its_TbSMdN[its_SatCheb] = "Cheb";
 its_TbSMdN[its_SatChebSum] = "ChebSum"; its_TbSMdN[its_SatCurve] = "Curve";
 i__ii = 0; loop(its_SatModeCnt, its_TbSMd[i__ii] = mSL_symbol(its_TbSMdN[i__ii]); i__ii += 1;);
+its_TbMxMdN = make_array(its_MxTypeCnt); its_TbMxMd = make_array(its_MxTypeCnt); // the matrices (mode of a Matrix)
+its_TbMxMdN[its_MxHouse] = "Householder"; its_TbMxMdN[its_MxHadam] = "Hadamard"; its_TbMxMdN[its_MxRing] = "Ring";
+i__ii = 0; loop(its_MxTypeCnt, its_TbMxMd[i__ii] = mSL_symbol(its_TbMxMdN[i__ii]); i__ii += 1;);
+// the loops, the spreads of the delays, the inputs of a Matrix (the names of the menus of the pad)
+its_TbMxLp = make_array(its_MxLpCnt); i__ii = 0; loop(its_MxLpCnt, its_TbMxLp[i__ii] = mSL_symbol(menu_Efx_MxLoop_N[i__ii]); i__ii += 1;);
+its_TbMxSp = make_array(its_MxSpCnt); i__ii = 0; loop(its_MxSpCnt, its_TbMxSp[i__ii] = mSL_symbol(menu_Efx_MxSpread_N[i__ii]); i__ii += 1;);
+its_TbMxInN = make_array(2); its_TbMxIn = make_array(2);
+its_TbMxInN[its_MxInDirect] = "Direct"; its_TbMxInN[its_MxInSpread] = "Spread";
+i__ii = 0; loop(2, its_TbMxIn[i__ii] = mSL_symbol(its_TbMxInN[i__ii]); i__ii += 1;);
 its_TbHarm = make_array(its_SatHarm); // the weights of the key "harm" (its_TbK1 : their count)
 // the keys of the block Global ; track samples (its_GlSmpl), actions (index : its_GlAct_..., see its_actions)
 its_TbGNk = 5;
@@ -9772,7 +10146,7 @@ its_TbSimLO = make_array(LN_CNT + 1); // the owner of each line, writer, reader,
 its_TbSimWO = make_array(WR_CNT + 1);
 its_TbSimRO = make_array(RD_CNT + 1);
 its_TbSimFO = make_array(FX_CNT + 1);
-its_TbKSz = 48; // (keys of the effects : its_TbFNk)
+its_TbKSz = 64; // (keys of the effects : its_TbFNk)
 its_TbKS = make_array(its_TbKSz); // the keys of a block : 1 if given
 its_TbK1 = make_array(its_TbKSz); // their value
 its_TbK2 = make_array(its_TbKSz); // their second value (first channel of a source, of an output)
@@ -11248,13 +11622,70 @@ function its_Tb_ModSet(p, ki, d0)
     (its_TbK6[ki] !== 0) ? (p[its_Mod_Flags] = p[its_Mod_Flags] - (p[its_Mod_Flags] & its_TbK6[ki]) + its_TbK5[ki]);
 );
 
+// the key "ki" has a meaning for the effect type "ty"
+function its_Tb_FxOk(ty, ki)
+(
+    (ki <= 4) ? 1 :
+    (ki === 5) ? (ty !== its_Efx_TyLFO) :
+    (ki >= its_TbFMod) ? (its_TbFMIt[ki - its_TbFMod] === ty) :
+    ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? ((ki < 14) || ((ki < 22) && (ty === its_Efx_TyMixer))) :
+    (ty === its_Efx_TyFilter) ? ((ki === 6) || (ki === 14) || ((ki >= 22) && (ki <= 25))) :
+    (ty === its_Efx_TySat) ? ((ki === 6) || (ki === 14) || (ki === 24) || ((ki >= 29) && (ki <= 39))) :
+    (ty === its_Efx_TyMatrix) ? ((ki === 6) || (ki === 14) || (ki === 24) || (ki === 31) || ((ki >= 40) && (ki <= 53))) :
+    (ty === its_Efx_TyLFO) ? ((ki === 22) || (ki === 24) || ((ki >= 26) && (ki <= 28)) || (ki === 38)) : 0;
+);
+
+/*
+    the type of the effect "k" of the block being read, before its keys (a word of several keys, its_Tb_FxKey) : the key
+    "type" of the block (read ahead, up to the next header), else the type of the effect (pass 2 : in the simulation ; no
+    effect in passes 2 and 3 : 0) ; -1 : unknown (passes 0 and 1, an effect named in this table, without its type)
+*/
+function its_Tb_FxTyAhead(k) local(ty, i, j, w, fx)
+(
+    ty = -1;
+    i = its_Tb_ptr;
+    while ((ty < 0) && (i < its_Tb_itc) && !its_Tb_IsHead(w = its_Tb_tbl[i])) (
+        (w === its_TbFKey[0]) ? (
+            j = i + 1;
+            while ((j < its_Tb_itc) && ((its_Tb_tbl[j] <= its_TbM_Base) || (its_Tb_tbl[j] === mSL_cstComma))) ( j += 1; );
+            (j < its_Tb_itc) ? ( w = its_Tb_tbl[j]; j = 0; while ((ty < 0) && (j < its_Efx_TyCnt)) ( (its_TbFTy[j] === w) ? (ty = j); j += 1; ); );
+        );
+        i += 1;
+    );
+    ((ty < 0) && (k >= 0)) ? (
+        (its_Tb_mode === 2) ? (
+            ty = its_TbSimFE[k] ? its_TbSimFT[k] : 0;
+        ) : (
+            fx = Effects_set[k];
+            ty = ((fx > BASE_MEMORY) && (fx[-2] === KW_effx)) ? fx[its_Efx_Type] : (its_Tb_mode === 3) ? 0 : -1;
+        );
+    );
+    ty;
+);
+
 // the key "w" of an effect : its index (its value in its_Tb_v1 ... its_Tb_v4), -1 if unknown ; the word of "mode" is
 // kept in its_Tb_v1 (its meaning depends on the type : its_Tb_FxPrep)
-function its_Tb_FxKey(w) local(ki, i, nm, n)
+function its_Tb_FxKey(w) local(ki, i, nm, n, sk)
 (
     ki = -1; i = 0; while ((ki < 0) && (i < its_TbFMod)) ( (its_TbFKey[i] === w) ? (ki = i); i += 1; );
     (w === its_TK_source) ? (ki = 6) : (w === its_TK_gain) ? (ki = 14) : (w === its_TK_mod) ? (ki = its_TbFMod);
     its_Tb_v2 = 0;
+    // a word of several keys (its_TbFAlt) : the key that has a meaning for the type of the effect (its_Tb_fxty, read ahead) ;
+    // an unknown type (passes 0 and 1) : its value is skipped (a word, or a number with its sign), it is read in pass 2
+    sk = 0;
+    ((ki >= 0) && (ki < its_TbFMod) && (its_TbFAlt[ki] > 0)) ? (
+        (its_Tb_fxty >= 0) ? (
+            i = ki; while ((i > 0) && !its_Tb_FxOk(its_Tb_fxty, i)) ( i = its_TbFAlt[i]; );
+            (i > 0) ? (ki = i); // (none : the first one, refused by its_Tb_FxPrep)
+        ) : (
+            sk = 1;
+        );
+    );
+    sk ? (
+        (its_Tb_Peek() === mSL_cstMinus) ? its_Tb_Next();
+        its_Tb_Next();
+        its_Tb_v1 = 0;
+    ) :
     (ki >= 0) ? (
         nm = its_TbFNam[ki];
         (ki === 0) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbFTy, its_Efx_TyCnt); ) :
@@ -11310,6 +11741,18 @@ function its_Tb_FxKey(w) local(ki, i, nm, n)
             its_Tb_v1 = its_Crv_Id(its_Tb_Next(), 0);
         ) :
         (ki === 39) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbFSt, 2); ) : // adaa : Off, On
+        (ki === 40) ? ( its_Tb_v1 = its_Tb_Num(nm, 0.01, 1000); ) : // decay (s)
+        ((ki === 41) || (ki === 48)) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 0.5 * srate); ) : // damp, hp (Hz, 0 : none)
+        ((ki === 42) || (ki === 43)) ? ( its_Tb_v1 = its_Tb_Num(nm, 0.02, 20000); ) : // dmin, dmax (ms)
+        (ki === 44) ? ( its_Tb_v1 = its_Tb_Num(nm, -2, 2); ) : // diffusion
+        (ki === 45) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbMxLp, its_MxLpCnt); ) : // loop : Decay, Freeze, Grow
+        (ki === 46) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 100000); ) : // seed
+        (ki === 47) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbMxSp, its_MxSpCnt); ) : // delays (their spread)
+        (ki === 49) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbMxIn, 2); ) : // inject : Direct, Spread
+        (ki === 50) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 2000); ) : // wow (ms)
+        (ki === 51) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 1000); ) : // rate (Hz)
+        (ki === 52) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 1); ) : // spread (turns)
+        (ki === 53) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 10); ) : // glide (s)
         (
             // mod : the input, its source, then "depth" and "att" (optional)
             w = its_Tb_Next();
@@ -11325,18 +11768,6 @@ function its_Tb_FxKey(w) local(ki, i, nm, n)
         );
     );
     ki;
-);
-
-// the key "ki" has a meaning for the effect type "ty"
-function its_Tb_FxOk(ty, ki)
-(
-    (ki <= 4) ? 1 :
-    (ki === 5) ? (ty !== its_Efx_TyLFO) :
-    (ki >= its_TbFMod) ? (its_TbFMIt[ki - its_TbFMod] === ty) :
-    ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? ((ki < 14) || ((ki < 22) && (ty === its_Efx_TyMixer))) :
-    (ty === its_Efx_TyFilter) ? ((ki === 6) || (ki === 14) || ((ki >= 22) && (ki <= 25))) :
-    (ty === its_Efx_TySat) ? ((ki === 6) || (ki === 14) || (ki === 24) || ((ki >= 29) && (ki <= 39))) :
-    (ty === its_Efx_TyLFO) ? ((ki === 22) || (ki === 24) || ((ki >= 26) && (ki <= 28)) || (ki === 38)) : 0;
 );
 
 //—— Writers and readers (2)
@@ -11448,6 +11879,7 @@ function its_Tb_Key(ty, w) local(keys, nk, ki, i, nm, j)
 function its_Tb_Keys(ty) local(w, ki)
 (
     memset(its_TbKS, 0, its_TbKSz);
+    (ty === its_TK_Effect) ? (its_Tb_fxty = its_Tb_FxTyAhead(its_Tb_fxk)); // (the effect : its_Tb_fxk, set by the caller)
     while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Tb_Peek())) (
         its_Tb_Next();
         its_Tb_v3 = its_Tb_v4 = Undef; its_Tb_v5 = its_Tb_v6 = 0;
@@ -11769,7 +12201,8 @@ function its_Tb_SetMod(ty, k) local(b, v)
 function its_Tb_FxMode(ty, w) local(syms, n, k, i)
 (
     (ty === its_Efx_TyFilter) ? ( syms = its_TbFMd; n = 6; ) :
-    (ty === its_Efx_TySat) ? ( syms = its_TbSMd; n = its_SatModeCnt; ) : ( syms = its_TbLSh; n = its_LfoCnt; );
+    (ty === its_Efx_TySat) ? ( syms = its_TbSMd; n = its_SatModeCnt; ) :
+    (ty === its_Efx_TyMatrix) ? ( syms = its_TbMxMd; n = its_MxTypeCnt; ) : ( syms = its_TbLSh; n = its_LfoCnt; );
     k = -1; i = 0; while ((k < 0) && (i < n)) ( (syms[i] === w) ? (k = i); i += 1; );
     (k < 0) ? (
         sprintf(#its_TbW, "mode : %s is not a mode of a %s", mSL_edit_value(#its_TbV, w), its_TbFTyN[ty]);
@@ -11835,6 +12268,12 @@ function its_Tb_FxGet(ki, fx) local(p)
     (ki === 37) ? its_Tb_HarmN(fx) : // harm : the count of weights up to the last one not null
     (ki === 38) ? fx[its_Efx_Par1 + ((fx[its_Efx_Type] === its_Efx_TySat) ? 9 : 5)] : // curve (LFO Par6, Saturation Par10)
     (ki === 39) ? (fx[its_Efx_Par1 + 10] !== 0) : // adaa (Par11)
+    // Matrix : decay Par1, damp Par3, dmin Par5, dmax Par6, diffusion Par7, loop Par8, seed Par9, delays Par10, hp Par11,
+    // inject Par12
+    (ki === 40) ? fx[its_Efx_Par1] :
+    (ki === 41) ? fx[its_Efx_Par1 + 2] :
+    ((ki >= 42) && (ki <= 49)) ? fx[its_Efx_Par1 + ki - 38] :
+    ((ki >= 50) && (ki <= 53)) ? fx[its_Efx_MxX + ki - 50] : // wow, rate, spread, glide
     (ki < its_TbFMod) ? fx[its_Efx_Par1 + ki - 28] : // bias Par3, output Par6, order Par7, stretch Par8, amount Par9
     its_Tb_ModGet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist);
 );
@@ -11845,12 +12284,16 @@ function its_Tb_FxText(str, ki, ty, v1, v2, v3, v4, v5)
 (
     (ki === 0) ? strcpy(str, its_TbFTyN[max(0, min(its_Efx_TyCnt - 1, v1))]) :
     ((ki === 1) || (ki === 5) || (ki === 39)) ? strcpy(str, its_TbFStN[max(0, min(3, v1))]) :
+    (ki === 45) ? strcpy(str, menu_Efx_MxLoop_N[max(0, min(its_MxLpCnt - 1, v1))]) :
+    (ki === 47) ? strcpy(str, menu_Efx_MxSpread_N[max(0, min(its_MxSpCnt - 1, v1))]) :
+    (ki === 49) ? strcpy(str, its_TbMxInN[max(0, min(1, v1))]) :
     (ki === 2) ? strcpy(str, its_TbFPhN[max(0, min(2, v1))]) :
     ((ki === 3) || (ki === 25) || (ki === 32)) ? sprintf(str, "%d", v1) :
     (ki === 4) ? ((v1 === 0) ? strcpy(str, "Own") : its_Tb_SrcText(str, v1, v2)) :
     (ki < 14) ? its_Tb_SrcText(str, v1, v2) :
     (ki === 24) ? strcpy(str, (ty === its_Efx_TyFilter) ? its_TbFMdN[max(0, min(5, v1))] :
-        (ty === its_Efx_TySat) ? its_TbSMdN[max(0, min(its_SatModeCnt - 1, v1))] : its_TbLShN[max(0, min(its_LfoCnt - 1, v1))]) :
+        (ty === its_Efx_TySat) ? its_TbSMdN[max(0, min(its_SatModeCnt - 1, v1))] :
+        (ty === its_Efx_TyMatrix) ? its_TbMxMdN[max(0, min(its_MxTypeCnt - 1, v1))] : its_TbLShN[max(0, min(its_LfoCnt - 1, v1))]) :
     (ki === 38) ? (((v1 >= 0) && (v1 < its_CrvMx)) ? its_Crv_TbName(str, v1) : sprintf(str, "%d", v1 + 1)) :
     (ki < its_TbFMod) ? sprintf(str, "%.10g", v1) :
     its_Tb_ModText(str, its_TbFMIN[ki - its_TbFMod], v1, v2, v3, v4, v5); // mod : the input, the source, depth, att, the law
@@ -11860,7 +12303,7 @@ function its_Tb_FxText(str, ki, ty, v1, v2, v3, v4, v5)
 // the name of the key "ki" in a Dump (an effect with one source : "source", "gain")
 function its_Tb_FxKName(ty, ki)
 (
-    (((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat)) && ((ki === 6) || (ki === 14))) ? ((ki === 6) ? "source" : "gain") :
+    ((its_Fx_NSrc(ty) === 1) && ((ki === 6) || (ki === 14))) ? ((ki === 6) ? "source" : "gain") :
         its_TbFNam[ki];
 );
 
@@ -11950,6 +12393,10 @@ function its_Tb_SetFx(k) local(fx, ty, j, p, ki)
         its_TbKS[37] ? ( j = 0; loop(its_SatHarm, fx[its_Efx_Harm1 + j] = (j < its_TbK1[37]) ? its_TbHarm[j] : 0; j += 1;); );
         its_TbKS[38] ? ( fx[its_Efx_Par1 + ((ty === its_Efx_TySat) ? 9 : 5)] = its_TbK1[38]; );
         its_TbKS[39] ? ( fx[its_Efx_Par1 + 10] = its_TbK1[39]; );
+        its_TbKS[40] ? ( fx[its_Efx_Par1] = its_TbK1[40]; ); // Matrix : decay
+        its_TbKS[41] ? ( fx[its_Efx_Par1 + 2] = its_TbK1[41]; ); // damp
+        ki = 42; loop(8, its_TbKS[ki] ? ( fx[its_Efx_Par1 + ki - 38] = its_TbK1[ki]; ); ki += 1;); // dmin ... inject
+        ki = 50; loop(4, its_TbKS[ki] ? ( fx[its_Efx_MxX + ki - 50] = its_TbK1[ki]; ); ki += 1;); // wow ... glide
         // the modulations : a new connection gets the attenuverter 1 and the default depth (as in the pad)
         ki = its_TbFMod; loop(its_TbFMINb,
             its_TbKS[ki] ? its_Tb_ModSet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist, ki, its_TbFMId[ki - its_TbFMod]);
@@ -11964,6 +12411,7 @@ function its_Tb_SetFx(k) local(fx, ty, j, p, ki)
 
 function its_Tb_CheckFx(k) local(fx, ty, fty, ki, bad, same, j, v)
 (
+    its_Tb_fxk = k;
     its_Tb_Keys(its_TK_Effect);
     ((its_Tb_error === 0) && (its_Tb_mode === 3) && (k >= 0)) ? (
         fx = its_Tb_Blk(its_TK_Effect, k);
@@ -12013,6 +12461,7 @@ function its_Tb_Module(ty) local(k)
 (
     k = its_Tb_Id(ty, its_Tb_Next(), 1);
     its_Tb_own = its_Tb_idLocal ? its_Tb_scope : 0; // a module of an instance (its_Tb_SimMod ... its_Tb_SetFx)
+    its_Tb_fxk = k;
     its_Tb_Keys(ty);
     ((its_Tb_error === 0) && (k >= 0)) ? (
         (its_Tb_mode === 0) ? ( its_TbResv[its_Tb_RBase(ty) + k] = 1; ) :
@@ -16570,6 +17019,164 @@ local (k, r, xx)
     );
 );
 
+// Matrix : line 1, cell 8 = the source (right clic : menu ; left clic : its first channel), cell 9 = the matrix (left clic :
+// the next one ; right clic : menu), cell 10 = the loop Decay / Freeze / Grow (left clic : the next one ; right clic : menu),
+// cell 11 = the lines (Hadamard : with the inner ones) and the longest delay possible, cell 12 = the seed of the delays
+// (left clic : + 1 ; right clic : - 1), cell 13 = the spread of the delays (left clic : the next one ; right clic : menu),
+// cell 14 = the input Direct / Spread (clic), cell 15 = "Loop sat." when the loop saturates (it can grow) ; line 2 : the
+// modulation inputs (decay, damping, diffusion) ; sliders : decay, damping, high pass, mix, delay min, delay max, diffusion
+// (not Hadamard), input gain, and the modulations used
+function FX_Matrix_Pad(RDBL, fx, fxn, what, cell, ev)
+local (k, r, xx, ok, np, lm)
+(
+    ok = its_Mx_ModOk(fx);
+    (what === FXP_Dims) ? (
+        RDBL[3] = 3;
+        RDBL[5] = 11 + ((ok & 4) ? 1 : 0) + its_Mod_SlCount(fx + its_Efx_Mod1, 3, ok);
+        RDBL[6] = 0;
+    ) :
+    (what === FXP_Fill) ? (
+        (fx[its_Efx_Src1] !== 0) ? (
+            its_Src_Label(pad_Efx_Labs[8], fx[its_Efx_Src1], fx[its_Efx_Off1]);
+            pad_Efx_Colrs[8] = Col_P3;
+        ) : (
+            strcpy(pad_Efx_Labs[8], "Source");
+            pad_Efx_Colrs[8] = Col_P1;
+        );
+        strcpy(pad_Efx_Labs[9], menu_Efx_MxType_N[max(0, min(its_MxTypeCnt - 1, fx[its_Efx_Par1 + 1]))]);
+        pad_Efx_Colrs[9] = Col_P3;
+        lm = max(0, min(its_MxLpCnt - 1, fx[its_Efx_Par1 + 7]));
+        sprintf(pad_Efx_Labs[10], "Loop %s", menu_Efx_MxLoop_N[lm]);
+        pad_Efx_Colrs[10] = (lm === its_MxLpFreeze) ? Color_Goldenrod : (lm === its_MxLpGrow) ? Color_Dark_Orange : Col_P3;
+        np = its_Mx_Lines(fx); k = max(1, min(its_MxMaxL, floor(fx[its_Efx_CCnt])));
+        (np > k) ? sprintf(pad_Efx_Labs[11], "%d+%d lines, %.1f s", k, np - k, its_Mx_MaxDelay(fx)) :
+            sprintf(pad_Efx_Labs[11], "%d lines, %.1f s", np, its_Mx_MaxDelay(fx));
+        pad_Efx_Colrs[11] = Col_InfoA;
+        sprintf(pad_Efx_Labs[12], "Seed %d", fx[its_Efx_Par1 + 8]);
+        pad_Efx_Colrs[12] = Col_P3;
+        strcpy(pad_Efx_Labs[13], menu_Efx_MxSpread_N[max(0, min(its_MxSpCnt - 1, fx[its_Efx_Par1 + 9]))]);
+        pad_Efx_Colrs[13] = Col_P3;
+        strcpy(pad_Efx_Labs[14], (fx[its_Efx_Par1 + 11] === its_MxInSpread) ? "Input spread" : "Input direct");
+        pad_Efx_Colrs[14] = (fx[its_Efx_Par1 + 11] === its_MxInSpread) ? Col_P2 : Col_P3;
+        its_Mx_Grows(fx, fx[its_Efx_Par1 + 6]) ? (
+            strcpy(pad_Efx_Labs[15], "Loop sat.");
+            pad_Efx_Colrs[15] = Color_Dark_Orange;
+        );
+        strcpy(pad_Efx_Labs[16], "Modulation");
+        its_Mod_Fill(pad_Efx_Labs, pad_Efx_Colrs, 17, fx + its_Efx_Mod1, 3, its_ModN_Mx, ok);
+    ) :
+    (what === FXP_Click) ? (
+        (cell === 8) ? (
+            (ev & ui_jpad_ev_rmc) ? (
+                ((k = its_Src_Choose(fx[its_Efx_Src1], fx[its_Efx_Off1])) >= 0) ? (
+                    fx[its_Efx_Src1] = k;
+                    fx[its_Efx_Off1] = its_Src_ChOff;
+                    fx[its_Efx_Check] = 0;
+                );
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                ((k = its_Off_Choose(fx[its_Efx_Off1])) >= 0) ? (
+                    fx[its_Efx_Off1] = k;
+                    fx[its_Efx_Check] = 0;
+                );
+            );
+        ) :
+        (cell === 9) ? (
+            (ev & ui_jpad_ev_rmc) ? (
+                ui_menu_tick(menu_Efx_MxType, -1, 0);
+                ui_menu_tick(menu_Efx_MxType, fx[its_Efx_Par1 + 1] + 1, 1);
+                xx = control_jmenu(menu_Efx_MxType);
+                (xx != 0) ? (fx[its_Efx_Par1 + 1] = xx - 1);
+                ui_menu_tick(menu_Efx_MxType, -1, 0);
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                fx[its_Efx_Par1 + 1] = (fx[its_Efx_Par1 + 1] + 1) % its_MxTypeCnt;
+            );
+        ) :
+        (cell === 10) ? (
+            (ev & ui_jpad_ev_rmc) ? (
+                ui_menu_tick(menu_Efx_MxLoop, -1, 0);
+                ui_menu_tick(menu_Efx_MxLoop, fx[its_Efx_Par1 + 7] + 1, 1);
+                xx = control_jmenu(menu_Efx_MxLoop);
+                (xx != 0) ? (fx[its_Efx_Par1 + 7] = xx - 1);
+                ui_menu_tick(menu_Efx_MxLoop, -1, 0);
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                fx[its_Efx_Par1 + 7] = (fx[its_Efx_Par1 + 7] + 1) % its_MxLpCnt;
+            );
+        ) :
+        (cell === 12) ? (
+            (ev & ui_jpad_ev_rmc) ? (fx[its_Efx_Par1 + 8] = max(0, fx[its_Efx_Par1 + 8] - 1)) :
+            (ev & ui_jpad_ev_lmc) ? (fx[its_Efx_Par1 + 8] = min(100000, fx[its_Efx_Par1 + 8] + 1));
+        ) :
+        (cell === 13) ? (
+            (ev & ui_jpad_ev_rmc) ? (
+                ui_menu_tick(menu_Efx_MxSpread, -1, 0);
+                ui_menu_tick(menu_Efx_MxSpread, fx[its_Efx_Par1 + 9] + 1, 1);
+                xx = control_jmenu(menu_Efx_MxSpread);
+                (xx != 0) ? (fx[its_Efx_Par1 + 9] = xx - 1);
+                ui_menu_tick(menu_Efx_MxSpread, -1, 0);
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                fx[its_Efx_Par1 + 9] = (fx[its_Efx_Par1 + 9] + 1) % its_MxSpCnt;
+            );
+        ) :
+        ((cell === 14) && (ev & (ui_jpad_ev_lmc | ui_jpad_ev_rmc))) ? (
+            fx[its_Efx_Par1 + 11] = (fx[its_Efx_Par1 + 11] === its_MxInSpread) ? its_MxInDirect : its_MxInSpread;
+        ) :
+        ((cell >= 17) && (cell <= 19)) ? (
+            its_Mod_Click(fx + its_Efx_Mod1, cell - 17, ev, its_PadJmc, its_ModD_Mx, its_ModK_Mx) ? (fx[its_Efx_Check] = 0);
+        );
+    ) :
+    (what === FXP_Sliders) ? (
+        // read at each sample (the delays : the lines are computed again)
+        paramValues[p_fxMxDecay] = fx[its_Efx_Par1];
+        r = parCtl(p_fxMxDecay);
+        (r != 0) ? (fx[its_Efx_Par1] = (r === 8) ? 2 : parV(p_fxMxDecay));
+        paramValues[p_fxMxDamp] = fx[its_Efx_Par1 + 2];
+        r = parCtl(p_fxMxDamp);
+        (r != 0) ? (fx[its_Efx_Par1 + 2] = (r === 8) ? 6000 : parV(p_fxMxDamp));
+        paramValues[p_fxMxHp] = max(1, fx[its_Efx_Par1 + 10]);
+        r = parCtl(p_fxMxHp);
+        (r != 0) ? (fx[its_Efx_Par1 + 10] = (r === 8) ? 0 : parV(p_fxMxHp)); // (1 Hz and below : none)
+        paramValues[p_fxMxMix] = 100 * fx[its_Efx_Par1 + 3];
+        r = parCtl(p_fxMxMix);
+        (r != 0) ? (fx[its_Efx_Par1 + 3] = (r === 8) ? 1 : parV(p_fxMxMix) / 100);
+        paramValues[p_fxMxDmin] = fx[its_Efx_Par1 + 4];
+        r = parCtl(p_fxMxDmin);
+        (r != 0) ? (fx[its_Efx_Par1 + 4] = (r === 8) ? 20 : parV(p_fxMxDmin));
+        paramValues[p_fxMxDmax] = fx[its_Efx_Par1 + 5];
+        r = parCtl(p_fxMxDmax);
+        (r != 0) ? (fx[its_Efx_Par1 + 5] = (r === 8) ? 80 : parV(p_fxMxDmax));
+        (ok & 4) ? (
+            paramValues[p_fxMxDiff] = fx[its_Efx_Par1 + 6];
+            r = parCtl(p_fxMxDiff);
+            (r != 0) ? (fx[its_Efx_Par1 + 6] = (r === 8) ? 1 : parV(p_fxMxDiff));
+        );
+        // the wow (the modulation of the delays) and the glide
+        paramValues[p_fxMxWow] = fx[its_Efx_MxX];
+        r = parCtl(p_fxMxWow);
+        (r != 0) ? (fx[its_Efx_MxX] = (r === 8) ? 0 : parV(p_fxMxWow));
+        paramValues[p_fxMxRate] = fx[its_Efx_MxX + 1];
+        r = parCtl(p_fxMxRate);
+        (r != 0) ? (fx[its_Efx_MxX + 1] = (r === 8) ? 0.2 : parV(p_fxMxRate));
+        paramValues[p_fxMxSpread] = fx[its_Efx_MxX + 2];
+        r = parCtl(p_fxMxSpread);
+        (r != 0) ? (fx[its_Efx_MxX + 2] = (r === 8) ? 0.25 : parV(p_fxMxSpread));
+        paramValues[p_fxMxGlide] = fx[its_Efx_MxX + 3];
+        r = parCtl(p_fxMxGlide);
+        (r != 0) ? (fx[its_Efx_MxX + 3] = (r === 8) ? 0.05 : parV(p_fxMxGlide));
+        // input gain : its linear value is computed by the check
+        paramValues[p_fxGain1] = fx[its_Efx_VoldB1];
+        r = parCtl(p_fxGain1);
+        (r != 0) ? (
+            fx[its_Efx_VoldB1] = (r === 8) ? 0 : parV(p_fxGain1);
+            fx[its_Efx_Check] = 0;
+        );
+        its_Mod_Sliders(fx + its_Efx_Mod1, 3, ok, p_fxMxModD1, p_fxMxModA1, its_ModN_Mx, its_ModK_Mx);
+    );
+);
+
 // the dispatcher : calls the function of the type of the effect (a type without function : the common line only)
 function FX_Type_Pad(RDBL, fx, fxn, what, cell, ev)
 local (ty)
@@ -16586,6 +17193,9 @@ local (ty)
     ) :
     (ty === its_Efx_TySat) ? (
         FX_Sat_Pad(RDBL, fx, fxn, what, cell, ev);
+    ) :
+    (ty === its_Efx_TyMatrix) ? (
+        FX_Matrix_Pad(RDBL, fx, fxn, what, cell, ev);
     ) : (
         (what === FXP_Dims) ? (RDBL[3] = 1; RDBL[5] = 0;);
     );

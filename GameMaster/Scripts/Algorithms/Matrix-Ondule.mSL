@@ -1,0 +1,53 @@
+print("Matrix-Ondule. Une traine qui ondule : les retards modules lentement, dephases d'une ligne a l'autre.");
+
+/*
+  Chaque retard est module par une sinusoide (wobble ms, pace Hz), dephasee de twist tour d'une ligne a la suivante :
+  la traine ondule comme une bande usee, un chorus geant. wobble 1 a 10 : un flottement ; 50 a 500 : des glissements de
+  hauteur ; 2000 et pace 0.05 : la traine se tord. twist 0.25 : quatre phases qui tournent.
+
+  Parametres :
+      nch       canaux (8 et plus : le son tourne autour des haut-parleurs)
+      tail      duree de la traine (s, -60 dB)
+      wobble    profondeur de la modulation des retards (ms)
+      pace      sa vitesse (Hz)
+      twist     son dephasage d'une ligne a la suivante (tours)
+      lowpass   amortissement des aigus (Hz, 0 : aucun)
+      short     retard le plus court (ms)
+      long      retard le plus long (ms)
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0.
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. dry, wet : les niveaux du son
+  sec et du son traite (dB). Les autres reglages se changent a la main dans le pad des effets de l'instance (le module
+  Instances la montre ; le module Effect montre ses effets, "pre", "fdn", "post").
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance ondule )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Ondule
+        input src
+        output dst
+        param nch 2 1 128
+        param tail 4 0.01 1000
+        param wobble 6 0 2000
+        param pace 0.4 0 1000
+        param twist 0.25 0 1
+        param lowpass 7000 0 24000
+        param short 15 0.02 20000
+        param long 70 0.02 20000
+        param dry 0 -120 40
+        param wet -6 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect fdn  type Matrix  chan nch  source Effect pre  mode Hadamard  mix 100  loop Decay  decay tail  damp lowpass
+                    dmin short  dmax long  delays Geometric  wow wobble  rate pace  spread twist
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect fdn  gain2 wet  out dst
+    End
+    Instance ondule Ondule  src In:0  dst Out:0  nch 2  tail 4  wobble 6  pace 0.4  twist 0.25  lowpass 7000  short 15  long 70  dry 0  wet -6
+));
+print(sprintf(0, "Matrix-Ondule. instance ondule : %d (0 : OK)", r));

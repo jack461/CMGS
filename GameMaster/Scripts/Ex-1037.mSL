@@ -1,0 +1,52 @@
+print("Ex-1037. Interstys table : l'effet Matrix (reseau de retards boucles, FDN).");
+
+/*
+  Un nouvel effet Matrix prend les valeurs par defaut du pad : Householder, decay 2 s, damp 6000 Hz, mix 100 %, retards
+  de 20 a 80 ms, diffusion 1, loop Decay, seed 1, delays Geometric, hp 0 (aucun), inject Direct, limiteur en service.
+  Puis Hadamard sans amortissement, loop Freeze, une autre graine, des retards harmoniques, un passe-haut, l'entree
+  repandue sur toutes les lignes, le decay module par Ctl 1 (profondeur 2 octaves). Puis des valeurs extremes :
+  Householder, diffusion -1.5 (la boucle croit : elle sature), loop Grow, decay 1000 s, retards egaux de 0.02 ms, delays
+  Random. Le Dump ecrit toutes les cles du type.
+  Erreurs (rien n'est cree) : e1 loop Maybe (2754) ; e2 decay 0 (2754) ; e3 drive pour un Matrix (2767) ;
+  e4 mode Mesh (pas encore, 2754) ; e5 diffusion 3 (2754).
+  Les numeros des effets dependent du projet (%d).
+*/
+
+var r = table(data(
+    Interstys
+    Effect mx  type Matrix  chan 2  source In:0
+    Dump Effect mx
+    Check Effect mx  mode Householder  decay 2  damp 6000  mix 100  dmin 20  dmax 80  diffusion 1  loop Decay  seed 1
+                     delays Geometric  hp 0  inject Direct
+    Effect mx  mode Hadamard  decay 8.5  damp 0  mix 40  dmin 5  dmax 150  loop Freeze  seed 7  delays Harmonic  hp 200
+               inject Spread  mod Decay Ctl 1  depth 2
+    Dump Effect mx
+    Check Effect mx  mode Hadamard  decay 8.5  damp 0  mix 40  dmin 5  dmax 150  loop Freeze  seed 7  delays Harmonic  hp 200
+                     inject Spread  mod Decay Ctl 1  depth 2  att 1
+    Effect mx  mode Householder  diffusion - 1.5  loop Grow  decay 1000  dmin 0.02  dmax 0.02  delays Random  mod Decay none
+    Dump Effect mx
+    Check Effect mx  diffusion - 1.5  loop Grow  decay 1000  dmin 0.02  delays Random
+    Free Effect mx
+));
+print(sprintf(0, "Ex-1037. resultat : %d", r));
+
+var e1 = table(data( Interstys  Effect x  type Matrix  loop Maybe ));
+var e2 = table(data( Interstys  Effect x  type Matrix  decay 0 ));
+var e3 = table(data( Interstys  Effect x  type Matrix  drive 3 ));
+var e4 = table(data( Interstys  Effect x  type Matrix  mode Mesh ));
+var e5 = table(data( Interstys  Effect x  type Matrix  diffusion 3 ));
+print(sprintf(0, "Ex-1037. erreurs : %d %d %d %d %d", e1, e2, e3, e4, e5));
+
+// Expected "Effect %d status On type Matrix phase Std chan 2 out Own limiter On source In:0 gain 0 mode Householder mix 100 decay 2 damp 6000 dmin 20 dmax 80 diffusion 1 loop Decay seed 1 delays Geometric hp 0 inject Direct wow 0 rate 0.2 spread 0.25 glide 0.05"
+// Expected "Check Effect %d OK"
+// Expected "Effect %d status On type Matrix phase Std chan 2 out Own limiter On source In:0 gain 0 mode Hadamard mix 40 decay 8.5 damp 0 dmin 5 dmax 150 diffusion 1 loop Freeze seed 7 delays Harmonic hp 200 inject Spread wow 0 rate 0.2 spread 0.25 glide 0.05 mod Decay Ctl 1 depth 2 att 1"
+// Expected "Check Effect %d OK"
+// Expected "Effect %d status On type Matrix phase Std chan 2 out Own limiter On source In:0 gain 0 mode Householder mix 40 decay 1000 damp 0 dmin 0.02 dmax 0.02 diffusion -1.5 loop Grow seed 7 delays Random hp 200 inject Spread wow 0 rate 0.2 spread 0.25 glide 0.05"
+// Expected "Check Effect %d OK"
+// Expected "Ex-1037. resultat : 0"
+// Expected error 2754
+// Expected error 2754
+// Expected error 2767
+// Expected error 2754
+// Expected error 2754
+// Expected "Ex-1037. erreurs : 2754 2754 2767 2754 2754"

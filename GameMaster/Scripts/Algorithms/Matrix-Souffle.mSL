@@ -1,0 +1,51 @@
+print("Matrix-Souffle. Une traine qui respire : sa duree balayee par un LFO tres lent.");
+
+/*
+  Un LFO lent (pace Hz) fait varier la duree de la traine, en octaves autour de tail : avec range 4, de tail / 16 a
+  tail x 16 ; la traine s'allonge jusqu'a presque se figer, puis se resserre. pace 0.01 : un tour en 100 s.
+
+  Parametres :
+      nch       canaux
+      tail      duree moyenne de la traine (s)
+      range     amplitude de la variation (octaves)
+      pace      vitesse du LFO (Hz)
+      lowpass   amortissement des aigus (Hz, 0 : aucun)
+      short     retard le plus court (ms)
+      long      retard le plus long (ms)
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0.
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. dry, wet : les niveaux du son
+  sec et du son traite (dB). Les autres reglages se changent a la main dans le pad des effets de l'instance (le module
+  Instances la montre ; le module Effect montre ses effets, "pre", "fdn", "post").
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance souffle )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Souffle
+        input src
+        output dst
+        param nch 2 1 128
+        param tail 2 0.01 1000
+        param range 4 0 10
+        param pace 0.03 0.001 20
+        param lowpass 6000 0 24000
+        param short 15 0.02 20000
+        param long 90 0.02 20000
+        param dry 0 -120 40
+        param wet -6 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect lfo  type LFO  chan 1  freq pace  mode Sine  amp 1  offset 0
+        Effect fdn  type Matrix  chan nch  source Effect pre  mode Hadamard  mix 100  loop Decay  decay tail  damp lowpass
+                    dmin short  dmax long  delays Geometric  mod Decay Effect lfo  depth range
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect fdn  gain2 wet  out dst
+    End
+    Instance souffle Souffle  src In:0  dst Out:0  nch 2  tail 2  range 4  pace 0.03  lowpass 6000  short 15  long 90  dry 0  wet -6
+));
+print(sprintf(0, "Matrix-Souffle. instance souffle : %d (0 : OK)", r));

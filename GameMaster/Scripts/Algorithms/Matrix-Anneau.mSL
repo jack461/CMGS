@@ -1,0 +1,51 @@
+print("Matrix-Anneau. Un anneau : chaque echo passe au haut-parleur voisin.");
+
+/*
+  Une Matrix en Anneau : les lignes echangent leur son avec leurs voisines (la ligne c avec c - 1 et c + 1, la derniere
+  avec la premiere) par des rotations, sans perte. turn 2 : a chaque passage tout le son saute a la ligne suivante, les
+  echos tournent autour des haut-parleurs (dans l'ordre des canaux) ; turn -2 : dans l'autre sens ; turn 1 : un
+  melange avec les voisines ; turn 0.3 : chaque canal deborde un peu sur ses voisins. Des retards longs (long 200 et
+  plus) font entendre chaque pas.
+
+  Parametres :
+      nch       canaux (8 et plus : le son tourne autour des haut-parleurs)
+      turn      rotation entre voisines (2 : un pas par passage, -2 : en sens inverse)
+      tail      duree de la traine (s, -60 dB)
+      lowpass   amortissement des aigus (Hz, 0 : aucun)
+      short     retard le plus court (ms)
+      long      retard le plus long (ms)
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0.
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. dry, wet : les niveaux du son
+  sec et du son traite (dB). Les autres reglages se changent a la main dans le pad des effets de l'instance (le module
+  Instances la montre ; le module Effect montre ses effets, "pre", "fdn", "post").
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance anneau )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Anneau
+        input src
+        output dst
+        param nch 2 1 128
+        param turn 2 -2 2
+        param tail 6 0.01 1000
+        param lowpass 6000 0 24000
+        param short 40 0.02 20000
+        param long 120 0.02 20000
+        param dry 0 -120 40
+        param wet -6 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect fdn  type Matrix  chan nch  source Effect pre  mode Ring  mix 100  loop Decay  decay tail  diffusion turn
+                    damp lowpass  dmin short  dmax long  delays Geometric
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect fdn  gain2 wet  out dst
+    End
+    Instance anneau Anneau  src In:0  dst Out:0  nch 2  turn 2  tail 6  lowpass 6000  short 40  long 120  dry 0  wet -6
+));
+print(sprintf(0, "Matrix-Anneau. instance anneau : %d (0 : OK)", r));
