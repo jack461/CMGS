@@ -1,0 +1,52 @@
+print("Shimmer-Abime. Un abime : la traine descend d'octave en octave et s'enfonce dans le grave.");
+
+/*
+  Le meme reseau, transpose vers le bas : chaque passage fait tomber la traine d'une octave, elle s'enfonce sous le son
+  jusqu'au grave (highpass l'arrete avant qu'elle ne gronde). step -7 : une chute par quintes ; -1 : une lente glissade.
+
+  Parametres :
+      nch       canaux
+      tail      duree de la traine (s, -60 dB)
+      sparkle   la part transposee (%)
+      step      l'intervalle (demi-tons)
+      lowpass   l'amortissement des aigus (Hz)
+      highpass  le passe-haut de la boucle (Hz)
+      thick     les lignes, au moins
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0 (dry, wet).
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. Les autres reglages se
+  changent a la main dans le pad des effets de l'instance (le module Instances la montre ; le module Effect montre ses
+  effets, "pre", "sh", "post").
+  L'effet "sh" s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance abime )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Abime
+        input src
+        output dst
+        param nch 2 1 128
+        param tail 14 0.01 1000
+        param sparkle 70 0 100
+        param step -12 -36 36
+        param lowpass 5000 0 24000
+        param highpass 40 0 24000
+        param thick 8 1 128
+        param dry 0 -120 40
+        param wet -3 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect sh  type Shimmer  chan nch  source Effect pre  mode Hadamard  mix 100  decay tail  shimmer sparkle  shift step
+                   shift2 step  damp lowpass  hp highpass  lines thick
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect sh  gain2 wet  out dst
+        Display Effect sh
+    End
+    Instance abime Abime  src In:0  dst Out:0  nch 2  tail 14  sparkle 70  step -12  lowpass 5000  highpass 40  thick 8  dry 0  wet -3
+));
+print(sprintf(0, "Shimmer-Abime. instance abime : %d (0 : OK)", r));

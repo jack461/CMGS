@@ -17,6 +17,13 @@ fenêtre d'Interstys et installe aussitôt un algorithme complet, branché sur l
 - **Plusieurs canaux** : mettre `nch` au nombre de canaux de la piste (jusqu'à 128). Sur une piste
   stéréo, `nch 2`.
 
+**L'effet principal s'affiche** : chaque recette se termine par `Display Effect …` (son effet principal :
+`fdn`, `fl`, `ph` ou `sh`), qui le montre dans un module Effect de l'onglet courant : celui qui le montre déjà,
+sinon un module Effect qui montre un effet qui n'existe plus, sinon un nouveau module Effect, à la fin du
+panneau qui en a le moins. `Display` montre aussi un reader, un writer, une ligne ou une courbe
+(`Display Reader r`, `Display Line l`, `Display Curve c`), ou un module par son nom, celui du menu des modules
+(`Display "Globals"`, `Display "System Log"`, `Display "Patch"`…).
+
 La première fois qu'on dépose un fichier, le journal note une erreur 2787 : le fichier retire d'abord une
 instance précédente, qui n'existe pas encore. C'est sans conséquence.
 
@@ -73,3 +80,16 @@ Chorus), `post` (la sortie ; le mélange sec et traité pour `Escalier`, `Cloche
 
 Les effets sont `pre`, `ph` (le Phaser) et `post`. Le son direct passe dans le Phaser (son mélange
 `blend`), sauf dans `Phaser-Laser` (`dry` et `wet`).
+
+## Les recettes du Shimmer (le Matrix avec un transpositeur dans chaque ligne)
+
+| Fichier | Ce qu'il fait |
+|---|---|
+| `Shimmer-Ciel` | Un ciel : la traîne monte d'octave en octave, le shimmer classique |
+| `Shimmer-Abime` | Un abîme : la traîne descend d'octave en octave et s'enfonce dans le grave |
+| `Shimmer-Quinte` | Une quinte : les lignes paires montent d'une octave, les impaires d'une quinte, un accord qui s'élève |
+| `Shimmer-Derive` | Une dérive : des intervalles infimes, la traîne se désaccorde lentement sans fin |
+| `Shimmer-Givre` | Un givre : des grains très courts transposés très haut, une poussière scintillante |
+
+Les effets sont `pre`, `sh` (le Shimmer) et `post` (le son sec et le son traité : `dry`, `wet`). `thick` règle
+le nombre de lignes du réseau (8 et plus : une traîne dense, même en stéréo).

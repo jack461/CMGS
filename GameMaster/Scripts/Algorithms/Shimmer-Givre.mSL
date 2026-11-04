@@ -1,0 +1,53 @@
+print("Shimmer-Givre. Un givre : des grains tres courts transposes tres haut, une poussiere scintillante.");
+
+/*
+  Un grain de 15 ms et des intervalles larges (une douzieme et deux octaves) : le transpositeur se fait granulaire, la
+  traine se couvre d'une poussiere de cristaux, metallique et grenue. slice 10 : plus de grenaille ;
+  50 : plus lisse.
+
+  Parametres :
+      nch       canaux
+      tail      duree de la traine (s, -60 dB)
+      sparkle   la part transposee (%)
+      step      l'intervalle des lignes paires (demi-tons)
+      step2     celui des lignes impaires (demi-tons)
+      slice     le grain du transpositeur (ms)
+      lowpass   l'amortissement des aigus (Hz)
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0 (dry, wet).
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. Les autres reglages se
+  changent a la main dans le pad des effets de l'instance (le module Instances la montre ; le module Effect montre ses
+  effets, "pre", "sh", "post").
+  L'effet "sh" s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance givre )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Givre
+        input src
+        output dst
+        param nch 2 1 128
+        param tail 6 0.01 1000
+        param sparkle 80 0 100
+        param step 19 -36 36
+        param step2 24 -36 36
+        param slice 15 10 1000
+        param lowpass 12000 0 24000
+        param dry 0 -120 40
+        param wet -6 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect sh  type Shimmer  chan nch  source Effect pre  mode Hadamard  mix 100  decay tail  shimmer sparkle  shift step
+                   shift2 step2  grain slice  damp lowpass  hp 200  lines 8
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect sh  gain2 wet  out dst
+        Display Effect sh
+    End
+    Instance givre Givre  src In:0  dst Out:0  nch 2  tail 6  sparkle 80  step 19  step2 24  slice 15  lowpass 12000  dry 0  wet -6
+));
+print(sprintf(0, "Shimmer-Givre. instance givre : %d (0 : OK)", r));

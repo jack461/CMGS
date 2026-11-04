@@ -553,7 +553,10 @@ its_Efx_Par1 = idx; idx += 12;
 its_Efx_St1 = idx; idx += 4;
 its_Efx_Harm1 = idx; idx += 16; // Saturation, mode Cheb. sum : les poids des harmoniques 1 ... 16 (its_SatHarm), dans [-1, 1]
 // Matrix : les mêmes mots, ses réglages en plus de Par1 ... Par12 : 0 wow (ms : la profondeur de la modulation des retards),
-// 1 rate (Hz : sa vitesse), 2 spread (tours : le déphasage d'une ligne à la suivante), 3 glide (s : le glissement des retards)
+// 1 rate (Hz : sa vitesse), 2 spread (tours : le déphasage d'une ligne à la suivante), 3 glide (s : le glissement des retards),
+// 8 lines (le nombre minimal de lignes : plus que de canaux, des lignes internes) ; Shimmer : ceux du Matrix, et 4 shimmer
+// [0, 1] (la part transposée de chaque ligne), 5 shift et 6 shift2 (demi-tons : les intervalles des lignes paires et
+// impaires), 7 grain (ms : la fenêtre du transpositeur)
 // Flanger, Chorus : 0 sweep (ms : l'amplitude du balayage du retard), 1 rate (Hz : sa vitesse), 3 glide (s : le glissement
 // du retard et du balayage), 4 jitter [0, 1] (les écarts des vitesses et des retards des voix) ; Phaser : 0 spacing (octaves
 // d'un étage au suivant), 1 rate (Hz), 3 glide (s), 4 jitter [0, 1] (les écarts des vitesses des canaux)
@@ -626,7 +629,8 @@ its_Efx_TyMatrix = 10; // a feedback delay network (see exec_matrix)
 its_Efx_TyFlanger = 11; // modulated delays (see exec_flanger)
 its_Efx_TyChorus = 12; // the same engine, other default values (see its_Fl_Def)
 its_Efx_TyPhaser = 13; // swept allpass filters (see exec_phaser)
-its_Efx_TyCnt = 14; // count of types
+its_Efx_TyShimmer = 14; // the Matrix with a pitch shifter in each line (see exec_matrix)
+its_Efx_TyCnt = 15; // count of types
 // Filter modes (its_Efx_Par3)
 its_FltLP1 = 0; // low pass, 1 pole
 its_FltHP1 = 1; // high pass, 1 pole
@@ -661,7 +665,7 @@ its_MxMaxL = 128; // lines at most
 its_MxMaxB = 1048576; // samples of a line at most (a power of 2)
 its_MxMaxW = 16777216; // samples of all the lines at most (fewer lines : longer delays)
 its_MxH = 24; // words of its header (after the one of the work area)
-its_MxLW = 8; // words per line
+its_MxLW = 10; // words per line
 its_SatHarm = 16; // count of the weights of the mode Cheb. sum (its_Efx_Harm1)
 its_HarmH = 90; // height of the editor of the weights (pixels)
 its_SatOSCnt = 4; // oversampling (its_Efx_Par5) : 1, 2, 4 or 8 times
@@ -1325,6 +1329,10 @@ p_fxPhSpacing = idx; idx += 1; // the spacing of the stages (octaves from a stag
 p_fxPhQ = idx; idx += 1; // the Q of the stages (mode Resonant)
 p_fxPhModD1 = idx; idx += 3; // depths of the 3 modulation inputs : frequency, rate (octaves), feedback
 p_fxPhModA1 = idx; idx += 3; // their attenuverters [-10 ... 10]
+p_fxMxLines = idx; idx += 1; // Matrix, Shimmer : the minimum count of lines
+p_fxShAmt = idx; idx += 1; // Shimmer : the share of the shifted signal in the lines (%)
+p_fxShShift = idx; idx += 2; // the intervals of the even and of the odd lines (semitones)
+p_fxShGrain = idx; idx += 1; // the window of the pitch shifter (ms)
 its_ParLast = idx - 1; // the last parameter of Interstys : in its range (paramNMax), see the error 2716
 
 // Global variables
@@ -2234,12 +2242,22 @@ function its_Mx_ModOk(fx)
     3 | ((fx[its_Efx_Par1 + 1] !== its_MxHadam) ? 4 : 0);
 );
 
-// Matrix : its count of lines (Hadamard : the power of 2 above its channels, the extra lines inside, without input nor output)
+// Matrix, Shimmer : the type "ty" is one of them (the same engine, see exec_matrix)
+function its_Mx_Is(ty) ( (ty === its_Efx_TyMatrix) || (ty === its_Efx_TyShimmer); );
+
+// Matrix : its count of lines : its channels, or the minimum count of lines (MxX + 8) ; Hadamard : the power of 2 above ; the
+// extra lines inside, without input nor output
 function its_Mx_Lines(fx)
 local (n, k)
 (
-    n = max(1, min(its_MxMaxL, floor(fx[its_Efx_CCnt])));
-    (fx[its_Efx_Par1 + 1] === its_MxHadam) ? ( k = 1; while (k < n) (k *= 2); k; ) : n;
+    n = max(1, min(its_MxMaxL, max(floor(fx[its_Efx_CCnt]), floor(fx[its_Efx_MxX + 8]))));
+    (fx[its_Efx_Par1 + 1] === its_MxHadam) ? ( k = 1; while (k < n) (k *= 2); min(its_MxMaxL, k); ) : n;
+);
+
+// Matrix : the room of a line beyond its delay (the delays all different ; Shimmer : the window of the pitch shifter)
+function its_Mx_Room(fx)
+(
+    2 * its_MxMaxL + 4 + ((fx[its_Efx_Type] === its_Efx_TyShimmer) ? max(10, min(1000, fx[its_Efx_MxX + 7])) * srate / 1000 + 2 : 0);
 );
 
 // Matrix : the size of a line, a power of 2 above the longest delay (and the room to make the delays all different), at
@@ -2247,7 +2265,7 @@ local (n, k)
 function its_Mx_BufSize(fx)
 local (d, b, n)
 (
-    d = (max(fx[its_Efx_Par1 + 4], fx[its_Efx_Par1 + 5]) + max(0, fx[its_Efx_MxX])) * srate / 1000 + 2 * its_MxMaxL + 4;
+    d = (max(fx[its_Efx_Par1 + 4], fx[its_Efx_Par1 + 5]) + max(0, fx[its_Efx_MxX])) * srate / 1000 + its_Mx_Room(fx);
     b = 64; while ((b < d) && (b < its_MxMaxB)) (b *= 2);
     n = its_Mx_Lines(fx);
     while ((b > 64) && (b * n > its_MxMaxW)) (b /= 2);
@@ -2255,7 +2273,7 @@ local (d, b, n)
 );
 
 // Matrix : the longest delay possible (s), see its_Mx_BufSize
-function its_Mx_MaxDelay(fx) ( (its_Mx_BufSize(fx) - 2 * its_MxMaxL - 4) / srate; );
+function its_Mx_MaxDelay(fx) ( (its_Mx_BufSize(fx) - its_Mx_Room(fx)) / srate; );
 
 // Matrix : the loop can grow (Grow, or a Householder diffusion out of [0, 1]) : it saturates (its_Mx_Sat)
 function its_Mx_Grows(fx, df)
@@ -2345,7 +2363,7 @@ local (ns)
     (fx[its_Efx_Type] === its_Efx_TySat) ? (
         its_FxW_Hdr + 5 * 4 + its_SatChW * max(1, min(128, floor(fx[its_Efx_CCnt])));
     ) :
-    (fx[its_Efx_Type] === its_Efx_TyMatrix) ? (
+    its_Mx_Is(fx[its_Efx_Type]) ? (
         ns = its_Mx_Lines(fx);
         its_FxW_Hdr + its_MxH + (its_MxLW + 2) * ns + ns * its_Mx_BufSize(fx);
     ) :
@@ -2363,7 +2381,7 @@ local (ns)
 function its_Fx_NSrc(ty)
 (
     ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? 8 :
-    ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || (ty === its_Efx_TyMatrix) || its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)) ? 1 :
+    ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || its_Mx_Is(ty) || its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)) ? 1 :
     (ty === its_Efx_TyLFO) ? 0 : -1;
 );
 
@@ -2791,7 +2809,7 @@ local (i, b, w, f, n, ty, p)
             );
             (ty === its_Efx_TyFilter) ? its_Pch_Mods(b + its_Efx_Mod1, 2, its_ModN_Flt, its_Flt_ModOk(b), "Effect", i) :
             (ty === its_Efx_TySat) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Sat, its_Sat_ModOk(b), "Effect", i) :
-            (ty === its_Efx_TyMatrix) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Mx, its_Mx_ModOk(b), "Effect", i) :
+            its_Mx_Is(ty) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Mx, its_Mx_ModOk(b), "Effect", i) :
             its_Fl_Is(ty) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Fl, 7, "Effect", i) :
             (ty === its_Efx_TyPhaser) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Ph, 7, "Effect", i);
         );
@@ -2950,7 +2968,7 @@ local (r, j, p, ns, nm)
     p = fx + its_Efx_Src1; j = 0;
     while (!r && (j < ns)) ( r = (p[0] !== 0) && (its_Fx_RKey(p[0]) === wk); p += its_EfxDist; j += 1; );
     nm = (fx[its_Efx_Type] === its_Efx_TyFilter) ? 2 :
-        ((fx[its_Efx_Type] === its_Efx_TySat) || (fx[its_Efx_Type] === its_Efx_TyMatrix) || its_Fl_Is(fx[its_Efx_Type])
+        ((fx[its_Efx_Type] === its_Efx_TySat) || its_Mx_Is(fx[its_Efx_Type]) || its_Fl_Is(fx[its_Efx_Type])
         || (fx[its_Efx_Type] === its_Efx_TyPhaser)) ? 3 : 0;
     p = fx + its_Efx_Mod1; j = 0;
     while (!r && (j < nm)) ( r = (p[its_Mod_Src] !== 0) && (its_Fx_RKey(p[its_Mod_Src]) === wk); p += its_ModDist; j += 1; );
@@ -4628,6 +4646,7 @@ its_EfxTyS[10] = "Matrix";
 its_EfxTyS[11] = "Flanger";
 its_EfxTyS[12] = "Chorus";
 its_EfxTyS[13] = "Phaser";
+its_EfxTyS[14] = "Shimmer";
 // the menus of a cell of these modules (right clic, see its_Sum_Menu) : the states, (readers) mute and solo, open the
 // object in a module of the tab, in a new module ; results : 1-3 the states, then (readers : 4 mute, 5 solo) open, open new
 menu_SumR_N = make_array(9);
@@ -4894,6 +4913,27 @@ local (k)
         fx[its_Efx_Par1 + 10] = 0; // high pass (Hz) : none
         fx[its_Efx_Par1 + 11] = its_MxInDirect; // the input
         fx[its_Efx_MxX] = 0; fx[its_Efx_MxX + 1] = 0.2; fx[its_Efx_MxX + 2] = 0.25; fx[its_Efx_MxX + 3] = 0.05; // wow, rate, spread, glide
+        fx[its_Efx_MxX + 8] = 1; // lines : the channels
+        fx[its_Efx_Lim] = 1; // the auto-limiter in service
+    );
+    ((ty === its_Efx_TyShimmer) && (k !== ty)) ? (
+        fx[its_Efx_Par1] = 8; // decay (s)
+        fx[its_Efx_Par1 + 1] = its_MxHadam;
+        fx[its_Efx_Par1 + 2] = 7000; // damping (Hz)
+        fx[its_Efx_Par1 + 3] = 0.5; // mix : 50 %
+        fx[its_Efx_Par1 + 4] = 30; // delays (ms)
+        fx[its_Efx_Par1 + 5] = 120;
+        fx[its_Efx_Par1 + 6] = 1; // diffusion
+        fx[its_Efx_Par1 + 7] = its_MxLpDecay; // the loop
+        fx[its_Efx_Par1 + 8] = 1; // seed
+        fx[its_Efx_Par1 + 9] = its_MxSpGeom; // the spread of the delays
+        fx[its_Efx_Par1 + 10] = 100; // high pass (Hz)
+        fx[its_Efx_Par1 + 11] = its_MxInDirect; // the input
+        fx[its_Efx_MxX] = 0.3; fx[its_Efx_MxX + 1] = 0.3; fx[its_Efx_MxX + 2] = 0.25; fx[its_Efx_MxX + 3] = 0.05; // wow, rate, spread, glide
+        fx[its_Efx_MxX + 4] = 0.6; // shimmer : 60 %
+        fx[its_Efx_MxX + 5] = fx[its_Efx_MxX + 6] = 12; // shift, shift2 : an octave up
+        fx[its_Efx_MxX + 7] = 80; // grain (ms)
+        fx[its_Efx_MxX + 8] = 8; // lines : 8 at least
         fx[its_Efx_Lim] = 1; // the auto-limiter in service
     );
     (its_Fl_Is(ty) && (k !== ty)) ? (
@@ -4957,6 +4997,7 @@ menu_Efx_Type_N[10] = "Matrix";
 menu_Efx_Type_N[11] = "Flanger";
 menu_Efx_Type_N[12] = "Chorus";
 menu_Efx_Type_N[13] = "Phaser";
+menu_Efx_Type_N[14] = "Shimmer";
 menu_Efx_Type = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "effect-type", its_Efx_TyCnt, menu_Efx_Type_N);
@@ -7529,6 +7570,11 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_fxPhModA1, "Freq atten.",  "PhAttF",  i_UB|i_SP, "%.3f", "Freq atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_fxPhModA1+1, "Rate atten.",  "PhAttR",  i_UB|i_SP, "%.3f", "Rate atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_fxPhModA1+2, "Feedback atten.",  "PhAttB",  i_UB|i_SP, "%.3f", "Feedback atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxMxLines, "Lines",  "MxLines",  i_UB|i_SP, "%.0f", "Lines (at least): %.0f",   1,   128,    1,  1, 2);
+    parDcl(p_fxShAmt, "Shimmer",  "ShAmt",  i_UB|i_SP, "%.1f %%", "Shimmer (shifted share): %.1f %%",   0,   100,    60,  0.1, 0);
+    parDcl(p_fxShShift, "Shift",  "ShShift",  i_UB|i_SP, "%.2f st", "Shift (even lines): %.2f st",   -36,   36,    12,  0.01, 0);
+    parDcl(p_fxShShift+1, "Shift 2",  "ShShift2",  i_UB|i_SP, "%.2f st", "Shift 2 (odd lines): %.2f st",   -36,   36,    12,  0.01, 0);
+    parDcl(p_fxShGrain, "Grain",  "ShGrain",  i_UB|i_SP, "%.1f ms", "Grain (shifter window): %.1f ms",   10,   1000,    80,  0.1, 3);
 );
 
 
@@ -8838,7 +8884,7 @@ function its_Mx_Delays(fx, ln, np, bs)
 local (d0, d1, c, u, d, q, dup, sp, k)
 (
     d0 = max(1, min(fx[its_Efx_Par1 + 4], fx[its_Efx_Par1 + 5]) * srate / 1000);
-    d1 = min(bs - 2 * its_MxMaxL - 4, max(d0, max(fx[its_Efx_Par1 + 4], fx[its_Efx_Par1 + 5]) * srate / 1000));
+    d1 = min(bs - its_Mx_Room(fx), max(d0, max(fx[its_Efx_Par1 + 4], fx[its_Efx_Par1 + 5]) * srate / 1000));
     d0 = min(d0, d1);
     sp = fx[its_Efx_Par1 + 9];
     c = 0;
@@ -8894,12 +8940,13 @@ local (a)
     cleared ; 13 the rate and 15 its increment, 14 the spread of the phases, 16 the glide and 17 its coefficient, 20 the
     diffusion of 18 19 the cosine and the sine of the Ring), its_MxLW words per line (0 its delay (samples), 1 the log of its
     gain for T60 = 1 s, 2 its gain, 3 4 the states of its low pass and high pass, 5 its current delay (gliding), 6 7 its sine
-    (cosine, sine)), the outputs of the lines (np), the vector of the matrix (np), then the lines (np x bs samples, bs a power
-    of 2 : its_Mx_BufSize)
+    (cosine, sine), 8 the phase of its pitch shifter (Shimmer)), the outputs of the lines (np), the vector of the matrix (np),
+    then the lines (np x bs samples, bs a power of 2 : its_Mx_BufSize) ; Shimmer : each line read again by a pitch shifter,
+    its share : the shimmer (MxX + 4)
 */
 function exec_matrix(fx, ccnt, out)
 local (wk, hd, ln, tp, vv, bf, np, bs, msk, src, g, mp, md, lm, t60, fz, fc, a, hb, df, mix, w, c, p, v, s, x, h, i, j,
-       a0, b0, e, sc, ls, sp, x0, wd, ew, gk, rd, q, cs, sn)
+       a0, b0, e, sc, ls, sp, x0, wd, ew, gk, rd, q, cs, sn, sm, gw, r1, r2, i1, i2, u1, u2, up, ph, pb, wc, da, db, sa, sb, y)
 (
     wk = fx[its_Efx_Work];
     ((wk > BASE_MEMORY) && (wk[its_FxW_Size] === its_Fx_WorkSize(fx))) ? (
@@ -8960,6 +9007,15 @@ local (wk, hd, ln, tp, vv, bf, np, bs, msk, src, g, mp, md, lm, t60, fz, fc, a, 
             hd[16] = fx[its_Efx_MxX + 3]; hd[17] = (hd[16] <= 0) ? 1 : 1 - exp(-1 / (hd[16] * srate));
         );
         gk = hd[17];
+        // Shimmer : a pitch shifter in each line (two taps half a window apart, their delays ramp over the grain, each one in
+        // a window 0.5 - 0.5 cos of its phase) ; the even lines shifted by "shift", the odd ones by "shift2" (semitones)
+        sm = (fx[its_Efx_Type] === its_Efx_TyShimmer) ? max(0, min(1, fx[its_Efx_MxX + 4])) : 0;
+        (sm > 0) ? (
+            gw = max(10, min(1000, fx[its_Efx_MxX + 7])) * srate / 1000; // the grain (samples)
+            r1 = 2 ^ (max(-36, min(36, fx[its_Efx_MxX + 5])) / 12); r2 = 2 ^ (max(-36, min(36, fx[its_Efx_MxX + 6])) / 12);
+            i1 = abs(r1 - 1) / gw; i2 = abs(r2 - 1) / gw; // the increments of the phases
+            u1 = (r1 > 1); u2 = (r2 > 1); // up : the delay of the taps goes down
+        );
         // the outputs of the lines (interpolated), filtered : kept (tp), and the vector of the matrix (vv)
         e = 0; p = ln; c = 0;
         loop(np,
@@ -8971,6 +9027,19 @@ local (wk, hd, ln, tp, vv, bf, np, bs, msk, src, g, mp, md, lm, t60, fz, fc, a, 
                 x = w - rd; i = floor(x); x -= i; q = bf + c * bs;
                 v = q[i & msk]; v += x * (q[(i + 1) & msk] - v);
             ) : (v = 0);
+            (sm > 0) ? (
+                // the shifted signal (p[8] : the phase of the shifter of the line)
+                ph = p[8] + ((c & 1) ? i2 : i1); ph -= floor(ph); p[8] = ph;
+                pb = ph + 0.5; pb -= floor(pb);
+                up = (c & 1) ? u2 : u1;
+                da = min(bs - 2, rd + gw * (up ? 1 - ph : ph));
+                db = min(bs - 2, rd + gw * (up ? 1 - pb : pb));
+                q = bf + c * bs;
+                (da < hd[9]) ? ( x = w - da; i = floor(x); x -= i; y = q[i & msk]; sa = y + x * (q[(i + 1) & msk] - y); ) : (sa = 0);
+                (db < hd[9]) ? ( x = w - db; i = floor(x); x -= i; y = q[i & msk]; sb = y + x * (q[(i + 1) & msk] - y); ) : (sb = 0);
+                wc = cos(2 * $pi * ph);
+                v += sm * ((0.5 - 0.5 * wc) * sa + (0.5 + 0.5 * wc) * sb - v);
+            );
             (a > 0) ? ( v = p[3] = v + a * (p[3] - v); ); // low pass
             (hb > 0) ? ( p[4] = v + hb * (p[4] - v); v -= p[4]; ); // high pass : v minus its low pass
             tp[c] = vv[c] = v; e += abs(v);
@@ -9362,6 +9431,7 @@ local (wk, hd, sf, cw, st, src, g, mp, md, sh, ns, bm, rs, f0, sw, rt, fb, mix, 
         in Par7, A in Par9, the curve in Par10 (see its_Sat_Curve),
         the stretch in Par8 (Cheb. sum), each one modulated by the third input ; the weights of Cheb. sum in its_Efx_Harm1
     Matrix : a feedback delay network on the channels of its source, see exec_matrix
+    Shimmer : the Matrix with a pitch shifter in each line (the tail climbs or falls by intervals), see exec_matrix
     Flanger, Chorus : modulated delays on the channels of its source (Through-zero, barber pole, voices), see exec_flanger
     Phaser : swept allpass stages on the channels of its source (one pole, two pole, barber pole), see exec_phaser
     Bypass (its_EfxStat_Bypass) : Out = the first source not null, unchanged (an LFO : nothing)
@@ -9411,7 +9481,7 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                 );
             );
             // the modulation inputs : an error is not fatal (no modulation, the error is shown)
-            ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || (ty === its_Efx_TyMatrix) || its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)) ?
+            ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || its_Mx_Is(ty) || its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)) ?
                 (mbad = its_Mod_Resolve(fx + its_Efx_Mod1, (ty === its_Efx_TyFilter) ? 2 : 3));
         );
         fx[its_Efx_Error] = (err === 0) && mbad ? 2715 : err; // 2715 : a modulation input is not valid
@@ -9558,7 +9628,7 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                 );
             );
         ) :
-        (fx[its_Efx_Type] === its_Efx_TyMatrix) ? (
+        its_Mx_Is(fx[its_Efx_Type]) ? (
             exec_matrix(fx, ccnt, out);
         ) :
         its_Fl_Is(fx[its_Efx_Type]) ? (
@@ -10447,6 +10517,7 @@ its_TK_Global = its_TK("Global");
 its_TK_Dump = its_TK("Dump");
 its_TK_Check = its_TK("Check");
 its_TK_Free = its_TK("Free");
+its_TK_Display = its_TK("Display");
 its_TK_All = its_TK("All");
 its_TK_In = its_TK("In");
 its_TK_Out = its_TK("Out");
@@ -10568,7 +10639,7 @@ i__ii = 0; loop(6, its_TbRLp[i__ii] = mSL_symbol(menu_Rdr_Loop_N[i__ii]); i__ii 
 
 // the keys of the effects (one table for all the types : its_Tb_FxOk tells which keys a type takes) ; "source" and "gain"
 // are src1 and gain1 ; the keys its_TbFMod ... : "mod" for each modulation input (its_TbFMI)
-its_TbFMod = 66;
+its_TbFMod = 71;
 its_TbFMINb = 12;
 its_TbFNk = its_TbFMod + its_TbFMINb;
 its_TbFKey = make_array(its_TbFNk); its_TbFNam = make_array(its_TbFNk);
@@ -10615,6 +10686,10 @@ its_TbKey(its_TbFKey, its_TbFNam, 60, "jitter"); its_TbKey(its_TbFKey, its_TbFNa
 // (Par6), feedback (Par7), wave (Par8), seed (Par9), cross (Par12), rate (MxX + 1), glide (MxX + 3), jitter (MxX + 4)
 its_TbKey(its_TbFKey, its_TbFNam, 62, "sweep"); its_TbKey(its_TbFKey, its_TbFNam, 63, "stages");
 its_TbKey(its_TbFKey, its_TbFNam, 64, "q"); its_TbKey(its_TbFKey, its_TbFNam, 65, "spacing");
+// Shimmer : shimmer (MxX + 4, %), shift and shift2 (MxX + 5, 6 : semitones), grain (MxX + 7, ms) ; Matrix, Shimmer : lines (MxX + 8)
+its_TbKey(its_TbFKey, its_TbFNam, 66, "shimmer"); its_TbKey(its_TbFKey, its_TbFNam, 67, "shift");
+its_TbKey(its_TbFKey, its_TbFNam, 68, "shift2"); its_TbKey(its_TbFKey, its_TbFNam, 69, "grain");
+its_TbKey(its_TbFKey, its_TbFNam, 70, "lines");
 // the order of the keys of a Flanger, of a Chorus in a Dump (from the key 22 ; the others : 22, not one of their keys)
 its_TbFlOrdN = 16; its_TbFlOrd = make_array(its_TbFlOrdN);
 its_TbFlOrd[0] = 24; its_TbFlOrd[1] = 54; its_TbFlOrd[2] = 55; its_TbFlOrd[3] = 51; its_TbFlOrd[4] = 57; // mode delay sweep rate wave
@@ -10655,7 +10730,7 @@ i__ii = 0; loop(its_TbFMINb,
         its_TbFMIk[i__ii] = its_ModK_Sat[i__ii - 2];
     ) :
     (i__ii < 8) ? (
-        its_TbFMIt[i__ii] = 1 << its_Efx_TyMatrix; its_TbFMIj[i__ii] = i__ii - 5; its_TbFMId[i__ii] = its_ModD_Mx[i__ii - 5];
+        its_TbFMIt[i__ii] = (1 << its_Efx_TyMatrix) | (1 << its_Efx_TyShimmer); its_TbFMIj[i__ii] = i__ii - 5; its_TbFMId[i__ii] = its_ModD_Mx[i__ii - 5];
         its_TbFMIk[i__ii] = its_ModK_Mx[i__ii - 5];
     ) :
     (i__ii < 11) ? (
@@ -10676,7 +10751,7 @@ its_TbFTyN = make_array(its_Efx_TyCnt); its_TbFTy = make_array(its_Efx_TyCnt);
 its_TbFTyN[0] = "Undefined"; its_TbFTyN[1] = "None"; its_TbFTyN[2] = "Mixer"; its_TbFTyN[3] = "AutoMix";
 its_TbFTyN[4] = "Mover"; its_TbFTyN[5] = "Action"; its_TbFTyN[6] = "Script"; its_TbFTyN[7] = "LFO";
 its_TbFTyN[8] = "Filter"; its_TbFTyN[9] = "Saturation"; its_TbFTyN[10] = "Matrix"; its_TbFTyN[11] = "Flanger";
-its_TbFTyN[12] = "Chorus"; its_TbFTyN[13] = "Phaser";
+its_TbFTyN[12] = "Chorus"; its_TbFTyN[13] = "Phaser"; its_TbFTyN[14] = "Shimmer";
 i__ii = 0; loop(its_Efx_TyCnt, its_TbFTy[i__ii] = its_TK(its_TbFTyN[i__ii]); i__ii += 1;);
 its_TbFStN = make_array(4); its_TbFSt = make_array(4);
 its_TbFStN[0] = "Off"; its_TbFStN[1] = "On"; its_TbFStN[2] = "Bypass"; its_TbFStN[3] = "Undefined";
@@ -10833,7 +10908,7 @@ function its_Tb_IsHead(w)
     (w === its_TK_Clear) || (w === its_TK_Line) || (w === its_TK_Writer) || (w === its_TK_Reader)
         || (w === its_TK_Effect) || (w === its_TK_Global) || (w === its_TK_Dump) || (w === its_TK_Check)
         || (w === its_TK_Free) || (w === its_TK_End) || (w === its_TK_EofMark) || (w === its_TK_Algorithm)
-        || (w === its_TK_Instance) || (w === its_TK_Set) || (w === its_TK_Curve);
+        || (w === its_TK_Instance) || (w === its_TK_Set) || (w === its_TK_Curve) || (w === its_TK_Display);
 );
 
 // a number in [vmin, vmax] (a "-" word before it changes its sign) ; Undef and an error otherwise
@@ -12240,7 +12315,8 @@ function its_Tb_FxOk(ty, ki)
     ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? ((ki < 14) || ((ki < 22) && (ty === its_Efx_TyMixer))) :
     (ty === its_Efx_TyFilter) ? ((ki === 6) || (ki === 14) || ((ki >= 22) && (ki <= 25))) :
     (ty === its_Efx_TySat) ? ((ki === 6) || (ki === 14) || (ki === 24) || ((ki >= 29) && (ki <= 39))) :
-    (ty === its_Efx_TyMatrix) ? ((ki === 6) || (ki === 14) || (ki === 24) || (ki === 31) || ((ki >= 40) && (ki <= 53))) :
+    its_Mx_Is(ty) ? ((ki === 6) || (ki === 14) || (ki === 24) || (ki === 31) || ((ki >= 40) && (ki <= 53)) || (ki === 70)
+        || ((ty === its_Efx_TyShimmer) && (ki >= 66) && (ki <= 69))) :
     its_Fl_Is(ty) ? ((ki === 6) || (ki === 14) || (ki === 24) || (ki === 28) || (ki === 38) || (ki === 41) || (ki === 46)
         || (ki === 48) || (ki === 51) || (ki === 53) || ((ki >= 54) && (ki <= 61))) :
     (ty === its_Efx_TyPhaser) ? ((ki === 6) || (ki === 14) || (ki === 22) || (ki === 24) || (ki === 28) || (ki === 38) || (ki === 46)
@@ -12377,6 +12453,10 @@ function its_Tb_FxKey(w) local(ki, i, nm, n, sk)
         (ki === 63) ? ( its_Tb_v1 = its_Tb_Int(nm, 1, its_PhMaxS); ) : // stages
         (ki === 64) ? ( its_Tb_v1 = its_Tb_Num(nm, 0.1, 100); ) : // q
         (ki === 65) ? ( its_Tb_v1 = its_Tb_Num(nm, -2, 2); ) : // spacing (octaves)
+        (ki === 66) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 100); ) : // Shimmer : shimmer (%)
+        ((ki === 67) || (ki === 68)) ? ( its_Tb_v1 = its_Tb_Num(nm, -36, 36); ) : // shift, shift2 (semitones)
+        (ki === 69) ? ( its_Tb_v1 = its_Tb_Num(nm, 10, 1000); ) : // grain (ms)
+        (ki === 70) ? ( its_Tb_v1 = its_Tb_Int(nm, 1, its_MxMaxL); ) : // lines (at least)
         (
             // mod : the input, its source, then "depth" and "att" (optional)
             w = its_Tb_Next();
@@ -12826,7 +12906,7 @@ function its_Tb_FxMode(ty, w) local(syms, n, k, i)
 (
     (ty === its_Efx_TyFilter) ? ( syms = its_TbFMd; n = 6; ) :
     (ty === its_Efx_TySat) ? ( syms = its_TbSMd; n = its_SatModeCnt; ) :
-    (ty === its_Efx_TyMatrix) ? ( syms = its_TbMxMd; n = its_MxTypeCnt; ) :
+    its_Mx_Is(ty) ? ( syms = its_TbMxMd; n = its_MxTypeCnt; ) :
     its_Fl_Is(ty) ? ( syms = its_TbFlMd; n = its_FlModeCnt; ) :
     (ty === its_Efx_TyPhaser) ? ( syms = its_TbPhMd; n = its_PhModeCnt; ) : ( syms = its_TbLSh; n = its_LfoCnt; );
     k = -1; i = 0; while ((k < 0) && (i < n)) ( (syms[i] === w) ? (k = i); i += 1; );
@@ -12913,6 +12993,8 @@ function its_Tb_FxGet(ki, fx) local(p)
     (ki === 63) ? fx[its_Efx_Par1 + 9] :
     (ki === 64) ? fx[its_Efx_Par1 + 10] :
     (ki === 65) ? fx[its_Efx_MxX] :
+    (ki === 66) ? fx[its_Efx_MxX + 4] * 100 : // Shimmer : shimmer, shift, shift2, grain (MxX + 4 ... 7) ; lines (MxX + 8)
+    ((ki >= 67) && (ki <= 70)) ? fx[its_Efx_MxX + ki - 62] :
     (ki < its_TbFMod) ? fx[its_Efx_Par1 + ki - 28] : // bias Par3, output Par6, order Par7, stretch Par8, amount Par9
     its_Tb_ModGet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist);
 );
@@ -12933,7 +13015,7 @@ function its_Tb_FxText(str, ki, ty, v1, v2, v3, v4, v5)
     (ki < 14) ? its_Tb_SrcText(str, v1, v2) :
     (ki === 24) ? strcpy(str, (ty === its_Efx_TyFilter) ? its_TbFMdN[max(0, min(5, v1))] :
         (ty === its_Efx_TySat) ? its_TbSMdN[max(0, min(its_SatModeCnt - 1, v1))] :
-        (ty === its_Efx_TyMatrix) ? its_TbMxMdN[max(0, min(its_MxTypeCnt - 1, v1))] :
+        its_Mx_Is(ty) ? its_TbMxMdN[max(0, min(its_MxTypeCnt - 1, v1))] :
         its_Fl_Is(ty) ? its_TbFlMdN[max(0, min(its_FlModeCnt - 1, v1))] :
         (ty === its_Efx_TyPhaser) ? its_TbPhMdN[max(0, min(its_PhModeCnt - 1, v1))] : its_TbLShN[max(0, min(its_LfoCnt - 1, v1))]) :
     (ki === 38) ? (((v1 >= 0) && (v1 < its_CrvMx)) ? its_Crv_TbName(str, v1) : sprintf(str, "%d", v1 + 1)) :
@@ -13054,6 +13136,8 @@ function its_Tb_SetFx(k) local(fx, ty, j, p, ki)
         its_TbKS[63] ? ( fx[its_Efx_Par1 + 9] = its_TbK1[63]; ); // stages
         its_TbKS[64] ? ( fx[its_Efx_Par1 + 10] = its_TbK1[64]; ); // q
         its_TbKS[65] ? ( fx[its_Efx_MxX] = its_TbK1[65]; ); // spacing
+        its_TbKS[66] ? ( fx[its_Efx_MxX + 4] = its_TbK1[66] / 100; ); // Shimmer : shimmer
+        ki = 67; loop(4, its_TbKS[ki] ? ( fx[its_Efx_MxX + ki - 62] = its_TbK1[ki]; ); ki += 1;); // shift, shift2, grain, lines
         // the modulations : a new connection gets the attenuverter 1 and the default depth (as in the pad)
         ki = its_TbFMod; loop(its_TbFMINb,
             its_TbKS[ki] ? its_Tb_ModSet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist, ki, its_TbFMId[ki - its_TbFMod]);
@@ -13964,6 +14048,99 @@ function its_Tb_Free() local(w, ty, k)
     );
 );
 
+/*
+    the module "n" of the kind "t" shown in the current tab (the block Display of a table ; as its_Mod_Open, without a module
+    of reference) : 'E' an effect, 'R' a reader, 'W' a writer, 'L' a line, 'C' a curve : a view of the tab that shows it
+    (nothing to do), else a view of the tab that shows a module that does not exist (it shows this one), else a new view
+    (the first one of the kind unused in the tab) ; 'M' the module "n" itself (blockGlobal, blockSysLog, ...) : nothing to do
+    if it is in the tab ; a new view, a module : at the end of the displayed pane that has the fewest modules ; returns 1, or
+    0 : no free view of the kind, or no room in the panes
+*/
+function its_Mod_Show(t, n)
+local (b0, st, sz, nv, set, np, p, d, i, m, c, fs, fe, used, bp, bc)
+(
+    nv = 8; st = set = sz = 0; // (the views of the kind : 8, the effects its_EfxViews)
+    (t === 'R') ? ( b0 = blockReaderA; st = ReadersStructA; sz = ReadersBlockSize; set = Readers_set; ) :
+    (t === 'W') ? ( b0 = blockWriterA; st = WriterStructA; sz = WriterBlockSize; set = Writers_set; ) :
+    (t === 'L') ? ( b0 = blockLineA; st = LinesStructA; sz = LinesBlockSize; set = Lines_Set; ) :
+    (t === 'C') ? ( b0 = blockCurvesA; st = its_CrvEd; sz = its_CrvEdSz; set = its_CrvBlk; nv = its_CrvEdN; ) :
+    (t === 'E') ? ( b0 = blockEffectA; st = EffectsStructA; sz = LinesBlockSize; nv = its_EfxViews; set = Effects_set; ) :
+    ( b0 = n; nv = 1; ); // a module
+    np = max(1, min(dcbPannelsMax, studDispPCnt)); // the panes displayed
+    fs = fe = bp = -1; used = 0; bc = dcbMax;
+    p = 0; loop(dcbPannelsMax,
+        d = dcbBlocksAll + (TabIdt * dcbPannelsMax + p) * dcbWSize;
+        c = 0;
+        i = 0; loop(dcbMax,
+            (d[i] > 0) ? (c = i + 1);
+            m = d[i] - b0;
+            ((d[i] > 0) && (m >= 0) && (m < nv)) ? (
+                used |= 2 ^ m;
+                (st === 0) ? (fs = m) : // (a module in the tab)
+                (p < np) ? (
+                    (st[m * sz] === n) ? (fs = m) : ((fe < 0) && (set[max(0, 0|st[m * sz])] <= BASE_MEMORY)) ? (fe = m);
+                );
+            );
+            i += 1;
+        );
+        ((p < np) && (c < bc)) ? ( bp = p; bc = c; );
+        p += 1;
+    );
+    (fs >= 0) ? 1 :
+    (fe >= 0) ? ( st[fe * sz] = n; 1; ) : (
+        m = 0; while ((m < nv) && (used & (2 ^ m))) ( m += 1; );
+        ((m < nv) && (bp >= 0)) ? (
+            d = dcbBlocksAll + (TabIdt * dcbPannelsMax + bp) * dcbWSize;
+            d[bc] = b0 + m; // (after the last module of the pane)
+            (st !== 0) ? (st[m * sz] = n);
+            1;
+        ) : 0;
+    );
+);
+
+/*
+    Display Effect|Reader|Writer|Line id, Display Curve id, Display "name" (a module by its name, see blockModNames :
+    "Globals", "System Log", "Patch", "Effect C"...) : the module shown in the current tab (pass 3 ; see its_Mod_Show), a new
+    view or a new module if needed ; no free view or no room : a message in the log, the table goes on
+*/
+function its_Tb_Display() local(w, k, i, t)
+(
+    w = its_Tb_Next();
+    mSL_isString(w) ? (
+        // (blockModNames : the names in the order of the module numbers ; blockDispNames : in the order of the menu)
+        k = -1; i = blockFirst; while ((k < 0) && (i <= blockUsrLast)) ( (stricmp(blockModNames[i], w) === 0) ? (k = i); i += 1; );
+        (k < 0) ? (
+            sprintf(#its_TbW, "Display : no module named \"%s\"", w);
+            its_Tb_Err(2777, #its_TbW);
+        ) : (
+            t = 'M';
+        );
+    ) :
+    ((w === its_TK_Effect) || (w === its_TK_Reader) || (w === its_TK_Writer) || (w === its_TK_Line)) ? (
+        k = its_Tb_Id(w, its_Tb_Next(), 0);
+        t = (w === its_TK_Effect) ? 'E' : (w === its_TK_Reader) ? 'R' : (w === its_TK_Writer) ? 'W' : 'L';
+    ) :
+    (w === its_TK_Curve) ? (
+        k = its_Crv_Id(its_Tb_Next(), 0);
+        ((its_Tb_error === 0) && (its_Tb_mode >= 2) && (k >= 0) && !its_Crv_Exists(k)) ? (
+            sprintf(#its_TbW, "Display Curve %d : no curve", k + 1);
+            its_Tb_Err(2792, #its_TbW);
+        );
+        t = 'C';
+    ) : (
+        sprintf(#its_TbW, "Display : %s is not Effect, Reader, Writer, Line, Curve or the \"name\" of a module", mSL_edit_value(#its_TbV, w));
+        its_Tb_Err(2776, #its_TbW);
+    );
+    ((its_Tb_mode === 3) && (its_Tb_error === 0) && (k >= 0)) ? (
+        !its_Mod_Show(t, k) ? (
+            (t === 'M') ? sprintf(#its_TbW, "Interstys table : Display \"%s\" : no room in the panes of the tab", blockModNames[k]) :
+                sprintf(#its_TbW, "Interstys table : Display %s %d : no free view of this kind in the tab, or no room in its panes",
+                    (t === 'C') ? "Curve" : its_Tb_TyName(w), k + 1);
+            mSL_log(SysLogBox, #its_TbW);
+        );
+    );
+);
+
 // Implementation of the mSL "table" operation
 function Set_Table(tbl) local(m, w, xb)
 (
@@ -14001,9 +14178,10 @@ function Set_Table(tbl) local(m, w, xb)
             (w === its_TK_Dump) ? its_Tb_Dump() :
             (w === its_TK_Check) ? its_Tb_Check() :
             (w === its_TK_Free) ? its_Tb_Free() :
+            (w === its_TK_Display) ? its_Tb_Display() :
             (w === its_TK_Global) ? its_Tb_Global() :
             (w === its_TK_Curve) ? its_Tb_Curve() : (
-                sprintf(#its_TbW, "%s : a block (Line, Writer, Reader, Effect, Global, Curve, Algorithm, Instance, Set, Dump, Check, Free, Clear) is expected", mSL_edit_value(#its_TbV, w));
+                sprintf(#its_TbW, "%s : a block (Line, Writer, Reader, Effect, Global, Curve, Algorithm, Instance, Set, Dump, Check, Free, Display, Clear) is expected", mSL_edit_value(#its_TbV, w));
                 its_Tb_Err(2750, #its_TbW);
             );
         );
@@ -17713,12 +17891,13 @@ local (fx)
 // modulation inputs (decay, damping, diffusion) ; sliders : decay, damping, high pass, mix, delay min, delay max, diffusion
 // (not Hadamard), input gain, and the modulations used
 function FX_Matrix_Pad(RDBL, fx, fxn, what, cell, ev)
-local (k, r, xx, ok, np, lm)
+local (k, r, xx, ok, np, lm, sh)
 (
     ok = its_Mx_ModOk(fx);
+    sh = (fx[its_Efx_Type] === its_Efx_TyShimmer);
     (what === FXP_Dims) ? (
         RDBL[3] = 3;
-        RDBL[5] = 11 + ((ok & 4) ? 1 : 0) + its_Mod_SlCount(fx + its_Efx_Mod1, 3, ok);
+        RDBL[5] = 12 + ((ok & 4) ? 1 : 0) + (sh ? 4 : 0) + its_Mod_SlCount(fx + its_Efx_Mod1, 3, ok);
         RDBL[6] = 0;
     ) :
     (what === FXP_Fill) ? (
@@ -17853,6 +18032,25 @@ local (k, r, xx, ok, np, lm)
         paramValues[p_fxMxGlide] = fx[its_Efx_MxX + 3];
         r = parCtl(p_fxMxGlide);
         (r != 0) ? (fx[its_Efx_MxX + 3] = (r === 8) ? 0.05 : parV(p_fxMxGlide));
+        // the minimum count of lines (more than the channels : inner lines)
+        paramValues[p_fxMxLines] = max(1, fx[its_Efx_MxX + 8]);
+        r = parCtl(p_fxMxLines);
+        (r != 0) ? (fx[its_Efx_MxX + 8] = (r === 8) ? (sh ? 8 : 1) : max(1, min(its_MxMaxL, floor(parV(p_fxMxLines) + 0.5))));
+        // Shimmer : its share, the intervals of the even and of the odd lines, the grain
+        sh ? (
+            paramValues[p_fxShAmt] = 100 * fx[its_Efx_MxX + 4];
+            r = parCtl(p_fxShAmt);
+            (r != 0) ? (fx[its_Efx_MxX + 4] = (r === 8) ? 0.6 : parV(p_fxShAmt) / 100);
+            k = 0; loop(2,
+                paramValues[p_fxShShift + k] = fx[its_Efx_MxX + 5 + k];
+                r = parCtl(p_fxShShift + k);
+                (r != 0) ? (fx[its_Efx_MxX + 5 + k] = (r === 8) ? 12 : parV(p_fxShShift + k));
+                k += 1;
+            );
+            paramValues[p_fxShGrain] = fx[its_Efx_MxX + 7];
+            r = parCtl(p_fxShGrain);
+            (r != 0) ? (fx[its_Efx_MxX + 7] = (r === 8) ? 80 : parV(p_fxShGrain));
+        );
         // input gain : its linear value is computed by the check
         paramValues[p_fxGain1] = fx[its_Efx_VoldB1];
         r = parCtl(p_fxGain1);
@@ -18174,7 +18372,7 @@ local (ty)
     (ty === its_Efx_TySat) ? (
         FX_Sat_Pad(RDBL, fx, fxn, what, cell, ev);
     ) :
-    (ty === its_Efx_TyMatrix) ? (
+    its_Mx_Is(ty) ? (
         FX_Matrix_Pad(RDBL, fx, fxn, what, cell, ev);
     ) :
     its_Fl_Is(ty) ? (
