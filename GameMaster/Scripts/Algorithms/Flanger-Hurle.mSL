@@ -1,0 +1,50 @@
+print("Flanger-Hurle. Une boucle qui hurle : la reinjection depasse 1, la boucle sature et chante seule.");
+
+/*
+  regen au-dela de 1 : le peigne s'entretient (la saturation le borne) ; il chante a la frequence de son retard, qui
+  saute au hasard a chaque periode (la forme Hold) et y glisse (le glide du pad, 0.15 s). Une fois excite, il ne
+  s'arrete plus : regen sous 1 (puis redeposer le fichier), ou Free-All.mSL. hp retire le grave qui s'accumule.
+
+  Parametres :
+      nch       canaux
+      center    le retard (ms : la hauteur, 200 Hz a 5 ms)
+      swing     l'amplitude des sauts (ms)
+      pace      les sauts par seconde
+      regen     la reinjection
+      lowpass   l'amortissement (Hz)
+      highpass  le passe-haut de la boucle (Hz)
+      level     le niveau de sortie (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son traite sort vers Out:0 (le son direct est dans l'effet : son
+  melange, blend ou mix).
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. Les autres reglages se
+  changent a la main dans le pad des effets de l'instance (le module Instances la montre ; le module Effect montre ses
+  effets, "pre", "fl", "post").
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance hurle )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Hurle
+        input src
+        output dst
+        param nch 2 1 128
+        param center 5 0 2000
+        param swing 4 0 2000
+        param pace 2 0 5000
+        param regen 1.3 -2 2
+        param lowpass 6000 0 24000
+        param highpass 80 0 24000
+        param level -12 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect fl  type Flanger  chan nch  source Effect pre  mode Classic  delay center  sweep swing  rate pace  wave Hold
+                   glide 0.15  feedback regen  damp lowpass  hp highpass  mix 100  jitter 0.5
+        Effect post  type Mixer  chan nch  src1 Effect fl  gain1 level  out dst
+    End
+    Instance hurle Hurle  src In:0  dst Out:0  nch 2  center 5  swing 4  pace 2  regen 1.3  lowpass 6000  highpass 80  level -12
+));
+print(sprintf(0, "Flanger-Hurle. instance hurle : %d (0 : OK)", r));

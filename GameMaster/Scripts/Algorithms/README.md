@@ -39,3 +39,23 @@ instance précédente, qui n'existe pas encore. C'est sans conséquence.
 
 Chaque recette se compose de trois effets : `pre` (l'entrée et le bus d'essai), `fdn` (la Matrix),
 `post` (le mélange sec et traité vers la sortie) ; `Matrix-Souffle` y ajoute un LFO.
+
+## Les recettes du Flanger et du Chorus (retards modulés)
+
+| Fichier | Ce qu'il fait |
+|---|---|
+| `Flanger-Jet` | Un jet : le mode Through-zero, le balayage traverse le son direct et l'annule au passage |
+| `Flanger-Plaque` | Une plaque de métal qui glisse : des retards très courts, une réinjection près de 1 |
+| `Flanger-Hurle` | Une boucle qui hurle : la réinjection dépasse 1, la boucle sature et chante seule, sa hauteur saute au hasard |
+| `Flanger-Spirale` | Une spirale sans fin : le barber pole, un balayage qui monte toujours (et tourne entre les haut-parleurs) |
+| `Flanger-Escalier` | Un escalier de hauteurs : le barber pole à retards longs transpose, chaque écho monte |
+| `Flanger-Cloche` | Une cloche : le retard modulé à vitesse audio, une modulation de phase inharmonique |
+| `Chorus-Essaim` | Un essaim : seize voix par canal, chacune à sa vitesse et son retard |
+| `Chorus-Ivre` | Une bande ivre : de grands retards qui dérivent, la hauteur tangue |
+
+Chaque recette se compose de trois effets : `pre` (l'entrée et le bus d'essai), `fl` (le Flanger ou le
+Chorus), `post` (la sortie ; le mélange sec et traité pour `Escalier`, `Cloche`, `Essaim` et `Ivre`). Dans
+`Jet`, `Plaque` et `Spirale`, le son direct passe dans l'effet : son mélange (`blend`, de -100 à 100 %) règle le flanger.
+
+`Flanger-Hurle` ne s'arrête plus une fois excité (la boucle s'entretient) : `regen` sous 1, ou
+`Free-All.mSL`.

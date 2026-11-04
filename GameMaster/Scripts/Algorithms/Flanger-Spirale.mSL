@@ -1,0 +1,50 @@
+print("Flanger-Spirale. Une spirale sans fin : le barber pole, un balayage qui monte toujours.");
+
+/*
+  Deux voix dont le retard descend, chacune dans sa fenetre : le peigne monte sans fin (une illusion, comme la gamme
+  de Shepard). cross fait passer la reinjection au canal suivant : sur 8 haut-parleurs et plus, la spirale tourne
+  autour de l'auditeur. Pour une spirale qui descend : mode BarberDown dans le pad.
+
+  Parametres :
+      nch       canaux
+      center    le retard (ms)
+      swing     l'amplitude de la rampe (ms, <= center)
+      pace      la vitesse de la montee (Hz)
+      regen     la reinjection
+      turn      cross : la part du canal suivant
+      blend     le melange (%)
+      level     le niveau de sortie (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son traite sort vers Out:0 (le son direct est dans l'effet : son
+  melange, blend ou mix).
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. Les autres reglages se
+  changent a la main dans le pad des effets de l'instance (le module Instances la montre ; le module Effect montre ses
+  effets, "pre", "fl", "post").
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance spirale )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Spirale
+        input src
+        output dst
+        param nch 2 1 128
+        param center 4 0 2000
+        param swing 3.5 0 2000
+        param pace 0.08 0 5000
+        param regen 0.85 -2 2
+        param turn 0.5 -1 1
+        param blend 50 -100 100
+        param level -3 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect fl  type Flanger  chan nch  source Effect pre  mode BarberUp  delay center  sweep swing  rate pace  voices 2
+                   feedback regen  cross turn  mix blend  spread 0.125
+        Effect post  type Mixer  chan nch  src1 Effect fl  gain1 level  out dst
+    End
+    Instance spirale Spirale  src In:0  dst Out:0  nch 2  center 4  swing 3.5  pace 0.08  regen 0.85  turn 0.5  blend 50  level -3
+));
+print(sprintf(0, "Flanger-Spirale. instance spirale : %d (0 : OK)", r));

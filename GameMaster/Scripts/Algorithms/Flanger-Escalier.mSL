@@ -1,0 +1,50 @@
+print("Flanger-Escalier. Un escalier de hauteurs : un transpositeur dans la boucle, chaque echo monte.");
+
+/*
+  Le barber pole a retards longs transpose : le rapport de hauteur vaut 1 + 2 x span (s) x pace (span 70 ms, pace 3 :
+  1.42, une quarte augmentee) ; dans la boucle (regen), chaque echo (toutes les center ms) monte d'autant : un escalier,
+  une spirale de hauteurs. Pour qu'il descende : mode BarberDown dans le pad (le rapport 1 - 2 x span x pace).
+  lowpass assombrit les marches hautes.
+
+  Parametres :
+      nch       canaux
+      center    le retard (ms : la duree d'une marche)
+      span      l'amplitude de la rampe (ms, <= center)
+      pace      sa vitesse (Hz)
+      regen     la reinjection
+      lowpass   l'amortissement (Hz)
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0 (dry, wet).
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. Les autres reglages se
+  changent a la main dans le pad des effets de l'instance (le module Instances la montre ; le module Effect montre ses
+  effets, "pre", "fl", "post").
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance escalier )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Escalier
+        input src
+        output dst
+        param nch 2 1 128
+        param center 80 0 2000
+        param span 70 0 2000
+        param pace 3 0 5000
+        param regen 0.65 -2 2
+        param lowpass 7000 0 24000
+        param dry 0 -120 40
+        param wet -3 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect fl  type Flanger  chan nch  source Effect pre  mode BarberUp  delay center  sweep span  rate pace  voices 2
+                   feedback regen  damp lowpass  mix 100  spread 0
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect fl  gain2 wet  out dst
+    End
+    Instance escalier Escalier  src In:0  dst Out:0  nch 2  center 80  span 70  pace 3  regen 0.65  lowpass 7000  dry 0  wet -3
+));
+print(sprintf(0, "Flanger-Escalier. instance escalier : %d (0 : OK)", r));

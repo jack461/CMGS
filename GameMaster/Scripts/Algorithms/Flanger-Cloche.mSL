@@ -1,0 +1,47 @@
+print("Flanger-Cloche. Une cloche : le retard module a vitesse audio, une modulation de phase.");
+
+/*
+  Moduler un retard tres court a vitesse audio (pace : des centaines de Hz), c'est moduler la phase du son : des bandes
+  laterales inharmoniques, un timbre de cloche, de metal frappe. swing regle l'indice (la richesse) : 0.05 ms discret,
+  0.5 ms tres riche (dans les aigus surtout). pace non multiple des hauteurs du son : plus inharmonique.
+
+  Parametres :
+      nch       canaux
+      center    le retard (ms)
+      swing     l'indice : l'amplitude de la modulation (ms)
+      pace      la frequence de la modulation (Hz)
+      regen     la reinjection
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0 (dry, wet).
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. Les autres reglages se
+  changent a la main dans le pad des effets de l'instance (le module Instances la montre ; le module Effect montre ses
+  effets, "pre", "fl", "post").
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance cloche )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Cloche
+        input src
+        output dst
+        param nch 2 1 128
+        param center 0.6 0 2000
+        param swing 0.4 0 2000
+        param pace 437 0 5000
+        param regen 0.2 -2 2
+        param dry -120 -120 40
+        param wet 0 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect fl  type Flanger  chan nch  source Effect pre  mode Classic  delay center  sweep swing  rate pace  wave Sine
+                   feedback regen  mix 100  spread 0
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect fl  gain2 wet  out dst
+    End
+    Instance cloche Cloche  src In:0  dst Out:0  nch 2  center 0.6  swing 0.4  pace 437  regen 0.2  dry -120  wet 0
+));
+print(sprintf(0, "Flanger-Cloche. instance cloche : %d (0 : OK)", r));
