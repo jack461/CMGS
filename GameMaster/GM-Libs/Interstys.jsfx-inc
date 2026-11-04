@@ -1197,6 +1197,8 @@ EffectsStructG = idx; idx += LinesBlockSize;
 EffectsStructH = idx; idx += LinesBlockSize;
 EffectsStructI = idx; idx += LinesBlockSize;
 EffectsStructJ = idx; idx += LinesBlockSize;
+idx += 6 * LinesBlockSize; // EffectsStructK ... EffectsStructP (the views Effect A ... P : EffectsStructA + k * LinesBlockSize)
+its_EfxViews = 16; // the modules "Effect A" ... "Effect P" (blockEffectA ... blockEffectP : consecutive numbers)
 ControlsStruct = idx; idx += 8; // the module "Controls" : [0] the page of sliders shown
 PatchStruct = idx; idx += 8; // the module "Patch" : [0] the view (its_PchV...), [1] the page, [2] the pinned entry + 1, [3] its view
 SummaryStruct = idx; idx += 8; // the modules "Readers", "Writers", "Effects" (show_Summary_Pad) : [0], [1], [2] their pages
@@ -1331,7 +1333,7 @@ mm_lowblocks[0] = 'Low_'; mm_lowblocks[1] = '_Mem';
 */
 
 // The Main menu
-dcbNamesCnt = 160; // up to 160 strings in the dcb Menu - 150 used with 32 user modules
+dcbNamesCnt = 192; // up to 192 strings in the dcb Menu - 158 used with 32 user modules (16 views Effect A ... P)
 // memory block for the menu
 GUI_Main_Menu_Block = mSL_StM_Alloc(ui_jmenu_items+dcbNamesCnt, 'Menu', mSL_StM_FlClear);
 
@@ -6343,6 +6345,14 @@ local (i, j, g, it, fid, sid, ttl, gl0, gl1, gl2, gl3, gl4, othFirst, tmp, bln, 
     blockDispNames[blockEffectG] = "Effect G"; //
     blockEffectH = (itdsp += 1);
     blockDispNames[blockEffectH] = "Effect H"; //
+    blockEffectI = (itdsp += 1); blockDispNames[blockEffectI] = "Effect I";
+    blockEffectJ = (itdsp += 1); blockDispNames[blockEffectJ] = "Effect J";
+    blockEffectK = (itdsp += 1); blockDispNames[blockEffectK] = "Effect K";
+    blockEffectL = (itdsp += 1); blockDispNames[blockEffectL] = "Effect L";
+    blockEffectM = (itdsp += 1); blockDispNames[blockEffectM] = "Effect M";
+    blockEffectN = (itdsp += 1); blockDispNames[blockEffectN] = "Effect N";
+    blockEffectO = (itdsp += 1); blockDispNames[blockEffectO] = "Effect O";
+    blockEffectP = (itdsp += 1); blockDispNames[blockEffectP] = "Effect P"; // (its_EfxViews : A ... P)
 
     blockWriterA = (itdsp += 1);
     blockDispNames[blockWriterA] = "Writer A"; //
@@ -6421,14 +6431,14 @@ local (i, j, g, it, fid, sid, ttl, gl0, gl1, gl2, gl3, gl4, othFirst, tmp, bln, 
         (g === 3) ? (ttl = ">Effects"; fid = blockEffectA; sid = blockEffects;) : (ttl = ">Curves"; fid = blockCurvesA; sid = 0;);
         blockDispNames[it] = ttl; blockDispIdts[it] = 0; it += 1;
         (sid > 0) ? (blockDispNames[it] = blockModNames[sid]; blockDispIdts[it] = sid; it += 1;);
-        i = 0; loop(8, blockDispNames[it] = blockModNames[fid + i]; blockDispIdts[it] = fid + i; it += 1; i += 1;);
+        i = 0; loop((g === 3) ? its_EfxViews : 8, blockDispNames[it] = blockModNames[fid + i]; blockDispIdts[it] = fid + i; it += 1; i += 1;);
         (g === 0) ? (gl0 = it - 1) : (g === 1) ? (gl1 = it - 1) : (g === 2) ? (gl2 = it - 1) : (g === 3) ? (gl3 = it - 1) : (gl4 = it - 1);
         g += 1;
     );
     othFirst = it;
     i = blockFirst; while (i <= blockUsrLast) (
         !(((i >= blockLineA) && (i <= blockLineH)) || ((i >= blockReaderA) && (i <= blockReaderH))
-            || ((i >= blockWriterA) && (i <= blockWriterH)) || ((i >= blockEffectA) && (i <= blockEffectH))
+            || ((i >= blockWriterA) && (i <= blockWriterH)) || ((i >= blockEffectA) && (i <= blockEffectP))
             || ((i >= blockCurvesA) && (i <= blockCurvesH)) || ((i >= blockReaders) && (i <= blockEffects))) ? (
             blockDispNames[it] = blockModNames[i]; blockDispIdts[it] = i; it += 1;
         );
@@ -13500,7 +13510,7 @@ loadMode ? (
                 z__sp = WriterStructA + z__si * WriterBlockSize; z__sp[0] = max(0, min(WR_CNT - 1, 0|z__sp[0]));
                 z__si += 1;
             );
-            z__si = 0; loop(10,
+            z__si = 0; loop(its_EfxViews,
                 z__sp = EffectsStructA + z__si * LinesBlockSize; z__sp[0] = max(0, min(FX_CNT - 1, 0|z__sp[0]));
                 z__si += 1;
             );
@@ -17966,17 +17976,18 @@ local (c, m)
     being drawn) ; 0 : no room
 */
 function its_Mod_Open(t, n, bk, nw)
-local (b0, st, sz, p, d, i, m, fd, fs, used, k)
+local (b0, st, sz, p, d, i, m, fd, fs, used, k, nv)
 (
+    nv = 8; // the views of the type (the effects : its_EfxViews)
     (t === 'R') ? (b0 = blockReaderA; st = ReadersStructA; sz = ReadersBlockSize;) :
     (t === 'W') ? (b0 = blockWriterA; st = WriterStructA; sz = WriterBlockSize;) :
-    (b0 = blockEffectA; st = EffectsStructA; sz = LinesBlockSize;); // (the effects : LinesBlockSize, see EffectsStructA)
+    (b0 = blockEffectA; st = EffectsStructA; sz = LinesBlockSize; nv = its_EfxViews;); // (the effects : LinesBlockSize, see EffectsStructA)
     fd = fs = -1; used = 0;
     p = 0; loop(dcbPannelsMax,
         d = dcbBlocksAll + (TabIdt * dcbPannelsMax + p) * dcbWSize;
         i = 0; loop(dcbMax,
             m = d[i] - b0;
-            ((m >= 0) && (m < 8)) ? (
+            ((m >= 0) && (m < nv)) ? (
                 used |= 2 ^ m;
                 (p < studDispPCnt) ? (
                     (st[m * sz] === n) ? (fs = m) : (fd < 0) ? (fd = m);
@@ -17991,9 +18002,9 @@ local (b0, st, sz, p, d, i, m, fd, fs, used, k)
         st[fd * sz] = n;
         1;
     ) : (
-        m = 0; while ((m < 8) && (used & (2 ^ m))) (m += 1;);
+        m = 0; while ((m < nv) && (used & (2 ^ m))) (m += 1;);
         k = 0; while ((k < dcbMax) && (blockDesc[k] !== bk)) (k += 1;);
-        ((blockDesc > 0) && (m < 8) && (k < dcbMax - 1) && (blockDesc[dcbMax - 1] === 0)) ? (
+        ((blockDesc > 0) && (m < nv) && (k < dcbMax - 1) && (blockDesc[dcbMax - 1] === 0)) ? (
             i = dcbMax - 1; while (i > k + 1) (blockDesc[i] = blockDesc[i - 1]; i -= 1;);
             blockDesc[k + 1] = b0 + m;
             st[m * sz] = n;
@@ -20076,29 +20087,9 @@ local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in
                 (igb === blockLineH) ? (
                     show_Line_Pad(LinesStructH, blockLineH);
                 ) :
-                (igb === blockEffectA) ? (
-                    show_Effect_Pad(EffectsStructA, blockEffectA);
-                ) :
-                (igb === blockEffectB) ? (
-                    show_Effect_Pad(EffectsStructB, blockEffectB);
-                ) :
-                (igb === blockEffectC) ? (
-                    show_Effect_Pad(EffectsStructC, blockEffectC);
-                ) :
-                (igb === blockEffectD) ? (
-                    show_Effect_Pad(EffectsStructD, blockEffectD);
-                ) :
-                (igb === blockEffectE) ? (
-                    show_Effect_Pad(EffectsStructE, blockEffectE);
-                ) :
-                (igb === blockEffectF) ? (
-                    show_Effect_Pad(EffectsStructF, blockEffectF);
-                ) :
-                (igb === blockEffectG) ? (
-                    show_Effect_Pad(EffectsStructG, blockEffectG);
-                ) :
-                (igb === blockEffectH) ? (
-                    show_Effect_Pad(EffectsStructH, blockEffectH);
+                ((igb >= blockEffectA) && (igb <= blockEffectP)) ? (
+                    // the views Effect A ... P (consecutive numbers, their states EffectsStructA + k * LinesBlockSize)
+                    show_Effect_Pad(EffectsStructA + (igb - blockEffectA) * LinesBlockSize, igb);
                 ) :
                 (igb === blockWriterA) ? (
                     show_Writer_Pad(WriterStructA, blockWriterA);
