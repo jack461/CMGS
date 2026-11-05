@@ -23,6 +23,11 @@ sinon un module Effect qui montre un effet qui n'existe plus, sinon un nouveau m
 panneau qui en a le moins. `Display` montre aussi un reader, un writer, une ligne ou une courbe
 (`Display Reader r`, `Display Line l`, `Display Curve c`), ou un module par son nom, celui du menu des modules
 (`Display "Globals"`, `Display "System Log"`, `Display "Patch"`…).
+`Remove` fait l'inverse : `Remove "Globals"` retire le module de l'onglet courant, `Remove Effect fdn` les vues
+de l'onglet qui montrent cet effet (le module n'est pas supprimé : c'est `Free`).
+`Display Instance essaim` et `Remove Instance essaim` font de même pour tous les modules d'une instance. Depuis
+une autre table (un script lancé plus tard), `essaim:fl` désigne l'effet `fl` de l'instance `essaim` :
+`Display Effect essaim:fl`, `Dump Effect essaim:fl`, `Remove Effect essaim:fl`.
 
 La première fois qu'on dépose un fichier, le journal note une erreur 2787 : le fichier retire d'abord une
 instance précédente, qui n'existe pas encore. C'est sans conséquence.

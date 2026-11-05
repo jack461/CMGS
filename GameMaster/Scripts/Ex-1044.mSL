@@ -1,0 +1,67 @@
+print("Ex-1044. Interstys table : le bloc Remove, Display et Remove d'une instance, les modules d'une instance nommes de l'exterieur.");
+
+/*
+  Remove Effect|Reader|Writer|Line id, Remove Curve id : les vues de l'onglet courant qui montrent ce module en sont
+  retirees ; Remove "nom" : le module de ce nom (celui du menu des modules) est retire de l'onglet. Le module lui-meme
+  n'est pas supprime (c'est Free). Rien a retirer : un message dans le journal, la table continue.
+  Display Instance i, Remove Instance i : tous les modules de l'instance. Depuis une autre table, "i:nom" designe le
+  module "nom" de l'instance i (Effect tq:b) ; un nombre apres les deux points reste le premier canal d'une source.
+  Ici : Globals est montre puis retire (le second Remove ne trouve plus rien : un message) ; l'effet rx est montre, puis
+  sa vue est retiree, puis il est supprime. Puis une instance tq (deux Mixers a et b ; b, le dernier mot de
+  l'algorithme, est montre : le nom doit etre cherche avant la fin de l'instance) : depuis une autre table, son effet b
+  est ecrit (Dump), a est verifie (Check), ses modules sont montres puis retires, a seul aussi, puis tq est supprimee.
+  A verifier a l'oeil : a la fin, ni Globals ni les vues de rx, a et b dans l'onglet.
+  Erreurs (rien n'est fait) : e1 Remove Global (2776) ; e2 Remove "Nothing" (2777) ; e3 tq:c, un effet que tq n'a pas
+  (2757) ; e4 tq:a apres la suppression de tq (2757 : une instance inconnue).
+*/
+
+var r = table(data(
+    Interstys
+    Display "Globals"
+    Remove "Globals"
+    Remove "Globals"
+    Effect rx  type Mixer  chan 2  src1 In:0
+    Display Effect rx
+    Remove Effect rx
+    Free Effect rx
+));
+print(sprintf(0, "Ex-1044. resultat : %d", r));
+
+var e1 = table(data( Interstys  Remove Global ));
+var e2 = table(data( Interstys  Remove "Nothing" ));
+print(sprintf(0, "Ex-1044. erreurs : %d %d", e1, e2));
+
+var r1 = table(data(
+    Interstys
+    Algorithm Tq
+        input src
+        output dst
+        Effect a  type Mixer  chan 2  src1 src
+        Effect b  type Mixer  chan 2  src1 Effect a  out dst
+        Display Effect b
+    End
+    Instance tq Tq  src In:0  dst Bus 63
+));
+var r2 = table(data(
+    Interstys
+    Dump Effect tq:b
+    Check Effect tq:a  src1 In:0
+    Display Instance tq
+    Remove Instance tq
+    Display Effect tq:a
+    Remove Effect tq:a
+));
+var e3 = table(data( Interstys  Dump Effect tq:c ));
+var r3 = table(data( Interstys  Free Instance tq ));
+var e4 = table(data( Interstys  Dump Effect tq:a ));
+print(sprintf(0, "Ex-1044. instance : %d %d %d ; erreurs : %d %d", r1, r2, r3, e3, e4));
+
+// Expected "Ex-1044. resultat : 0"
+// Expected error 2776
+// Expected error 2777
+// Expected "Ex-1044. erreurs : 2776 2777"
+// Expected "Effect %d status On type Mixer phase Std chan 2 out Bus 63:0 limiter Off src1 Effect %d gain1 0"
+// Expected "Check Effect %d OK"
+// Expected error 2757
+// Expected error 2757
+// Expected "Ex-1044. instance : 0 0 0 ; erreurs : 2757 2757"
