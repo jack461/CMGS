@@ -1,0 +1,45 @@
+print("Noise-Cascade. Une cascade de periodes : l'application logistique, un son qui glisse et se dedouble.");
+
+/*
+  Logistic (x = r x (1 - x), r = 3 + chaos), iteree pitch fois par seconde : r 3.2 donne la periode 2 (un son a pitch / 2
+  Hz), 3.5 la periode 4, 3.56 la periode 8 (ici 4000 / 8 = 500 Hz), au-dela le chaos (sauf la periode 3 vers 3.83). La
+  cellule a droite de la couleur dans le pad montre le regime et la hauteur. Un LFO lent fait glisser la vitesse d'une
+  octave : le son monte et descend ; chaque canal tourne dans le cycle avec sa propre phase.
+
+  Parametres :
+      nch       canaux
+      pitch     les iterations par seconde
+      regime    chaos (0 ... 1 : r de 3 a 4)
+      slide     le glissement (octaves)
+      pace      la vitesse du LFO (Hz)
+      level     le niveau (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le bruit sort vers Out:0 (il ne prend aucune entree).
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs : chaque canal a son propre
+  bruit (corr 0 : un champ diffus ; corr 1 : le meme bruit partout). Les autres reglages se changent a la main dans le pad
+  des effets de l'instance (le module Instances la montre ; le module Effect montre ses effets, "lfo", "nz").
+  L'effet "nz" s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance cascade )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Cascade
+        output dst
+        param nch 2 1 128
+        param pitch 4000 0.01 100000
+        param regime 0.56 0 1
+        param slide 1 0 10
+        param pace 0.05 0.001 20
+        param level -18 -120 40
+        Effect lfo  type LFO  chan 1  freq pace  mode Triangle  amp 1  offset 0
+        Effect nz  type Noise  chan nch  color Logistic  density pitch  chaos regime  corr 0  damp 6000  output level
+                   mod Density Effect lfo  depth slide  out dst
+        Display Effect nz
+    End
+    Instance cascade Cascade  dst Out:0  nch 2  pitch 4000  regime 0.56  slide 1  pace 0.05  level -18
+));
+print(sprintf(0, "Noise-Cascade. instance cascade : %d (0 : OK)", r));

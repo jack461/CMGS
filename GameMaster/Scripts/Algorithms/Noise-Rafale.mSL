@@ -1,0 +1,45 @@
+print("Noise-Rafale. Une rafale : un bruit rose dans un passe-bande que balaie un LFO lent.");
+
+/*
+  Le bruit rose passe dans un filtre passe-bande dont la frequence monte et descend de deux octaves autour de center, au
+  rythme du LFO (pace) : le vent forcit puis retombe. sharp (le Q du filtre) creuse le sifflement ; un pace tres lent
+  (0.02) donne des rafales espacees.
+
+  Parametres :
+      nch       canaux
+      center    la frequence centrale du filtre (Hz)
+      swing     l'etendue du balayage (octaves)
+      pace      la vitesse du LFO (Hz)
+      sharp     le Q du filtre
+      level     le niveau du bruit (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le bruit sort vers Out:0 (il ne prend aucune entree).
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs : chaque canal a son propre
+  bruit (corr 0 : un champ diffus ; corr 1 : le meme bruit partout). Les autres reglages se changent a la main dans le pad
+  des effets de l'instance (le module Instances la montre ; le module Effect montre ses effets, "nz", "lfo", "wf").
+  L'effet "nz" s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance rafale )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Rafale
+        output dst
+        param nch 2 1 128
+        param center 500 20 20000
+        param swing 2 0 10
+        param pace 0.08 0.001 20
+        param sharp 2 0.05 2000
+        param level -6 -120 40
+        Effect nz  type Noise  chan nch  color Pink  corr 0  output level
+        Effect lfo  type LFO  chan 1  freq pace  mode Sine  amp 1  offset 0
+        Effect wf  type Filter  chan nch  source Effect nz  mode BP  freq center  q sharp  stages 1
+                   mod Cutoff Effect lfo  depth swing  out dst
+        Display Effect nz
+    End
+    Instance rafale Rafale  dst Out:0  nch 2  center 500  swing 2  pace 0.08  sharp 2  level -6
+));
+print(sprintf(0, "Noise-Rafale. instance rafale : %d (0 : OK)", r));

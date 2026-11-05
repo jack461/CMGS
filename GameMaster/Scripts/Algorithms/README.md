@@ -18,7 +18,7 @@ fenêtre d'Interstys et installe aussitôt un algorithme complet, branché sur l
   stéréo, `nch 2`.
 
 **L'effet principal s'affiche** : chaque recette se termine par `Display Effect …` (son effet principal :
-`fdn`, `fl`, `ph` ou `sh`), qui le montre dans un module Effect de l'onglet courant : celui qui le montre déjà,
+`fdn`, `fl`, `ph`, `sh` ou `nz`), qui le montre dans un module Effect de l'onglet courant : celui qui le montre déjà,
 sinon un module Effect qui montre un effet qui n'existe plus, sinon un nouveau module Effect, à la fin du
 panneau qui en a le moins. `Display` montre aussi un reader, un writer, une ligne ou une courbe
 (`Display Reader r`, `Display Line l`, `Display Curve c`), ou un module par son nom, celui du menu des modules
@@ -98,3 +98,24 @@ Les effets sont `pre`, `ph` (le Phaser) et `post`. Le son direct passe dans le P
 
 Les effets sont `pre`, `sh` (le Shimmer) et `post` (le son sec et le son traité : `dry`, `wet`). `thick` règle
 le nombre de lignes du réseau (8 et plus : une traîne dense, même en stéréo).
+
+## Les recettes du Noise (bruits, impulsions, applications chaotiques)
+
+| Fichier | Ce qu'il fait |
+|---|---|
+| `Noise-Static` | Des parasites : des impulsions au hasard (Dust), chacune sur un haut-parleur |
+| `Noise-Rafale` | Une rafale : un bruit rose dans un passe-bande que balaie un LFO lent |
+| `Noise-Velours` | Un velours : des impulsions serrées (Velvet), un souffle plus doux que le blanc |
+| `Noise-Crepite` | Un crépitement : l'application chaotique Crackle, des braises qui craquent |
+| `Noise-Cascade` | Une cascade de périodes : l'application logistique, un son qui glisse et se dédouble |
+| `Noise-Static2` | Un bruit rose dont la corrélation des canaux suit un LFO lent : l'image passe du diffus au centre |
+| `Noise-Fracas` | Un fracas : le rumble seul, un bruit très grave qui enfle et retombe, autrement sur chaque haut-parleur |
+| `Noise-Epines` | Des épines : le bruit blanc à la puissance 5 (`power`), il ne reste que des pointes éparses |
+
+Ces recettes ne prennent pas d'entrée : le bruit sort vers `Out:0`. L'effet principal est `nz` (le Noise) ;
+`Noise-Rafale` y ajoute `lfo` et `wf` (le filtre), `Noise-Cascade` et `Noise-Static2` un `lfo`. Chaque canal
+a son propre bruit : `corr` (de 0 à 1) y mélange un bruit commun, de l'image diffuse à la source au centre. Les niveaux
+(`output`) sont ceux des crêtes, comme les lit un crête-mètre : chaque couleur est calibrée sur le bruit blanc. La
+couleur `Mix` passe continûment du brun au rose, au blanc puis au violet (`tilt`, de -6 à +6 dB/oct) ; `power`
+élève chaque échantillon à une puissance (sign(x) |x|^e : 2, 3, 5… des grains de plus en plus épars ; 0 : un bruit
+binaire) ; `rumble` mêle un grondement très grave et mouvant (`rfreq`, sa fréquence).

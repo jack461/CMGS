@@ -548,7 +548,11 @@ its_Efx_WkOld = idx; idx += 1; //  la zone remplacée par @block, libérée par 
 // réinjection (Hz, 0 : aucun), Par12 cross [-1, 1] (la part du canal voisin dans la réinjection) ; Phaser : Par1 la fréquence
 // (Hz), Par2 le mode (its_Ph...), Par3 le balayage (octaves), Par4 mix [-1, 1], Par5 le déphasage d'un canal au suivant
 // (tours), Par6 la courbe de la forme Curve, Par7 la réinjection [-2, 2], Par8 la forme du balayage, Par9 la graine, Par10
-// les étages (1 ... its_PhMaxS), Par11 le Q (mode Resonant), Par12 cross [-1, 1])
+// les étages (1 ... its_PhMaxS), Par11 le Q (mode Resonant), Par12 cross [-1, 1] ; Noise : Par1 la part du grondement
+// (rumble) [0, 1], Par2 la couleur (its_Nz...), Par3 l'amortissement passe-bas (Hz, 0 : aucun), Par4 la corrélation des
+// canaux [0, 1], Par5 la densité (par seconde : Velvet, Dust, Logistic), Par6 le niveau (dB : celui des crêtes), Par7
+// chaos [0, 1] (Crackle, Logistic), Par8 la teinte du mode Mix (dB/oct, [-6, 6]), Par9 l'exposant de la forme (sign(x)
+// |x|^e, [0, 8]), Par10 la fréquence du grondement (Hz), Par11 passe-haut (Hz, 0 : aucun))
 its_Efx_Par1 = idx; idx += 12;
 its_Efx_St1 = idx; idx += 4;
 its_Efx_Harm1 = idx; idx += 16; // Saturation, mode Cheb. sum : les poids des harmoniques 1 ... 16 (its_SatHarm), dans [-1, 1]
@@ -630,7 +634,8 @@ its_Efx_TyFlanger = 11; // modulated delays (see exec_flanger)
 its_Efx_TyChorus = 12; // the same engine, other default values (see its_Fl_Def)
 its_Efx_TyPhaser = 13; // swept allpass filters (see exec_phaser)
 its_Efx_TyShimmer = 14; // the Matrix with a pitch shifter in each line (see exec_matrix)
-its_Efx_TyCnt = 15; // count of types
+its_Efx_TyNoise = 15; // noises : colors, impulses, chaotic maps (see exec_noise)
+its_Efx_TyCnt = 16; // count of types
 // Filter modes (its_Efx_Par3)
 its_FltLP1 = 0; // low pass, 1 pole
 its_FltHP1 = 1; // high pass, 1 pole
@@ -675,6 +680,8 @@ its_SatChW = 13;
 its_SatAdEps = 0.00001; // ADAA : below this difference of the inputs, the shape of their middle (see its_Sat_Adaa)
 its_SatLn2 = log(2);
 its_SatDcK = 1 - 2 * $pi * 10 / srate; // DC blocker : pole
+// Noise : Brown, a leaky integrator (10 Hz) that keeps the power of the white noise
+its_NzBrK = exp(-2 * $pi * 10 / srate); its_NzBrG = sqrt(1 - its_NzBrK * its_NzBrK);
 its_LimAtt = 1 - exp(-1 / (0.005 * srate)); // auto-limiter of the effects : attack about 5 ms
 its_LimRel = 1 - exp(-1 / (1.5 * srate)); // release about 1.5 s
 its_FinMax = 10^30; // above (or NaN) : a value is not finite, the state that produced it is reset (see its_NaNCnt)
@@ -718,6 +725,19 @@ its_PhClassic = 0; its_PhReson = 1; its_PhBarbUp = 2; its_PhBarbDown = 3; its_Ph
 its_PhMaxS = 64; // stages at most
 its_PhH = 16; // words of its header (after the one of the work area)
 its_PhCW = 8; // words per channel
+// Noise : the colors (its_Efx_Par2) : White, Pink (-3 dB/oct), Brown (-6 dB/oct), Violet (+6 dB/oct), Mix (the four
+// above, linear between two neighbours, its_Efx_Par8 the tilt : -6 Brown, -3 Pink, 0 White, +6 Violet), Velvet (one
+// impulse +-1 at a random place in each period of the density), Dust (impulses at random times, random amplitudes), Crackle
+// (a chaotic map : |p y1 - y2 - 0.05|), Logistic (the logistic map r x (1 - x), "density" iterations per second, held)
+its_NzWhite = 0; its_NzPink = 1; its_NzBrown = 2; its_NzViolet = 3; its_NzMix = 4; its_NzVelvet = 5; its_NzDust = 6;
+its_NzCrackle = 7; its_NzLogistic = 8; its_NzCnt = 9;
+// the gains that bring the peaks of each color (the maximum over 45 ms, as a peak meter) to those of the white noise
+// (uniform in [-1, 1] : its peaks are its level)
+its_NzPkG = 0.3392 * 0.5552; its_NzBrC = 0.8586; its_NzViG = sqrt(0.5) * 0.7205;
+its_NzSwR = 0.25; // the swells of the rumble : a new target 0.25 times per second
+its_NzT = 16; its_NzTN = 1024; // the table of the shape |x|^e (its_NzTN + 1 values) in its header, from the word its_NzT
+its_NzH = its_NzT + its_NzTN + 4; // words of its header (after the one of the work area)
+its_NzCW = 24; // words per channel, and for the common generator (after the channels)
 
 its_EfxStat_Off = 0; // its_Efx_Status : the effect is not executed
 its_EfxStat_On = 1; // (= its_Efx_Unspecified, set by FX_Clear)
@@ -1333,6 +1353,16 @@ p_fxMxLines = idx; idx += 1; // Matrix, Shimmer : the minimum count of lines
 p_fxShAmt = idx; idx += 1; // Shimmer : the share of the shifted signal in the lines (%)
 p_fxShShift = idx; idx += 2; // the intervals of the even and of the odd lines (semitones)
 p_fxShGrain = idx; idx += 1; // the window of the pitch shifter (ms)
+p_fxNzLevel = idx; idx += 1; // Noise : the level (dB)
+p_fxNzDens = idx; idx += 1; // the density (events or iterations per second)
+p_fxNzCorr = idx; idx += 1; // the correlation of the channels [0, 1]
+p_fxNzChaos = idx; idx += 1; // chaos [0, 1] (Crackle, Logistic)
+p_fxNzModD1 = idx; idx += 3; // depths of the 3 modulation inputs : level (dB), density (octaves), correlation
+p_fxNzModA1 = idx; idx += 3; // their attenuverters [-10 ... 10]
+p_fxNzTilt = idx; idx += 1; // the tilt of the mode Mix (dB/oct)
+p_fxNzPower = idx; idx += 1; // the exponent of the shape (power)
+p_fxNzRumble = idx; idx += 1; // the share of the rumble (%)
+p_fxNzRFreq = idx; idx += 1; // its frequency (Hz)
 its_ParLast = idx - 1; // the last parameter of Interstys : in its range (paramNMax), see the error 2716
 
 // Global variables
@@ -2344,6 +2374,45 @@ function its_Ph_Label(str, fx) local(n, k, t)
     str;
 );
 
+// Noise : the colors that use the density (Velvet, Dust, Logistic), the chaos (Crackle, Logistic)
+function its_Nz_Dens(cl) ( (cl === its_NzVelvet) || (cl === its_NzDust) || (cl === its_NzLogistic); );
+function its_Nz_Chaos(cl) ( (cl === its_NzCrackle) || (cl === its_NzLogistic); );
+function its_Nz_Shaped(cl) ( cl !== its_NzVelvet; ); // (the impulses of Velvet are +-1 : the shape does not change them)
+function its_Nz_Color(fx) ( max(0, min(its_NzCnt - 1, floor(fx[its_Efx_Par1 + 1]))); );
+
+// Noise : the modulation inputs meaningful in its color (a mask : level, density, correlation)
+function its_Nz_ModOk(fx) ( its_Nz_Dens(its_Nz_Color(fx)) ? 7 : 5; );
+
+/*
+    Noise : the label "str" of its color : its spectrum (White ... Violet), the two colors of the mode Mix and the share of
+    the second one, its kind (Velvet, Dust), the parameter of the chaotic maps (Crackle : p = 1 + chaos ; Logistic : r = 3
+    + chaos, and its regime : the periods 2, 4, 8, 16 ... up to 3.5699 (P2 ... : the pitch is the density divided by the
+    period), then chaos, but the period 3 from 1 + sqrt(8))
+*/
+function its_Nz_Label(str, fx) local(cl, r, n, t)
+(
+    cl = its_Nz_Color(fx);
+    (cl === its_NzWhite) ? strcpy(str, "Flat") :
+    (cl === its_NzPink) ? strcpy(str, "-3 dB/oct") :
+    (cl === its_NzBrown) ? strcpy(str, "-6 dB/oct") :
+    (cl === its_NzViolet) ? strcpy(str, "+6 dB/oct") :
+    (cl === its_NzMix) ? (
+        t = max(-6, min(6, fx[its_Efx_Par1 + 7]));
+        (t < -3) ? sprintf(str, "Brown>Pink %d%%", floor(0.5 + 100 * (t + 6) / 3)) :
+        (t < 0) ? sprintf(str, "Pink>White %d%%", floor(0.5 + 100 * (t + 3) / 3)) :
+            sprintf(str, "White>Violet %d%%", floor(0.5 + 100 * t / 6));
+    ) :
+    (cl === its_NzVelvet) ? strcpy(str, "Impulses +-1") :
+    (cl === its_NzDust) ? strcpy(str, "Random impulses") :
+    (cl === its_NzCrackle) ? sprintf(str, "p %.3f", 1 + max(0, min(1, fx[its_Efx_Par1 + 6]))) : (
+        r = 3 + max(0, min(1, fx[its_Efx_Par1 + 6]));
+        n = (r < 3.44949) ? 2 : (r < 3.54409) ? 4 : (r < 3.56441) ? 8 : (r < 3.56995) ? 16 : ((r >= 3.82843) && (r < 3.8415)) ? 3 : 0;
+        (n > 0) ? sprintf(str, "r %.3f P%d %.0f Hz", r, n, max(0.01, min(srate, fx[its_Efx_Par1 + 4])) / n) :
+            sprintf(str, "r %.3f chaos", r);
+    );
+    str;
+);
+
 // Flanger, Chorus : the loop can grow (a feedback of 1 or more ; the barber modes with jitter : the windows of the voices no
 // longer sum to 1) : it saturates (its_Mx_Sat)
 function its_Fl_Grows(fx, fb)
@@ -2385,6 +2454,9 @@ local (ns)
     (fx[its_Efx_Type] === its_Efx_TyPhaser) ? (
         ns = max(1, min(128, floor(fx[its_Efx_CCnt])));
         its_FxW_Hdr + its_PhH + its_PhMaxS + (its_PhCW + 4 * its_PhMaxS) * ns;
+    ) :
+    (fx[its_Efx_Type] === its_Efx_TyNoise) ? (
+        its_FxW_Hdr + its_NzH + its_NzCW * (max(1, min(128, floor(fx[its_Efx_CCnt]))) + 1);
     ) : 0;
 );
 
@@ -2393,7 +2465,7 @@ function its_Fx_NSrc(ty)
 (
     ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? 8 :
     ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || its_Mx_Is(ty) || its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)) ? 1 :
-    (ty === its_Efx_TyLFO) ? 0 : -1;
+    ((ty === its_Efx_TyLFO) || (ty === its_Efx_TyNoise)) ? 0 : -1;
 );
 
 /*
@@ -2822,7 +2894,8 @@ local (i, b, w, f, n, ty, p)
             (ty === its_Efx_TySat) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Sat, its_Sat_ModOk(b), "Effect", i) :
             its_Mx_Is(ty) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Mx, its_Mx_ModOk(b), "Effect", i) :
             its_Fl_Is(ty) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Fl, 7, "Effect", i) :
-            (ty === its_Efx_TyPhaser) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Ph, 7, "Effect", i);
+            (ty === its_Efx_TyPhaser) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Ph, 7, "Effect", i) :
+            (ty === its_Efx_TyNoise) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Nz, its_Nz_ModOk(b), "Effect", i);
         );
         i += 1;
     );
@@ -2980,7 +3053,7 @@ local (r, j, p, ns, nm)
     while (!r && (j < ns)) ( r = (p[0] !== 0) && (its_Fx_RKey(p[0]) === wk); p += its_EfxDist; j += 1; );
     nm = (fx[its_Efx_Type] === its_Efx_TyFilter) ? 2 :
         ((fx[its_Efx_Type] === its_Efx_TySat) || its_Mx_Is(fx[its_Efx_Type]) || its_Fl_Is(fx[its_Efx_Type])
-        || (fx[its_Efx_Type] === its_Efx_TyPhaser)) ? 3 : 0;
+        || (fx[its_Efx_Type] === its_Efx_TyPhaser) || (fx[its_Efx_Type] === its_Efx_TyNoise)) ? 3 : 0;
     p = fx + its_Efx_Mod1; j = 0;
     while (!r && (j < nm)) ( r = (p[its_Mod_Src] !== 0) && (its_Fx_RKey(p[its_Mod_Src]) === wk); p += its_ModDist; j += 1; );
     r;
@@ -4658,6 +4731,7 @@ its_EfxTyS[11] = "Flanger";
 its_EfxTyS[12] = "Chorus";
 its_EfxTyS[13] = "Phaser";
 its_EfxTyS[14] = "Shimmer";
+its_EfxTyS[15] = "Noise";
 // the menus of a cell of these modules (right clic, see its_Sum_Menu) : the states, (readers) mute and solo, open the
 // object in a module of the tab, in a new module ; results : 1-3 the states, then (readers : 4 mute, 5 solo) open, open new
 menu_SumR_N = make_array(9);
@@ -4983,6 +5057,19 @@ local (k)
         fx[its_Efx_MxX + 3] = 0.05; fx[its_Efx_MxX + 4] = 0; // glide (s), jitter
         fx[its_Efx_Lim] = 1; // the auto-limiter in service
     );
+    ((ty === its_Efx_TyNoise) && (k !== ty)) ? (
+        fx[its_Efx_Par1 + 1] = its_NzWhite; // the color
+        fx[its_Efx_Par1 + 2] = 0; // damping (Hz) : none
+        fx[its_Efx_Par1 + 3] = 0; // correlation : each channel its own noise
+        fx[its_Efx_Par1 + 4] = 1000; // density (per second)
+        fx[its_Efx_Par1 + 5] = -12; // level (dB)
+        fx[its_Efx_Par1 + 6] = 0.9; // chaos
+        fx[its_Efx_Par1 + 7] = 0; // tilt (Mix) : white
+        fx[its_Efx_Par1 + 8] = 1; // power (the exponent of the shape) : 1, none
+        fx[its_Efx_Par1] = 0; fx[its_Efx_Par1 + 9] = 40; // rumble : none ; its frequency (Hz)
+        fx[its_Efx_Par1 + 10] = 0; // high pass (Hz) : none
+        fx[its_Efx_Lim] = 1; // the auto-limiter in service
+    );
 );
 
 
@@ -5011,6 +5098,7 @@ menu_Efx_Type_N[11] = "Flanger";
 menu_Efx_Type_N[12] = "Chorus";
 menu_Efx_Type_N[13] = "Phaser";
 menu_Efx_Type_N[14] = "Shimmer";
+menu_Efx_Type_N[15] = "Noise";
 menu_Efx_Type = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "effect-type", its_Efx_TyCnt, menu_Efx_Type_N);
@@ -5134,6 +5222,13 @@ its_ModD_Ph = make_array(3); its_ModD_Ph[0] = 2; its_ModD_Ph[1] = 1; its_ModD_Ph
 its_ModK_Ph = make_array(3);
 its_ModK_Ph[0] = its_ModK_Ph[1] = its_ModKind(its_ModA_Oct, i__o | i__s);
 its_ModK_Ph[2] = its_ModKind(its_ModA_Add, i__a | i__s);
+// Noise : level (dB), density (octaves), correlation
+its_ModN_Nz = make_array(3); its_ModN_Nz[0] = "Level"; its_ModN_Nz[1] = "Density"; its_ModN_Nz[2] = "Corr";
+its_ModD_Nz = make_array(3); its_ModD_Nz[0] = 12; its_ModD_Nz[1] = 2; its_ModD_Nz[2] = 0.5;
+its_ModK_Nz = make_array(3);
+its_ModK_Nz[0] = its_ModKind(its_ModA_Add, i__a); // (dB, as the drive of the Saturation)
+its_ModK_Nz[1] = its_ModKind(its_ModA_Oct, i__o | i__s);
+its_ModK_Nz[2] = its_ModKind(its_ModA_Add, i__a | i__s);
 // the actions and the shapes : their names (menu, labels of the cells), the first depth of an action that is not the default one
 its_ModA_Name = make_array(5); its_ModA_Name[1] = "Add"; its_ModA_Name[2] = "Scale"; its_ModA_Name[3] = "Octaves"; its_ModA_Name[4] = "Decibels";
 its_ModA_Tag = make_array(5); its_ModA_Tag[1] = " +"; its_ModA_Tag[2] = " scale"; its_ModA_Tag[3] = " oct"; its_ModA_Tag[4] = " dB";
@@ -5189,6 +5284,14 @@ menu_Efx_PhMode_N[its_PhBarbUp] = "Barber up"; menu_Efx_PhMode_N[its_PhBarbDown]
 menu_Efx_PhMode = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "phaser-mode", its_PhModeCnt, menu_Efx_PhMode_N);
+// the colors of the Noise (its_Nz...)
+menu_Efx_NzColor_N = make_array(its_NzCnt);
+menu_Efx_NzColor_N[its_NzWhite] = "White"; menu_Efx_NzColor_N[its_NzPink] = "Pink"; menu_Efx_NzColor_N[its_NzBrown] = "Brown";
+menu_Efx_NzColor_N[its_NzViolet] = "Violet"; menu_Efx_NzColor_N[its_NzMix] = "Mix"; menu_Efx_NzColor_N[its_NzVelvet] = "Velvet"; menu_Efx_NzColor_N[its_NzDust] = "Dust";
+menu_Efx_NzColor_N[its_NzCrackle] = "Crackle"; menu_Efx_NzColor_N[its_NzLogistic] = "Logistic";
+menu_Efx_NzColor = make_jmenu(
+    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "noise-color", its_NzCnt, menu_Efx_NzColor_N);
 
 // Menu 3 for Effects : the phase (entry n is the phase n)
 menu_Efx_Phase_N = make_array(3);
@@ -6741,9 +6844,9 @@ local (i, j, g, it, fid, sid, ttl, gl0, gl1, gl2, gl3, gl4, othFirst, tmp, bln, 
     blockPaneClear = (itdsp += 1);
     blockDispNames[blockPaneClear] = "&/Clear Pane";
     blockTabClear = (itdsp += 1);
-    blockDispNames[blockTabClear] = "&/Remove all modules in tab"; // (the panes of the current tab ; Clear all panes : all the tabs)
+    blockDispNames[blockTabClear] = "&/Clear Tab"; // (the panes of the current tab ; Clear All Tabs : all the tabs)
     blockAllPaneClear = (itdsp += 1);
-    blockDispNames[blockAllPaneClear] = "&/<Clear all panes";
+    blockDispNames[blockAllPaneClear] = "&/<Clear All Tabs";
     //
     (itdsp += 1); // separator
     blockDispNames[(itdsp += 1)] = ">Tabs Management";
@@ -7594,6 +7697,20 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_fxShShift, "Shift",  "ShShift",  i_UB|i_SP, "%.2f st", "Shift (even lines): %.2f st",   -36,   36,    12,  0.01, 0);
     parDcl(p_fxShShift+1, "Shift 2",  "ShShift2",  i_UB|i_SP, "%.2f st", "Shift 2 (odd lines): %.2f st",   -36,   36,    12,  0.01, 0);
     parDcl(p_fxShGrain, "Grain",  "ShGrain",  i_UB|i_SP, "%.1f ms", "Grain (shifter window): %.1f ms",   10,   1000,    80,  0.1, 3);
+    parDcl(p_fxNzLevel, "Level",  "NzLevel",  i_UB|i_SP, "%.1f dB", "Level: %.1f dB",   -120,   24,    -12,  0.1, 0);
+    parDcl(p_fxNzDens, "Density",  "NzDens",  i_UB|i_SP, "%.2f /s", "Density: %.2f per second",   0.01,   100000,    1000,  0.01, 12);
+    parDcl(p_fxNzCorr, "Correlation",  "NzCorr",  i_UB|i_SP, "%.3f", "Correlation of the channels: %.3f",   0,   1,    0,  0.001, 0);
+    parDcl(p_fxNzChaos, "Chaos",  "NzChaos",  i_UB|i_SP, "%.3f", "Chaos: %.3f",   0,   1,    0.9,  0.001, 0);
+    parDcl(p_fxNzModD1, "Level depth",  "NzModL",  i_UB|i_SP, "%.1f dB", "Level depth: %.1f dB",   0,   96,    12,  0.1, 0);
+    parDcl(p_fxNzModD1+1, "Density depth",  "NzModD",  i_UB|i_SP, "%.3f oct", "Density depth: %.3f oct",   0,   20,    2,  0.001, 2);
+    parDcl(p_fxNzModD1+2, "Corr depth",  "NzModC",  i_UB|i_SP, "%.3f", "Correlation depth: %.3f",   0,   2,    0.5,  0.001, 0);
+    parDcl(p_fxNzModA1, "Level atten.",  "NzAttL",  i_UB|i_SP, "%.3f", "Level atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxNzModA1+1, "Density atten.",  "NzAttD",  i_UB|i_SP, "%.3f", "Density atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxNzModA1+2, "Corr atten.",  "NzAttC",  i_UB|i_SP, "%.3f", "Correlation atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxNzTilt, "Tilt",  "NzTilt",  i_UB|i_SP, "%.2f dB/oct", "Tilt (Brown -6, Pink -3, White 0, Violet 6): %.2f dB/oct",   -6,   6,    0,  0.01, 0);
+    parDcl(p_fxNzPower, "Power",  "NzPower",  i_UB|i_SP, "%.3f", "Power (the shape : sign(x) |x|^e): %.3f",   0,   8,    1,  0.001, 0);
+    parDcl(p_fxNzRumble, "Rumble",  "NzRumble",  i_UB|i_SP, "%.1f %%", "Rumble (its share): %.1f %%",   0,   100,    0,  0.1, 0);
+    parDcl(p_fxNzRFreq, "Rumble freq",  "NzRFreq",  i_UB|i_SP, "%.1f Hz", "Rumble frequency: %.1f Hz",   5,   500,    40,  0.1, 7);
 );
 
 
@@ -9275,6 +9392,169 @@ local (wk, hd, cw, vw, bf, bs, msk, src, g, mp, md, sh, nv, bm, dl, sw, rt, fb, 
     );
 );
 
+// Noise : one sample of the generator of the color "cl" whose states are at "p" (tf : the period of the density in samples,
+// pd : the density per sample, pc : the parameter of Crackle, rl : the one of Logistic)
+function its_Nz_Gen(p, cl, tf, pd, pc, rl) local(y)
+(
+    (cl === its_NzVelvet) ? (
+        // a period of tf samples, one impulse on one of its samples, p[1] (p[2] : it was given)
+        ((p[0] += 1) >= tf) ? (
+            p[0] -= tf; p[0] = max(0, min(p[0], tf - 1));
+            p[1] = p[0] + floor(rand(max(1, ceil(tf - p[0])))); p[2] = 0;
+        );
+        ((p[2] === 0) && (p[0] >= p[1])) ? ( p[2] = 1; (rand(1) < 0.5) ? -1 : 1; ) : 0;
+    ) :
+    (cl === its_NzDust) ? (
+        (rand(1) < pd) ? rand(2) - 1 : 0;
+    ) :
+    (cl === its_NzCrackle) ? (
+        y = abs(p[3] * pc - p[4] - 0.05); p[4] = p[3];
+        (y < 10) ? ( p[3] = y; ) : ( p[3] = rand(0.5); p[4] = rand(0.5); y = 0; ); // (it went away : again from random states)
+        y;
+    ) :
+    (cl === its_NzLogistic) ? (
+        ((p[6] += pd) >= 1) ? (
+            p[6] -= floor(p[6]);
+            y = rl * p[5] * (1 - p[5]);
+            p[5] = ((y > 0) && (y < 1)) ? y : 0.1 + rand(0.8); // (0 and 1 are fixed points : again from a random state)
+        );
+        2 * p[5] - 1;
+    ) : (
+        rand(2) - 1;
+    );
+);
+
+// Noise : the rumble kept within +-1 (linear up to 0.8, then a soft knee, its_Mx_Sat : its rare peaks rounded)
+function its_Nz_Knee(x) local(a)
+(
+    a = abs(x);
+    (a <= 0.8) ? x : ( a = 0.8 + 0.2 * its_Mx_Sat((a - 0.8) / 0.2); (x < 0) ? -a : a; );
+);
+
+// Noise : the shape sign(x) |x|^e of the sample "x" (the table "t" of |x|^e for |x| < 1, interpolated ; above : the power)
+function its_Nz_Shape(x, t, e) local(a, f, i)
+(
+    a = abs(x);
+    (a < 1) ? ( f = a * its_NzTN; i = floor(f); a = t[i] + (f - i) * (t[i + 1] - t[i]); ) : ( a = a ^ e; );
+    (x < 0) ? -a : a;
+);
+
+/*
+    Noise : "ccnt" channels, each one its own generator, mixed with a common generator (the slot after the channels) by the
+    correlation c : sqrt(c) common + sqrt(1 - c) own (the power is kept ; 0 : a diffuse field, 1 : the same noise
+    everywhere) ; the generators : random values (White, Pink, Brown, Violet, Mix), the trains Velvet and Dust, the chaotic
+    maps Crackle (p = 1 + chaos : a folded rotation, high pitched near 1, crackles near 2) and Logistic (r = 3 + chaos, the
+    density = its iterations per second, held : the periods 2, 4, 8 ... up to 3.57, then chaos) ; each sample shaped :
+    sign(x) |x|^e (2 : x |x|, 3 : x^3, 4 : x |x^3|, 5 : x^5 ; 0 : +-1) ; then, per channel, the colors (Pink : the filter of
+    Paul Kellet, 3 poles ; Brown : a leaky integrator ; Violet : the difference ; Mix : the two colors around the tilt,
+    linear between them), each one brought to the peaks of the white noise, a DC blocker (Crackle, Logistic), the low pass
+    (damp) and the high pass (hp), one pole each ; the rumble : another noise (the same correlation), two one pole low pass
+    at its frequency, its amplitude swelling at random on each channel (a new target every 4 s), its rare peaks (with the
+    swells) at the level, a soft knee above (its_Nz_Knee : it never exceeds the level), in a share of the output ; the
+    level (dB : the peaks)
+*/
+function exec_noise(fx, ccnt, out)
+local (wk, hd, tb, cw, mp, cl, mx, lv, dn, cr, a, b, tf, pd, pc, rl, kd, kh, fc, c, p, g0, u, y, x, e, sh, cb, cp,
+       tl, ww, wp, wb, wv, rm, rk, rg, r0, sw, s)
+(
+    wk = fx[its_Efx_Work];
+    ((wk > BASE_MEMORY) && (wk[its_FxW_Size] === its_Fx_WorkSize(fx))) ? (
+        hd = wk + its_FxW_Hdr; tb = hd + its_NzT; cw = hd + its_NzH;
+        cl = its_Nz_Color(fx); mx = (cl === its_NzMix);
+        // a new area, after a bypass, after a value not finite, another color : the states from zero (the maps, the swells :
+        // at random)
+        ((wk[its_FxW_Md] !== 1) || (hd[0] !== cl)) ? (
+            memset(cw, 0, its_NzCW * (ccnt + 1));
+            p = cw;
+            loop(ccnt + 1, p[2] = 1; p[3] = rand(0.5); p[4] = rand(0.5); p[5] = 0.1 + rand(0.8); p[18] = rand(1); p[19] = rand(1); p += its_NzCW;);
+            hd[0] = cl; hd[1] = hd[3] = hd[5] = hd[6] = -1; // (the filters, the table of the shape, the rumble to compute)
+            wk[its_FxW_Md] = 1;
+        );
+        mp = fx + its_Efx_Mod1;
+        lv = its_Mod_Apply(mp, fx[its_Efx_Par1 + 5], its_ModA_Add, 1); // the level (dB)
+        lv = (lv <= -120) ? 0 : 10 ^ (min(40, lv) / 20);
+        dn = max(0.01, min(srate, its_Mod_Apply(mp + its_ModDist, fx[its_Efx_Par1 + 4], its_ModA_Oct, 1))); // the density
+        cr = max(0, min(1, its_Mod_Apply(mp + 2 * its_ModDist, fx[its_Efx_Par1 + 3], its_ModA_Add, 1))); // the correlation
+        a = sqrt(cr); b = sqrt(1 - cr);
+        tf = srate / dn; pd = dn / srate;
+        pc = 1 + max(0, min(1, fx[its_Efx_Par1 + 6])); rl = 2 + pc;
+        // the shape (1 : none) ; the colors filtered keep the peaks of the white noise : Brown x sqrt((2e + 1) / 3), the power
+        // of the shaped source brought back to the one of the uniform source ; Pink : the same to the power 0.75 (its direct
+        // path keeps a part of the peaks) ; Violet : none
+        e = max(0, min(8, fx[its_Efx_Par1 + 8]));
+        sh = (e !== 1) && its_Nz_Shaped(cl);
+        (sh && (e !== hd[5])) ? ( hd[5] = e; tb[0] = 0; c = 1; loop(its_NzTN, tb[c] = (c / its_NzTN) ^ e; c += 1;); );
+        cb = sh ? sqrt((2 * e + 1) / 3) : 1; cp = sh ? cb ^ 0.75 : 1;
+        // the weights of the colors : one of them, or (Mix) the two around the tilt (-6 Brown, -3 Pink, 0 White, +6 Violet)
+        mx ? (
+            tl = max(-6, min(6, fx[its_Efx_Par1 + 7]));
+            ww = wp = wb = wv = 0;
+            (tl < -3) ? ( wp = (tl + 6) / 3; wb = 1 - wp; ) : (tl < 0) ? ( ww = (tl + 3) / 3; wp = 1 - ww; ) : ( wv = tl / 6; ww = 1 - wv; );
+        ) : (
+            ww = (cl === its_NzWhite); wp = (cl === its_NzPink); wb = (cl === its_NzBrown); wv = (cl === its_NzViolet);
+        );
+        wp *= cp * its_NzPkG; wb *= cb * its_NzBrC; wv *= its_NzViG;
+        // the low pass and the high pass (one pole) : off at 0 Hz (the high pass : 1 Hz), and from 0.45 srate
+        fc = fx[its_Efx_Par1 + 2];
+        (fc !== hd[1]) ? ( hd[1] = fc; hd[2] = ((fc <= 0) || (fc >= 0.45 * srate)) ? 0 : 1 - exp(-2 * $pi * fc / srate); );
+        fc = fx[its_Efx_Par1 + 10];
+        (fc !== hd[3]) ? ( hd[3] = fc; hd[4] = ((fc <= 1) || (fc >= 0.45 * srate)) ? 0 : 1 - exp(-2 * $pi * fc / srate); );
+        kd = hd[2]; kh = hd[4];
+        // the rumble : its share, its two low pass, its gain (sqrt(2 srate / (pi fc)) brings it to the power of the source ;
+        // then its median peak over 45 ms, and its rare peaks with the swells (99.9 % of the windows), measured, at the level)
+        rm = max(0, min(1, fx[its_Efx_Par1]));
+        (rm > 0) ? (
+            fc = max(5, min(500, fx[its_Efx_Par1 + 9]));
+            (fc !== hd[6]) ? (
+                hd[6] = fc; hd[7] = 1 - exp(-2 * $pi * fc / srate);
+                x = log(fc / 40) / log(2);
+                hd[8] = sqrt(2 * srate / ($pi * fc)) * 10 ^ (-(0.5453 + 1.3367 * x - 0.0819 * x * x + 4.4 - 0.5 * x + 0.12 * x * x) / 20);
+            );
+            rk = hd[7]; rg = hd[8];
+            r0 = (a > 0) ? rand(2) - 1 : 0; // (the common source)
+            sw = its_NzSwR / srate;
+        );
+        g0 = 0;
+        (a > 0) ? ( g0 = its_Nz_Gen(cw + ccnt * its_NzCW, cl, tf, pd, pc, rl); sh ? (g0 = its_Nz_Shape(g0, tb, e)); ); // the common generator
+        c = 0; p = cw;
+        loop(ccnt,
+            u = a * g0;
+            (b > 0) ? ( x = its_Nz_Gen(p, cl, tf, pd, pc, rl); sh ? (x = its_Nz_Shape(x, tb, e)); u += b * x; );
+            (cl <= its_NzMix) ? (
+                // White, Pink, Brown, Violet, Mix (its filters always computed : no jump when the tilt passes from two colors to two others)
+                y = ww * u;
+                ((wp !== 0) || mx) ? (
+                    p[7] = 0.99765 * p[7] + u * 0.0990460;
+                    p[8] = 0.96300 * p[8] + u * 0.2965164;
+                    p[9] = 0.57000 * p[9] + u * 1.0526913;
+                    y += wp * (p[7] + p[8] + p[9] + u * 0.1848);
+                );
+                ((wb !== 0) || mx) ? ( p[10] = its_NzBrK * p[10] + its_NzBrG * u; y += wb * p[10]; );
+                ((wv !== 0) || mx) ? ( y += wv * (u - p[11]); p[11] = u; );
+                u = y;
+            ) :
+            ((cl === its_NzCrackle) || (cl === its_NzLogistic)) ? (
+                // DC blocker (about 10 Hz) ; Crackle : its level brought near the one of the white noise
+                y = u - p[14] + its_SatDcK * p[15]; p[14] = u; p[15] = y;
+                u = (cl === its_NzCrackle) ? 8 * y : y;
+            );
+            (kd > 0) ? ( p[12] += kd * (u - p[12]); u = p[12]; );
+            (kh > 0) ? ( p[13] += kh * (u - p[13]); u -= p[13]; );
+            (rm > 0) ? (
+                x = a * r0 + ((b > 0) ? b * (rand(2) - 1) : 0);
+                p[16] += rk * (x - p[16]); p[17] += rk * (p[16] - p[17]);
+                // the swell : from p[18] to p[19] (smoothstep), p[20] its phase
+                ((p[20] += sw) >= 1) ? ( p[20] -= 1; p[18] = p[19]; p[19] = rand(1); );
+                s = p[20]; s = s * s * (3 - 2 * s);
+                u = (1 - rm) * u + rm * its_Nz_Knee(rg * (p[18] + (p[19] - p[18]) * s) * p[17]);
+            );
+            !(abs(u) < its_FinMax) ? ( memset(p + 7, 0, its_NzCW - 7); u = 0; its_NaNCnt += 1; );
+            out[c] += lv * u;
+            c += 1; p += its_NzCW;
+        );
+    );
+);
+
 // a tangent for the coefficients of the Phaser (Padé 3/2 : x (15 - x²) / (15 - 6 x²), x in [0, 0.45 pi] : 3 % low at the top
 // (the frequency a little lower), the stages stay stable)
 function its_Tan_P(x) local(a) ( a = x * x; x * (15 - a) / (15 - 6 * a); );
@@ -9453,7 +9733,8 @@ local (wk, hd, sf, cw, st, src, g, mp, md, sh, ns, bm, rs, f0, sw, rt, fb, mix, 
     Shimmer : the Matrix with a pitch shifter in each line (the tail climbs or falls by intervals), see exec_matrix
     Flanger, Chorus : modulated delays on the channels of its source (Through-zero, barber pole, voices), see exec_flanger
     Phaser : swept allpass stages on the channels of its source (one pole, two pole, barber pole), see exec_phaser
-    Bypass (its_EfxStat_Bypass) : Out = the first source not null, unchanged (an LFO : nothing)
+    Noise : noises on its channels (colors, impulses, chaotic maps), decorrelated or not, see exec_noise
+    Bypass (its_EfxStat_Bypass) : Out = the first source not null, unchanged (an LFO, a Noise : nothing)
     Auto-limiter (its_Efx_Lim, not the LFO) : the output of the type, divided by max(1, its smoothed peak), then the output gain
     the structure is checked again after each modification (its_Efx_Check reset to 0) ; the error is kept in its_Efx_Error
 */
@@ -9500,7 +9781,8 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                 );
             );
             // the modulation inputs : an error is not fatal (no modulation, the error is shown)
-            ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || its_Mx_Is(ty) || its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)) ?
+            ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || its_Mx_Is(ty) || its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)
+                || (ty === its_Efx_TyNoise)) ?
                 (mbad = its_Mod_Resolve(fx + its_Efx_Mod1, (ty === its_Efx_TyFilter) ? 2 : 3));
         );
         fx[its_Efx_Error] = (err === 0) && mbad ? 2715 : err; // 2715 : a modulation input is not valid
@@ -9655,6 +9937,9 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
         ) :
         (fx[its_Efx_Type] === its_Efx_TyPhaser) ? (
             exec_phaser(fx, ccnt, out);
+        ) :
+        (fx[its_Efx_Type] === its_Efx_TyNoise) ? (
+            exec_noise(fx, ccnt, out);
         ) :
         (fx[its_Efx_Type] === its_Efx_TySat) ? (
             wk = fx[its_Efx_Work];
@@ -10659,8 +10944,8 @@ i__ii = 0; loop(6, its_TbRLp[i__ii] = mSL_symbol(menu_Rdr_Loop_N[i__ii]); i__ii 
 
 // the keys of the effects (one table for all the types : its_Tb_FxOk tells which keys a type takes) ; "source" and "gain"
 // are src1 and gain1 ; the keys its_TbFMod ... : "mod" for each modulation input (its_TbFMI)
-its_TbFMod = 71;
-its_TbFMINb = 12;
+its_TbFMod = 79;
+its_TbFMINb = 15;
 its_TbFNk = its_TbFMod + its_TbFMINb;
 its_TbFKey = make_array(its_TbFNk); its_TbFNam = make_array(its_TbFNk);
 its_TbKey(its_TbFKey, its_TbFNam, 0, "type"); its_TbKey(its_TbFKey, its_TbFNam, 1, "status");
@@ -10710,6 +10995,14 @@ its_TbKey(its_TbFKey, its_TbFNam, 64, "q"); its_TbKey(its_TbFKey, its_TbFNam, 65
 its_TbKey(its_TbFKey, its_TbFNam, 66, "shimmer"); its_TbKey(its_TbFKey, its_TbFNam, 67, "shift");
 its_TbKey(its_TbFKey, its_TbFNam, 68, "shift2"); its_TbKey(its_TbFKey, its_TbFNam, 69, "grain");
 its_TbKey(its_TbFKey, its_TbFNam, 70, "lines");
+// Noise : color (Par2), density (Par5), corr (Par4), chaos (Par7) ; and the keys of the others : output (Par6, dB : the
+// Saturation), damp (Par3), hp (Par11)
+its_TbKey(its_TbFKey, its_TbFNam, 71, "color"); its_TbKey(its_TbFKey, its_TbFNam, 72, "density");
+its_TbKey(its_TbFKey, its_TbFNam, 73, "corr"); its_TbKey(its_TbFKey, its_TbFNam, 74, "chaos");
+// Noise : tilt (Par8, Mix), power (Par9 : the exponent of the shape ; "shape" is a word of "mod"), rumble (Par1, %), rfreq
+// (Par10)
+its_TbKey(its_TbFKey, its_TbFNam, 75, "tilt"); its_TbKey(its_TbFKey, its_TbFNam, 76, "power");
+its_TbKey(its_TbFKey, its_TbFNam, 77, "rumble"); its_TbKey(its_TbFKey, its_TbFNam, 78, "rfreq");
 // the order of the keys of a Flanger, of a Chorus in a Dump (from the key 22 ; the others : 22, not one of their keys)
 its_TbFlOrdN = 16; its_TbFlOrd = make_array(its_TbFlOrdN);
 its_TbFlOrd[0] = 24; its_TbFlOrd[1] = 54; its_TbFlOrd[2] = 55; its_TbFlOrd[3] = 51; its_TbFlOrd[4] = 57; // mode delay sweep rate wave
@@ -10721,6 +11014,10 @@ its_TbPhOrd[0] = 24; its_TbPhOrd[1] = 22; its_TbPhOrd[2] = 62; its_TbPhOrd[3] = 
 its_TbPhOrd[5] = 38; its_TbPhOrd[6] = 56; its_TbPhOrd[7] = 61; its_TbPhOrd[8] = 63; // curve feedback mix stages
 its_TbPhOrd[9] = 65; its_TbPhOrd[10] = 64; its_TbPhOrd[11] = 28; its_TbPhOrd[12] = 60; // spacing q spread jitter
 its_TbPhOrd[13] = 46; its_TbPhOrd[14] = 59; its_TbPhOrd[15] = 53; // seed cross glide
+its_TbNzOrdN = 11; its_TbNzOrd = make_array(its_TbNzOrdN); // (the Noise)
+its_TbNzOrd[0] = 71; its_TbNzOrd[1] = 33; its_TbNzOrd[2] = 75; its_TbNzOrd[3] = 72; its_TbNzOrd[4] = 74; // color output tilt density chaos
+its_TbNzOrd[5] = 76; its_TbNzOrd[6] = 73; its_TbNzOrd[7] = 41; its_TbNzOrd[8] = 48; // power corr damp hp
+its_TbNzOrd[9] = 77; its_TbNzOrd[10] = 78; // rumble rfreq
 i__ii = its_TbFMod; loop(its_TbFMINb, its_TbFKey[i__ii] = its_TK_mod; its_TbFNam[i__ii] = "mod"; i__ii += 1;);
 // a word may name several keys, for different types (each one with its own slot, range or kind of value : the key of the
 // type is chosen when the block is read, see its_Tb_FxKey) : its_TbFAlt[k] the next key of the same word (0 : none)
@@ -10739,6 +11036,7 @@ its_TbFMIN[2] = "Drive"; its_TbFMIN[3] = "Bias"; its_TbFMIN[4] = "Order"; // (as
 its_TbFMIN[5] = "Decay"; its_TbFMIN[6] = "Damping"; its_TbFMIN[7] = "Diffusion"; // (as its_ModN_Mx)
 its_TbFMIN[8] = "Delay"; its_TbFMIN[9] = "Rate"; its_TbFMIN[10] = "Feedback"; // (as its_ModN_Fl : the Flanger and the Chorus ;
 its_TbFMIN[11] = "Freq"; // Rate and Feedback : the Phaser too, its_ModN_Ph)
+its_TbFMIN[12] = "Level"; its_TbFMIN[13] = "Density"; its_TbFMIN[14] = "Corr"; // (as its_ModN_Nz : the Noise)
 i__ii = 0; loop(its_TbFMINb,
     its_TbFMI[i__ii] = its_TK(its_TbFMIN[i__ii]);
     (i__ii < 2) ? (
@@ -10758,10 +11056,15 @@ i__ii = 0; loop(its_TbFMINb,
         its_TbFMIt[i__ii] = (1 << its_Efx_TyFlanger) | (1 << its_Efx_TyChorus) | ((i__ii > 8) ? 1 << its_Efx_TyPhaser : 0);
         its_TbFMIj[i__ii] = i__ii - 8; its_TbFMId[i__ii] = its_ModD_Fl[i__ii - 8];
         its_TbFMIk[i__ii] = its_ModK_Fl[i__ii - 8];
-    ) : (
+    ) :
+    (i__ii < 12) ? (
         // Freq : the Phaser (its input 0)
         its_TbFMIt[i__ii] = 1 << its_Efx_TyPhaser; its_TbFMIj[i__ii] = 0; its_TbFMId[i__ii] = its_ModD_Ph[0];
         its_TbFMIk[i__ii] = its_ModK_Ph[0];
+    ) : (
+        // Level, Density, Corr : the Noise
+        its_TbFMIt[i__ii] = 1 << its_Efx_TyNoise; its_TbFMIj[i__ii] = i__ii - 12; its_TbFMId[i__ii] = its_ModD_Nz[i__ii - 12];
+        its_TbFMIk[i__ii] = its_ModK_Nz[i__ii - 12];
     );
     i__ii += 1;
 );
@@ -10771,7 +11074,7 @@ its_TbFTyN = make_array(its_Efx_TyCnt); its_TbFTy = make_array(its_Efx_TyCnt);
 its_TbFTyN[0] = "Undefined"; its_TbFTyN[1] = "None"; its_TbFTyN[2] = "Mixer"; its_TbFTyN[3] = "AutoMix";
 its_TbFTyN[4] = "Mover"; its_TbFTyN[5] = "Action"; its_TbFTyN[6] = "Script"; its_TbFTyN[7] = "LFO";
 its_TbFTyN[8] = "Filter"; its_TbFTyN[9] = "Saturation"; its_TbFTyN[10] = "Matrix"; its_TbFTyN[11] = "Flanger";
-its_TbFTyN[12] = "Chorus"; its_TbFTyN[13] = "Phaser"; its_TbFTyN[14] = "Shimmer";
+its_TbFTyN[12] = "Chorus"; its_TbFTyN[13] = "Phaser"; its_TbFTyN[14] = "Shimmer"; its_TbFTyN[15] = "Noise";
 i__ii = 0; loop(its_Efx_TyCnt, its_TbFTy[i__ii] = its_TK(its_TbFTyN[i__ii]); i__ii += 1;);
 its_TbFStN = make_array(4); its_TbFSt = make_array(4);
 its_TbFStN[0] = "Off"; its_TbFStN[1] = "On"; its_TbFStN[2] = "Bypass"; its_TbFStN[3] = "Undefined";
@@ -10814,6 +11117,8 @@ its_TbPhMdN = make_array(its_PhModeCnt); its_TbPhMd = make_array(its_PhModeCnt);
 its_TbPhMdN[its_PhClassic] = "Classic"; its_TbPhMdN[its_PhReson] = "Resonant"; its_TbPhMdN[its_PhBarbUp] = "BarberUp";
 its_TbPhMdN[its_PhBarbDown] = "BarberDown";
 i__ii = 0; loop(its_PhModeCnt, its_TbPhMd[i__ii] = mSL_symbol(its_TbPhMdN[i__ii]); i__ii += 1;);
+its_TbNzClN = make_array(its_NzCnt); its_TbNzCl = make_array(its_NzCnt); // the colors of a Noise (as its menu)
+i__ii = 0; loop(its_NzCnt, its_TbNzClN[i__ii] = menu_Efx_NzColor_N[i__ii]; its_TbNzCl[i__ii] = mSL_symbol(its_TbNzClN[i__ii]); i__ii += 1;);
 its_TbHarm = make_array(its_SatHarm); // the weights of the key "harm" (its_TbK1 : their count)
 // the keys of the block Global ; track samples (its_GlSmpl), actions (index : its_GlAct_..., see its_actions)
 its_TbGNk = 5;
@@ -10848,7 +11153,7 @@ its_TbSimLO = make_array(LN_CNT + 1); // the owner of each line, writer, reader,
 its_TbSimWO = make_array(WR_CNT + 1);
 its_TbSimRO = make_array(RD_CNT + 1);
 its_TbSimFO = make_array(FX_CNT + 1);
-its_TbKSz = 96; // (keys of the effects : its_TbFNk)
+its_TbKSz = 128; // (keys of the effects : its_TbFNk)
 (its_TbFNk > its_TbKSz) ? err_sys_ini = 2717; // the keys of the effects go beyond the arrays of a block (its_TbKSz)
 its_TbKS = make_array(its_TbKSz); // the keys of a block : 1 if given
 its_TbK1 = make_array(its_TbKSz); // their value
@@ -12365,6 +12670,7 @@ function its_Tb_FxOk(ty, ki)
         || (ki === 48) || (ki === 51) || (ki === 53) || ((ki >= 54) && (ki <= 61))) :
     (ty === its_Efx_TyPhaser) ? ((ki === 6) || (ki === 14) || (ki === 22) || (ki === 24) || (ki === 28) || (ki === 38) || (ki === 46)
         || (ki === 51) || (ki === 53) || ((ki >= 56) && (ki <= 65) && (ki !== 58))) :
+    (ty === its_Efx_TyNoise) ? ((ki === 33) || (ki === 41) || (ki === 48) || ((ki >= 71) && (ki <= 78))) :
     (ty === its_Efx_TyLFO) ? ((ki === 22) || (ki === 24) || ((ki >= 26) && (ki <= 28)) || (ki === 38)) : 0;
 );
 
@@ -12501,6 +12807,13 @@ function its_Tb_FxKey(w) local(ki, i, nm, n, sk)
         ((ki === 67) || (ki === 68)) ? ( its_Tb_v1 = its_Tb_Num(nm, -36, 36); ) : // shift, shift2 (semitones)
         (ki === 69) ? ( its_Tb_v1 = its_Tb_Num(nm, 10, 1000); ) : // grain (ms)
         (ki === 70) ? ( its_Tb_v1 = its_Tb_Int(nm, 1, its_MxMaxL); ) : // lines (at least)
+        (ki === 71) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbNzCl, its_NzCnt); ) : // Noise : color
+        (ki === 72) ? ( its_Tb_v1 = its_Tb_Num(nm, 0.01, 100000); ) : // density (per second)
+        ((ki === 73) || (ki === 74)) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 1); ) : // corr, chaos
+        (ki === 75) ? ( its_Tb_v1 = its_Tb_Num(nm, -6, 6); ) : // tilt (dB/oct)
+        (ki === 76) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 8); ) : // power (the exponent of the shape)
+        (ki === 77) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 100); ) : // rumble (%)
+        (ki === 78) ? ( its_Tb_v1 = its_Tb_Num(nm, 5, 500); ) : // rfreq (Hz)
         (
             // mod : the input, its source, then "depth" and "att" (optional)
             w = its_Tb_Next();
@@ -12995,6 +13308,15 @@ function its_Tb_SatUsed(fx, ki) local(md)
     (ki === 38) ? (md === its_SatCurve) : 1;
 );
 
+// Noise : the key "ki" is used by the effect "fx" (density : Velvet, Dust, Logistic ; chaos : Crackle, Logistic ; tilt :
+// Mix ; power : not Velvet ; rfreq : a rumble)
+function its_Tb_NzUsed(fx, ki)
+(
+    (ki === 72) ? its_Nz_Dens(its_Nz_Color(fx)) : (ki === 74) ? its_Nz_Chaos(its_Nz_Color(fx)) :
+    (ki === 75) ? (its_Nz_Color(fx) === its_NzMix) : (ki === 76) ? its_Nz_Shaped(its_Nz_Color(fx)) :
+    (ki === 78) ? (fx[its_Efx_Par1] > 0) : 1;
+);
+
 // the value of the key "ki" of the effect "fx" : its_Tb_g1 ... its_Tb_g5 (mod : the flags of the law) ; fx === 0 : no effect
 function its_Tb_FxGet(ki, fx) local(p)
 (
@@ -13039,7 +13361,15 @@ function its_Tb_FxGet(ki, fx) local(p)
     (ki === 65) ? fx[its_Efx_MxX] :
     (ki === 66) ? fx[its_Efx_MxX + 4] * 100 : // Shimmer : shimmer, shift, shift2, grain (MxX + 4 ... 7) ; lines (MxX + 8)
     ((ki >= 67) && (ki <= 70)) ? fx[its_Efx_MxX + ki - 62] :
-    (ki < its_TbFMod) ? fx[its_Efx_Par1 + ki - 28] : // bias Par3, output Par6, order Par7, stretch Par8, amount Par9
+    (ki === 71) ? fx[its_Efx_Par1 + 1] : // Noise : color Par2, density Par5, corr Par4, chaos Par7
+    (ki === 72) ? fx[its_Efx_Par1 + 4] :
+    (ki === 73) ? fx[its_Efx_Par1 + 3] :
+    (ki === 74) ? fx[its_Efx_Par1 + 6] :
+    (ki === 75) ? fx[its_Efx_Par1 + 7] : // tilt Par8, shape Par9, rumble Par1 (%), rfreq Par10
+    (ki === 76) ? fx[its_Efx_Par1 + 8] :
+    (ki === 77) ? fx[its_Efx_Par1] * 100 :
+    (ki === 78) ? fx[its_Efx_Par1 + 9] :
+    (ki < its_TbFMod) ? fx[its_Efx_Par1 + ki - 28] : // bias Par3, output Par6 (the Noise too), order Par7, stretch Par8, amount Par9
     its_Tb_ModGet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist);
 );
 
@@ -13053,6 +13383,7 @@ function its_Tb_FxText(str, ki, ty, v1, v2, v3, v4, v5)
     (ki === 47) ? strcpy(str, menu_Efx_MxSpread_N[max(0, min(its_MxSpCnt - 1, v1))]) :
     (ki === 49) ? strcpy(str, its_TbMxInN[max(0, min(1, v1))]) :
     (ki === 57) ? strcpy(str, its_TbFlShN[max(0, min(its_FlShCnt - 1, v1))]) :
+    (ki === 71) ? strcpy(str, its_TbNzClN[max(0, min(its_NzCnt - 1, v1))]) :
     (ki === 2) ? strcpy(str, its_TbFPhN[max(0, min(2, v1))]) :
     ((ki === 3) || (ki === 25) || (ki === 32)) ? sprintf(str, "%d", v1) :
     (ki === 4) ? ((v1 === 0) ? strcpy(str, "Own") : its_Tb_SrcText(str, v1, v2)) :
@@ -13086,9 +13417,11 @@ function its_Tb_DumpFx(k) local(fx, ty, ki, p, j)
             // the status first ; the sources connected only, each one followed by its gain ; the modulations connected only
             p = (ki === 0) ? 1 : (ki === 1) ? 0 : ((ki >= 6) && (ki < 22)) ? 6 + ((ki - 6) >> 1) + ((ki - 6) & 1) * 8 :
                 (its_Fl_Is(ty) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbFlOrdN) ? its_TbFlOrd[ki - 22] : 23) :
-                ((ty === its_Efx_TyPhaser) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbFlOrdN) ? its_TbPhOrd[ki - 22] : 23) : ki;
+                ((ty === its_Efx_TyPhaser) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbFlOrdN) ? its_TbPhOrd[ki - 22] : 23) :
+                ((ty === its_Efx_TyNoise) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbNzOrdN) ? its_TbNzOrd[ki - 22] : 23) : ki;
             (its_Tb_FxOk(ty, p) && ((p < 6) || (p >= 22) || (fx[its_Efx_Src1 + ((p - 6) % 8) * its_EfxDist] !== 0))
                 && ((ty !== its_Efx_TySat) || its_Tb_SatUsed(fx, p))
+                && ((ty !== its_Efx_TyNoise) || its_Tb_NzUsed(fx, p))
                 && ((p !== 38) || (ty === its_Efx_TySat)
                     || (fx[its_Efx_Par1 + ((its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)) ? 7 : 1)] === its_LfoCurve))) ? (
                 its_Tb_FxGet(p, fx);
@@ -13182,6 +13515,14 @@ function its_Tb_SetFx(k) local(fx, ty, j, p, ki)
         its_TbKS[65] ? ( fx[its_Efx_MxX] = its_TbK1[65]; ); // spacing
         its_TbKS[66] ? ( fx[its_Efx_MxX + 4] = its_TbK1[66] / 100; ); // Shimmer : shimmer
         ki = 67; loop(4, its_TbKS[ki] ? ( fx[its_Efx_MxX + ki - 62] = its_TbK1[ki]; ); ki += 1;); // shift, shift2, grain, lines
+        its_TbKS[71] ? ( fx[its_Efx_Par1 + 1] = its_TbK1[71]; ); // Noise : color
+        its_TbKS[72] ? ( fx[its_Efx_Par1 + 4] = its_TbK1[72]; ); // density
+        its_TbKS[73] ? ( fx[its_Efx_Par1 + 3] = its_TbK1[73]; ); // corr
+        its_TbKS[74] ? ( fx[its_Efx_Par1 + 6] = its_TbK1[74]; ); // chaos
+        its_TbKS[75] ? ( fx[its_Efx_Par1 + 7] = its_TbK1[75]; ); // tilt
+        its_TbKS[76] ? ( fx[its_Efx_Par1 + 8] = its_TbK1[76]; ); // power
+        its_TbKS[77] ? ( fx[its_Efx_Par1] = its_TbK1[77] / 100; ); // rumble
+        its_TbKS[78] ? ( fx[its_Efx_Par1 + 9] = its_TbK1[78]; ); // rfreq
         // the modulations : a new connection gets the attenuverter 1 and the default depth (as in the pad)
         ki = its_TbFMod; loop(its_TbFMINb,
             its_TbKS[ki] ? its_Tb_ModSet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist, ki, its_TbFMId[ki - its_TbFMod]);
@@ -18473,6 +18814,92 @@ local (k, r, xx, md, sh, bm, rs)
     );
 );
 
+// Noise : line 1, cell 8 = the color (left clic : the next one ; right clic : menu), cell 9 = its spectrum, the two colors
+// of the mode Mix, its kind or the regime of its chaotic map (its_Nz_Label) ; line 2 : the modulation inputs (level,
+// density, correlation) ; sliders : level, tilt (Mix), density (Velvet, Dust, Logistic), chaos (Crackle, Logistic), power
+// (the shape, not Velvet), correlation, damping, high pass, rumble, its frequency, and the modulations used
+function FX_Noise_Pad(RDBL, fx, fxn, what, cell, ev)
+local (r, xx, cl, ud, uc, um, us, ok)
+(
+    cl = its_Nz_Color(fx);
+    ud = its_Nz_Dens(cl); uc = its_Nz_Chaos(cl); um = (cl === its_NzMix); us = its_Nz_Shaped(cl);
+    ok = its_Nz_ModOk(fx);
+    (what === FXP_Dims) ? (
+        RDBL[3] = 3;
+        RDBL[5] = 6 + um + ud + uc + us + its_Mod_SlCount(fx + its_Efx_Mod1, 3, ok);
+        RDBL[6] = 0;
+    ) :
+    (what === FXP_Fill) ? (
+        strcpy(pad_Efx_Labs[8], menu_Efx_NzColor_N[cl]);
+        pad_Efx_Colrs[8] = Col_P3;
+        its_Nz_Label(pad_Efx_Labs[9], fx);
+        pad_Efx_Colrs[9] = Col_InfoA;
+        strcpy(pad_Efx_Labs[16], "Modulation");
+        its_Mod_Fill(pad_Efx_Labs, pad_Efx_Colrs, 17, fx + its_Efx_Mod1, 3, its_ModN_Nz, ok);
+    ) :
+    (what === FXP_Click) ? (
+        (cell === 8) ? (
+            (ev & ui_jpad_ev_rmc) ? (
+                ui_menu_tick(menu_Efx_NzColor, -1, 0);
+                ui_menu_tick(menu_Efx_NzColor, cl + 1, 1);
+                xx = control_jmenu(menu_Efx_NzColor);
+                (xx != 0) ? (fx[its_Efx_Par1 + 1] = xx - 1);
+                ui_menu_tick(menu_Efx_NzColor, -1, 0);
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                fx[its_Efx_Par1 + 1] = (cl + 1) % its_NzCnt;
+            );
+        ) :
+        ((cell >= 17) && (cell <= 19)) ? (
+            its_Mod_Click(fx + its_Efx_Mod1, cell - 17, ev, its_PadJmc, its_ModD_Nz, its_ModK_Nz) ? (fx[its_Efx_Check] = 0);
+        );
+    ) :
+    (what === FXP_Sliders) ? (
+        // read at each sample
+        paramValues[p_fxNzLevel] = fx[its_Efx_Par1 + 5];
+        r = parCtl(p_fxNzLevel);
+        (r != 0) ? (fx[its_Efx_Par1 + 5] = (r === 8) ? -12 : parV(p_fxNzLevel));
+        um ? (
+            paramValues[p_fxNzTilt] = fx[its_Efx_Par1 + 7];
+            r = parCtl(p_fxNzTilt);
+            (r != 0) ? (fx[its_Efx_Par1 + 7] = (r === 8) ? 0 : parV(p_fxNzTilt));
+        );
+        ud ? (
+            paramValues[p_fxNzDens] = fx[its_Efx_Par1 + 4];
+            r = parCtl(p_fxNzDens);
+            (r != 0) ? (fx[its_Efx_Par1 + 4] = (r === 8) ? 1000 : parV(p_fxNzDens));
+        );
+        uc ? (
+            paramValues[p_fxNzChaos] = fx[its_Efx_Par1 + 6];
+            r = parCtl(p_fxNzChaos);
+            (r != 0) ? (fx[its_Efx_Par1 + 6] = (r === 8) ? 0.9 : parV(p_fxNzChaos));
+        );
+        us ? (
+            paramValues[p_fxNzPower] = fx[its_Efx_Par1 + 8];
+            r = parCtl(p_fxNzPower);
+            (r != 0) ? (fx[its_Efx_Par1 + 8] = (r === 8) ? 1 : parV(p_fxNzPower));
+        );
+        paramValues[p_fxNzCorr] = fx[its_Efx_Par1 + 3];
+        r = parCtl(p_fxNzCorr);
+        (r != 0) ? (fx[its_Efx_Par1 + 3] = (r === 8) ? 0 : parV(p_fxNzCorr));
+        // the filters (0 : none ; the slider of the damping shows none at 24000 Hz)
+        paramValues[p_fxMxDamp] = (fx[its_Efx_Par1 + 2] <= 0) ? 24000 : fx[its_Efx_Par1 + 2];
+        r = parCtl(p_fxMxDamp);
+        (r != 0) ? (fx[its_Efx_Par1 + 2] = (r === 8) ? 0 : parV(p_fxMxDamp));
+        paramValues[p_fxMxHp] = max(1, fx[its_Efx_Par1 + 10]);
+        r = parCtl(p_fxMxHp);
+        (r != 0) ? (fx[its_Efx_Par1 + 10] = (r === 8) ? 0 : parV(p_fxMxHp)); // (1 Hz and below : none)
+        // the rumble
+        paramValues[p_fxNzRumble] = 100 * fx[its_Efx_Par1];
+        r = parCtl(p_fxNzRumble);
+        (r != 0) ? (fx[its_Efx_Par1] = (r === 8) ? 0 : parV(p_fxNzRumble) / 100);
+        paramValues[p_fxNzRFreq] = fx[its_Efx_Par1 + 9];
+        r = parCtl(p_fxNzRFreq);
+        (r != 0) ? (fx[its_Efx_Par1 + 9] = (r === 8) ? 40 : parV(p_fxNzRFreq));
+        its_Mod_Sliders(fx + its_Efx_Mod1, 3, ok, p_fxNzModD1, p_fxNzModA1, its_ModN_Nz, its_ModK_Nz);
+    );
+);
+
 // the dispatcher : calls the function of the type of the effect (a type without function : the common line only)
 function FX_Type_Pad(RDBL, fx, fxn, what, cell, ev)
 local (ty)
@@ -18498,6 +18925,9 @@ local (ty)
     ) :
     (ty === its_Efx_TyPhaser) ? (
         FX_Phaser_Pad(RDBL, fx, fxn, what, cell, ev);
+    ) :
+    (ty === its_Efx_TyNoise) ? (
+        FX_Noise_Pad(RDBL, fx, fxn, what, cell, ev);
     ) : (
         (what === FXP_Dims) ? (RDBL[3] = 1; RDBL[5] = 0;);
     );
