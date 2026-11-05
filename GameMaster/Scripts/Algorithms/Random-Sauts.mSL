@@ -1,0 +1,49 @@
+print("Random-Sauts. Des sauts : un filtre resonant qui saute d'une frequence a l'autre, a des instants irreguliers.");
+
+/*
+  Un passe-bande resonant dont la frequence suit un Random en paliers (Step), sur 13 niveaux (steps) : elle saute,
+  sans glisser, a des instants presque imprevisibles (jitter 0.8). range : l'etendue (octaves autour de center) ; avec
+  beaucoup de canaux et clock Own (dans le pad du Random), chaque haut-parleur saute pour son compte.
+
+  Parametres :
+      nch       canaux
+      center    la frequence centrale (Hz)
+      range     l'etendue (octaves)
+      pace      les sauts par seconde
+      sharp     le Q du filtre
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0.
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. dry, wet : les niveaux du son
+  sec et du son traite (dB). Les autres reglages se changent a la main dans le pad des effets de l'instance (le module
+  Instances la montre ; le module Effect montre ses effets, "pre", "rnd", "wf", "post").
+  L'effet "rnd" (le Random) s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance sauts )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Sauts
+        input src
+        output dst
+        param nch 2 1 128
+        param center 900 20 20000
+        param range 2 0 10
+        param pace 4 0.001 20000
+        param sharp 6 0.05 2000
+        param dry -12 -120 40
+        param wet 0 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect rnd  type Random  chan 1  mode Step  dist Uniform  rate pace  jitter 0.8  steps 13  amp 1  offset 0
+        Effect wf  type Filter  chan nch  source Effect pre  mode BP  freq center  q sharp  stages 1  mod Cutoff Effect rnd  depth range
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect wf  gain2 wet  out dst
+        Display Effect rnd
+    End
+    Instance sauts Sauts  src In:0  dst Out:0  nch 2  center 900  range 2  pace 4  sharp 6  dry -12  wet 0
+));
+print(sprintf(0, "Random-Sauts. instance sauts : %d (0 : OK)", r));

@@ -1,0 +1,59 @@
+print("Ex-1046. Interstys table : l'effet Random (signaux de commande aleatoires).");
+
+/*
+  Un nouveau Random prend les valeurs par defaut : Smooth, Uniform, rate 1 Hz, jitter 0, horloge commune, glide 0, steps 0
+  (valeurs continues), walk 0.2, corr 0, amp 1, offset 0 ; pas de limiteur (comme le LFO). Le Dump ne montre walk que pour
+  le mode Walk, curve que pour la loi Curve (le Check les compare toujours). Puis Walk, Gauss, 8000 Hz (au-dela des 5000 Hz
+  du Flanger), jitter 0.5, une horloge par canal, glide, 12 paliers, corr 0.25, amp 2, offset -1, la vitesse modulee par
+  Ctl 1 (l'entree Rate, celle du Flanger) ; puis Step et la loi Curve (la courbe crn), l'amplitude et le jitter modules.
+  Erreurs (rien n'est cree) : e1 dist Poisson (2754) ; e2 rate 30000 (2754) ; e3 clock Shared (2754) ; e4 steps 200 (2754) ;
+  e5 walk 3 (2754) ; e6 limiter pour un Random (2767) ; e7 dist pour un Noise (2767) ; e8 mod Level pour un Random (2767) ;
+  e9 rate 8000 pour un Flanger (2754 : 5000 au plus). Les numeros des effets dependent du projet (%d).
+*/
+
+var r = table(data(
+    Interstys
+    Curve crn  type Wave  points 0 -1 0  0.5 0.8 0  1 1 0
+    Effect rn  type Random  chan 4
+    Dump Effect rn
+    Check Effect rn  mode Smooth  dist Uniform  rate 1  jitter 0  clock Common  glide 0  steps 0  walk 0.2  corr 0  amp 1  offset 0
+    Effect rn  mode Walk  dist Gauss  rate 8000  jitter 0.5  clock Own  glide 0.1  steps 12  walk 0.3  corr 0.25  amp 2  offset -1
+               mod Rate Ctl 1  depth 2
+    Dump Effect rn
+    Check Effect rn  mode Walk  dist Gauss  rate 8000  clock Own  walk 0.3  mod Rate Ctl 1  depth 2  att 1
+    Effect rn  mode Step  dist Curve  curve crn  mod Amp Ctl 2  mod Jitter Ctl 3
+    Dump Effect rn
+    Check Effect rn  mode Step  dist Curve  curve crn  mod Amp Ctl 2  depth 0.5  mod Jitter Ctl 3  depth 0.5
+    Free Effect rn
+    Free Curve crn
+));
+print(sprintf(0, "Ex-1046. resultat : %d", r));
+
+var e1 = table(data( Interstys  Effect x  type Random  dist Poisson ));
+var e2 = table(data( Interstys  Effect x  type Random  rate 30000 ));
+var e3 = table(data( Interstys  Effect x  type Random  clock Shared ));
+var e4 = table(data( Interstys  Effect x  type Random  steps 200 ));
+var e5 = table(data( Interstys  Effect x  type Random  walk 3 ));
+var e6 = table(data( Interstys  Effect x  type Random  limiter On ));
+var e7 = table(data( Interstys  Effect x  type Noise  dist Gauss ));
+var e8 = table(data( Interstys  Effect x  type Random  mod Level Ctl 1 ));
+var e9 = table(data( Interstys  Effect x  type Flanger  rate 8000 ));
+print(sprintf(0, "Ex-1046. erreurs : %d %d %d %d %d %d %d %d %d", e1, e2, e3, e4, e5, e6, e7, e8, e9));
+
+// Expected "Effect %d status On type Random phase Std chan 4 out Own mode Smooth dist Uniform rate 1 jitter 0 clock Common glide 0 steps 0 corr 0 amp 1 offset 0"
+// Expected "Check Effect %d OK"
+// Expected "Effect %d status On type Random phase Std chan 4 out Own mode Walk dist Gauss rate 8000 jitter 0.5 clock Own glide 0.1 steps 12 walk 0.3 corr 0.25 amp 2 offset -1 mod Rate Ctl 1 depth 2 att 1"
+// Expected "Check Effect %d OK"
+// Expected "Effect %d status On type Random phase Std chan 4 out Own mode Step dist Curve rate 8000 jitter 0.5 clock Own glide 0.1 steps 12 corr 0.25 amp 2 offset -1 curve crn mod Rate Ctl 1 depth 2 att 1 mod Amp Ctl 2 depth 0.5 att 1 mod Jitter Ctl 3 depth 0.5 att 1"
+// Expected "Check Effect %d OK"
+// Expected "Ex-1046. resultat : 0"
+// Expected error 2754
+// Expected error 2754
+// Expected error 2754
+// Expected error 2754
+// Expected error 2754
+// Expected error 2767
+// Expected error 2767
+// Expected error 2767
+// Expected error 2754
+// Expected "Ex-1046. erreurs : 2754 2754 2754 2754 2754 2767 2767 2767 2754"

@@ -1,0 +1,62 @@
+print("Random-Wah. Un wah-wah au hasard : chaque attaque du son deplace un filtre resonant sur ce son, en glissant.");
+
+/*
+  Le son declenche un Random sur son enveloppe (detect Env) : une attaque (l'enveloppe monte de 6 dB au-dessus de son
+  niveau recent, et au-dessus de gate) donne une nouvelle valeur au hasard (Step, rate 0 : les attaques seules) ; la
+  frequence d'un passe-bande resonant sur ce meme son y glisse (slide). Chaque choc, chaque note detachee, chaque
+  syllabe change la couleur du son : le glissement fait un wah-wah, dont chaque attaque tire la destination ; un son
+  tenu, un tremolo, un bruit regulier ne declenchent rien : la couleur reste. Des notes longues qui se chevauchent ne
+  sont pas toutes vues (il faut que le niveau monte nettement). Moins de wah : slide 0 (des sauts de couleur), sharp
+  plus bas ; plus de wah : sharp 8 ou plus.
+  fall : la retombee de l'enveloppe (ms : plus courte, des attaques plus rapprochees sont vues ; sous la periode du son,
+  ses periodes deviennent des attaques). Dans le pad du Random : Smooth glisse d'une valeur a la suivante sur la duree
+  entre les deux attaques precedentes ; Binary saute entre deux couleurs ; rate (plus que 0) ajoute des changements entre
+  les attaques ; le seuil (gate) et la retombee (Release) se reglent aussi la.
+
+  Parametres :
+      nch       canaux
+      center    la frequence centrale du filtre (Hz)
+      range     l'etendue (octaves autour de center)
+      gate      le niveau minimal d'une attaque (amplitude : 0.01 = -40 dB)
+      fall      la retombee de l'enveloppe (ms)
+      slide     le glissement de la frequence (s)
+      sharp     le Q du filtre
+      dry       son sec (dB)
+      wet       son filtre (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son filtre sortent vers Out:0.
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. dry, wet : les niveaux du son
+  sec et du son filtre (dB). Les autres reglages se changent a la main dans le pad des effets de l'instance (le module
+  Instances la montre ; le module Effect montre ses effets, "pre", "rnd", "wf", "post").
+  L'effet "rnd" (le Random) s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance wah )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Wah
+        input src
+        output dst
+        param nch 2 1 128
+        param center 1500 20 20000
+        param range 2 0 10
+        param gate 0.01 0 2
+        param fall 50 1 10000
+        param slide 0.2 0 10
+        param sharp 4 0.05 2000
+        param dry -120 -120 40
+        param wet 0 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect rnd  type Random  chan 1  source Effect pre  detect Env  thresh gate  release fall  rate 0  mode Step
+                    dist Uniform  glide slide  amp 1  offset 0
+        Effect wf  type Filter  chan nch  source Effect pre  mode BP  freq center  q sharp  stages 1  mod Cutoff Effect rnd  depth range
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect wf  gain2 wet  out dst
+        Display Effect rnd
+    End
+    Instance wah Wah  src In:0  dst Out:0  nch 2  center 1500  range 2  gate 0.01  fall 50  slide 0.2  sharp 4  dry -120  wet 0
+));
+print(sprintf(0, "Random-Wah. instance wah : %d (0 : OK)", r));

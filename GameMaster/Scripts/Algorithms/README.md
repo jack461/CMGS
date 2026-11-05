@@ -18,7 +18,7 @@ fenêtre d'Interstys et installe aussitôt un algorithme complet, branché sur l
   stéréo, `nch 2`.
 
 **L'effet principal s'affiche** : chaque recette se termine par `Display Effect …` (son effet principal :
-`fdn`, `fl`, `ph`, `sh` ou `nz`), qui le montre dans un module Effect de l'onglet courant : celui qui le montre déjà,
+`fdn`, `fl`, `ph`, `sh`, `nz` ou `rnd`), qui le montre dans un module Effect de l'onglet courant : celui qui le montre déjà,
 sinon un module Effect qui montre un effet qui n'existe plus, sinon un nouveau module Effect, à la fin du
 panneau qui en a le moins. `Display` montre aussi un reader, un writer, une ligne ou une courbe
 (`Display Reader r`, `Display Line l`, `Display Curve c`), ou un module par son nom, celui du menu des modules
@@ -119,3 +119,20 @@ a son propre bruit : `corr` (de 0 à 1) y mélange un bruit commun, de l'image d
 couleur `Mix` passe continûment du brun au rose, au blanc puis au violet (`tilt`, de -6 à +6 dB/oct) ; `power`
 élève chaque échantillon à une puissance (sign(x) |x|^e : 2, 3, 5… des grains de plus en plus épars ; 0 : un bruit
 binaire) ; `rumble` mêle un grondement très grave et mouvant (`rfreq`, sa fréquence).
+
+## Les recettes du Random (signaux de commande aléatoires)
+
+| Fichier | Ce qu'il fait |
+|---|---|
+| `Random-Errance` | Une errance : la traîne d'une Matrix s'allonge et se raccourcit au hasard, sans période |
+| `Random-Tangage` | Un tangage : le retard d'un Chorus marche au hasard, la hauteur dérive comme une bande qui tangue |
+| `Random-Sauts` | Des sauts : un filtre résonant saute d'une fréquence à l'autre (13 paliers), à des instants irréguliers |
+| `Random-Pouls` | Un pouls : la densité d'un Noise Velvet marche au hasard, les impulsions accélèrent et ralentissent |
+| `Random-Drops` | Des gouttes : des impulsions au hasard (Noise Dust) déclenchent les sauts d'un filtre résonant |
+| `Random-Wah` | Un wah-wah au hasard : chaque attaque du son (son enveloppe) déplace un filtre résonant sur ce son, en glissant |
+
+L'effet affiché est `rnd`, le Random : ses réglages (mode Step, Smooth ou Walk ; loi Uniform, Gauss, Binary ou
+Curve ; horloge commune ou propre à chaque canal…) changent le caractère de la recette. Un Random module une
+entrée de modulation (`mod … Effect rnd`) : comme un LFO, mais sans période.
+Sa source est un déclenchement : chaque front montant au-dessus du seuil (`thresh`) donne une nouvelle valeur et
+relance son horloge (`rate 0` : les déclenchements seuls) ; `detect Env` : les attaques d'un son (son enveloppe).

@@ -552,7 +552,13 @@ its_Efx_WkOld = idx; idx += 1; //  la zone remplacée par @block, libérée par 
 // (rumble) [0, 1], Par2 la couleur (its_Nz...), Par3 l'amortissement passe-bas (Hz, 0 : aucun), Par4 la corrélation des
 // canaux [0, 1], Par5 la densité (par seconde : Velvet, Dust, Logistic), Par6 le niveau (dB : celui des crêtes), Par7
 // chaos [0, 1] (Crackle, Logistic), Par8 la teinte du mode Mix (dB/oct, [-6, 6]), Par9 l'exposant de la forme (sign(x)
-// |x|^e, [0, 8]), Par10 la fréquence du grondement (Hz), Par11 passe-haut (Hz, 0 : aucun))
+// |x|^e, [0, 8]), Par10 la fréquence du grondement (Hz), Par11 passe-haut (Hz, 0 : aucun) ; Random : Par2 le mode
+// (its_Rn...), Par3 l'amplitude, Par4 le décalage, Par5 la corrélation [0, 1] (la probabilité de prendre la valeur
+// commune), Par6 la courbe de la loi Curve, Par7 la loi des tirages, Par8 l'horloge (0 commune, 1 propre à chaque canal),
+// Par9 les paliers (0 : aucun), Par10 le pas du mode Walk, Par11 le seuil du déclenchement (sa source : le câble des
+// déclenchements), Par12 sa détection (0 l'onde, 1 son enveloppe) ; et dans les mots its_Efx_MxX : 1 la vitesse (Hz, 0 :
+// les déclenchements seuls), 3 le glissement (s), 4 l'irrégularité de l'horloge (jitter [0, 1]), 5 la retombée de
+// l'enveloppe (ms))
 its_Efx_Par1 = idx; idx += 12;
 its_Efx_St1 = idx; idx += 4;
 its_Efx_Harm1 = idx; idx += 16; // Saturation, mode Cheb. sum : les poids des harmoniques 1 ... 16 (its_SatHarm), dans [-1, 1]
@@ -635,7 +641,8 @@ its_Efx_TyChorus = 12; // the same engine, other default values (see its_Fl_Def)
 its_Efx_TyPhaser = 13; // swept allpass filters (see exec_phaser)
 its_Efx_TyShimmer = 14; // the Matrix with a pitch shifter in each line (see exec_matrix)
 its_Efx_TyNoise = 15; // noises : colors, impulses, chaotic maps (see exec_noise)
-its_Efx_TyCnt = 16; // count of types
+its_Efx_TyRandom = 16; // random control signals (see exec_random)
+its_Efx_TyCnt = 17; // count of types
 // Filter modes (its_Efx_Par3)
 its_FltLP1 = 0; // low pass, 1 pole
 its_FltHP1 = 1; // high pass, 1 pole
@@ -738,6 +745,22 @@ its_NzSwR = 0.25; // the swells of the rumble : a new target 0.25 times per seco
 its_NzT = 16; its_NzTN = 1024; // the table of the shape |x|^e (its_NzTN + 1 values) in its header, from the word its_NzT
 its_NzH = its_NzT + its_NzTN + 4; // words of its header (after the one of the work area)
 its_NzCW = 24; // words per channel, and for the common generator (after the channels)
+// Random : the modes (its_Efx_Par2) : Step (a new value at each tick, held), Smooth (from a value to the next over the
+// interval), Walk (at each tick a step of "walk" times a draw, reflected within [-1, 1]) ; the laws of the draws (Par7) :
+// Uniform in [-1, 1], Gauss (sigma 1/3, within [-1, 1]), Binary (+-1), Curve (the curve Par6 read at a random place : its
+// shape is the distribution of the values)
+its_RnStep = 0; its_RnSmooth = 1; its_RnWalk = 2; its_RnModeCnt = 3;
+its_RnUnif = 0; its_RnGauss = 1; its_RnBin = 2; its_RnCurve = 3; its_RnLawCnt = 4;
+// the trigger (its source) : a rising edge above the threshold (Par11) gives a tick, and restarts the clock ; rate 0 : the
+// triggers only ; clock Common : the first channel of the trigger, clock Own : a channel of the trigger per channel
+its_RnH = 8; // words of its header (after the one of the work area)
+its_RnCW = 14; // words per channel, and for the common clock (after the channels), see exec_random
+its_RnHyst = 0.01; // the hysteresis of the trigger : an edge above the threshold + its_RnHyst, again armed at the threshold
+// the detection of the trigger (Par12) : its wave, or its envelope (an instant attack, the release MxX + 5) : an attack,
+// the envelope above the threshold and its_RnJump times its recent level (6 dB), again armed at its_RnReArm (2 dB), see
+// its_Rn_Trig
+its_RnDtWave = 0; its_RnDtEnv = 1;
+its_RnJump = 2; its_RnReArm = 1.25;
 
 its_EfxStat_Off = 0; // its_Efx_Status : the effect is not executed
 its_EfxStat_On = 1; // (= its_Efx_Unspecified, set by FX_Clear)
@@ -1363,6 +1386,17 @@ p_fxNzTilt = idx; idx += 1; // the tilt of the mode Mix (dB/oct)
 p_fxNzPower = idx; idx += 1; // the exponent of the shape (power)
 p_fxNzRumble = idx; idx += 1; // the share of the rumble (%)
 p_fxNzRFreq = idx; idx += 1; // its frequency (Hz)
+p_fxRnRate = idx; idx += 1; // Random : the rate (Hz)
+p_fxRnAmp = idx; idx += 1; // the amplitude
+p_fxRnDC = idx; idx += 1; // the offset
+p_fxRnJitter = idx; idx += 1; // the irregularity of the clock [0, 1]
+p_fxRnGlide = idx; idx += 1; // the glide (s)
+p_fxRnSteps = idx; idx += 1; // the steps (0 : none)
+p_fxRnWalk = idx; idx += 1; // the size of the steps of the mode Walk
+p_fxRnThr = idx; idx += 1; // the threshold of the trigger
+p_fxRnRel = idx; idx += 1; // the release of its envelope (ms)
+p_fxRnModD1 = idx; idx += 3; // depths of the 3 modulation inputs : amplitude, rate (octaves), jitter
+p_fxRnModA1 = idx; idx += 3; // their attenuverters [-10 ... 10]
 its_ParLast = idx - 1; // the last parameter of Interstys : in its range (paramNMax), see the error 2716
 
 // Global variables
@@ -2457,15 +2491,29 @@ local (ns)
     ) :
     (fx[its_Efx_Type] === its_Efx_TyNoise) ? (
         its_FxW_Hdr + its_NzH + its_NzCW * (max(1, min(128, floor(fx[its_Efx_CCnt]))) + 1);
+    ) :
+    (fx[its_Efx_Type] === its_Efx_TyRandom) ? (
+        its_FxW_Hdr + its_RnH + its_RnCW * (max(1, min(128, floor(fx[its_Efx_CCnt]))) + 1);
     ) : 0;
 );
 
-// count of sources of an effect type (-1 : a type not executed)
+// a generator of control signals (LFO, Random) : no auto-limiter ; in Bypass, nothing (a Random : not its trigger)
+function its_Fx_Ctl(ty) ( (ty === its_Efx_TyLFO) || (ty === its_Efx_TyRandom); );
+
+// count of sources of an effect type (-1 : a type not executed) ; the Random : its trigger (optional)
 function its_Fx_NSrc(ty)
 (
     ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? 8 :
-    ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || its_Mx_Is(ty) || its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)) ? 1 :
+    ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || its_Mx_Is(ty) || its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)
+        || (ty === its_Efx_TyRandom)) ? 1 :
     ((ty === its_Efx_TyLFO) || (ty === its_Efx_TyNoise)) ? 0 : -1;
+);
+
+// the count of channels read from a source of the effect "fx" : its channels ; a Random, clock Common : one (the first
+// channel of its trigger)
+function its_Fx_SrcW(fx)
+(
+    ((fx[its_Efx_Type] === its_Efx_TyRandom) && (fx[its_Efx_Par1 + 7] === 0)) ? 1 : max(1, min(128, floor(fx[its_Efx_CCnt])));
 );
 
 /*
@@ -2884,10 +2932,10 @@ local (i, b, w, f, n, ty, p)
             w = max(1, min(128, floor(b[its_Efx_CCnt])));
             its_Pch_Use(b[its_Efx_OutK], b[its_Efx_OutOff],
                 its_Out_Cell(b[its_Efx_OutK], b[its_Efx_OutOff], w, CblFxStart[i], CblFxWidth[i]), w, 1, "Effect", i, "output");
-            n = 0; p = b + its_Efx_Src1; loop(its_Fx_NSrc(ty),
+            n = 0; p = b + its_Efx_Src1; w = its_Fx_SrcW(b); loop(its_Fx_NSrc(ty),
                 (p[0] !== 0) ? its_Pch_Use(p[0], p[its_Efx_Off1 - its_Efx_Src1], its_Src_Cell(p[0], p[its_Efx_Off1 - its_Efx_Src1], w), w, 0,
                     "Effect", i,
-                    (its_Fx_NSrc(ty) > 1) ? sprintf(#its_PchRole, "source %d", n + 1) : "source");
+                    (its_Fx_NSrc(ty) > 1) ? sprintf(#its_PchRole, "source %d", n + 1) : (ty === its_Efx_TyRandom) ? "trigger" : "source");
                 n += 1; p += its_EfxDist;
             );
             (ty === its_Efx_TyFilter) ? its_Pch_Mods(b + its_Efx_Mod1, 2, its_ModN_Flt, its_Flt_ModOk(b), "Effect", i) :
@@ -2895,7 +2943,8 @@ local (i, b, w, f, n, ty, p)
             its_Mx_Is(ty) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Mx, its_Mx_ModOk(b), "Effect", i) :
             its_Fl_Is(ty) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Fl, 7, "Effect", i) :
             (ty === its_Efx_TyPhaser) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Ph, 7, "Effect", i) :
-            (ty === its_Efx_TyNoise) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Nz, its_Nz_ModOk(b), "Effect", i);
+            (ty === its_Efx_TyNoise) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Nz, its_Nz_ModOk(b), "Effect", i) :
+            (ty === its_Efx_TyRandom) ? its_Pch_Mods(b + its_Efx_Mod1, 3, its_ModN_Rn, 7, "Effect", i);
         );
         i += 1;
     );
@@ -3053,7 +3102,8 @@ local (r, j, p, ns, nm)
     while (!r && (j < ns)) ( r = (p[0] !== 0) && (its_Fx_RKey(p[0]) === wk); p += its_EfxDist; j += 1; );
     nm = (fx[its_Efx_Type] === its_Efx_TyFilter) ? 2 :
         ((fx[its_Efx_Type] === its_Efx_TySat) || its_Mx_Is(fx[its_Efx_Type]) || its_Fl_Is(fx[its_Efx_Type])
-        || (fx[its_Efx_Type] === its_Efx_TyPhaser) || (fx[its_Efx_Type] === its_Efx_TyNoise)) ? 3 : 0;
+        || (fx[its_Efx_Type] === its_Efx_TyPhaser) || (fx[its_Efx_Type] === its_Efx_TyNoise)
+        || (fx[its_Efx_Type] === its_Efx_TyRandom)) ? 3 : 0;
     p = fx + its_Efx_Mod1; j = 0;
     while (!r && (j < nm)) ( r = (p[its_Mod_Src] !== 0) && (its_Fx_RKey(p[its_Mod_Src]) === wk); p += its_ModDist; j += 1; );
     r;
@@ -4732,6 +4782,7 @@ its_EfxTyS[12] = "Chorus";
 its_EfxTyS[13] = "Phaser";
 its_EfxTyS[14] = "Shimmer";
 its_EfxTyS[15] = "Noise";
+its_EfxTyS[16] = "Random";
 // the menus of a cell of these modules (right clic, see its_Sum_Menu) : the states, (readers) mute and solo, open the
 // object in a module of the tab, in a new module ; results : 1-3 the states, then (readers : 4 mute, 5 solo) open, open new
 menu_SumR_N = make_array(9);
@@ -5070,6 +5121,20 @@ local (k)
         fx[its_Efx_Par1 + 10] = 0; // high pass (Hz) : none
         fx[its_Efx_Lim] = 1; // the auto-limiter in service
     );
+    ((ty === its_Efx_TyRandom) && (k !== ty)) ? (
+        fx[its_Efx_Par1 + 1] = its_RnSmooth; // the mode
+        fx[its_Efx_Par1 + 2] = 1; fx[its_Efx_Par1 + 3] = 0; // amplitude, offset
+        fx[its_Efx_Par1 + 4] = 0; // correlation : each channel its own values
+        fx[its_Efx_Par1 + 5] = 0; // the curve (law Curve)
+        fx[its_Efx_Par1 + 6] = its_RnUnif; // the law of the draws
+        fx[its_Efx_Par1 + 7] = 0; // the clock : common
+        fx[its_Efx_Par1 + 8] = 0; // steps : none (continuous values)
+        fx[its_Efx_Par1 + 9] = 0.2; // walk : the size of the steps of the mode Walk
+        fx[its_Efx_Par1 + 10] = 0; // the threshold of the trigger
+        fx[its_Efx_Par1 + 11] = its_RnDtWave; fx[its_Efx_MxX + 5] = 50; // its detection : the wave ; the release of the envelope (ms)
+        fx[its_Efx_MxX + 1] = 1; fx[its_Efx_MxX + 3] = 0; fx[its_Efx_MxX + 4] = 0; // rate (Hz), glide (s), jitter
+        fx[its_Efx_Src1] = fx[its_Efx_Off1] = 0; fx[its_Efx_VoldB1] = 0; // no trigger (the source of the previous type)
+    );
 );
 
 
@@ -5099,6 +5164,7 @@ menu_Efx_Type_N[12] = "Chorus";
 menu_Efx_Type_N[13] = "Phaser";
 menu_Efx_Type_N[14] = "Shimmer";
 menu_Efx_Type_N[15] = "Noise";
+menu_Efx_Type_N[16] = "Random";
 menu_Efx_Type = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "effect-type", its_Efx_TyCnt, menu_Efx_Type_N);
@@ -5229,6 +5295,12 @@ its_ModK_Nz = make_array(3);
 its_ModK_Nz[0] = its_ModKind(its_ModA_Add, i__a); // (dB, as the drive of the Saturation)
 its_ModK_Nz[1] = its_ModKind(its_ModA_Oct, i__o | i__s);
 its_ModK_Nz[2] = its_ModKind(its_ModA_Add, i__a | i__s);
+// Random : amplitude, rate (octaves), jitter
+its_ModN_Rn = make_array(3); its_ModN_Rn[0] = "Amp"; its_ModN_Rn[1] = "Rate"; its_ModN_Rn[2] = "Jitter";
+its_ModD_Rn = make_array(3); its_ModD_Rn[0] = 0.5; its_ModD_Rn[1] = 1; its_ModD_Rn[2] = 0.5;
+its_ModK_Rn = make_array(3);
+its_ModK_Rn[0] = its_ModK_Rn[2] = its_ModKind(its_ModA_Add, i__a | i__s);
+its_ModK_Rn[1] = its_ModKind(its_ModA_Oct, i__o | i__s);
 // the actions and the shapes : their names (menu, labels of the cells), the first depth of an action that is not the default one
 its_ModA_Name = make_array(5); its_ModA_Name[1] = "Add"; its_ModA_Name[2] = "Scale"; its_ModA_Name[3] = "Octaves"; its_ModA_Name[4] = "Decibels";
 its_ModA_Tag = make_array(5); its_ModA_Tag[1] = " +"; its_ModA_Tag[2] = " scale"; its_ModA_Tag[3] = " oct"; its_ModA_Tag[4] = " dB";
@@ -5292,6 +5364,18 @@ menu_Efx_NzColor_N[its_NzCrackle] = "Crackle"; menu_Efx_NzColor_N[its_NzLogistic
 menu_Efx_NzColor = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "noise-color", its_NzCnt, menu_Efx_NzColor_N);
+// the modes and the laws of the Random (its_Rn...)
+menu_Efx_RnMode_N = make_array(its_RnModeCnt);
+menu_Efx_RnMode_N[its_RnStep] = "Step"; menu_Efx_RnMode_N[its_RnSmooth] = "Smooth"; menu_Efx_RnMode_N[its_RnWalk] = "Walk";
+menu_Efx_RnMode = make_jmenu(
+    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "random-mode", its_RnModeCnt, menu_Efx_RnMode_N);
+menu_Efx_RnLaw_N = make_array(its_RnLawCnt);
+menu_Efx_RnLaw_N[its_RnUnif] = "Uniform"; menu_Efx_RnLaw_N[its_RnGauss] = "Gauss"; menu_Efx_RnLaw_N[its_RnBin] = "Binary";
+menu_Efx_RnLaw_N[its_RnCurve] = "Curve";
+menu_Efx_RnLaw = make_jmenu(
+    ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "random-law", its_RnLawCnt, menu_Efx_RnLaw_N);
 
 // Menu 3 for Effects : the phase (entry n is the phase n)
 menu_Efx_Phase_N = make_array(3);
@@ -7710,6 +7794,21 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_fxNzTilt, "Tilt",  "NzTilt",  i_UB|i_SP, "%.2f dB/oct", "Tilt (Brown -6, Pink -3, White 0, Violet 6): %.2f dB/oct",   -6,   6,    0,  0.01, 0);
     parDcl(p_fxNzPower, "Power",  "NzPower",  i_UB|i_SP, "%.3f", "Power (the shape : sign(x) |x|^e): %.3f",   0,   8,    1,  0.001, 0);
     parDcl(p_fxNzRumble, "Rumble",  "NzRumble",  i_UB|i_SP, "%.1f %%", "Rumble (its share): %.1f %%",   0,   100,    0,  0.1, 0);
+    parDcl(p_fxRnRate, "Rate",  "RnRate",  i_UB|i_SP, "%.3f Hz", "Rate (the mean of the ticks ; 0 : the triggers only): %.3f Hz",   0,   20000,    1,  0.001, 14);
+    parDcl(p_fxRnAmp, "Amplitude",  "RnAmp",  i_UB|i_SP, "%.3f", "Amplitude: %.3f",   0,   10,    1,  0.001, 4.5);
+    parDcl(p_fxRnDC, "Offset",  "RnDC",  i_UB|i_SP, "%.3f", "Offset: %.3f",   -10,   10,    0,  0.001, 0);
+    parDcl(p_fxRnJitter, "Jitter",  "RnJitter",  i_UB|i_SP, "%.3f", "Jitter (0 : regular ticks, 1 : at random): %.3f",   0,   1,    0,  0.001, 0);
+    parDcl(p_fxRnGlide, "Glide",  "RnGlide",  i_UB|i_SP, "%.3f s", "Glide of the values: %.3f s",   0,   10,    0,  0.001, 2);
+    parDcl(p_fxRnSteps, "Steps",  "RnSteps",  i_UB|i_SP, "%.0f", "Steps (the values on n levels, 0 : continuous): %.0f",   0,   128,    0,  1, 2);
+    parDcl(p_fxRnWalk, "Walk",  "RnWalk",  i_UB|i_SP, "%.3f", "Walk (the size of the steps): %.3f",   0,   2,    0.2,  0.001, 0);
+    parDcl(p_fxRnThr, "Threshold",  "RnThr",  i_UB|i_SP, "%.3f", "Threshold of the trigger (its rising edges above): %.3f",   -2,   2,    0,  0.001, 0);
+    parDcl(p_fxRnRel, "Release",  "RnRel",  i_UB|i_SP, "%.0f ms", "Release of the envelope of the trigger: %.0f ms",   1,   10000,    50,  1, 7);
+    parDcl(p_fxRnModD1, "Amp depth",  "RnModA",  i_UB|i_SP, "%.3f", "Amplitude depth: %.3f",   0,   10,    0.5,  0.001, 0);
+    parDcl(p_fxRnModD1+1, "Rate depth",  "RnModR",  i_UB|i_SP, "%.3f oct", "Rate depth: %.3f oct",   0,   10,    1,  0.001, 2);
+    parDcl(p_fxRnModD1+2, "Jitter depth",  "RnModJ",  i_UB|i_SP, "%.3f", "Jitter depth: %.3f",   0,   1,    0.5,  0.001, 0);
+    parDcl(p_fxRnModA1, "Amp atten.",  "RnAttA",  i_UB|i_SP, "%.3f", "Amplitude atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxRnModA1+1, "Rate atten.",  "RnAttR",  i_UB|i_SP, "%.3f", "Rate atten.: %.3f",   -10,   10,    1,  0.001, 0);
+    parDcl(p_fxRnModA1+2, "Jitter atten.",  "RnAttJ",  i_UB|i_SP, "%.3f", "Jitter atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_fxNzRFreq, "Rumble freq",  "NzRFreq",  i_UB|i_SP, "%.1f Hz", "Rumble frequency: %.1f Hz",   5,   500,    40,  0.1, 7);
 );
 
@@ -9424,6 +9523,165 @@ function its_Nz_Gen(p, cl, tf, pd, pc, rl) local(y)
     );
 );
 
+// Random : a draw of the law "lw" (ct : the table of the curve of the law Curve)
+function its_Rn_Draw(lw, ct)
+(
+    // Gauss : the sum of 4 uniforms in [0, 1] (sigma sqrt(4 / 12)), brought to sigma 1/3 : (sum - 2) x 0.5774
+    (lw === its_RnGauss) ? max(-1, min(1, (rand(1) + rand(1) + rand(1) + rand(1) - 2) * 0.5774)) :
+    (lw === its_RnBin) ? ((rand(1) < 0.5) ? -1 : 1) :
+    (lw === its_RnCurve) ? its_Crv_Cyc(ct, rand(1)) :
+    rand(2) - 1;
+);
+
+// Random : the inverse of the length of the next interval of a clock (relative to the rate) : 1 - jt + jt x an exponential
+// draw of mean 1 (regular at 0, Poisson at 1)
+function its_Rn_Ivl(jt) ( 1 / max(0.001, 1 - jt - jt * log(max(0.000001, 1 - rand(1)))); );
+
+// Random : the clock at "q" (q[0] its phase, q[1] the inverse of the length of the current interval) moves by "rt" (ticks per
+// sample) : 1 at a tick
+function its_Rn_Clock(q, rt, jt)
+(
+    ((q[0] += rt * q[1]) >= 1) ? (
+        q[0] -= floor(q[0]);
+        q[1] = its_Rn_Ivl(jt);
+        1;
+    ) : 0;
+);
+
+// Random : a rising edge of the trigger "x" (above the threshold "th" + its_RnHyst, after having been at or below "th") ;
+// q[9] : its state (1 : above)
+function its_Rn_Edge(q, x, th)
+(
+    q[9] ? ( (x <= th) ? (q[9] = 0); 0; ) : (x > th + its_RnHyst) ? ( q[9] = 1; 1; ) : 0;
+);
+
+// Random : a rising edge of the trigger "x", detected on its wave ("dt" 0, its_Rn_Edge) or on its envelope ("dt" 1 : an
+// attack) : q[11] the envelope (an instant attack, then the release "kr" per sample), q[12] its recent level (a one pole,
+// "ks" : 5 times the release) ; an attack : the envelope above the threshold "th" (at least 0.001) and its_RnJump times
+// its recent level ; again armed when it is back to its_RnReArm times this level, or under half the threshold (a
+// steady sound, a tremolo : no attack)
+function its_Rn_Trig(q, x, th, dt, kr, ks)
+(
+    dt ? (
+        x = abs(x);
+        q[11] = (x > q[11] * kr) ? x : q[11] * kr;
+        th = max(0.001, th);
+        x = q[9] ? ( ((q[11] <= its_RnReArm * q[12]) || (q[11] <= 0.5 * th)) ? (q[9] = 0); 0; ) :
+            ((q[11] > th) && (q[11] > its_RnJump * q[12])) ? ( q[9] = 1; 1; ) : 0;
+        q[12] += ks * (q[11] - q[12]);
+        x;
+    ) : its_Rn_Edge(q, x, th);
+);
+
+// Random : the clock at "q" and the trigger "g" (1 : a rising edge) : 1 at a tick ; a trigger restarts the clock (the phase
+// 0, a new interval) ; rate 0 : the triggers only ; q[10] the phase of the mode Smooth : 0 at a tick, then at the speed of
+// the clock or of the triggers, the faster (q[7] the samples since the last trigger, q[8] the inverse of that interval :
+// 0 when no trigger came for two of these intervals) ; the triggers faster than the clock : each transition is over at
+// the next trigger
+function its_Rn_Tick(q, rt, jt, g) local(t)
+(
+    q[7] += 1;
+    (q[7] * q[8] > 2) ? (q[8] = 0); // (the triggers stopped : the speed of the clock)
+    t = g ? (
+        q[8] = 1 / q[7]; q[7] = 0;
+        q[0] = 0; q[1] = its_Rn_Ivl(jt);
+        1;
+    ) : (rt > 0) ? its_Rn_Clock(q, rt, jt) : 0;
+    q[10] = t ? 0 : min(1, q[10] + max(rt * q[1], q[8]));
+    t;
+);
+
+/*
+    Random : "ccnt" channels of random values, around "offset", times "amp" ; the ticks : a common clock (the slot after the
+    channels), or (clock Own) a clock per channel ; the rate : the mean of the ticks (Hz, up to one per sample), jitter the
+    irregularity of the intervals ; at each tick a new value : the common one with the probability "corr" (the common clock
+    draws it), else its own draw (the law is kept : a Binary stays +-1) ; Step : held ; Smooth : from the previous value to
+    the new one over the interval (smoothstep) ; Walk : a step of "walk" times a draw, reflected within [-1, 1] (the common
+    step with the probability "corr") ; then the steps (n levels within [-1, 1]), the glide (one pole)
+    the trigger (its source, times its gain) : at a rising edge above the threshold, a tick, and the clock starts again ;
+    clock Common : the first channel of the trigger (the common clock) ; clock Own : the channel c of the trigger for the
+    channel c (and its first channel for the common clock : the common value) ; rate 0 : the triggers only
+    the slots of a channel (and of the common clock) : 0 the phase of the clock, 1 the inverse of the length of its interval
+    (relative to the rate), 2 the value at the start of the interval, 3 the new value, 4 the value (before the steps ; the
+    common clock : the step of the mode Walk), 5 the value after the glide, 6 the value of the mode Walk, 7 the samples
+    since the last trigger, 8 the inverse of that interval, 9 the state of the trigger, 10 the phase of the mode Smooth (see
+    its_Rn_Tick), 11 the envelope of the trigger and 12 its recent level (detect Env, see its_Rn_Trig)
+*/
+function exec_random(fx, ccnt, out)
+local (wk, hd, cw, q, mp, md, lw, own, cr, rt, jt, amp, off, n, gk, wl, ct, tk, c, p, v, s, x, sc, tg, th, dt, kr, ks)
+(
+    wk = fx[its_Efx_Work];
+    ((wk > BASE_MEMORY) && (wk[its_FxW_Size] === its_Fx_WorkSize(fx))) ? (
+        hd = wk + its_FxW_Hdr; cw = hd + its_RnH; q = cw + ccnt * its_RnCW;
+        md = max(0, min(its_RnModeCnt - 1, floor(fx[its_Efx_Par1 + 1])));
+        lw = max(0, min(its_RnLawCnt - 1, floor(fx[its_Efx_Par1 + 6])));
+        ct = its_CrvTab + max(0, min(its_CrvMx - 1, 0|fx[its_Efx_Par1 + 5])) * its_CrvTbSz + its_CrvTbG;
+        // a new area, after a bypass, after a value not finite : the clocks (the own ones : at random phases) and the values
+        (wk[its_FxW_Md] !== 1) ? (
+            memset(cw, 0, its_RnCW * (ccnt + 1));
+            p = cw; loop(ccnt + 1,
+                p[0] = rand(1); p[1] = 1; p[2] = p[3] = p[4] = p[5] = its_Rn_Draw(lw, ct); p[6] = 0.5 * p[3];
+                p[9] = 1; // (a trigger already high : not an edge)
+                p[10] = 1; // (no transition)
+                p += its_RnCW;
+            );
+            q[0] = 0;
+            hd[1] = -1; // (the glide to compute)
+            hd[3] = -1; // (the release to compute)
+            wk[its_FxW_Md] = 1;
+        );
+        mp = fx + its_Efx_Mod1;
+        amp = its_Mod_Apply(mp, fx[its_Efx_Par1 + 2], its_ModA_Add, 1);
+        rt = min(1, max(0, its_Mod_Apply(mp + its_ModDist, fx[its_Efx_MxX + 1], its_ModA_Oct, 1)) / srate);
+        jt = max(0, min(1, its_Mod_Apply(mp + 2 * its_ModDist, fx[its_Efx_MxX + 4], its_ModA_Add, 1)));
+        off = fx[its_Efx_Par1 + 3];
+        cr = max(0, min(1, fx[its_Efx_Par1 + 4]));
+        own = (fx[its_Efx_Par1 + 7] !== 0);
+        n = floor(fx[its_Efx_Par1 + 8]);
+        wl = max(0, min(2, fx[its_Efx_Par1 + 9]));
+        (fx[its_Efx_MxX + 3] !== hd[1]) ? ( hd[1] = fx[its_Efx_MxX + 3]; hd[2] = (hd[1] <= 0) ? 1 : 1 - exp(-1 / (hd[1] * srate)); );
+        gk = hd[2];
+        // the trigger : its cells (0 : none), its gain, its threshold, its detection (the release of the envelope : per sample)
+        sc = fx[its_Efx_Cell1]; sc = (sc > 0) ? smpl_tab + sc : 0;
+        tg = fx[its_Efx_Vol1];
+        th = fx[its_Efx_Par1 + 10];
+        dt = (fx[its_Efx_Par1 + 11] === its_RnDtEnv);
+        (fx[its_Efx_MxX + 5] !== hd[3]) ? (
+            hd[3] = fx[its_Efx_MxX + 5];
+            hd[4] = exp(-1000 / (max(1, hd[3]) * srate)); hd[5] = 1 - exp(-200 / (max(1, hd[3]) * srate));
+        );
+        kr = hd[4]; ks = hd[5];
+        // the common clock (and the first channel of the trigger) : its value (q[3], the previous one q[2]), its step of the
+        // mode Walk (q[4])
+        (tk = its_Rn_Tick(q, rt, jt, sc ? its_Rn_Trig(q, tg * sc[0], th, dt, kr, ks) : 0)) ? (
+            q[2] = q[3]; q[3] = its_Rn_Draw(lw, ct); q[4] = wl * its_Rn_Draw(lw, ct);
+        );
+        c = 0; p = cw;
+        loop(ccnt,
+            (own ? its_Rn_Tick(p, rt, jt, sc ? its_Rn_Trig(p, tg * sc[c], th, dt, kr, ks) : 0) : tk) ? (
+                (md === its_RnWalk) ? (
+                    x = p[6] + ((rand(1) < cr) ? q[4] : wl * its_Rn_Draw(lw, ct));
+                    x = (x > 1) ? 2 - x : (x < -1) ? -2 - x : x;
+                    p[6] = max(-1, min(1, x));
+                ) : (
+                    p[2] = p[4]; // (from where it is : a trigger may come before the end of the interval)
+                    p[3] = (rand(1) < cr) ? q[3] : its_Rn_Draw(lw, ct);
+                );
+            );
+            v = (md === its_RnWalk) ? p[6] : (md === its_RnStep) ? p[3] : (
+                s = own ? p[10] : q[10]; s = s * s * (3 - 2 * s);
+                p[2] + (p[3] - p[2]) * s;
+            );
+            p[4] = v;
+            (n >= 2) ? ( v = 2 * floor(0.5 * (v + 1) * (n - 1) + 0.5) / (n - 1) - 1; );
+            p[5] += gk * (v - p[5]);
+            !(abs(p[5]) < its_FinMax) ? ( p[5] = 0; its_NaNCnt += 1; );
+            out[c] += off + amp * p[5];
+            c += 1; p += its_RnCW;
+        );
+    );
+);
+
 // Noise : the rumble kept within +-1 (linear up to 0.8, then a soft knee, its_Mx_Sat : its rare peaks rounded)
 function its_Nz_Knee(x) local(a)
 (
@@ -9734,12 +9992,14 @@ local (wk, hd, sf, cw, st, src, g, mp, md, sh, ns, bm, rs, f0, sw, rt, fb, mix, 
     Flanger, Chorus : modulated delays on the channels of its source (Through-zero, barber pole, voices), see exec_flanger
     Phaser : swept allpass stages on the channels of its source (one pole, two pole, barber pole), see exec_phaser
     Noise : noises on its channels (colors, impulses, chaotic maps), decorrelated or not, see exec_noise
-    Bypass (its_EfxStat_Bypass) : Out = the first source not null, unchanged (an LFO, a Noise : nothing)
+    Random : random control signals on its channels (held, smooth, a walk ; irregular clocks ; its source : a trigger),
+        see exec_random
+    Bypass (its_EfxStat_Bypass) : Out = the first source not null, unchanged (an LFO, a Noise, a Random : nothing)
     Auto-limiter (its_Efx_Lim, not the LFO) : the output of the type, divided by max(1, its smoothed peak), then the output gain
     the structure is checked again after each modification (its_Efx_Check reset to 0) ; the error is kept in its_Efx_Error
 */
 function exec_fx(fx, nbr)
-local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, mbad, mp, f, q, md, cf, st, w, cw, sw, al, a0, b0, b1, b2, y,
+local (tw, ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, mbad, mp, f, q, md, cf, st, w, cw, sw, al, a0, b0, b1, b2, y,
        wk, ns, k, qk, s, os, gd, bi, shb, mix, og, u, p, yd, on, lim, out, go, m, e, ct, fg, fk, fa, fn, fb, ad, nb, fr, f2)
 (
     (fx[its_Efx_Check] !== BLOCK_CHECK) ? (
@@ -9759,16 +10019,16 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
             fx[its_Efx_OutAdd] = (fx[its_Efx_OutK] !== 0);
             (its_Fx_NSrc(ty) > 0) ? (
                 // Mixer, Auto Mixer : the sources ; Filter, Saturation : its source (the first one)
-                cc = 0; ptsrc = fx + its_Efx_Src1;
+                cc = 0; ptsrc = fx + its_Efx_Src1; tw = its_Fx_SrcW(fx);
                 loop(its_Fx_NSrc(ty),
                     g = ptsrc[its_Efx_VoldB1 - its_Efx_Src1];
                     ptsrc[its_Efx_Vol1 - its_Efx_Src1] = (g > -120) ? 10^(g/20) : 0;
-                    src = its_Src_Cell(ptsrc[0], ptsrc[its_Efx_Off1 - its_Efx_Src1], ccnt);
+                    src = its_Src_Cell(ptsrc[0], ptsrc[its_Efx_Off1 - its_Efx_Src1], tw);
                     ptsrc[its_Efx_Cell1 - its_Efx_Src1] = max(0, src);
                     (src < 0) ? (
                         err = 2703; // erreur : bad source
                     ) :
-                    ((src > 0) && (src < dst + ccnt) && (src + ccnt > dst)) ? (
+                    ((src > 0) && (src < dst + ccnt) && (src + tw > dst)) ? (
                         err = 2704; // erreur : a source overlaps the output
                     ) :
                     (src > 0) ? (
@@ -9776,13 +10036,13 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
                     );
                     ptsrc += its_EfxDist;
                 );
-                ((err === 0) && (cc === 0)) ? (
-                    err = 2705; // erreur : no source
+                ((err === 0) && (cc === 0) && (ty !== its_Efx_TyRandom)) ? (
+                    err = 2705; // erreur : no source (the trigger of a Random : optional)
                 );
             );
             // the modulation inputs : an error is not fatal (no modulation, the error is shown)
             ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || its_Mx_Is(ty) || its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)
-                || (ty === its_Efx_TyNoise)) ?
+                || (ty === its_Efx_TyNoise) || (ty === its_Efx_TyRandom)) ?
                 (mbad = its_Mod_Resolve(fx + its_Efx_Mod1, (ty === its_Efx_TyFilter) ? 2 : 3));
         );
         fx[its_Efx_Error] = (err === 0) && mbad ? 2715 : err; // 2715 : a modulation input is not valid
@@ -9798,12 +10058,12 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
             fx[its_Efx_OutDirty] = 1;
         );
         // the auto-limiter (not the LFO, not in Bypass) : the effect writes into its_FxTmp, then the limiter adds it to dst
-        lim = fx[its_Efx_Lim] && (fx[its_Efx_Type] !== its_Efx_TyLFO) && (fx[its_Efx_Status] !== its_EfxStat_Bypass);
+        lim = fx[its_Efx_Lim] && !its_Fx_Ctl(fx[its_Efx_Type]) && (fx[its_Efx_Status] !== its_EfxStat_Bypass);
         out = lim ? its_FxTmp : dst;
         lim ? memset(out, 0, ccnt);
         go = 1; // the output gain, after the limiter (Saturation : Par6)
         (fx[its_Efx_Status] === its_EfxStat_Bypass) ? (
-            (its_Fx_NSrc(fx[its_Efx_Type]) > 0) ? (
+            ((its_Fx_NSrc(fx[its_Efx_Type]) > 0) && !its_Fx_Ctl(fx[its_Efx_Type])) ? (
                 c = 0; ptsrc = fx + its_Efx_Src1;
                 loop(its_Fx_NSrc(fx[its_Efx_Type]),
                     (c === 0) ? (c = ptsrc[its_Efx_Cell1 - its_Efx_Src1]);
@@ -9940,6 +10200,9 @@ local (ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, dc, spr, 
         ) :
         (fx[its_Efx_Type] === its_Efx_TyNoise) ? (
             exec_noise(fx, ccnt, out);
+        ) :
+        (fx[its_Efx_Type] === its_Efx_TyRandom) ? (
+            exec_random(fx, ccnt, out);
         ) :
         (fx[its_Efx_Type] === its_Efx_TySat) ? (
             wk = fx[its_Efx_Work];
@@ -10944,8 +11207,8 @@ i__ii = 0; loop(6, its_TbRLp[i__ii] = mSL_symbol(menu_Rdr_Loop_N[i__ii]); i__ii 
 
 // the keys of the effects (one table for all the types : its_Tb_FxOk tells which keys a type takes) ; "source" and "gain"
 // are src1 and gain1 ; the keys its_TbFMod ... : "mod" for each modulation input (its_TbFMI)
-its_TbFMod = 79;
-its_TbFMINb = 15;
+its_TbFMod = 86;
+its_TbFMINb = 17;
 its_TbFNk = its_TbFMod + its_TbFMINb;
 its_TbFKey = make_array(its_TbFNk); its_TbFNam = make_array(its_TbFNk);
 its_TbKey(its_TbFKey, its_TbFNam, 0, "type"); its_TbKey(its_TbFKey, its_TbFNam, 1, "status");
@@ -11003,6 +11266,15 @@ its_TbKey(its_TbFKey, its_TbFNam, 73, "corr"); its_TbKey(its_TbFKey, its_TbFNam,
 // (Par10)
 its_TbKey(its_TbFKey, its_TbFNam, 75, "tilt"); its_TbKey(its_TbFKey, its_TbFNam, 76, "power");
 its_TbKey(its_TbFKey, its_TbFNam, 77, "rumble"); its_TbKey(its_TbFKey, its_TbFNam, 78, "rfreq");
+// Random : dist (Par7 : the law of the draws ; "law" is a word of "mod"), clock (Par8), steps (Par9), walk (Par10) ; and the
+// keys of the others : mode (Par2), amp (Par3), offset (Par4), corr (Par5), curve (Par6), rate (MxX + 1), glide (MxX + 3),
+// jitter (MxX + 4)
+its_TbKey(its_TbFKey, its_TbFNam, 79, "dist"); its_TbKey(its_TbFKey, its_TbFNam, 80, "clock");
+its_TbKey(its_TbFKey, its_TbFNam, 81, "steps"); its_TbKey(its_TbFKey, its_TbFNam, 82, "walk");
+// Random : thresh (Par11 : the threshold of the trigger, its source : "source", "gain"), detect (Par12 : Wave|Env), release
+// (MxX + 5 : of the envelope, ms)
+its_TbKey(its_TbFKey, its_TbFNam, 83, "thresh");
+its_TbKey(its_TbFKey, its_TbFNam, 84, "detect"); its_TbKey(its_TbFKey, its_TbFNam, 85, "release");
 // the order of the keys of a Flanger, of a Chorus in a Dump (from the key 22 ; the others : 22, not one of their keys)
 its_TbFlOrdN = 16; its_TbFlOrd = make_array(its_TbFlOrdN);
 its_TbFlOrd[0] = 24; its_TbFlOrd[1] = 54; its_TbFlOrd[2] = 55; its_TbFlOrd[3] = 51; its_TbFlOrd[4] = 57; // mode delay sweep rate wave
@@ -11018,6 +11290,11 @@ its_TbNzOrdN = 11; its_TbNzOrd = make_array(its_TbNzOrdN); // (the Noise)
 its_TbNzOrd[0] = 71; its_TbNzOrd[1] = 33; its_TbNzOrd[2] = 75; its_TbNzOrd[3] = 72; its_TbNzOrd[4] = 74; // color output tilt density chaos
 its_TbNzOrd[5] = 76; its_TbNzOrd[6] = 73; its_TbNzOrd[7] = 41; its_TbNzOrd[8] = 48; // power corr damp hp
 its_TbNzOrd[9] = 77; its_TbNzOrd[10] = 78; // rumble rfreq
+its_TbRnOrdN = 15; its_TbRnOrd = make_array(its_TbRnOrdN); // (the Random ; thresh, detect, release after its source and its gain)
+its_TbRnOrd[0] = 83; its_TbRnOrd[1] = 84; its_TbRnOrd[2] = 85; // thresh detect release
+its_TbRnOrd[3] = 24; its_TbRnOrd[4] = 79; its_TbRnOrd[5] = 51; its_TbRnOrd[6] = 60; its_TbRnOrd[7] = 80; // mode dist rate jitter clock
+its_TbRnOrd[8] = 53; its_TbRnOrd[9] = 81; its_TbRnOrd[10] = 82; its_TbRnOrd[11] = 73; // glide steps walk corr
+its_TbRnOrd[12] = 26; its_TbRnOrd[13] = 27; its_TbRnOrd[14] = 38; // amp offset curve
 i__ii = its_TbFMod; loop(its_TbFMINb, its_TbFKey[i__ii] = its_TK_mod; its_TbFNam[i__ii] = "mod"; i__ii += 1;);
 // a word may name several keys, for different types (each one with its own slot, range or kind of value : the key of the
 // type is chosen when the block is read, see its_Tb_FxKey) : its_TbFAlt[k] the next key of the same word (0 : none)
@@ -11037,6 +11314,7 @@ its_TbFMIN[5] = "Decay"; its_TbFMIN[6] = "Damping"; its_TbFMIN[7] = "Diffusion";
 its_TbFMIN[8] = "Delay"; its_TbFMIN[9] = "Rate"; its_TbFMIN[10] = "Feedback"; // (as its_ModN_Fl : the Flanger and the Chorus ;
 its_TbFMIN[11] = "Freq"; // Rate and Feedback : the Phaser too, its_ModN_Ph)
 its_TbFMIN[12] = "Level"; its_TbFMIN[13] = "Density"; its_TbFMIN[14] = "Corr"; // (as its_ModN_Nz : the Noise)
+its_TbFMIN[15] = "Amp"; its_TbFMIN[16] = "Jitter"; // (as its_ModN_Rn : the Random ; its input Rate : the one of the Flanger)
 i__ii = 0; loop(its_TbFMINb,
     its_TbFMI[i__ii] = its_TK(its_TbFMIN[i__ii]);
     (i__ii < 2) ? (
@@ -11052,8 +11330,9 @@ i__ii = 0; loop(its_TbFMINb,
         its_TbFMIk[i__ii] = its_ModK_Mx[i__ii - 5];
     ) :
     (i__ii < 11) ? (
-        // Delay : the Flanger, the Chorus ; Rate, Feedback : the Phaser too (its inputs 1 and 2)
-        its_TbFMIt[i__ii] = (1 << its_Efx_TyFlanger) | (1 << its_Efx_TyChorus) | ((i__ii > 8) ? 1 << its_Efx_TyPhaser : 0);
+        // Delay : the Flanger, the Chorus ; Rate, Feedback : the Phaser too (its inputs 1 and 2) ; Rate : the Random too (its input 1)
+        its_TbFMIt[i__ii] = (1 << its_Efx_TyFlanger) | (1 << its_Efx_TyChorus) | ((i__ii > 8) ? 1 << its_Efx_TyPhaser : 0)
+            | ((i__ii === 9) ? 1 << its_Efx_TyRandom : 0);
         its_TbFMIj[i__ii] = i__ii - 8; its_TbFMId[i__ii] = its_ModD_Fl[i__ii - 8];
         its_TbFMIk[i__ii] = its_ModK_Fl[i__ii - 8];
     ) :
@@ -11061,10 +11340,15 @@ i__ii = 0; loop(its_TbFMINb,
         // Freq : the Phaser (its input 0)
         its_TbFMIt[i__ii] = 1 << its_Efx_TyPhaser; its_TbFMIj[i__ii] = 0; its_TbFMId[i__ii] = its_ModD_Ph[0];
         its_TbFMIk[i__ii] = its_ModK_Ph[0];
-    ) : (
+    ) :
+    (i__ii < 15) ? (
         // Level, Density, Corr : the Noise
         its_TbFMIt[i__ii] = 1 << its_Efx_TyNoise; its_TbFMIj[i__ii] = i__ii - 12; its_TbFMId[i__ii] = its_ModD_Nz[i__ii - 12];
         its_TbFMIk[i__ii] = its_ModK_Nz[i__ii - 12];
+    ) : (
+        // Amp, Jitter : the Random (its inputs 0 and 2)
+        its_TbFMIt[i__ii] = 1 << its_Efx_TyRandom; its_TbFMIj[i__ii] = (i__ii === 15) ? 0 : 2;
+        its_TbFMId[i__ii] = its_ModD_Rn[its_TbFMIj[i__ii]]; its_TbFMIk[i__ii] = its_ModK_Rn[its_TbFMIj[i__ii]];
     );
     i__ii += 1;
 );
@@ -11074,7 +11358,7 @@ its_TbFTyN = make_array(its_Efx_TyCnt); its_TbFTy = make_array(its_Efx_TyCnt);
 its_TbFTyN[0] = "Undefined"; its_TbFTyN[1] = "None"; its_TbFTyN[2] = "Mixer"; its_TbFTyN[3] = "AutoMix";
 its_TbFTyN[4] = "Mover"; its_TbFTyN[5] = "Action"; its_TbFTyN[6] = "Script"; its_TbFTyN[7] = "LFO";
 its_TbFTyN[8] = "Filter"; its_TbFTyN[9] = "Saturation"; its_TbFTyN[10] = "Matrix"; its_TbFTyN[11] = "Flanger";
-its_TbFTyN[12] = "Chorus"; its_TbFTyN[13] = "Phaser"; its_TbFTyN[14] = "Shimmer"; its_TbFTyN[15] = "Noise";
+its_TbFTyN[12] = "Chorus"; its_TbFTyN[13] = "Phaser"; its_TbFTyN[14] = "Shimmer"; its_TbFTyN[15] = "Noise"; its_TbFTyN[16] = "Random";
 i__ii = 0; loop(its_Efx_TyCnt, its_TbFTy[i__ii] = its_TK(its_TbFTyN[i__ii]); i__ii += 1;);
 its_TbFStN = make_array(4); its_TbFSt = make_array(4);
 its_TbFStN[0] = "Off"; its_TbFStN[1] = "On"; its_TbFStN[2] = "Bypass"; its_TbFStN[3] = "Undefined";
@@ -11119,6 +11403,16 @@ its_TbPhMdN[its_PhBarbDown] = "BarberDown";
 i__ii = 0; loop(its_PhModeCnt, its_TbPhMd[i__ii] = mSL_symbol(its_TbPhMdN[i__ii]); i__ii += 1;);
 its_TbNzClN = make_array(its_NzCnt); its_TbNzCl = make_array(its_NzCnt); // the colors of a Noise (as its menu)
 i__ii = 0; loop(its_NzCnt, its_TbNzClN[i__ii] = menu_Efx_NzColor_N[i__ii]; its_TbNzCl[i__ii] = mSL_symbol(its_TbNzClN[i__ii]); i__ii += 1;);
+its_TbRnMdN = make_array(its_RnModeCnt); its_TbRnMd = make_array(its_RnModeCnt); // the modes of a Random (as its menu)
+i__ii = 0; loop(its_RnModeCnt, its_TbRnMdN[i__ii] = menu_Efx_RnMode_N[i__ii]; its_TbRnMd[i__ii] = mSL_symbol(its_TbRnMdN[i__ii]); i__ii += 1;);
+its_TbRnLwN = make_array(its_RnLawCnt); its_TbRnLw = make_array(its_RnLawCnt); // its laws
+i__ii = 0; loop(its_RnLawCnt, its_TbRnLwN[i__ii] = menu_Efx_RnLaw_N[i__ii]; its_TbRnLw[i__ii] = mSL_symbol(its_TbRnLwN[i__ii]); i__ii += 1;);
+its_TbRnCkN = make_array(2); its_TbRnCk = make_array(2); // its clocks
+its_TbRnCkN[0] = "Common"; its_TbRnCkN[1] = "Own";
+i__ii = 0; loop(2, its_TbRnCk[i__ii] = mSL_symbol(its_TbRnCkN[i__ii]); i__ii += 1;);
+its_TbRnDtN = make_array(2); its_TbRnDt = make_array(2); // the detections of its trigger
+its_TbRnDtN[its_RnDtWave] = "Wave"; its_TbRnDtN[its_RnDtEnv] = "Env";
+i__ii = 0; loop(2, its_TbRnDt[i__ii] = mSL_symbol(its_TbRnDtN[i__ii]); i__ii += 1;);
 its_TbHarm = make_array(its_SatHarm); // the weights of the key "harm" (its_TbK1 : their count)
 // the keys of the block Global ; track samples (its_GlSmpl), actions (index : its_GlAct_..., see its_actions)
 its_TbGNk = 5;
@@ -12659,7 +12953,7 @@ function its_Tb_ModSet(p, ki, d0)
 function its_Tb_FxOk(ty, ki)
 (
     (ki <= 4) ? 1 :
-    (ki === 5) ? (ty !== its_Efx_TyLFO) :
+    (ki === 5) ? !its_Fx_Ctl(ty) :
     (ki >= its_TbFMod) ? ((its_TbFMIt[ki - its_TbFMod] & (1 << ty)) !== 0) :
     ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? ((ki < 14) || ((ki < 22) && (ty === its_Efx_TyMixer))) :
     (ty === its_Efx_TyFilter) ? ((ki === 6) || (ki === 14) || ((ki >= 22) && (ki <= 25))) :
@@ -12671,6 +12965,8 @@ function its_Tb_FxOk(ty, ki)
     (ty === its_Efx_TyPhaser) ? ((ki === 6) || (ki === 14) || (ki === 22) || (ki === 24) || (ki === 28) || (ki === 38) || (ki === 46)
         || (ki === 51) || (ki === 53) || ((ki >= 56) && (ki <= 65) && (ki !== 58))) :
     (ty === its_Efx_TyNoise) ? ((ki === 33) || (ki === 41) || (ki === 48) || ((ki >= 71) && (ki <= 78))) :
+    (ty === its_Efx_TyRandom) ? ((ki === 6) || (ki === 14) || (ki === 24) || (ki === 26) || (ki === 27) || (ki === 38) || (ki === 51)
+        || (ki === 53) || (ki === 60) || (ki === 73) || ((ki >= 79) && (ki <= 85))) :
     (ty === its_Efx_TyLFO) ? ((ki === 22) || (ki === 24) || ((ki >= 26) && (ki <= 28)) || (ki === 38)) : 0;
 );
 
@@ -12789,7 +13085,7 @@ function its_Tb_FxKey(w) local(ki, i, nm, n, sk)
         (ki === 47) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbMxSp, its_MxSpCnt); ) : // delays (their spread)
         (ki === 49) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbMxIn, 2); ) : // inject : Direct, Spread
         (ki === 50) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 2000); ) : // wow (ms)
-        (ki === 51) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 5000); ) : // rate (Hz)
+        (ki === 51) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, ((its_Tb_fxty === its_Efx_TyRandom) || (its_Tb_fxty < 0)) ? 20000 : 5000); ) : // rate (Hz ; Random : 20000)
         (ki === 52) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 1); ) : // spread (turns)
         (ki === 53) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 10); ) : // glide (s)
         ((ki === 54) || (ki === 55)) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 2000); ) : // delay, sweep (ms)
@@ -12814,6 +13110,13 @@ function its_Tb_FxKey(w) local(ki, i, nm, n, sk)
         (ki === 76) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 8); ) : // power (the exponent of the shape)
         (ki === 77) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 100); ) : // rumble (%)
         (ki === 78) ? ( its_Tb_v1 = its_Tb_Num(nm, 5, 500); ) : // rfreq (Hz)
+        (ki === 79) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbRnLw, its_RnLawCnt); ) : // Random : dist
+        (ki === 80) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbRnCk, 2); ) : // clock
+        (ki === 81) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 128); ) : // steps
+        (ki === 82) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 2); ) : // walk
+        (ki === 83) ? ( its_Tb_v1 = its_Tb_Num(nm, -2, 2); ) : // thresh
+        (ki === 84) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbRnDt, 2); ) : // detect
+        (ki === 85) ? ( its_Tb_v1 = its_Tb_Num(nm, 1, 10000); ) : // release (ms)
         (
             // mod : the input, its source, then "depth" and "att" (optional)
             w = its_Tb_Next();
@@ -13265,7 +13568,8 @@ function its_Tb_FxMode(ty, w) local(syms, n, k, i)
     (ty === its_Efx_TySat) ? ( syms = its_TbSMd; n = its_SatModeCnt; ) :
     its_Mx_Is(ty) ? ( syms = its_TbMxMd; n = its_MxTypeCnt; ) :
     its_Fl_Is(ty) ? ( syms = its_TbFlMd; n = its_FlModeCnt; ) :
-    (ty === its_Efx_TyPhaser) ? ( syms = its_TbPhMd; n = its_PhModeCnt; ) : ( syms = its_TbLSh; n = its_LfoCnt; );
+    (ty === its_Efx_TyPhaser) ? ( syms = its_TbPhMd; n = its_PhModeCnt; ) :
+    (ty === its_Efx_TyRandom) ? ( syms = its_TbRnMd; n = its_RnModeCnt; ) : ( syms = its_TbLSh; n = its_LfoCnt; );
     k = -1; i = 0; while ((k < 0) && (i < n)) ( (syms[i] === w) ? (k = i); i += 1; );
     (k < 0) ? (
         sprintf(#its_TbW, "mode : %s is not a mode of a %s", mSL_edit_value(#its_TbV, w), its_TbFTyN[ty]);
@@ -13317,6 +13621,15 @@ function its_Tb_NzUsed(fx, ki)
     (ki === 78) ? (fx[its_Efx_Par1] > 0) : 1;
 );
 
+// Random : the key "ki" is used by the effect "fx" (walk : the mode Walk ; curve : the law Curve ; thresh, detect : a
+// trigger ; release : a trigger, detect Env)
+function its_Tb_RnUsed(fx, ki)
+(
+    (ki === 82) ? (fx[its_Efx_Par1 + 1] === its_RnWalk) : (ki === 38) ? (fx[its_Efx_Par1 + 6] === its_RnCurve) :
+    ((ki === 83) || (ki === 84)) ? (fx[its_Efx_Src1] !== 0) :
+    (ki === 85) ? ((fx[its_Efx_Src1] !== 0) && (fx[its_Efx_Par1 + 11] === its_RnDtEnv)) : 1;
+);
+
 // the value of the key "ki" of the effect "fx" : its_Tb_g1 ... its_Tb_g5 (mod : the flags of the law) ; fx === 0 : no effect
 function its_Tb_FxGet(ki, fx) local(p)
 (
@@ -13363,12 +13676,14 @@ function its_Tb_FxGet(ki, fx) local(p)
     ((ki >= 67) && (ki <= 70)) ? fx[its_Efx_MxX + ki - 62] :
     (ki === 71) ? fx[its_Efx_Par1 + 1] : // Noise : color Par2, density Par5, corr Par4, chaos Par7
     (ki === 72) ? fx[its_Efx_Par1 + 4] :
-    (ki === 73) ? fx[its_Efx_Par1 + 3] :
+    (ki === 73) ? fx[its_Efx_Par1 + ((fx[its_Efx_Type] === its_Efx_TyRandom) ? 4 : 3)] : // (Random : Par5)
     (ki === 74) ? fx[its_Efx_Par1 + 6] :
     (ki === 75) ? fx[its_Efx_Par1 + 7] : // tilt Par8, shape Par9, rumble Par1 (%), rfreq Par10
     (ki === 76) ? fx[its_Efx_Par1 + 8] :
     (ki === 77) ? fx[its_Efx_Par1] * 100 :
     (ki === 78) ? fx[its_Efx_Par1 + 9] :
+    ((ki >= 79) && (ki <= 84)) ? fx[its_Efx_Par1 + ki - 73] : // Random : dist Par7, clock Par8, steps Par9, walk Par10, thresh Par11,
+    (ki === 85) ? fx[its_Efx_MxX + 5] : // detect Par12 ; release MxX + 5
     (ki < its_TbFMod) ? fx[its_Efx_Par1 + ki - 28] : // bias Par3, output Par6 (the Noise too), order Par7, stretch Par8, amount Par9
     its_Tb_ModGet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist);
 );
@@ -13384,6 +13699,9 @@ function its_Tb_FxText(str, ki, ty, v1, v2, v3, v4, v5)
     (ki === 49) ? strcpy(str, its_TbMxInN[max(0, min(1, v1))]) :
     (ki === 57) ? strcpy(str, its_TbFlShN[max(0, min(its_FlShCnt - 1, v1))]) :
     (ki === 71) ? strcpy(str, its_TbNzClN[max(0, min(its_NzCnt - 1, v1))]) :
+    (ki === 79) ? strcpy(str, its_TbRnLwN[max(0, min(its_RnLawCnt - 1, v1))]) :
+    (ki === 80) ? strcpy(str, its_TbRnCkN[max(0, min(1, v1))]) :
+    (ki === 84) ? strcpy(str, its_TbRnDtN[max(0, min(1, v1))]) :
     (ki === 2) ? strcpy(str, its_TbFPhN[max(0, min(2, v1))]) :
     ((ki === 3) || (ki === 25) || (ki === 32)) ? sprintf(str, "%d", v1) :
     (ki === 4) ? ((v1 === 0) ? strcpy(str, "Own") : its_Tb_SrcText(str, v1, v2)) :
@@ -13392,7 +13710,8 @@ function its_Tb_FxText(str, ki, ty, v1, v2, v3, v4, v5)
         (ty === its_Efx_TySat) ? its_TbSMdN[max(0, min(its_SatModeCnt - 1, v1))] :
         its_Mx_Is(ty) ? its_TbMxMdN[max(0, min(its_MxTypeCnt - 1, v1))] :
         its_Fl_Is(ty) ? its_TbFlMdN[max(0, min(its_FlModeCnt - 1, v1))] :
-        (ty === its_Efx_TyPhaser) ? its_TbPhMdN[max(0, min(its_PhModeCnt - 1, v1))] : its_TbLShN[max(0, min(its_LfoCnt - 1, v1))]) :
+        (ty === its_Efx_TyPhaser) ? its_TbPhMdN[max(0, min(its_PhModeCnt - 1, v1))] :
+        (ty === its_Efx_TyRandom) ? its_TbRnMdN[max(0, min(its_RnModeCnt - 1, v1))] : its_TbLShN[max(0, min(its_LfoCnt - 1, v1))]) :
     (ki === 38) ? (((v1 >= 0) && (v1 < its_CrvMx)) ? its_Crv_TbName(str, v1) : sprintf(str, "%d", v1 + 1)) :
     (ki < its_TbFMod) ? sprintf(str, "%.10g", v1) :
     its_Tb_ModText(str, its_TbFMIN[ki - its_TbFMod], v1, v2, v3, v4, v5); // mod : the input, the source, depth, att, the law
@@ -13418,11 +13737,13 @@ function its_Tb_DumpFx(k) local(fx, ty, ki, p, j)
             p = (ki === 0) ? 1 : (ki === 1) ? 0 : ((ki >= 6) && (ki < 22)) ? 6 + ((ki - 6) >> 1) + ((ki - 6) & 1) * 8 :
                 (its_Fl_Is(ty) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbFlOrdN) ? its_TbFlOrd[ki - 22] : 23) :
                 ((ty === its_Efx_TyPhaser) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbFlOrdN) ? its_TbPhOrd[ki - 22] : 23) :
-                ((ty === its_Efx_TyNoise) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbNzOrdN) ? its_TbNzOrd[ki - 22] : 23) : ki;
+                ((ty === its_Efx_TyNoise) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbNzOrdN) ? its_TbNzOrd[ki - 22] : 23) :
+                ((ty === its_Efx_TyRandom) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbRnOrdN) ? its_TbRnOrd[ki - 22] : 23) : ki;
             (its_Tb_FxOk(ty, p) && ((p < 6) || (p >= 22) || (fx[its_Efx_Src1 + ((p - 6) % 8) * its_EfxDist] !== 0))
                 && ((ty !== its_Efx_TySat) || its_Tb_SatUsed(fx, p))
                 && ((ty !== its_Efx_TyNoise) || its_Tb_NzUsed(fx, p))
-                && ((p !== 38) || (ty === its_Efx_TySat)
+                && ((ty !== its_Efx_TyRandom) || its_Tb_RnUsed(fx, p))
+                && ((p !== 38) || (ty === its_Efx_TySat) || (ty === its_Efx_TyRandom)
                     || (fx[its_Efx_Par1 + ((its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)) ? 7 : 1)] === its_LfoCurve))) ? (
                 its_Tb_FxGet(p, fx);
                 ((p < its_TbFMod) || (its_Tb_g1 !== 0)) ? (
@@ -13517,12 +13838,14 @@ function its_Tb_SetFx(k) local(fx, ty, j, p, ki)
         ki = 67; loop(4, its_TbKS[ki] ? ( fx[its_Efx_MxX + ki - 62] = its_TbK1[ki]; ); ki += 1;); // shift, shift2, grain, lines
         its_TbKS[71] ? ( fx[its_Efx_Par1 + 1] = its_TbK1[71]; ); // Noise : color
         its_TbKS[72] ? ( fx[its_Efx_Par1 + 4] = its_TbK1[72]; ); // density
-        its_TbKS[73] ? ( fx[its_Efx_Par1 + 3] = its_TbK1[73]; ); // corr
+        its_TbKS[73] ? ( fx[its_Efx_Par1 + ((ty === its_Efx_TyRandom) ? 4 : 3)] = its_TbK1[73]; ); // corr (Random : Par5)
         its_TbKS[74] ? ( fx[its_Efx_Par1 + 6] = its_TbK1[74]; ); // chaos
         its_TbKS[75] ? ( fx[its_Efx_Par1 + 7] = its_TbK1[75]; ); // tilt
         its_TbKS[76] ? ( fx[its_Efx_Par1 + 8] = its_TbK1[76]; ); // power
         its_TbKS[77] ? ( fx[its_Efx_Par1] = its_TbK1[77] / 100; ); // rumble
         its_TbKS[78] ? ( fx[its_Efx_Par1 + 9] = its_TbK1[78]; ); // rfreq
+        ki = 79; loop(6, its_TbKS[ki] ? ( fx[its_Efx_Par1 + ki - 73] = its_TbK1[ki]; ); ki += 1;); // Random : dist, clock, steps, walk, thresh, detect
+        its_TbKS[85] ? ( fx[its_Efx_MxX + 5] = its_TbK1[85]; ); // release
         // the modulations : a new connection gets the attenuverter 1 and the default depth (as in the pad)
         ki = its_TbFMod; loop(its_TbFMINb,
             its_TbKS[ki] ? its_Tb_ModSet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist, ki, its_TbFMId[ki - its_TbFMod]);
@@ -18900,6 +19223,139 @@ local (r, xx, cl, ud, uc, um, us, ok)
     );
 );
 
+// Random : line 1, cell 8 = the mode (left clic : the next one ; right clic : menu), cell 9 = the law of the draws (the
+// same), cell 10 = the clock, common or own (clic), cell 11 = the curve of the law Curve (left clic : the next curve that
+// exists ; right clic : menu), cell 12 = the trigger (right clic : menu ; left clic : its first channel), cell 13 = its
+// detection, the wave or the envelope (clic ; a trigger) ; line 2 : the modulation inputs (amplitude, rate, jitter) ;
+// sliders : rate, amplitude, offset, jitter, correlation, glide, steps, walk (Walk), the threshold (a trigger), the release
+// (a trigger, detect Env), and the modulations used
+function FX_Random_Pad(RDBL, fx, fxn, what, cell, ev)
+local (r, k, xx, md, lw, wm, tr, ev1)
+(
+    md = max(0, min(its_RnModeCnt - 1, floor(fx[its_Efx_Par1 + 1])));
+    lw = max(0, min(its_RnLawCnt - 1, floor(fx[its_Efx_Par1 + 6])));
+    wm = (md === its_RnWalk);
+    tr = (fx[its_Efx_Src1] !== 0); // a trigger
+    ev1 = tr && (fx[its_Efx_Par1 + 11] === its_RnDtEnv); // detected on its envelope
+    (what === FXP_Dims) ? (
+        RDBL[3] = 3;
+        RDBL[5] = 7 + wm + tr + ev1 + its_Mod_SlCount(fx + its_Efx_Mod1, 3, 7);
+        RDBL[6] = 0;
+    ) :
+    (what === FXP_Fill) ? (
+        strcpy(pad_Efx_Labs[8], menu_Efx_RnMode_N[md]);
+        pad_Efx_Colrs[8] = Col_P3;
+        strcpy(pad_Efx_Labs[9], menu_Efx_RnLaw_N[lw]);
+        pad_Efx_Colrs[9] = Col_P3;
+        strcpy(pad_Efx_Labs[10], (fx[its_Efx_Par1 + 7] !== 0) ? "Clock own" : "Clock common");
+        pad_Efx_Colrs[10] = (fx[its_Efx_Par1 + 7] !== 0) ? Col_P2 : Col_P3;
+        (lw === its_RnCurve) ? FX_Crv_Fill(fx + its_Efx_Par1 + 5, 11);
+        tr ? (
+            sprintf(pad_Efx_Labs[12], "Trig. %s", its_Src_Label(#its_RnTrig, fx[its_Efx_Src1], fx[its_Efx_Off1]));
+            pad_Efx_Colrs[12] = Col_P3;
+            strcpy(pad_Efx_Labs[13], ev1 ? "Detect env." : "Detect wave");
+            pad_Efx_Colrs[13] = ev1 ? Col_P2 : Col_P3;
+        ) : (
+            strcpy(pad_Efx_Labs[12], "Trigger");
+            pad_Efx_Colrs[12] = Col_P1;
+        );
+        strcpy(pad_Efx_Labs[16], "Modulation");
+        its_Mod_Fill(pad_Efx_Labs, pad_Efx_Colrs, 17, fx + its_Efx_Mod1, 3, its_ModN_Rn, 7);
+    ) :
+    (what === FXP_Click) ? (
+        (cell === 8) ? (
+            (ev & ui_jpad_ev_rmc) ? (
+                ui_menu_tick(menu_Efx_RnMode, -1, 0);
+                ui_menu_tick(menu_Efx_RnMode, md + 1, 1);
+                xx = control_jmenu(menu_Efx_RnMode);
+                (xx != 0) ? (fx[its_Efx_Par1 + 1] = xx - 1);
+                ui_menu_tick(menu_Efx_RnMode, -1, 0);
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                fx[its_Efx_Par1 + 1] = (md + 1) % its_RnModeCnt;
+            );
+        ) :
+        (cell === 9) ? (
+            (ev & ui_jpad_ev_rmc) ? (
+                ui_menu_tick(menu_Efx_RnLaw, -1, 0);
+                ui_menu_tick(menu_Efx_RnLaw, lw + 1, 1);
+                xx = control_jmenu(menu_Efx_RnLaw);
+                (xx != 0) ? (fx[its_Efx_Par1 + 6] = xx - 1);
+                ui_menu_tick(menu_Efx_RnLaw, -1, 0);
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                fx[its_Efx_Par1 + 6] = (lw + 1) % its_RnLawCnt;
+            );
+        ) :
+        ((cell === 10) && (ev & (ui_jpad_ev_lmc | ui_jpad_ev_rmc))) ? (
+            fx[its_Efx_Par1 + 7] = (fx[its_Efx_Par1 + 7] !== 0) ? 0 : 1;
+            fx[its_Efx_Check] = 0; // (the channels of the trigger : one, or all)
+        ) :
+        ((cell === 11) && (lw === its_RnCurve)) ? FX_Crv_Click(fx + its_Efx_Par1 + 5, ev) :
+        (cell === 12) ? (
+            (ev & ui_jpad_ev_rmc) ? (
+                ((k = its_Src_Choose(fx[its_Efx_Src1], fx[its_Efx_Off1])) >= 0) ? (
+                    fx[its_Efx_Src1] = k;
+                    fx[its_Efx_Off1] = its_Src_ChOff;
+                    fx[its_Efx_Check] = 0;
+                );
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                ((k = its_Off_Choose(fx[its_Efx_Off1])) >= 0) ? (
+                    fx[its_Efx_Off1] = k;
+                    fx[its_Efx_Check] = 0;
+                );
+            );
+        ) :
+        ((cell === 13) && tr && (ev & (ui_jpad_ev_lmc | ui_jpad_ev_rmc))) ? (
+            fx[its_Efx_Par1 + 11] = ev1 ? its_RnDtWave : its_RnDtEnv;
+        ) :
+        ((cell >= 17) && (cell <= 19)) ? (
+            its_Mod_Click(fx + its_Efx_Mod1, cell - 17, ev, its_PadJmc, its_ModD_Rn, its_ModK_Rn) ? (fx[its_Efx_Check] = 0);
+        );
+    ) :
+    (what === FXP_Sliders) ? (
+        // read at each sample
+        paramValues[p_fxRnRate] = fx[its_Efx_MxX + 1];
+        r = parCtl(p_fxRnRate);
+        (r != 0) ? (fx[its_Efx_MxX + 1] = (r === 8) ? 1 : parV(p_fxRnRate));
+        paramValues[p_fxRnAmp] = fx[its_Efx_Par1 + 2];
+        r = parCtl(p_fxRnAmp);
+        (r != 0) ? (fx[its_Efx_Par1 + 2] = (r === 8) ? 1 : parV(p_fxRnAmp));
+        paramValues[p_fxRnDC] = fx[its_Efx_Par1 + 3];
+        r = parCtl(p_fxRnDC);
+        (r != 0) ? (fx[its_Efx_Par1 + 3] = (r === 8) ? 0 : parV(p_fxRnDC));
+        paramValues[p_fxRnJitter] = fx[its_Efx_MxX + 4];
+        r = parCtl(p_fxRnJitter);
+        (r != 0) ? (fx[its_Efx_MxX + 4] = (r === 8) ? 0 : parV(p_fxRnJitter));
+        paramValues[p_fxNzCorr] = fx[its_Efx_Par1 + 4];
+        r = parCtl(p_fxNzCorr);
+        (r != 0) ? (fx[its_Efx_Par1 + 4] = (r === 8) ? 0 : parV(p_fxNzCorr));
+        paramValues[p_fxRnGlide] = fx[its_Efx_MxX + 3];
+        r = parCtl(p_fxRnGlide);
+        (r != 0) ? (fx[its_Efx_MxX + 3] = (r === 8) ? 0 : parV(p_fxRnGlide));
+        paramValues[p_fxRnSteps] = fx[its_Efx_Par1 + 8];
+        r = parCtl(p_fxRnSteps);
+        (r != 0) ? (fx[its_Efx_Par1 + 8] = (r === 8) ? 0 : max(0, min(128, floor(parV(p_fxRnSteps) + 0.5))));
+        wm ? (
+            paramValues[p_fxRnWalk] = fx[its_Efx_Par1 + 9];
+            r = parCtl(p_fxRnWalk);
+            (r != 0) ? (fx[its_Efx_Par1 + 9] = (r === 8) ? 0.2 : parV(p_fxRnWalk));
+        );
+        tr ? (
+            paramValues[p_fxRnThr] = fx[its_Efx_Par1 + 10];
+            r = parCtl(p_fxRnThr);
+            (r != 0) ? (fx[its_Efx_Par1 + 10] = (r === 8) ? 0 : parV(p_fxRnThr));
+        );
+        ev1 ? (
+            paramValues[p_fxRnRel] = fx[its_Efx_MxX + 5];
+            r = parCtl(p_fxRnRel);
+            (r != 0) ? (fx[its_Efx_MxX + 5] = (r === 8) ? 50 : parV(p_fxRnRel));
+        );
+        its_Mod_Sliders(fx + its_Efx_Mod1, 3, 7, p_fxRnModD1, p_fxRnModA1, its_ModN_Rn, its_ModK_Rn);
+    );
+);
+
 // the dispatcher : calls the function of the type of the effect (a type without function : the common line only)
 function FX_Type_Pad(RDBL, fx, fxn, what, cell, ev)
 local (ty)
@@ -18928,6 +19384,9 @@ local (ty)
     ) :
     (ty === its_Efx_TyNoise) ? (
         FX_Noise_Pad(RDBL, fx, fxn, what, cell, ev);
+    ) :
+    (ty === its_Efx_TyRandom) ? (
+        FX_Random_Pad(RDBL, fx, fxn, what, cell, ev);
     ) : (
         (what === FXP_Dims) ? (RDBL[3] = 1; RDBL[5] = 0;);
     );
@@ -19032,7 +19491,7 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, 
                         strcpy(pad_Efx_Labs[6], "...");
                     );
                     FX_Type_Pad(RDBL, fx, fxn, FXP_Fill, 0, 0);
-                    (fx[its_Efx_Type] !== its_Efx_TyLFO) ? (
+                    !its_Fx_Ctl(fx[its_Efx_Type]) ? (
                         (fx[its_Efx_Lim]) ? (
                             sprintf(pad_Efx_Labs[23], "Limiter %.1f dB", -20 * log10(max(1, fx[its_Efx_LimEnv])));
                             pad_Efx_Colrs[23] = (fx[its_Efx_LimEnv] > 1.012) ? Color_Goldenrod : Color_Limegreen; // > 0.1 dB
@@ -19148,7 +19607,7 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, 
                                 fok = 0;
                             );
                         ) :
-                        ((zzmcl === 23) && fok && (fx[its_Efx_Type] !== its_Efx_TyLFO)) ? (
+                        ((zzmcl === 23) && fok && !its_Fx_Ctl(fx[its_Efx_Type])) ? (
                             // the auto-limiter : On / Off
                             fx[its_Efx_Lim] = !fx[its_Efx_Lim];
                             fx[its_Efx_LimEnv] = 0;
@@ -19176,7 +19635,7 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, 
                                 fx[its_Efx_Check] = 0;
                             );
                         ) :
-                        ((zzmcl === 23) && fok && (fx[its_Efx_Type] !== its_Efx_TyLFO)) ? (
+                        ((zzmcl === 23) && fok && !its_Fx_Ctl(fx[its_Efx_Type])) ? (
                             // the auto-limiter : On / Off
                             fx[its_Efx_Lim] = !fx[its_Efx_Lim];
                             fx[its_Efx_LimEnv] = 0;

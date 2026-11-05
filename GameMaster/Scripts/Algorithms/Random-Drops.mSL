@@ -1,0 +1,52 @@
+print("Random-Drops. Des gouttes : un filtre resonant saute d'une frequence a l'autre a chaque goutte.");
+
+/*
+  Un bruit d'impulsions (Noise Dust, power 0 : des impulsions +1 ou -1, a des instants au hasard) declenche un Random en
+  paliers (Step, rate 0 : les declenchements seuls) ; la frequence d'un passe-bande resonant saute a chaque impulsion
+  positive (une sur deux : rain / 2 sauts par seconde, en moyenne). Un echantillonneur-bloqueur sur une horloge
+  imprevisible : des rafales de sauts, puis des attentes. range : l'etendue (octaves autour de center) ; dans le pad du
+  Random, rate (plus que 0) ajoute des sauts reguliers, Smooth glisse d'une frequence a la suivante.
+
+  Parametres :
+      nch       canaux
+      center    la frequence centrale (Hz)
+      range     l'etendue (octaves)
+      rain      les impulsions par seconde (en moyenne)
+      sharp     le Q du filtre
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0.
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. dry, wet : les niveaux du son
+  sec et du son traite (dB). Les autres reglages se changent a la main dans le pad des effets de l'instance (le module
+  Instances la montre ; le module Effect montre ses effets, "pre", "imp", "rnd", "wf", "post").
+  L'effet "rnd" (le Random) s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance drops )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Drops
+        input src
+        output dst
+        param nch 2 1 128
+        param center 900 20 20000
+        param range 2 0 10
+        param rain 6 0.01 1000
+        param sharp 8 0.05 2000
+        param dry -12 -120 40
+        param wet 0 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect imp  type Noise  chan 1  color Dust  density rain  power 0  output 0
+        Effect rnd  type Random  chan 1  source Effect imp  thresh 0.1  rate 0  mode Step  dist Uniform  amp 1  offset 0
+        Effect wf  type Filter  chan nch  source Effect pre  mode BP  freq center  q sharp  stages 1  mod Cutoff Effect rnd  depth range
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect wf  gain2 wet  out dst
+        Display Effect rnd
+    End
+    Instance drops Drops  src In:0  dst Out:0  nch 2  center 900  range 2  rain 6  sharp 8  dry -12  wet 0
+));
+print(sprintf(0, "Random-Drops. instance drops : %d (0 : OK)", r));
