@@ -1,0 +1,60 @@
+print("Ex-1048. Interstys table : l'effet Math (operations sur les cables).");
+
+/*
+  Un nouveau Math prend les valeurs par defaut : mode Scale (A tel quel), amp 1 (le facteur de la sortie), offset 0, value 1
+  (B sans source B), bchan Auto, attack 1 ms, release 100 ms, pas de limiteur. Le Dump montre value seulement pour une
+  operation qui lit B sans source B, bchan seulement avec une source B, attack et release seulement pour Env et Slew (le
+  Check les compare toujours). Sources : src1 (ou source) A, src2 B. Puis Mul par Ctl 1 (bchan One : son premier canal
+  pour tous), un facteur negatif, un decalage ; puis Env, B retire, l'entree Amp et l'entree Offset ; puis Gate, son seuil
+  value module par l'entree Value.
+  Erreurs (rien n'est cree) : e1 mode Sine (2754) ; e2 value 2000 (2754) ; e3 bchan Two (2754) ; e4 attack 20000 (2754) ;
+  e5 src3 pour un Math (2767) ; e6 mod Jitter pour un Math (2767) ; e7 value pour un Filter (2767) ; e8 amp 2000 (2754).
+  Les numeros des effets dependent du projet (%d).
+*/
+
+var r = table(data(
+    Interstys
+    Effect mt  type Math  chan 2  source In:0
+    Dump Effect mt
+    Check Effect mt  mode Scale  amp 1  offset 0  value 1  bchan Auto  attack 1  release 100  limiter Off
+    Effect mt  mode Mul  src2 Ctl 1  gain2 -6  bchan One  amp -2  offset 0.5
+    Dump Effect mt
+    Check Effect mt  mode Mul  src2 Ctl 1  gain2 -6  bchan One  amp -2  offset 0.5
+    Effect mt  mode Env  attack 5  release 300  src2 none  mod Amp Ctl 2  mod Offset Ctl 3  depth 0.25
+    Dump Effect mt
+    Check Effect mt  mode Env  attack 5  release 300  mod Amp Ctl 2  depth 0.5  mod Offset Ctl 3  depth 0.25
+    Effect mt  mode Gate  value 0.2  mod Value Ctl 4
+    Dump Effect mt
+    Check Effect mt  mode Gate  value 0.2  mod Value Ctl 4  depth 1
+    Free Effect mt
+));
+print(sprintf(0, "Ex-1048. resultat : %d", r));
+
+var e1 = table(data( Interstys  Effect x  type Math  mode Sine ));
+var e2 = table(data( Interstys  Effect x  type Math  value 2000 ));
+var e3 = table(data( Interstys  Effect x  type Math  bchan Two ));
+var e4 = table(data( Interstys  Effect x  type Math  attack 20000 ));
+var e5 = table(data( Interstys  Effect x  type Math  src3 In:0 ));
+var e6 = table(data( Interstys  Effect x  type Math  mod Jitter Ctl 1 ));
+var e7 = table(data( Interstys  Effect x  type Filter  value 1 ));
+var e8 = table(data( Interstys  Effect x  type Math  amp 2000 ));
+print(sprintf(0, "Ex-1048. erreurs : %d %d %d %d %d %d %d %d", e1, e2, e3, e4, e5, e6, e7, e8));
+
+// Expected "Effect %d status On type Math phase Std chan 2 out Own limiter Off src1 In:0 gain1 0 mode Scale amp 1 offset 0"
+// Expected "Check Effect %d OK"
+// Expected "Effect %d status On type Math phase Std chan 2 out Own limiter Off src1 In:0 gain1 0 src2 Ctl 1 gain2 -6 mode Mul bchan One amp -2 offset 0.5"
+// Expected "Check Effect %d OK"
+// Expected "Effect %d status On type Math phase Std chan 2 out Own limiter Off src1 In:0 gain1 0 mode Env attack 5 release 300 amp -2 offset 0.5 mod Amp Ctl 2 depth 0.5 att 1 mod Offset Ctl 3 depth 0.25 att 1"
+// Expected "Check Effect %d OK"
+// Expected "Effect %d status On type Math phase Std chan 2 out Own limiter Off src1 In:0 gain1 0 mode Gate value 0.2 amp -2 offset 0.5 mod Amp Ctl 2 depth 0.5 att 1 mod Value Ctl 4 depth 1 att 1 mod Offset Ctl 3 depth 0.25 att 1"
+// Expected "Check Effect %d OK"
+// Expected "Ex-1048. resultat : 0"
+// Expected error 2754
+// Expected error 2754
+// Expected error 2754
+// Expected error 2754
+// Expected error 2767
+// Expected error 2767
+// Expected error 2767
+// Expected error 2754
+// Expected "Ex-1048. erreurs : 2754 2754 2754 2754 2767 2767 2767 2754"

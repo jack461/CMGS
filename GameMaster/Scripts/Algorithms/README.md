@@ -18,7 +18,7 @@ fenêtre d'Interstys et installe aussitôt un algorithme complet, branché sur l
   stéréo, `nch 2`.
 
 **L'effet principal s'affiche** : chaque recette se termine par `Display Effect …` (son effet principal :
-`fdn`, `fl`, `ph`, `sh`, `nz` ou `rnd`), qui le montre dans un module Effect de l'onglet courant : celui qui le montre déjà,
+`fdn`, `fl`, `ph`, `sh`, `nz`, `rnd`, `rg`, ou pour un Math `fol`, `rect`, `gt`), qui le montre dans un module Effect de l'onglet courant : celui qui le montre déjà,
 sinon un module Effect qui montre un effet qui n'existe plus, sinon un nouveau module Effect, à la fin du
 panneau qui en a le moins. `Display` montre aussi un reader, un writer, une ligne ou une courbe
 (`Display Reader r`, `Display Line l`, `Display Curve c`), ou un module par son nom, celui du menu des modules
@@ -136,3 +136,26 @@ Curve ; horloge commune ou propre à chaque canal…) changent le caractère de 
 entrée de modulation (`mod … Effect rnd`) : comme un LFO, mais sans période.
 Sa source est un déclenchement : chaque front montant au-dessus du seuil (`thresh`) donne une nouvelle valeur et
 relance son horloge (`rate 0` : les déclenchements seuls) ; `detect Env` : les attaques d'un son (son enveloppe).
+
+## Les recettes du Math (opérations sur les câbles)
+
+| Fichier | Ce qu'il fait |
+|---|---|
+| `Math-Contour` | Un bruit qui parle : l'enveloppe du son (Env) imposée à un bruit rose (Mul) |
+| `Math-Redresse` | Un redresseur : la valeur absolue du son (Abs), une octave au-dessus, rugueuse |
+| `Math-Porte` | Une porte : Env, Gate, Slew puis Mul, le son ne passe qu'au-dessus d'un seuil, canal par canal |
+
+Un Math lit une source A (`source`, ou `src1`) et une source B facultative (`src2` ; sans elle, `value`), et donne
+`offset + amp × l'opération`. Ses effets se chaînent : un suiveur d'enveloppe, une porte, un adoucissement, un VCA.
+
+## Les recettes du Ring (modulateur en anneau, AM, décaleur de fréquence)
+
+| Fichier | Ce qu'il fait |
+|---|---|
+| `Ring-Gong` | Des gongs : le modulateur en anneau, un son métallique, inharmonique ; chaque canal a sa porteuse |
+| `Ring-Glisse` | Un glissement : le spectre descend de quelques Hz (Down) et dérive au rythme d'un LFO lent |
+| `Ring-Tourne` | Un tournoiement : un trémolo (AM) dont la crête passe d'un haut-parleur au suivant |
+
+Un Ring multiplie sa source A par une porteuse : la source B si elle est branchée (`src2`), sinon son oscillateur
+(`freq`, `wave`, `detune` et `spread` d'un canal au suivant). Modes : `Ring`, `AM` (`amount`), `Up` et `Down` (le
+décaleur de fréquence).

@@ -1,0 +1,42 @@
+print("Math-Redresse. Un redresseur : la valeur absolue du son, une octave au-dessus, rugueuse.");
+
+/*
+  Le son redresse (Math, mode Abs : |x|) : chaque alternance negative est retournee ; la fondamentale passe a l'octave
+  superieure, avec des harmoniques paires, un grain de fuzz. Un passe-haut retire le continu que le redressement ajoute.
+  Dans le pad de "rect", Max (avec value 0) ne garde que les alternances positives (une demi-onde : la fondamentale
+  reste, plus douce) ; Min avec une value negative ecrete le bas seulement.
+
+  Parametres :
+      nch       canaux
+      dry       son sec (dB)
+      wet       son redresse (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son redresse sortent vers Out:0.
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. dry, wet : les niveaux du son
+  sec et du son redresse (dB). Les autres reglages se changent a la main dans le pad des effets de l'instance (le module
+  Instances la montre ; le module Effect montre ses effets, "pre", "rect", "dc", "post").
+  L'effet "rect" (le redresseur) s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance redresse )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Redresse
+        input src
+        output dst
+        param nch 2 1 128
+        param dry -120 -120 40
+        param wet 0 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect rect  type Math  chan nch  source Effect pre  mode Abs
+        Effect dc  type Filter  chan nch  source Effect rect  mode HP  freq 30  stages 1
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect dc  gain2 wet  out dst
+        Display Effect rect
+    End
+    Instance redresse Redresse  src In:0  dst Out:0  nch 2  dry -120  wet 0
+));
+print(sprintf(0, "Math-Redresse. instance redresse : %d (0 : OK)", r));

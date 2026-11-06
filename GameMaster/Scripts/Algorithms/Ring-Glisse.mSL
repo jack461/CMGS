@@ -1,0 +1,49 @@
+print("Ring-Glisse. Un glissement : tout le spectre du son descend de quelques Hz, et derive.");
+
+/*
+  Le decaleur de frequence (Ring, mode Down) : chaque frequence du son descend de gap Hz, sans retournement ; les
+  harmoniques ne sont plus multiples l'une de l'autre, le son devient inharmonique, metallique. Un LFO tres lent (drift
+  Hz) fait varier le decalage (range octaves autour de gap) : le son glisse, se desaccorde, revient. Avec un gap de
+  1 a 5 Hz et le son sec (dry 0), un dephasage qui tourne sans fin (un phaser de barbier). Dans le pad du Ring, Up fait
+  monter le spectre.
+
+  Parametres :
+      nch       canaux
+      gap       le decalage (Hz)
+      drift     la vitesse de la derive (Hz)
+      range     son etendue (octaves)
+      dry       son sec (dB)
+      wet       son decale (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son decale sortent vers Out:0.
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. dry, wet : les niveaux du son
+  sec et du son decale (dB). Les autres reglages se changent a la main dans le pad des effets de l'instance (le module
+  Instances la montre ; le module Effect montre ses effets, "pre", "lfo", "rg", "post").
+  L'effet "rg" (le Ring) s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance glisse )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Glisse
+        input src
+        output dst
+        param nch 2 1 128
+        param gap 40 0.01 20000
+        param drift 0.05 0.001 100
+        param range 1 0 10
+        param dry -120 -120 40
+        param wet 0 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect lfo  type LFO  chan 1  freq drift  mode Sine  amp 1  offset 0
+        Effect rg  type Ring  chan nch  source Effect pre  mode Down  freq gap  wave Sine  mod Freq Effect lfo  depth range
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect rg  gain2 wet  out dst
+        Display Effect rg
+    End
+    Instance glisse Glisse  src In:0  dst Out:0  nch 2  gap 40  drift 0.05  range 1  dry -120  wet 0
+));
+print(sprintf(0, "Ring-Glisse. instance glisse : %d (0 : OK)", r));

@@ -1,0 +1,48 @@
+print("Math-Contour. Un bruit qui parle : l'enveloppe du son imposee a un bruit rose.");
+
+/*
+  Un suiveur d'enveloppe (Math, mode Env) lit le son ; un second Math (mode Mul) multiplie un bruit rose par cette
+  enveloppe, canal par canal : le bruit a la dynamique du son, ses attaques, ses silences, sa parole sans sa hauteur.
+  rise et fall : l'attaque et la retombee du suiveur (ms : courtes, le bruit suit chaque detail ; longues, il respire
+  lentement). Dans le pad du Noise, une autre couleur (Velvet, Dust, Crackle...) change la matiere ; dans le pad de
+  "fol", Slew a la place de Env donne une enveloppe plus anguleuse.
+
+  Parametres :
+      nch       canaux
+      rise      l'attaque du suiveur (ms)
+      fall      sa retombee (ms)
+      dry       son sec (dB)
+      wet       le bruit (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le bruit sortent vers Out:0.
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. dry, wet : les niveaux du son
+  sec et du bruit (dB). Les autres reglages se changent a la main dans le pad des effets de l'instance (le module
+  Instances la montre ; le module Effect montre ses effets, "pre", "fol", "nz", "vca", "post").
+  L'effet "fol" (le suiveur) s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance contour )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Contour
+        input src
+        output dst
+        param nch 2 1 128
+        param rise 5 0 10000
+        param fall 120 1 10000
+        param dry -120 -120 40
+        param wet 0 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect fol  type Math  chan nch  source Effect pre  mode Env  attack rise  release fall
+        Effect nz  type Noise  chan nch  color Pink  output 0  corr 0
+        Effect vca  type Math  chan nch  source Effect nz  src2 Effect fol  mode Mul
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect vca  gain2 wet  out dst
+        Display Effect fol
+    End
+    Instance contour Contour  src In:0  dst Out:0  nch 2  rise 5  fall 120  dry -120  wet 0
+));
+print(sprintf(0, "Math-Contour. instance contour : %d (0 : OK)", r));

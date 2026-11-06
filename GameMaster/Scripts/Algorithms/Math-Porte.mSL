@@ -1,0 +1,50 @@
+print("Math-Porte. Une porte : le son ne passe qu'au-dessus d'un seuil, canal par canal.");
+
+/*
+  Une chaine de quatre Math : le suiveur d'enveloppe (Env), la porte (Gate : 1 au-dessus du seuil level, 0 quand
+  l'enveloppe y retombe), son adoucissement (Slew : la porte s'ouvre en open ms, se ferme en close ms), puis le son
+  multiplie par la porte (Mul). Chaque canal a sa porte. Un seuil bas efface le souffle entre les sons ; un seuil haut ne
+  laisse passer que les attaques fortes, hachees ; close court et un seuil moyen font un son troue, fragmente.
+
+  Parametres :
+      nch       canaux
+      level     le seuil (amplitude : 0.05 = -26 dB)
+      open      l'ouverture (ms)
+      close     la fermeture (ms)
+      dry       son sec (dB)
+      wet       son passe par la porte (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son passe par la porte sortent vers Out:0.
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. dry, wet : les niveaux du son
+  sec et du son passe par la porte (dB). Les autres reglages se changent a la main dans le pad des effets de l'instance (le
+  module Instances la montre ; le module Effect montre ses effets, "pre", "fol", "gt", "sm", "vca", "post").
+  L'effet "gt" (la porte) s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance porte )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Porte
+        input src
+        output dst
+        param nch 2 1 128
+        param level 0.05 0 1000
+        param open 5 0 10000
+        param close 150 1 10000
+        param dry -120 -120 40
+        param wet 0 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect fol  type Math  chan nch  source Effect pre  mode Env  attack 1  release 40
+        Effect gt  type Math  chan nch  source Effect fol  mode Gate  value level
+        Effect sm  type Math  chan nch  source Effect gt  mode Slew  attack open  release close
+        Effect vca  type Math  chan nch  source Effect pre  src2 Effect sm  mode Mul
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect vca  gain2 wet  out dst
+        Display Effect gt
+    End
+    Instance porte Porte  src In:0  dst Out:0  nch 2  level 0.05  open 5  close 150  dry -120  wet 0
+));
+print(sprintf(0, "Math-Porte. instance porte : %d (0 : OK)", r));

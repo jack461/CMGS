@@ -1,0 +1,48 @@
+print("Ring-Tourne. Un tournoiement : un tremolo qui tourne d'un haut-parleur a l'autre.");
+
+/*
+  Le mode AM du Ring, lent : le son monte et descend (amount 1 : jusqu'au silence) ; chaque canal a sa phase, decalee de
+  stride tours sur le precedent (spread) : la crete du tremolo passe d'un haut-parleur au suivant, le son tourne. Pour un
+  tour complet sur nch haut-parleurs : stride = 1 / nch (8 : 0.125). pace : les tours par seconde ; au-dela de 20 Hz, le
+  tremolo devient un timbre (des bandes laterales). Dans le pad du Ring, la forme Square fait sauter le son d'un
+  haut-parleur a l'autre, amount 2 donne l'anneau.
+
+  Parametres :
+      nch       canaux
+      pace      la vitesse (Hz)
+      stride    le dephasage d'un canal au suivant (tours)
+      deep      la profondeur (amount : 0 a 2)
+      dry       son sec (dB)
+      wet       son qui tourne (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son qui tourne sortent vers Out:0.
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. dry, wet : les niveaux du son
+  sec et du son qui tourne (dB). Les autres reglages se changent a la main dans le pad des effets de l'instance (le
+  module Instances la montre ; le module Effect montre ses effets, "pre", "rg", "post").
+  L'effet "rg" (le Ring) s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+table(data( Free Instance tourne )); // (l'instance precedente)
+var r = table(data(
+    Interstys
+    Algorithm Tourne
+        input src
+        output dst
+        param nch 8 1 128
+        param pace 0.5 0.001 20000
+        param stride 0.125 0 1
+        param deep 1 0 2
+        param dry -120 -120 40
+        param wet 0 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect rg  type Ring  chan nch  source Effect pre  mode AM  freq pace  wave Sine  amount deep  spread stride
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect rg  gain2 wet  out dst
+        Display Effect rg
+    End
+    Instance tourne Tourne  src In:0  dst Out:0  nch 8  pace 0.5  stride 0.125  deep 1  dry -120  wet 0
+));
+print(sprintf(0, "Ring-Tourne. instance tourne : %d (0 : OK)", r));
