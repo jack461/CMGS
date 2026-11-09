@@ -1,0 +1,131 @@
+/*
+    mSL_Export.jsfx-inc
+    A text file written in a folder of the project by GMAuxiliary.eel (command 30) : the scripts exported by an application
+    (c)Jean-Jacques Girardot
+
+    Include in @init (preprocessor include of "GM-Libs/mSL_Export.jsfx-inc"), after mSL_Utilities2 (mSL_g6packStr) and
+    mSL_clip_lib (gMemFree, xplStr2, the time fields of gmem). Used by Interstys (its_Xp_...) ; an other application only has to
+    produce its own text :
+
+        xpt_Clean(str)                      only letters, digits, - and _ in the string (the others become _)
+        xpt_FileName(str, name, app, kind)  "Data/name-app-kind-YYYY-MM-DD-HH-MM-SS.mSL" (app : the short name of the application,
+                                            kind : patch, session...)
+        xpt_Begin()                         an empty text
+        xpt_Line(str)                       a line of the text
+        xpt_Block(str, ind)                 a long line, cut at the spaces outside the double quotes, at two spaces if possible
+                                            (between two pairs "key  value") ; "ind" spaces before it
+        xpt_Ready()                         0 : the script can write ; else why it can't : 1 not running, 2 too old, 3 busy
+        xpt_Send(file)                      the text is sent to the script (the folder is created if needed)
+        xpt_Poll()                          each frame : 1 the file is written, -1 it could not be, 0 nothing new
+*/
+
+<? _suppress=1; ?>
+@init
+<? _suppress=0; ?>
+
+#xpt_Folder = "Data"; // the folder of the exported files, in the folder of the project
+xpt_NeedV = 0x000106; // the version of GMAuxiliary.eel needed (a name with a folder)
+// the text in gmem, above all the areas of mSL_clip_lib (nothing else moves) ; xpt_Ov : 1 if it does not fit
+xpt_B = gMemFree + 1024;
+xpt_Sz = min(0x40000, gmemLimit - xpt_B - 1);
+xpt_J = xpt_Ov = 0;
+xpt_Wid = 118; // the width of the lines of xpt_Block
+xpt_Req = 0; // the date of the request (0 : none)
+#xpt_Sp = "                                "; // (32 spaces : xpt_Block)
+
+function xpt_Clean(str) local(i, c)
+(
+    i = 0; loop(strlen(str),
+        c = str_getchar(str, i, 'cu');
+        !(((c >= 'A') && (c <= 'Z')) || ((c >= 'a') && (c <= 'z')) || ((c >= '0') && (c <= '9')) || (c === '-') || (c === '_')) ?
+            str_setchar(str, i, '_', 'cu');
+        i += 1;
+    );
+    str;
+);
+
+// the date and the time : "str" YYYY-MM-DD-HH-MM-SS (fmt 0), or DD/MM/YYYY HHhMMmSS (fmt 1, for a text)
+function xpt_Date(str, fmt) local(s, h, m)
+(
+    s = gmem[timeSecOfDay];
+    h = 0|(s / 3600); m = 0|((s - h * 3600) / 60); s = 0|(s - h * 3600 - m * 60);
+    fmt ? sprintf(str, "%02d/%02d/%04d %02dh%02dm%02d", gmem[timeDay], gmem[timeMonth], gmem[timeYear], h, m, s) :
+        sprintf(str, "%04d-%02d-%02d-%02d-%02d-%02d", gmem[timeYear], gmem[timeMonth], gmem[timeDay], h, m, s);
+    str;
+);
+
+function xpt_FileName(str, name, app, kind)
+(
+    sprintf(str, "%s/%s-%s-%s-%s.mSL", #xpt_Folder, name, app, kind, xpt_Date(#xpt_Dt, 0));
+    str;
+);
+
+function xpt_Begin()
+(
+    xpt_J = xpt_Ov = 0;
+    gmem[xpt_B] = 0;
+);
+
+function xpt_Line(str)
+(
+    xpt_J = mSL_g6packStr(xpt_B, str, xpt_J, xpt_Sz, 1);
+    (xpt_J >= xpt_Sz - 8) ? (xpt_Ov = 1);
+);
+
+function xpt_Block(str, ind) local(l, st, i, sp, dp, q, c, n)
+(
+    l = strlen(str); st = 0; n = ind;
+    while (st < l) (
+        sp = dp = -1;
+        (l - st <= xpt_Wid - n) ? (
+            sp = l;
+        ) : (
+            i = st; q = 0;
+            while ((i < l) && ((i - st <= xpt_Wid - n) || (sp < 0))) (
+                c = str_getchar(str, i, 'cu');
+                (c === '"') ? (q = !q);
+                ((c === ' ') && !q) ? (
+                    sp = i;
+                    ((i - st <= xpt_Wid - n) && (i + 1 < l) && (str_getchar(str, i + 1, 'cu') === ' ')) ? (dp = i);
+                );
+                i += 1;
+            );
+            // the last two spaces in the width (between two pairs), else the last space, else the first one after the width
+            (dp > st) ? (sp = dp) : (sp < 0) ? (sp = l);
+        );
+        strcpy_substr(#xpt_S, str, st, sp - st);
+        strcpy_substr(#xpt_L, #xpt_Sp, 0, n);
+        strcat(#xpt_L, #xpt_S);
+        xpt_Line(#xpt_L);
+        st = sp; while ((st < l) && (str_getchar(str, st, 'cu') === ' ')) ( st += 1; );
+        n = ind + 4; // (the next lines of the block : 4 more spaces)
+    );
+);
+
+function xpt_Ready()
+(
+    (gmem[versionGMScript] == 0) ? 1 : (gmem[versionGMScript] < xpt_NeedV) ? 2 : (gmem[dateCfrm] > gmem[dateDone]) ? 3 : 0;
+);
+
+function xpt_Send(file) local(i)
+(
+    // the name : one character per word (as sysout)
+    i = 0; loop(strlen(file), gmem[xplStr2 + i] = str_getchar(file, i, 'cu'); i += 1;);
+    gmem[xplStr2 + i] = 0;
+    gmem[scptPar2] = xplStr2;
+    gmem[scptPar3] = xpt_B;
+    // the command first, the dates last : the script (another thread) starts on the dates
+    gmem[cmndKode] = 30;
+    xpt_Req = time_precise() + timeD;
+    gmem[dateRqst] = gmem[dateCfrm] = xpt_Req;
+);
+
+function xpt_Poll() local(r)
+(
+    r = 0;
+    ((xpt_Req > 0) && (gmem[dateDone] > xpt_Req)) ? (
+        r = (gmem[rtrnVal3] > 0) ? 1 : -1;
+        xpt_Req = 0;
+    );
+    r;
+);

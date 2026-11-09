@@ -28,11 +28,11 @@ ui_jd_tboxh = 0;
     uix_zoom multiplies it (see ui_start in ui-lib) : the texts, the pads, the sliders, the menus, the graphics and the
     mouse follow together ; the code that draws itself must use ui_left_retina() ... or uix_drawconfig_current[9]
     (ui_retina()), and compare the window size with ui units through ui_jscale() (gfx_w / ui_jscale())
-    ui_jzoomCnt sizes, of index ui_jzoomK (ui_jzoom_pc : 50 % ... 120 %) ; each plugin saves its size in percent
+    ui_jzoomCnt sizes, of index ui_jzoomK (ui_jzoom_pc : 50 % ... 200 %) ; each plugin saves its size in percent
     (serialBlock[Pr7_UiSize], 0 : the default size) ; the sub-menu "Display size" of the menu of the modules
     (ui_jzoom_menu_items, ui_jzoom_menu_tick, ui_jzoom_menu_click) and the keys (GM_Size_Keys) change it
 */
-ui_jzoomCnt = 7;
+ui_jzoomCnt = 9; // 50 60 70 80 90 100 120 150 200 %
 ui_jzoomDef = 5; // 100 %
 ui_jzoomK = ui_jzoomDef;
 ui_jzoomItem0 = -1; // the item "50 %" in the menu of the modules of the plugin (ui_jzoom_menu_items)
@@ -40,14 +40,16 @@ ui_jfontk = 1.1; // the fonts at 100 % (uix_fontk, see ui_jzoom_set ; 1 for the 
 
 function ui_jzoom_pc(k)
 (
-    (k <= 0) ? 50 : (k === 1) ? 60 : (k === 2) ? 70 : (k === 3) ? 80 : (k === 4) ? 90 : (k === 5) ? 100 : 120;
+    (k <= 0) ? 50 : (k === 1) ? 60 : (k === 2) ? 70 : (k === 3) ? 80 : (k === 4) ? 90 : (k === 5) ? 100 :
+    (k === 6) ? 120 : (k === 7) ? 150 : 200;
 );
 
 function ui_jzoom_set(k)
 (
     ui_jzoomK = max(0, min(ui_jzoomCnt - 1, 0|k));
     uix_zoom = ui_jzoom_pc(ui_jzoomK) / 100;
-    // the fonts : ui_jfontk at 100 %, reduced less than the rest (50 % : 0.71 of their size at 100 %, 70 % : 0.87)
+    // the fonts : ui_jfontk at 100 %, reduced less than the rest (50 % : 0.71 of their size at 100 %, 70 % : 0.87),
+    // and enlarged less (150 % : 1.28, 200 % : 1.52)
     uix_fontk = ui_jfontk * (uix_zoom ^ (-0.4));
     uix_jl_gfx_w = -1; // the sizes of the tabs bar are computed again (my_menu_bar_classic)
     ui_GFXdoNow |= 1; ui_GFXReason = 46;
@@ -81,7 +83,9 @@ function ui_jzoom_menu_items(names, itdsp)
     names[(itdsp += 1)] = "!&2 80 %";
     names[(itdsp += 1)] = "!&2 90 %";
     names[(itdsp += 1)] = "!&2 100 %";
-    names[(itdsp += 1)] = "!&2< 120 %";
+    names[(itdsp += 1)] = "!&2 120 %";
+    names[(itdsp += 1)] = "!&2 150 %";
+    names[(itdsp += 1)] = "!&2< 200 %";
     itdsp;
 );
 
@@ -447,12 +451,13 @@ local(str, str2, tw, ii, aw, ast, xcol)
 // my_menu_bar_soft (called instead of the classic bar, before the panes) handles the visibility and the clics,
 // and gives the bar the priority on the clics ; my_menu_bar_overlay (at the end of @gfx) draws it over the panes.
 ui_jbar_until = 0; // the bar is visible until this time
-ui_jbar_delay = 0.5; // in seconds
+ui_jbar_delay = 10; // in seconds (the time to come back to the bar after leaving it)
 ui_jbar_shown = 0; // the bar is visible
 ui_jbar_was = 0; // it was visible at the previous display
+ui_jbar_in = 0; // the mouse was over the bar at the previous display
 
 function my_menu_bar_soft(said)
-local(str, tw, ii, aw, h, ww)
+local(str, tw, ii, aw, h, ww, inb)
 (
     (gfx_w != uix_jl_gfx_w) ? (
         uix_jl_gfx_w = gfx_w;
@@ -461,14 +466,16 @@ local(str, tw, ii, aw, h, ww)
     h = ui_jd_menuh;
     ww = gfx_w / uix_drawconfig_current[9]; // width of the window (ui coordinates) : the bar is at the top of the window
     // visibility : mouse near the top of the window, or a secondary screen opened (for the "Back" button)
-    (((uix_mouse_y >= 0) && (uix_mouse_y < h) && (uix_mouse_x >= 0) && (uix_mouse_x < ww))
-        || (ui_screen_level() > 0)) ? (
+    inb = (uix_mouse_y >= 0) && (uix_mouse_y < h) && (uix_mouse_x >= 0) && (uix_mouse_x < ww);
+    (inb || (ui_screen_level() > 0)) ? (
         ui_jbar_until = time_precise() + ui_jbar_delay;
     );
     ui_jbar_shown = (time_precise() < ui_jbar_until);
-    // refresh the screen while the bar is shown, and once more when it disappears
-    (ui_jbar_shown || ui_jbar_was) ? ui_GFXdoNow |= 1;
+    // refresh the screen while the mouse is over the bar (the tab under the mouse), once more when it leaves it,
+    // and when the bar appears or disappears (out of the bar, the periodic refreshes see the end of the delay)
+    (inb || ui_jbar_in || (ui_jbar_shown != ui_jbar_was)) ? ui_GFXdoNow |= 1;
     ui_jbar_was = ui_jbar_shown;
+    ui_jbar_in = inb;
     ui_jbar_shown ? (
         ui_push();
             ui_set_rect(0, 0, ww, h); // absolute position : the top of the window

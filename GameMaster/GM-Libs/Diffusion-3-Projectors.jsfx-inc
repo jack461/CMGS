@@ -1,20 +1,27 @@
 /*
 
-    =============================== The modules "Projector view" and "Diffusion" ===============================
+    ========================== The modules "Projector A" ... "H", "Projectors" and "Global" ===========================
 
     The settings of Diffusion that the native sliders give, shown as pads in modules of the Studio menu :
-        - "Projector view 1" ... "Projector view 8" : the settings of one projector (status, operating mode,
-          scene, group, item, morphing time, blur, random delay, Hyper Slider and its ambitus, new random
-          configuration) ; each view chooses the projector it shows (cell 1 ; by default, the view N shows the
-          projector N), saved with the project (serialBlock[Pr7_PrjView + N - 1], 0 : the default) ;
-        - "Diffusion" : the global settings (volume, volume adjustment, volume responsivity, input and output
-          channels, current projector, error indicator, configuration files).
+        - "Projector A" ... "Projector H" (the views ; until 2026-11-09 : "Projector view 1" ... "8") : the settings of
+          one projector (status, operating mode, scene, group, item, morphing time, blur, random delay, Hyper Slider and
+          its ambitus, new random configuration, volume) ; each view chooses the projector it shows (cell 1 ; by default,
+          the view N shows the projector N), saved with the project (serialBlock[Pr7_PrjView + N - 1], 0 : the default) ;
+        - "Projectors" : the summary of all the projectors (projucnt = PRJ_CNT : 16), one cell each (show_Projectors_Pad) ;
+        - "Global" (until 2026-11-09 : "Diffusion", same module number) : the global settings (input and output channels,
+          current projector, changes Run / Hold / Freeze, volume responsivity, error indicator, configuration files,
+          debug mode), the faders Volume and Volume adjustment, and one fader per projector : its volume (show_Global_Pad).
+    The volume of a projector (dB, -120 : silence) is not a native slider : it is saved with the project
+    (serialBlock[Pr7_PrjVol + p - 1]), @gfx writes it there directly, @block makes its linear target (prv_PVolBlock),
+    @sample reaches it smoothly (about 50 ms) ; it multiplies the level of the status (Active / Mute, see updpstatus).
+    The Studio menu shows "Projectors" and the views in the sub-menu "Projectors" (pns_GrpTtl, see pns_Host_Modules).
     Cells : right clic = menu ; left clic = simple action ; the numeric cells (times, blur, Hyper Slider, ambitus,
-    volumes) : a potentiometer (ui_jdrag, see mSL_ui_Pads) : left drag, horizontal for the whole range, vertical for
+    volume, responsivity) : a potentiometer (ui_jdrag, see mSL_ui_Pads) : left drag, horizontal for the whole range, vertical for
     fine adjustment (1/10, up = more ; in the column of the cell, only fine, in its row, only coarse) ;
     Shift + left clic = the default value ; the left clic alone does nothing.
 
-    Changing a setting of a projector makes it the current projector, as with the native sliders (slider 1).
+    Changing a setting of a projector makes it the current projector, as with the native sliders (slider 1) ; not its
+    volume.
     The modules run in @gfx, the settings are applied by @block : @gfx posts a request (prv_Request : one slot
     per kind of setting, the last value wins), @block applies it (prv_Block) as a move of the native slider
     would (sliderevent(1)) : first the change of the current projector, then the setting.
@@ -31,7 +38,9 @@ PRV_NV = 8;                 // number of modules "Projector view"
 prv_rStat = 1; prv_rMode = 2; prv_rScene = 3; prv_rGroup = 4; prv_rItem = 5; prv_rMorph = 6; prv_rBlur = 7;
 prv_rDelay = 8; prv_rHyper = 9; prv_rAmbit = 10; prv_rChange = 11; prv_rCurrent = 12;
 prv_rVol = 13; prv_rVadj = 14; prv_rResp = 15; prv_rInp = 16; prv_rOut = 17; prv_rClear = 18; prv_rFile = 19;
-PRV_NREQ = 20;
+prv_rFreeze = 20;
+prv_rPVol = 21;             // (the volume of a projector : not a request, see prv_Request)
+PRV_NREQ = 22;
 prv_prj = make_array(PRV_NREQ);     // the projector (1 ... ; 0 : a global setting)
 prv_val = make_array(PRV_NREQ);     // the value
 prv_seq = make_array(PRV_NREQ);     // incremented by @gfx when the request is posted
@@ -42,44 +51,79 @@ prv_dreq = prv_dprj = 0;
 
 prv_StatNames = "Off|Active|Mute|Solo";
 prv_ModeNames = "Off|Manual|Random 1|Random 2|Random 4|Random 8|Random 16|Hyper Slider";
+prv_ModeShort = "Off|Man.|Rnd 1|Rnd 2|Rnd 4|Rnd 8|Rnd 16|Hyper"; // (the cells of the module "Projectors")
 prv_N16 = "1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16";
-prv_Projs = "Projector 1|Projector 2|Projector 3|Projector 4|Projector 5|Projector 6|Projector 7|Projector 8";
+// "Projector 1|Projector 2|...", projucnt items (as slider 1)
+strcpy(#prv_PList, "Projector 1");
+i__k = 2; loop(projucnt - 1, sprintf(#prv_it, "|Projector %d", i__k); strcat(#prv_PList, #prv_it); i__k += 1;);
+prv_Projs = #prv_PList;
 prv_Files = "File 1|File 2|File 3|File 4|File 5|File 6|File 7|File 8|File 9";
 prv_Morphs = "0.1|0.25|0.5|1|2|4|8|15|30|60";
 prv_Blurs = "0|10|25|50|75|100";
 prv_Delays = "1|5|10|20|30|60|120|300|600|900";
 prv_Hypers = "0|0.1|0.25|0.5|0.75|0.9|1";
 prv_Ambits = "2|3|4|5|6|7|8";
-prv_Vols = "0|-1|-3|-6|-10|-20|-30|-40|-60|-120";
-prv_Vadjs = "20|10|6|3|0|-3|-6|-10|-20";
+prv_PVols = "12|6|3|0|-3|-6|-10|-20|-40|-60|-120";
 prv_Resps = "0.1|0.5|1|2|3|5|10|30|60";
 prv_Chans = "2|4|6|8|10|12|16|24|32|48|64|96|128";
+// the changes (module "Global") : changeallowed, interpallowed (see prv_FrzState)
+prv_FrzNames = "Run|Hold|Freeze";
+prv_FrzMenu = "Run : random changes and morphings|Hold : no random change, the morphings go on|Freeze : no change, no morphing";
+// the volume of a projector (dB ; prv_PVolMin : silence) and its smoothing in @sample (about 50 ms)
+prv_PVolMin = -120; prv_PVolMax = 12;
+prv_VolK = 1 - exp(-1 / (0.05 * srate));
 
-// The pads : 2 lines of 8 cells (one pad for the 8 views : they are drawn one after the other), 1 line (Diffusion)
+// The pads : 2 lines of 8 cells (one pad for the 8 views : they are drawn one after the other), 1 line (Global)
 pad_PRV_Siz = 16;
 pad_PRV = make_jpad(
     ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
     2, 8, pad_PRV_Siz);
 pad_PRV_Labs = pad_PRV + pad_PRV[ui_jpad_labs];
 pad_PRV_Colrs = pad_PRV + pad_PRV[ui_jpad_clrs];
-pad_DIF_Siz = 8;
-pad_DIF = make_jpad(
+pad_GLB_Siz = 8;
+pad_GLB = make_jpad(
     ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
-    1, 8, pad_DIF_Siz);
-pad_DIF_Labs = pad_DIF + pad_DIF[ui_jpad_labs];
-pad_DIF_Colrs = pad_DIF + pad_DIF[ui_jpad_clrs];
+    1, 8, pad_GLB_Siz);
+pad_GLB_Labs = pad_GLB + pad_GLB[ui_jpad_labs];
+pad_GLB_Colrs = pad_GLB + pad_GLB[ui_jpad_clrs];
 i__k = 0; loop(pad_PRV_Siz, pad_PRV_Colrs[i__k] = Col_Inactive; pad_PRV_Labs[i__k] = ""; i__k += 1;);
-i__k = 0; loop(pad_DIF_Siz, pad_DIF_Colrs[i__k] = Col_Inactive; pad_DIF_Labs[i__k] = ""; i__k += 1;);
+i__k = 0; loop(pad_GLB_Siz, pad_GLB_Colrs[i__k] = Col_Inactive; pad_GLB_Labs[i__k] = ""; i__k += 1;);
+// The module "Projectors" : the counts (1 line of 8 cells), then one cell per projector (8 per line)
+pad_PRS_Siz = 8;
+pad_PRS = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    1, 8, pad_PRS_Siz);
+pad_PRS_Labs = pad_PRS + pad_PRS[ui_jpad_labs];
+pad_PRS_Colrs = pad_PRS + pad_PRS[ui_jpad_clrs];
+pad_PRSG_NL = max(1, ceil(projucnt / 8));
+pad_PRSG_Siz = 8 * pad_PRSG_NL;
+pad_PRSG = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    pad_PRSG_NL, 8, pad_PRSG_Siz);
+pad_PRSG_Labs = pad_PRSG + pad_PRSG[ui_jpad_labs];
+pad_PRSG_Colrs = pad_PRSG + pad_PRSG[ui_jpad_clrs];
+i__k = 0; loop(pad_PRS_Siz, pad_PRS_Colrs[i__k] = Col_Inactive; pad_PRS_Labs[i__k] = ""; i__k += 1;);
+i__k = 0; loop(pad_PRSG_Siz, pad_PRSG_Colrs[i__k] = Col_Inactive; pad_PRSG_Labs[i__k] = ""; i__k += 1;);
 strcpy(#prv_mnu, "");
 strcpy(#prv_it, "");
 strcpy(#prv_title, "");
+strcpy(#prs_txt, "");
+strcpy(#prs_t2, "");
+strcpy(#glb_txt, "");
+strcpy(#glb_t2, "");
+strcpy(#glb_lab, "");
 
 
 // Post a request to @block (@gfx) : the setting k of the projector p (0 : a global setting), value v
+// (the volume of a projector, prv_rPVol : written at once where it is saved, @block reads it at each block : prv_PVolBlock)
 function prv_Request(k, p, v)
 (
-    prv_prj[k] = p; prv_val[k] = v;
-    atomic_add(prv_seq[k], 1); // last : @block reads the request when the sequence changes (atomic : the order of the writes)
+    (k === prv_rPVol) ? (
+        ((p >= 1) && (p <= projucnt)) ? serialBlock[Pr7_PrjVol + p - 1] = v;
+    ) : (
+        prv_prj[k] = p; prv_val[k] = v;
+        atomic_add(prv_seq[k], 1); // last : @block reads the request when the sequence changes (atomic : the order of the writes)
+    );
 );
 
 // The projector shown by the view n (0 ... PRV_NV - 1) : 1 ... projucnt
@@ -101,6 +145,12 @@ local(v)
     );
 );
 
+// The color of the status s of a projector (0 Off, 1 Active, 2 Mute, 3 Solo)
+function prv_StatCol(s)
+(
+    (s === 1) ? Color_Limegreen : (s === 2) ? Col_P6 : (s === 3) ? Col_P7 : Col_Inactive;
+);
+
 // The current value of the setting r (numeric cells), for the projector p
 function prv_Value(r, p)
 (
@@ -111,7 +161,8 @@ function prv_Value(r, p)
     (r === prv_rAmbit) ? prv_Get(p, prx_svhypam, sldhypambi) :
     (r === prv_rVol) ? sldvol :
     (r === prv_rVadj) ? sldvad :
-    (r === prv_rResp) ? sldvolswtim : 0;
+    (r === prv_rResp) ? sldvolswtim :
+    (r === prv_rPVol) ? serialBlock[Pr7_PrjVol + p - 1] : 0;
 );
 
 // The range of the setting r : prv_lo, prv_hi, prv_lg (logarithmic), prv_px (pixels of drag for the range),
@@ -126,7 +177,8 @@ function prv_Range(r)
     (r === prv_rAmbit) ? (prv_lo = 2; prv_hi = sldhypamax; prv_int = 1; prv_px = 120; prv_def = 2;) :
     (r === prv_rVol) ? (prv_lo = sldvolmin; prv_hi = sldvolmax; prv_px = 480; prv_def = 0;) :
     (r === prv_rVadj) ? (prv_lo = sldvadmin; prv_hi = sldvadmax; prv_px = 400; prv_def = 0;) :
-    (r === prv_rResp) ? (prv_lo = 0.01; prv_hi = 60; prv_lg = 1; prv_def = 3;);
+    (r === prv_rResp) ? (prv_lo = 0.01; prv_hi = 60; prv_lg = 1; prv_def = 3;) :
+    (r === prv_rPVol) ? (prv_lo = prv_PVolMin; prv_hi = prv_PVolMax; prv_px = 480; prv_def = 0;);
 );
 
 // The value v of the setting r, limited to its range (prv_Range must have been called)
@@ -134,6 +186,14 @@ function prv_Limit(v)
 (
     v = max(prv_lo, min(prv_hi, v));
     prv_int ? floor(v + 0.5) : v;
+);
+
+// A new value v of the setting r of the projector p (0 : a global setting), limited to its range (the faders)
+function prv_SetVal(r, p, v)
+(
+    prv_Range(r);
+    v = prv_Limit(v);
+    (v != prv_Value(r, p)) ? prv_Request(r, p, v);
 );
 
 // A menu from a list "a|b|c" of n items, the item chk (0 ...) checked : returns the item chosen (0 ...) or -1
@@ -185,11 +245,11 @@ local(d)
 );
 
 
-// The numeric settings of the cells of a view (8 ... 12), 0 for the others
+// The numeric settings of the cells of a view (8 ... 12, 14), 0 for the others
 function prv_CellReq(c)
 (
     (c === 8) ? prv_rMorph : (c === 9) ? prv_rBlur : (c === 10) ? prv_rDelay :
-    (c === 11) ? prv_rHyper : (c === 12) ? prv_rAmbit : 0;
+    (c === 11) ? prv_rHyper : (c === 12) ? prv_rAmbit : (c === 14) ? prv_rPVol : 0;
 );
 
 // A numeric cell clicked : right = menu, Shift + left = default value (the left clic alone : nothing, see prv_Drag)
@@ -238,11 +298,12 @@ local(rc, m, v)
     (c === 9) ? prv_NumCell(prv_rBlur, p, rc, prv_Blurs, 6) :
     (c === 10) ? prv_NumCell(prv_rDelay, p, rc, prv_Delays, 10) :
     (c === 11) ? prv_NumCell(prv_rHyper, p, rc, prv_Hypers, 7) :
-    (c === 12) ? prv_NumCell(prv_rAmbit, p, rc, prv_Ambits, 7);
+    (c === 12) ? prv_NumCell(prv_rAmbit, p, rc, prv_Ambits, 7) :
+    (c === 14) ? prv_NumCell(prv_rPVol, p, rc, prv_PVols, 11);
 );
 
 /*
-    The module "Projector view" n (0 ... PRV_NV - 1)
+    The module "Projector A" ... "Projector H" : the view n (0 ... PRV_NV - 1)
 */
 function show_Projector_Pad(blockId, n)
 local(h1, hneed, zz, zzmi, p, v, cur, c, dr)
@@ -261,7 +322,7 @@ local(h1, hneed, zz, zzmi, p, v, cur, c, dr)
             );
             p = prv_ProjOf(n);
             cur = (p === slprjcur);
-            sprintf(#prv_title, "Projector view %d", n + 1);
+            sprintf(#prv_title, "Projector %c", 'A' + n);
             control_group(#prv_title);
             ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
             ui_pad(1,2,2,2);
@@ -277,7 +338,7 @@ local(h1, hneed, zz, zzmi, p, v, cur, c, dr)
             sprintf(pad_PRV_Labs[5], "Item %d", prv_Get(p, prx_savitem, sldconfitm));
             strcpy(pad_PRV_Labs[6], "New config");
             strcpy(pad_PRV_Labs[7], cur ? "Current" : "Make current");
-            // line 2 : morphing, blur, random delay, Hyper Slider, ambitus, configuration loaded
+            // line 2 : morphing, blur, random delay, Hyper Slider, ambitus, configuration loaded, volume (module "Global")
             sprintf(pad_PRV_Labs[8], "Morph %.2f s", prv_Value(prv_rMorph, p));
             sprintf(pad_PRV_Labs[9], "Blur %d %%", prv_Value(prv_rBlur, p));
             v = prv_Value(prv_rDelay, p);
@@ -286,11 +347,12 @@ local(h1, hneed, zz, zzmi, p, v, cur, c, dr)
             sprintf(pad_PRV_Labs[12], "Ambitus %d", prv_Value(prv_rAmbit, p));
             v = projectors[(p - 1) * projsize + prx_numconf];
             ((v === Undef) || (v <= 0)) ? strcpy(pad_PRV_Labs[13], "No config") : sprintf(pad_PRV_Labs[13], "Config %d", v);
-            strcpy(pad_PRV_Labs[14], ""); strcpy(pad_PRV_Labs[15], "");
+            v = prv_Value(prv_rPVol, p);
+            (v <= prv_PVolMin) ? strcpy(pad_PRV_Labs[14], "Vol -inf") : sprintf(pad_PRV_Labs[14], "Vol %.1f dB", v);
+            strcpy(pad_PRV_Labs[15], "");
             // colors
             pad_PRV_Colrs[0] = cur ? Color_Limegreen : Col_P1;
-            v = prv_Get(p, prx_savprjst, slprjstat);
-            pad_PRV_Colrs[1] = (v === 0) ? Col_Inactive : (v === 1) ? Color_Limegreen : (v === 2) ? Col_P6 : Col_P7;
+            pad_PRV_Colrs[1] = prv_StatCol(prv_Get(p, prx_savprjst, slprjstat));
             v = prv_Get(p, prx_savopmod, sldopmod);
             pad_PRV_Colrs[2] = (v === 0) ? Col_Inactive : (v === 1) ? Col_P1 : Col_P2;
             pad_PRV_Colrs[3] = pad_PRV_Colrs[4] = pad_PRV_Colrs[5] = Col_P1;
@@ -300,7 +362,8 @@ local(h1, hneed, zz, zzmi, p, v, cur, c, dr)
             pad_PRV_Colrs[10] = ((v >= 2) && (v <= 6)) ? Col_P1 : Col_Inactive; // random modes
             pad_PRV_Colrs[11] = pad_PRV_Colrs[12] = (v === 7) ? Col_P1 : Col_Inactive; // Hyper Slider
             pad_PRV_Colrs[13] = Col_InfoA;
-            pad_PRV_Colrs[14] = pad_PRV_Colrs[15] = Col_Inactive;
+            pad_PRV_Colrs[14] = (prv_Value(prv_rPVol, p) <= prv_PVolMin) ? Col_P6 : Col_P1; // (v : the mode, here)
+            pad_PRV_Colrs[15] = Col_Inactive;
             zz = control_jpad(pad_PRV);
             c = ui_jpad_cell_at();
             dr = prv_Drag(blockId, c, prv_CellReq(c), p);
@@ -315,49 +378,93 @@ local(h1, hneed, zz, zzmi, p, v, cur, c, dr)
 );
 
 
-// The numeric settings of the cells of the module Diffusion (0 ... 2), 0 for the others
-function prv_DifReq(c)
+// The state of the changes (module "Global") : 0 Run (random changes and morphings), 1 Hold (no random change, the
+// morphings go on), 2 Freeze (no change, no morphing) ; as the button "H" of the AKAI (changeallowed, interpallowed)
+function prv_FrzState()
 (
-    (c === 0) ? prv_rVol : (c === 1) ? prv_rVadj : (c === 2) ? prv_rResp : 0;
+    !interpallowed ? 2 : changeallowed ? 0 : 1;
 );
 
-// A clic on the cell c of the module Diffusion
-function prv_DifCell(c, ev)
+// The numeric settings of the cells of the module "Global" (4 : the responsivity), 0 for the others
+function prv_GlbReq(c)
+(
+    (c === 4) ? prv_rResp : 0;
+);
+
+// A clic on the cell c of the module "Global"
+function prv_GlbCell(c, ev)
 local(rc, m, v)
 (
     rc = ev & ui_jpad_ev_rmc;
-    (c === 0) ? prv_NumCell(prv_rVol, 0, rc, prv_Vols, 10) :
-    (c === 1) ? prv_NumCell(prv_rVadj, 0, rc, prv_Vadjs, 9) :
-    (c === 2) ? prv_NumCell(prv_rResp, 0, rc, prv_Resps, 9) :
-    ((c === 3) || (c === 4)) ? (
-        v = ((c === 3) ? channelsinpD : channelsoutD) + 2;
+    ((c === 0) || (c === 1)) ? (
+        // the input or output channels : a menu (both clics)
+        v = ((c === 0) ? channelsinpD : channelsoutD) + 2;
         m = max(2, min(128, prv_MenuVal(prv_Chans, 13, v)));
-        (m != v) ? prv_Request((c === 3) ? prv_rInp : prv_rOut, 0, m);
+        (m != v) ? prv_Request((c === 0) ? prv_rInp : prv_rOut, 0, m);
     ) :
-    (c === 5) ? (
+    (c === 2) ? (
         // the current projector : left = the next one
         m = rc ? prv_Menu(prv_Projs, projucnt, slprjcur - 1) : slprjcur % projucnt;
         (m >= 0) ? prv_Request(prv_rCurrent, m + 1, 1);
     ) :
-    (c === 6) ? (
+    (c === 3) ? (
+        // the changes : left = Run <-> Freeze (Hold : Run)
+        v = prv_FrzState();
+        m = rc ? prv_Menu(prv_FrzMenu, 3, v) : (v === 0) ? 2 : 0;
+        ((m >= 0) && (m != v)) ? prv_Request(prv_rFreeze, 0, m);
+    ) :
+    (c === 4) ? prv_NumCell(prv_rResp, 0, rc, prv_Resps, 9) :
+    (c === 5) ? (
         !rc ? prv_Request(prv_rClear, 0, 1);
     ) :
-    (c === 7) ? (
+    (c === 6) ? (
+        // the configuration files : a menu (both clics)
         m = prv_Menu(prv_Files, 9, cconf - 1);
         (m >= 0) ? prv_Request(prv_rFile, 0, m + 1);
+    ) :
+    (c === 7) ? (
+        // the debug mode (the sliders Debug 1 ... 4) : left = on <-> off
+        m = rc ? prv_Menu("Debug off|Debug on", 2, dbgmod ? 1 : 0) : dbgmod ? 0 : 1;
+        (m >= 0) ? dbgmod = m;
     );
 );
 
-/*
-    The module "Diffusion" : the global settings
-*/
-function show_Diffusion_Pad(blockId)
-local(h1, hneed, zz, zzmi, c, dr)
+// The text of the global gain (module "Global") : #glb_txt
+function prv_GainText()
 (
+    (glvol <= 0) ? strcpy(#glb_txt, "Global gain : -inf") : sprintf(#glb_txt, "Global gain : %.1f dB", 20 * log10(glvol));
+    (glvol != glnewvol) ? (
+        (glnewvol <= 0) ? strcpy(#glb_t2, " -> -inf") : sprintf(#glb_t2, " -> %.1f dB", 20 * log10(glnewvol));
+        strcat(#glb_txt, #glb_t2);
+        sprintf(#glb_t2, " (responsivity %.2f s)", sldvolswtim);
+        strcat(#glb_txt, #glb_t2);
+    );
+    #glb_txt;
+);
+
+/*
+    The module "Global" (until 2026-11-09 : "Diffusion") : the global settings
+    line 1 (8 cells) : 0 input channels, 1 output channels (a menu, both clics), 2 the current projector (left clic : the
+    next one ; right clic : a menu), 3 the changes Run / Hold / Freeze (prv_FrzState ; left clic : Run <-> Freeze ; right
+    clic : a menu), 4 the volume responsivity (a potentiometer), 5 the error indicator (left clic : clear), 6 the
+    configuration files (a menu, both clics), 7 the debug mode (left clic : on <-> off)
+    the faders Volume (sldvol) and Volume adjustment (sldvad), the global gain (glvol, going to glnewvol), and one fader per
+    projector, its volume (dB, prv_rPVol ; 2 columns when the pane is wide enough). The faders (slider_ctl) : right clic =
+    0 dB, double clic = the default, clic on the value = type it.
+*/
+function show_Global_Pad(blockId)
+local(h1, h2, h3, h4, hl, hneed, zzmi, zz, c, dr, nc, nr, nf, col, i, p, r, v)
+(
+    nc = (ui_width() >= 600) ? 2 : 1; // the columns of the faders of the projectors
+    nr = ceil(projucnt / nc);
+    hl = ui_jd_slidh + 3; // a fader
     h1 = uix_jpadHeight(1);
-    hneed = h1 + ui_jd_ctgr + 8;
-    (ui_height() >= hneed) ? (
-        ui_split_top(hneed);
+    h2 = 2 * hl + 3;
+    h3 = uix_jBoxHeight(2);
+    h4 = nr * hl + 3;
+    hneed = h1 + h2 + h3 + h4 + ui_jd_ctgr;
+    (ui_height() >= h1 + ui_jd_ctgr) ? (
+        ui_split_top(min(hneed, ui_height()));
             zzmi = ui_hover();
             keepBlockInfos(blockId);
             (zzmi) ? (
@@ -366,32 +473,296 @@ local(h1, hneed, zz, zzmi, c, dr)
                     ui_border();
                 ui_pop();
             );
-            control_group("Diffusion");
+            control_group("Global");
             ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
-            ui_pad(1,2,2,2);
-            mSL_setStrArray(pad_DIF_Labs, pad_DIF_Siz);
-            sprintf(pad_DIF_Labs[0], "Vol %.1f dB", sldvol);
-            (sldvad >= 0) ? sprintf(pad_DIF_Labs[1], "Adjust +%.1f dB", sldvad) : sprintf(pad_DIF_Labs[1], "Adjust %.1f dB", sldvad);
-            sprintf(pad_DIF_Labs[2], "Resp. %.2f s", sldvolswtim);
-            sprintf(pad_DIF_Labs[3], "Inputs %d", channelsinpD + 2);
-            sprintf(pad_DIF_Labs[4], "Outputs %d", channelsoutD + 2);
-            sprintf(pad_DIF_Labs[5], "Current: P%d", slprjcur);
-            lErr ? sprintf(pad_DIF_Labs[6], "Error %04d", lErr) : strcpy(pad_DIF_Labs[6], "No error");
-            sprintf(pad_DIF_Labs[7], "File %d", cconf);
-            pad_DIF_Colrs[0] = pad_DIF_Colrs[1] = pad_DIF_Colrs[2] = Col_P1;
-            pad_DIF_Colrs[3] = pad_DIF_Colrs[4] = Col_P2;
-            pad_DIF_Colrs[5] = Color_Limegreen;
-            pad_DIF_Colrs[6] = lErr ? Col_P6 : Col_Inactive;
-            pad_DIF_Colrs[7] = Col_InfoA;
-            zz = control_jpad(pad_DIF);
-            c = ui_jpad_cell_at();
-            dr = prv_Drag(blockId, c, prv_DifReq(c), 0);
-            (zz > 0) ? (
-                ui_GFXdoNow |= 4;
-                ((zz & (ui_jpad_ev_lmc | ui_jpad_ev_rmc)) && !((zz & ui_jpad_ev_lmc) && (dr & 2))) ? (
-                    prv_DifCell(pad_DIF[ui_jpad_last] - 1, zz);
+
+            // the cells
+            ui_split_top(h1);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_GLB_Labs, pad_GLB_Siz);
+                sprintf(pad_GLB_Labs[0], "Inputs %d", channelsinpD + 2);
+                sprintf(pad_GLB_Labs[1], "Outputs %d", channelsoutD + 2);
+                sprintf(pad_GLB_Labs[2], "Current: P%d", slprjcur);
+                v = prv_FrzState();
+                sx_Nth(prv_FrzNames, v, pad_GLB_Labs[3]);
+                sprintf(pad_GLB_Labs[4], "Resp. %.2f s", sldvolswtim);
+                lErr ? sprintf(pad_GLB_Labs[5], "Error %04d", lErr) : strcpy(pad_GLB_Labs[5], "No error");
+                sprintf(pad_GLB_Labs[6], "File %d", cconf);
+                strcpy(pad_GLB_Labs[7], dbgmod ? "Debug on" : "Debug off");
+                pad_GLB_Colrs[0] = pad_GLB_Colrs[1] = Col_P2;
+                pad_GLB_Colrs[2] = Color_Limegreen;
+                pad_GLB_Colrs[3] = (v === 0) ? Color_Limegreen : (v === 1) ? Col_P7 : Col_P6;
+                pad_GLB_Colrs[4] = Col_P1;
+                pad_GLB_Colrs[5] = lErr ? Col_P6 : Col_Inactive;
+                pad_GLB_Colrs[6] = Col_InfoA;
+                pad_GLB_Colrs[7] = dbgmod ? Col_P2 : Col_Inactive;
+                zz = control_jpad(pad_GLB);
+                c = ui_jpad_cell_at();
+                dr = prv_Drag(blockId, c, prv_GlbReq(c), 0);
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4;
+                    ((zz & (ui_jpad_ev_lmc | ui_jpad_ev_rmc)) && !((zz & ui_jpad_ev_lmc) && (dr & 2))) ? (
+                        prv_GlbCell(pad_GLB[ui_jpad_last] - 1, zz);
+                    );
+                );
+            ui_pop();
+
+            // the faders Volume and Adjust (the native sliders 3 and 4)
+            (ui_height() >= h2) ? (
+                ui_split_top(h2);
+                    ui_pad(1,3,1,0);
+                    prv_Range(prv_rVol);
+                    r = slider_ctl("Volume: %.1f dB", sldvol, prv_lo, prv_hi, -2, prv_def, 0.1);
+                    (r & 8) ? prv_SetVal(prv_rVol, 0, 0) : (r != 0) ? prv_SetVal(prv_rVol, 0, uix_jsl_val);
+                    prv_Range(prv_rVadj);
+                    r = slider_ctl((sldvad > 0) ? "Adjust: +%.1f dB" : "Adjust: %.1f dB", sldvad, prv_lo, prv_hi, 0, prv_def, 0.1);
+                    (r & 8) ? prv_SetVal(prv_rVadj, 0, 0) : (r != 0) ? prv_SetVal(prv_rVadj, 0, uix_jsl_val);
+                ui_pop();
+            );
+
+            // the text : the global gain, the faders
+            (ui_height() >= h3) ? (
+                ui_split_top(h3);
+                    ui_pad(4,2,4,2);
+                    ui_pcolor(ui_jcolor_text);
+                    ui_align(0, 0);
+                    ui_split_top(ui_texth()); ui_text(prv_GainText()); ui_pop();
+                    ui_split_top(ui_texth());
+                        ui_text("Faders : right clic = 0 dB, double clic = default, clic on the value = type it");
+                    ui_pop();
+                ui_pop();
+            );
+
+            // the volumes of the projectors : one fader each (the column 1 : 1 ... nr, the column 2 : nr + 1 ...), the rows
+            // that the pane can show
+            nf = min(nr, floor((ui_height() - 3) / hl));
+            (nf > 0) ? (
+                ui_split_top(nf * hl + 3);
+                    ui_pad(1,3,1,0);
+                    col = 0; loop(nc,
+                        // (ui_split_left removes the column from the rectangle : the column 2 is what remains)
+                        ((nc > 1) && (col === 0)) ? ui_split_leftratio(0.5) : ui_push();
+                            i = 0; loop(nf,
+                                p = col * nr + i + 1;
+                                (p <= projucnt) ? (
+                                    v = prv_Get(p, prx_savprjst, slprjstat);
+                                    (v === 1) ? sprintf(#glb_t2, "P%d", p) :
+                                        (sx_Nth(prv_StatNames, max(0, min(3, v)), #prv_it); sprintf(#glb_t2, "P%d %s", p, #prv_it));
+                                    v = prv_Value(prv_rPVol, p);
+                                    (v <= prv_PVolMin) ? sprintf(#glb_lab, "%s: -inf", #glb_t2) : sprintf(#glb_lab, "%s: %%.1f dB", #glb_t2);
+                                    prv_Range(prv_rPVol);
+                                    r = slider_ctl(#glb_lab, v, prv_lo, prv_hi, -2, prv_def, 0.1);
+                                    (r & 8) ? prv_SetVal(prv_rPVol, p, 0) : (r != 0) ? prv_SetVal(prv_rPVol, p, uix_jsl_val);
+                                );
+                                i += 1;
+                            );
+                        ui_pop();
+                        col += 1;
+                    );
+                ui_pop();
+            );
+
+        ui_pop();
+    );
+);
+
+
+/*
+    Shows the projector p in a view (Alt + clic and menu of the module "Projectors") : nothing to do if a view of the
+    visible panes of the tab shows it ; else the first view of these panes shows it ("nw" : not this way) ; else a view not
+    used in the tab is added just below the module "bk" (the one that asks), in its pane (blockDesc : the pane being drawn) ;
+    0 : no room (as its_Mod_Open in Interstys)
+*/
+function prv_Open(p, bk, nw)
+local (pn, d, i, m, fd, fs, used, k)
+(
+    fd = fs = -1; used = 0;
+    pn = 0; loop(dcbPannelsMax,
+        d = dcbBlocksAll + (TabIdt * dcbPannelsMax + pn) * dcbWSize;
+        i = 0; loop(dcbMax,
+            m = d[i] - blockPrjView0;
+            ((m >= 0) && (m < PRV_NV)) ? (
+                used |= 2 ^ m;
+                (pn < studDispPCnt) ? (
+                    (prv_ProjOf(m) === p) ? (fs = m) : (fd < 0) ? (fd = m);
                 );
             );
+            i += 1;
+        );
+        pn += 1;
+    );
+    (fs >= 0) ? 1 :
+    ((fd >= 0) && !nw) ? (
+        serialBlock[Pr7_PrjView + fd] = p;
+        1;
+    ) : (
+        m = 0; while ((m < PRV_NV) && (used & (2 ^ m))) (m += 1;);
+        k = 0; while ((k < dcbMax) && (blockDesc[k] !== bk)) (k += 1;);
+        ((blockDesc > 0) && (m < PRV_NV) && (k < dcbMax - 1) && (blockDesc[dcbMax - 1] === 0)) ? (
+            i = dcbMax - 1; while (i > k + 1) (blockDesc[i] = blockDesc[i - 1]; i -= 1;);
+            blockDesc[k + 1] = blockPrjView0 + m;
+            serialBlock[Pr7_PrjView + m] = p;
+            1;
+        ) : 0;
+    );
+);
+
+// 1 if the projector p sounds (active, the level of its status is not 0 : see updprqueue ; its volume is not -inf)
+function prv_Sounds(p)
+local(pp)
+(
+    pp = projectors + (p - 1) * projsize;
+    (pp[prx_activity] !== 0) && (pp[prx_prvol] > 0) && (pp[prx_vtgt] > 0); // (Undef < 0)
+);
+
+// The text of the projector p in the module "Projectors" (the cell under the mouse) : #prs_txt
+function prv_PrjText(p)
+local(pp, v)
+(
+    pp = projectors + (p - 1) * projsize;
+    sx_Nth(prv_StatNames, max(0, min(3, prv_Get(p, prx_savprjst, slprjstat))), #prs_t2);
+    sprintf(#prs_txt, (p === slprjcur) ? "Projector %d (current) : %s, " : "Projector %d : %s, ", p, #prs_t2);
+    sx_Nth(prv_ModeNames, max(0, min(7, prv_Get(p, prx_savopmod, sldopmod))), #prs_t2);
+    strcat(#prs_txt, #prs_t2);
+    sprintf(#prs_t2, ", scene %d, group %d, item %d", prv_Get(p, prx_svscene, sldconfscn), prv_Get(p, prx_svgroup, sldconfgrp),
+        prv_Get(p, prx_savitem, sldconfitm));
+    strcat(#prs_txt, #prs_t2);
+    v = pp[prx_numconf];
+    ((v !== Undef) && (v > 0)) ? (sprintf(#prs_t2, ", config %d", v); strcat(#prs_txt, #prs_t2););
+    v = prv_Value(prv_rPVol, p);
+    (v <= prv_PVolMin) ? strcpy(#prs_t2, ", volume -inf") : sprintf(#prs_t2, ", volume %.1f dB", v);
+    strcat(#prs_txt, #prs_t2);
+    prv_Sounds(p) ? sprintf(#prs_t2, ", level %d %%", 0|(100 * pp[prx_prvol] + 0.5)) : strcpy(#prs_t2, ", silent");
+    strcat(#prs_txt, #prs_t2);
+);
+
+// The menu of the projector p (right clic on its cell in the module "Projectors", the module bk)
+function prv_PrjMenu(p, bk)
+local(s, cur, m)
+(
+    cur = (p === slprjcur);
+    s = prv_Get(p, prx_savprjst, slprjstat);
+    // (gfx_showmenu : the title counts, as the grayed items ; the separators do not)
+    sprintf(#prv_mnu, "#Projector %d||%s||%sOff|%sActive|%sMute|%sSolo||Show in a view|Show in a new view", p,
+        cur ? "#!Current" : "Make current", (s === 0) ? "!" : "", (s === 1) ? "!" : "", (s === 2) ? "!" : "", (s === 3) ? "!" : "");
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#prv_mnu);
+    ((m === 2) && !cur) ? prv_Request(prv_rCurrent, p, 1) :
+    ((m >= 3) && (m <= 6)) ? (((m - 3) !== s) ? prv_Request(prv_rStat, p, m - 3)) :
+    (m === 7) ? prv_Open(p, bk, 0) :
+    (m === 8) ? prv_Open(p, bk, 1);
+);
+
+/*
+    The module "Projectors" : the summary of the projectors 1 ... projucnt, one cell each
+    line 1 : 0 "Projectors", 1 their count, 2 ... 5 the counts by status (Active, Mute, Solo, Off), 6 the ones that sound
+    (prv_Sounds), 7 the current projector (left clic : the next one ; right clic : a menu, as in the module "Global")
+    the grid (8 cells per line) : one cell per projector, its number and its operating mode (the current one [between
+    brackets]) ; its color : its status, as in the views (Active green, Mute red, Solo yellow, Off grey)
+    left clic : Active <-> Mute (Off : Active, as the cell of the status of the views) ; Alt + left clic : shows it in a
+    view of the tab (prv_Open) ; right clic : a menu (make current, status, show in a view, in a new view)
+    the text : the projector under the mouse (status, mode, scene, group, item, configuration, volume)
+    As in the views, changing the status of a projector makes it the current one (prv_Apply).
+*/
+function show_Projectors_Pad(blockId)
+local(h1, h2, h3, hneed, zzmi, jmc, nl, i, p, s, na, nm, nso, nof, nsd, zz, e, hk)
+(
+    // the counts by status, the projectors that sound
+    na = nm = nso = nof = nsd = 0;
+    p = 1; loop(projucnt,
+        s = prv_Get(p, prx_savprjst, slprjstat);
+        (s === 1) ? (na += 1) : (s === 2) ? (nm += 1) : (s === 3) ? (nso += 1) : (nof += 1);
+        prv_Sounds(p) ? (nsd += 1);
+        p += 1;
+    );
+    nl = max(1, min(pad_PRSG_NL, ceil(projucnt / 8)));
+    h1 = uix_jpadHeight(1);
+    h2 = uix_jpadHeight(nl);
+    h3 = uix_jBoxHeight(2);
+    hneed = h1 + h2 + h3 + ui_jd_ctgr;
+    (ui_height() >= hneed) ? (
+        ui_split_top(hneed);
+            zzmi = ui_hover();
+            jmc = ui_jmouse_cap;
+            keepBlockInfos(blockId);
+            (zzmi) ? (
+                ui_push();
+                    ui_color(Col_Frame);
+                    ui_border();
+                ui_pop();
+            );
+            control_group("Projectors");
+            ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+
+            // the counts
+            ui_split_top(h1);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_PRS_Labs, pad_PRS_Siz);
+                strcpy(pad_PRS_Labs[0], "Projectors");
+                sprintf(pad_PRS_Labs[1], "Count %d", projucnt);
+                sprintf(pad_PRS_Labs[2], "Active %d", na);
+                sprintf(pad_PRS_Labs[3], "Mute %d", nm);
+                sprintf(pad_PRS_Labs[4], "Solo %d", nso);
+                sprintf(pad_PRS_Labs[5], "Off %d", nof);
+                sprintf(pad_PRS_Labs[6], "Sound %d", nsd);
+                sprintf(pad_PRS_Labs[7], "Current: P%d", slprjcur);
+                pad_PRS_Colrs[0] = Col_InfoA;
+                pad_PRS_Colrs[1] = Col_P1;
+                pad_PRS_Colrs[2] = (na > 0) ? prv_StatCol(1) : Col_Inactive;
+                pad_PRS_Colrs[3] = (nm > 0) ? prv_StatCol(2) : Col_Inactive;
+                pad_PRS_Colrs[4] = (nso > 0) ? prv_StatCol(3) : Col_Inactive;
+                pad_PRS_Colrs[5] = (nof > 0) ? Col_P1 : Col_Inactive;
+                pad_PRS_Colrs[6] = (nsd > 0) ? Col_P2 : Col_Inactive;
+                pad_PRS_Colrs[7] = Color_Limegreen;
+                zz = control_jpad(pad_PRS);
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4;
+                    ((pad_PRS[ui_jpad_last] - 1) === 7) ? prv_GlbCell(2, zz); // (the cell "Current" of the module "Global")
+                );
+            ui_pop();
+
+            // the grid of the projectors
+            ui_split_top(h2);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_PRSG_Labs, 8 * nl);
+                i = 0; loop(8 * nl,
+                    p = i + 1;
+                    (p <= projucnt) ? (
+                        sx_Nth(prv_ModeShort, max(0, min(7, prv_Get(p, prx_savopmod, sldopmod))), #prv_it);
+                        sprintf(pad_PRSG_Labs[i], (p === slprjcur) ? "[P%d %s]" : "P%d %s", p, #prv_it);
+                        pad_PRSG_Colrs[i] = prv_StatCol(prv_Get(p, prx_savprjst, slprjstat));
+                    ) : (
+                        strcpy(pad_PRSG_Labs[i], "");
+                        pad_PRSG_Colrs[i] = Col_Inactive;
+                    );
+                    i += 1;
+                );
+                zz = control_jpad(pad_PRSG, nl, -1, 1);
+                e = ui_jpad_cell_at(); // (the projector under the mouse, for the text)
+                hk = ((e >= 0) && (e < projucnt)) ? e + 1 : 0;
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4;
+                    p = pad_PRSG[ui_jpad_last]; // (the cell + 1)
+                    ((p >= 1) && (p <= projucnt)) ? (
+                        ((zz & ui_jpad_ev_lmc) && (jmc & 16)) ? prv_Open(p, blockId, 0) : // Alt
+                        (zz & ui_jpad_ev_lmc) ? prv_Cell(0, p, 1, zz) : // (the cell of the status of a view)
+                        (zz & ui_jpad_ev_rmc) ? prv_PrjMenu(p, blockId);
+                    );
+                );
+            ui_pop();
+
+            // the text : the projector under the mouse
+            ui_split_top(h3);
+                ui_pad(4,2,4,2);
+                ui_pcolor(ui_jcolor_text);
+                ui_align(0, 0);
+                (hk > 0) ? prv_PrjText(hk) : strcpy(#prs_txt, "Mouse over a cell : its projector.");
+                ui_split_top(ui_texth()); ui_text(#prs_txt); ui_pop();
+                ui_split_top(ui_texth());
+                    ui_text("Clic : Active / Mute ; Alt + clic : show it in a view ; right clic : menu");
+                ui_pop();
+            ui_pop();
+
         ui_pop();
     );
 );
@@ -424,8 +795,28 @@ function prv_Apply(k, p, v)
     (k === prv_rInp) ? (channelsinpD = v - 2; sliderchange(channelsinpD);) :
     (k === prv_rOut) ? (channelsoutD = v - 2; sliderchange(channelsoutD);) :
     (k === prv_rClear) ? (sldaction = 1;) :
-    (k === prv_rFile) ? (sldaction = v + 2;);
-    (k !== prv_rCurrent) ? sliderevent(1);
+    (k === prv_rFile) ? (sldaction = v + 2;) :
+    (k === prv_rFreeze) ? (
+        // the changes (module "Global") : 0 Run, 1 Hold, 2 Freeze ; as the button "H" of the AKAI (its color : refresh_04)
+        changeallowed = (v === 0); interpallowed = (v !== 2);
+        zzrefreshUI |= refresh_04;
+    );
+    ((k !== prv_rCurrent) && (k !== prv_rFreeze)) ? sliderevent(1);
+);
+
+// The volumes of the projectors (@block) : serialBlock[Pr7_PrjVol + p - 1] (dB, written by @gfx, saved with the project)
+// -> prx_vtgt (linear), that @sample reaches smoothly in prx_vcur ; the projectors after projucnt : 0 dB
+function prv_PVolBlock()
+local(pp, i, v)
+(
+    pp = projectors; i = 0;
+    loop(akousmax,
+        v = (i < projucnt) ? serialBlock[Pr7_PrjVol + i] : 0;
+        v = (v <= prv_PVolMin) ? 0 : 10 ^ (min(prv_PVolMax, v) / 20);
+        pp[prx_vtgt] = v;
+        (pp[prx_vcur] === Undef) ? pp[prx_vcur] = v; // (created : at once)
+        pp += projsize; i += 1;
+    );
 );
 
 // The requests posted by the modules (@block)

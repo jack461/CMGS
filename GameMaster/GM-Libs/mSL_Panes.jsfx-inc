@@ -14,7 +14,10 @@
         The host must define before part 1 :
             pns_Host_Modules(itdsp)  declares the host modules in the menu, for example :
                                         blockSysLog = (itdsp += 1); blockDispNames[blockSysLog] = "System Log";
-                                     and returns the last "itdsp" used
+                                     and returns the last "itdsp" used ; it may also group modules in sub-menus of
+                                     the Studio menu (at most pns_GrpMx ; they come first, before the other modules) :
+                                        pns_GrpTtl[g] = ">Name"; pns_GrpSum[g] = summary module (0 : none);
+                                        pns_GrpFst[g] = first module; pns_GrpNb[g] = count of modules; pns_GrpCnt = g + 1;
         and before pns_Init() :
             dcbTabsCount             number of tabs (uix_jG_menuscr), altTabsNames (alternate tabs names)
             serialBlock, Pr7_StudConf, Pr7_StudRat, Pr7_StudLive
@@ -80,11 +83,20 @@ local (i, p)
     );
 
     // The Studio menu
-    dcbNamesCnt = 128; // up to 128 strings in the dcb Menu
+    dcbNamesCnt = 160; // up to 160 strings in the dcb Menu (63 entries, the modules of the host, 32 user modules)
     GUI_Main_Menu_Block = mSL_StM_Alloc(ui_jmenu_items+dcbNamesCnt, 'Menu', mSL_StM_FlClear);
     blockDispNames = make_array(dcbNamesCnt);
     blockDispIdts = make_array(dcbNamesCnt);
     blockDispInverts = make_array(dcbNamesCnt);
+    blockModNames = make_array(dcbNamesCnt); // the names of the modules by module number (blockDispNames : by menu item)
+    // The sub-menus of the modules (optional) : declared by the host in pns_Host_Modules (see mkModuleMenu)
+    pns_GrpMx = 8;
+    pns_GrpTtl = make_array(pns_GrpMx); // its title (">Name")
+    pns_GrpSum = make_array(pns_GrpMx); // its first item : a summary module (0 : none)
+    pns_GrpFst = make_array(pns_GrpMx); // then the modules pns_GrpFst ... pns_GrpFst + pns_GrpNb - 1 (the views)
+    pns_GrpNb = make_array(pns_GrpMx);
+    pns_GrpLst = make_array(pns_GrpMx); // the menu item of its last entry
+    pns_GrpCnt = 0;
 
     // User modules (created by mSL scripts - see mSL_gui_ops in GamePlayer and Interstys)
     dcbUModsSiz = 32;
@@ -110,8 +122,20 @@ local (i, p)
 
 
 //====== PANES : THE STUDIO MENU ======
+// 1 if the module m belongs to a sub-menu declared by the host (pns_GrpCnt)
+function pns_InGroup(m)
+local (g, r)
+(
+    r = g = 0;
+    while (!r && (g < pns_GrpCnt)) (
+        r = (m === pns_GrpSum[g]) || ((m >= pns_GrpFst[g]) && (m < pns_GrpFst[g] + pns_GrpNb[g]));
+        g += 1;
+    );
+    r;
+);
+
 function mkModuleMenu()
-local (i, j, tmp, itdsp, blockStrSpace, blockThemeBlack, blockThemeTron, blockThemeLightCyan, blockThemeOrange, blockThemeBlue,
+local (i, j, g, it, othFirst, tmp, itdsp, blockStrSpace, blockThemeBlack, blockThemeTron, blockThemeLightCyan, blockThemeOrange, blockThemeBlue,
     blockThemeDarkCyan, blockThemeDarkGreen, blockThemeDarkRed, blockThemeLightAmber, blockThemeNeonGreen, blockThemeLightMagenta)
 (
 
@@ -129,7 +153,8 @@ local (i, j, tmp, itdsp, blockStrSpace, blockThemeBlack, blockThemeTron, blockTh
     blockDispNames[blockModules] = ">Modules";    // not counted
     blockFirst = itdsp + 1;
 
-    // The modules of the host
+    // The modules of the host (and its sub-menus, if any : pns_GrpTtl ... pns_GrpCnt)
+    pns_GrpCnt = 0;
     itdsp = pns_Host_Modules(itdsp);
 
     blockUsrFirst = itdsp+1;
@@ -145,6 +170,27 @@ local (i, j, tmp, itdsp, blockStrSpace, blockThemeBlack, blockThemeTron, blockTh
     );
     blockUsrLast = itdsp;
     //
+    // The numbers above are the module numbers (kept in the panes descriptions, saved with the project). The "Modules"
+    // submenu shows them in another order : first the sub-menus declared by the host (each one starts with its summary
+    // module, then its views ; as in Interstys), then the other modules, sorted alphabetically.
+    // blockDispIdts[menu item] = module number (0 for a sub-menu title), blockDispInverts[module number] = menu item
+    i = 0; loop(blockUsrLast + 1, blockModNames[i] = blockDispNames[i]; i += 1;);
+    it = blockFirst;
+    g = 0; loop(pns_GrpCnt,
+        blockDispNames[it] = pns_GrpTtl[g]; blockDispIdts[it] = 0; it += 1;
+        (pns_GrpSum[g] > 0) ? (blockDispNames[it] = blockModNames[pns_GrpSum[g]]; blockDispIdts[it] = pns_GrpSum[g]; it += 1;);
+        i = 0; loop(pns_GrpNb[g],
+            blockDispNames[it] = blockModNames[pns_GrpFst[g] + i]; blockDispIdts[it] = pns_GrpFst[g] + i; it += 1; i += 1;
+        );
+        pns_GrpLst[g] = it - 1;
+        g += 1;
+    );
+    othFirst = it;
+    i = blockFirst; while (i <= blockUsrLast) (
+        !pns_InGroup(i) ? (blockDispNames[it] = blockModNames[i]; blockDispIdts[it] = i; it += 1;);
+        i += 1;
+    );
+    itdsp = it - 1;
     blockDispITC = itdsp+1; // item count
     // for the menu
     blockStrSpace = (itdsp += 1);
@@ -245,11 +291,12 @@ local (i, j, tmp, itdsp, blockStrSpace, blockThemeBlack, blockThemeTron, blockTh
     //
     blockMenuITC = itdsp + 1 ;
     // ======
-    // Alphabetically sort modules names - insure future compatibility by keeping same number for previous modules
-    mSL_Sort_Strings(blockDispITC, blockFirst, blockDispNames, blockDispIdts, 0, 0);
-    // build invert table
+    // Alphabetically sort the other modules names - the module numbers stay the same
+    mSL_Sort_Strings(blockDispITC, othFirst, blockDispNames, blockDispIdts, 0, 0);
+    // build invert table (module number -> menu item)
     i = blockFirst; while(i<blockDispITC) (
-        blockDispInverts[blockDispIdts[i]] = i; i += 1;
+        (blockDispIdts[i] > 0) ? blockDispInverts[blockDispIdts[i]] = i;
+        i += 1;
     );
 
     // provide a block for the menu
@@ -260,6 +307,8 @@ local (i, j, tmp, itdsp, blockStrSpace, blockThemeBlack, blockThemeTron, blockTh
     // Set the "<" in last module item
     tmp  = menu_Stud_Mod[ui_jmenu_items + blockDispITC - 1];
     str_setchar(tmp, 5, '<');
+    // and in the last item of each sub-menu
+    g = 0; loop(pns_GrpCnt, str_setchar(menu_Stud_Mod[ui_jmenu_items + pns_GrpLst[g]], 5, '<'); g += 1;);
 );
 
 
@@ -685,7 +734,9 @@ local(xx, igb, u, v, i, j, k, p, s, wst, kit, x, d, e, pn_in)
             str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
             ui_jzoom_menu_tick(p); // current display size
 
-            xx = control_jmenu(menu_Stud_Mod);
+            // Shift + right click : the menu ; a plain right click too where no module is under the mouse
+            // (an unused zone of the pane : see keepBlockInfos)
+            xx = control_jmenu_clicks(menu_Stud_Mod, (cModule === 0) ? ui_jmenu_opt_sorclick : ui_jmenu_opt_shrclick);
             xx ? (
                 ui_GFXdoNow |= 1;
                 kit = jmenu_res2item(menu_Stud_Mod, xx);

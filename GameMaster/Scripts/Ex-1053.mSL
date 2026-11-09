@@ -1,0 +1,50 @@
+print("Ex-1053. Interstys : l'export d'un patch et d'une session dans le dossier Data du projet (GMAuxiliary.eel en marche).");
+
+/*
+  Construit un graphe (une ligne, un writer, un reader dont la boucle est reglee, deux effets, une courbe, un curseur) et une
+  instance modifiee, puis ecrit Data/Ex1053-its-patch-<date>.mSL et Data/Ex1053-its-session-<date>.mSL.
+  A la fin, tout est efface (Clear All). Ensuite, a la main : deposer le fichier session dans Interstys, puis
+  Interstys-Export-Check.mSL : chaque module est verifie (resultat 0 ; sans la session relue, les modules n'existent pas).
+  Puis deposer le fichier patch : une instance ex1053 s'ajoute ; il suffit de l'ecouter et de la regarder.
+*/
+
+table(data( Interstys  Clear All ));
+var r = table(data(
+    Interstys
+    Control 3 value 0.5
+    Curve "Forme" type Env sustain 2 points 0 0 0  0.5 1 0.25  1 0 0
+    Line 1  length 2  chan 2
+    Writer 1  line 1  source In:0  overdub 50  status Paused
+    Reader 1  line 1  loop loop  from 0.5  to 1.5  xfade 20  mute On  speed 0.5  status Paused  out Bus 3
+    Effect 1  type Mixer  chan 2  src1 Bus 3  gain1 -6  src2 In:2  gain2 -12
+    Effect 2  type Saturation  chan 2  source Effect 1  mode Curve  curve Forme  drive 12  out Out:0
+    Effect 3  type Filter  chan 2  source In:0  freq 300  mod Cutoff Ctl 3  depth 1  out Bus 8
+    Algorithm Essai
+        input src
+        output dst
+        param lvl -6 -120 40
+        Effect a  type Mixer  chan 2  src1 src  gain1 lvl
+        Effect c  type Filter  chan 2  source Effect a  freq 800
+        Effect d  type Mixer  chan 2  src1 Effect c  gain1 0  out dst
+        Effect z  type None  chan 1
+    End
+    Instance i9 Essai  src In:0  dst Out:2  lvl -3
+    Effect i9:c  freq 1200
+    Free Effect i9:z
+    Export Patch Reader 1 "Ex1053"
+));
+print(sprintf(0, "Ex-1053. patch : %d", r));
+wait(1);
+var r2 = table(data( Interstys  Export Session "Ex1053" ));
+print(sprintf(0, "Ex-1053. session : %d", r2));
+wait(1);
+table(data( Interstys  Clear All ));
+print("Ex-1053. fin");
+
+// Expected "Export : Data/Ex1053-its-patch-%s.mSL : %d words"
+// Expected "Ex-1053. patch : 0"
+// Expected "Export : Data/Ex1053-its-patch-%s.mSL written in the folder of the project"
+// Expected "Export : Data/Ex1053-its-session-%s.mSL : %d words"
+// Expected "Ex-1053. session : 0"
+// Expected "Export : Data/Ex1053-its-session-%s.mSL written in the folder of the project"
+// Expected "Ex-1053. fin"

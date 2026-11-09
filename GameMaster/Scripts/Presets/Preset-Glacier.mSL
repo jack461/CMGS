@@ -1,0 +1,447 @@
+print("Preset-Glacier. Le temps dilate : des etirements extremes, des gels, des halos transposes ; 10 minutes, mono, dans le buffer de sortie.");
+
+/*
+  PRESET "GLACIER" : l'etirement et le gel
+  Deux lecteurs en mode Stretch avancent dans le buffer d'entree 8 a 250 fois plus lentement que le temps reel (parfois
+  a reculons), chacun dans une region tiree au hasard, transposes (deux octaves en dessous ... une octave au-dessus,
+  parfois a l'envers) : le son devient une masse lente, granuleuse. Un lecteur Brage y jette des fragments (a l'endroit
+  ou a l'envers). Un reseau de retards (Matrix) les prolonge ; par moments il se fige (loop Freeze) : il garde un
+  instant du son, un accord immobile qui ondule, pendant que les couches mouvantes s'en vont, ou se taisent d'un coup.
+  Un Shimmer les entoure d'un halo transpose (octaves, quintes, ou des intervalles infimes qui derivent), un chorus lent
+  les epaissit, un passe-bas respire.
+  La forme : des sections de 18 s a 80 s ; dans chacune, les etirements changent de vitesse, les regions derivent, les
+  hauteurs basculent ; un gel sur deux sections environ.
+
+  Utilisation (la meme pour les cinq presets : Nuee, Glacier, Sillons, Resonances, Vertige)
+    - Regler les variables de "Reglages" ci-dessous, puis deposer ce fichier dans la fenetre d'Interstys. Une session
+      vierge suffit : le preset cree ses buffers et ses modules, dans deux instances (glacin : le buffer d'entree ;
+      glacier : le traitement et le buffer de sortie), sans toucher aux autres modules.
+    - Sans fichier (fichier = "") : le son de la piste est enregistre dans le buffer d'entree (In:0, et In:1 si canaux
+      vaut 2) pendant "duree" secondes. Lancer d'abord la lecture de la piste (une nappe, un son de plusieurs minutes),
+      puis deposer le preset : la generation commence apres 6 secondes d'enregistrement, et ne puise que dans la part
+      deja enregistree. Avec un fichier : il est lu dans le buffer d'entree (mono ou stereo ; un nom relatif au dossier
+      du projet, GMAuxiliary.eel en marche, ou un chemin complet), et "duree" doit valoir sa duree (ou moins : au-dela,
+      les positions reviennent au debut du fichier).
+    - La generation dure "sortie" secondes, en temps reel : REAPER doit faire tourner la piste (lecture en cours, ou
+      piste armee avec le monitoring). Le resultat, mono, s'ecrit dans le buffer de sortie (la ligne "res" de l'instance
+      glacier, "glacier:res" dans une table) et s'entend sur Out:0 et Out:1 (niveau "ecoute"). Le journal suit les sections.
+    - Le hasard decide de tout (les positions dans le buffer, les durees, les textures, les hauteurs, les enchainements) :
+      chaque execution est differente. Redeposer le fichier relance une generation (la precedente s'arrete, ses buffers
+      sont refaits). Presets-Stop.mSL arrete les generations en cours (un fondu ; les buffers restent) ;
+      Presets-Free.mSL retire tout.
+    - La premiere fois, le journal note deux erreurs (2787, 2757) : les instances a retirer n'existent pas encore.
+*/
+
+// ======================================================================================================================
+// Reglages
+// ======================================================================================================================
+var fichier = "";     // un fichier son pour le buffer d'entree ; "" : le son de la piste (In:0) est enregistre
+var duree = 240;      // la duree du buffer d'entree (s, au plus 1300) : celle de l'enregistrement, ou celle du fichier
+var canaux = 2;       // les canaux enregistres : 1 (In:0) ou 2 (In:0 et In:1) ; un fichier donne les siens
+var continu = 0;      // 1 : l'enregistrement continue (le buffer garde les "duree" dernieres secondes) ; 0 : il s'arrete
+var sortie = 600;     // la duree produite dans le buffer de sortie (s)
+var ecoute = 6;      // le niveau d'ecoute du resultat sur Out:0 et Out:1 (dB ; -120 : muet)
+
+// ======================================================================================================================
+// Outils (les memes dans les cinq presets)
+// ======================================================================================================================
+var NOM = `glacier;                    // le nom du processus : un nouveau depot de ce preset arrete celui-ci
+var TITRE = "Preset-Glacier";
+var PH = 7700000000;                 // dans une table modele, le mot PH + k est remplace par la k-ieme valeur (tab)
+var arret = 0;                       // 1 : arret demande (Presets-Stop.mSL : un fondu), 2 : arret immediat
+var T0 = 0;                          // le debut de la generation (ptime)
+var Trec = 0;                        // le debut de l'enregistrement du buffer d'entree
+var recfin = 0;                      // 1 : l'enregistrement est termine
+var avecfic = (strlen(fichier) > 0); // 1 : le buffer d'entree vient d'un fichier
+var FIN = 8;                         // le fondu final (s)
+var E = 0.4;                         // l'energie (0 ... 1) : elle erre, et choisit les sections
+var NS = 0;                          // les sections
+
+// le hasard : le generateur de rand() avance d'un nombre de pas tire de l'horloge, chaque execution est differente
+var k0 = floor(1000000 * (ptime() - floor(ptime())));
+loop(1 + (k0 % 7919), rand(1));
+
+function alea(a, b) ( a + rand(b - a); );                       // un reel dans [a, b]
+function aleal(a, b) ( a * pow(b / a, rand(1)); );              // dans [a, b] (a, b > 0), en echelle logarithmique
+function proba(p) ( rand(1) < p; );                             // vrai avec la probabilite p
+function signe(p) ( (rand(1) < p) ? -1 : 1; );                  // -1 avec la probabilite p, sinon 1
+function borne(x, a, b) ( max(a, min(b, x)); );
+function pioche(t) ( t[min(t[-1] - 1, floor(rand(t[-1])))]; );  // un element d'un tableau, au hasard
+function tps() ( ptime() - T0; );                               // le temps de la generation (s)
+
+// un indice tire selon les poids du tableau w
+function tirage(w) local(s, i, u, k)
+(
+    s = 0; i = 0; while (i < w[-1]) ( s += w[i]; i += 1; );
+    u = rand(s); k = 0; s = w[0];
+    while ((k < w[-1] - 1) && (u >= s)) ( k += 1; s += w[k]; );
+    k;
+);
+
+// la table modele m (un data), ses mots PH + 1, PH + 2... remplaces par les valeurs v1, v2... : tab(m, v1, v2...) ;
+// m n'est pas modifiee ; une instance qui n'existe plus (retiree a la main) arrete la generation
+function tab(n; v) local(m, c, i, w, r)
+(
+    r = -1;
+    (arret !== 2) ? (
+        m = v[0]; c = malloc(m[-1]);
+        i = 0; while (i < m[-1]) (
+            w = m[i];
+            ((w > PH) && (w < PH + n)) ? (w = v[w - PH]);
+            c[i] = w; i += 1;
+        );
+        r = table(c);
+        mfree(c);
+        (r !== 0) ? (
+            print(sprintf(0, "%s : erreur %04d dans une table", TITRE, r));
+            ((r === 2757) || (r === 2787)) ? (arret = 2);
+        );
+    );
+    r;
+);
+
+// attendre d secondes ; un message "stop" (Presets-Stop.mSL, ou un nouveau depot du preset) arrete la generation
+function attend(d) local(t1, m)
+(
+    t1 = ptime() + d;
+    while ((arret === 0) && (ptime() < t1 - 0.005)) (
+        (t1 - ptime() >= 1) ? (
+            m = event(`wait, t1 - ptime());
+            (m > 0) ? (
+                (m[2] === `stop) ? (arret = (m[14] === 1) ? 2 : 1);
+                event(`recycle, m);
+            );
+        ) : (
+            wait(t1 - ptime());
+        );
+    );
+);
+
+// la fin : attendre d secondes ; seul un nouveau depot du preset (un arret immediat) interrompt
+function attfin(d) local(t1, m)
+(
+    t1 = ptime() + d;
+    while ((arret !== 2) && (ptime() < t1 - 0.005)) (
+        (t1 - ptime() >= 1) ? (
+            m = event(`wait, t1 - ptime());
+            (m > 0) ? (
+                ((m[2] === `stop) && (m[14] === 1)) ? (arret = 2);
+                event(`recycle, m);
+            );
+        ) : (
+            wait(t1 - ptime());
+        );
+    );
+);
+
+// la duree utilisable du buffer d'entree (s) : la part deja enregistree, ou la duree du fichier
+function dispo() local(e)
+(
+    avecfic ? duree : (
+        e = ptime() - Trec;
+        (e >= duree) ? duree : max(2, e - 0.5);
+    );
+);
+
+// l'energie erre autour d'un arc (faible au debut et a la fin, forte au milieu)
+function energie() local(x, arc)
+(
+    x = borne(tps() / sortie, 0, 1);
+    arc = 0.2 + 0.6 * sin($pi * x);
+    E = borne(0.5 * E + 0.5 * (arc + alea(-0.35, 0.35)), 0, 1);
+);
+
+// la duree d'une transition : une coupure (20 %), un fondu court (50 %) ou long (30 %)
+function transit() local(u)
+(
+    u = rand(1);
+    (u < 0.2) ? alea(0.03, 0.15) : ((u < 0.7) ? alea(0.8, 4) : alea(5, 14));
+);
+
+// ======================================================================================================================
+// Glacier : les modules
+// ======================================================================================================================
+/*
+  L'instance glacier : deux lecteurs Stretch t1, t2 et un lecteur Brage bg sur le buffer d'entree (glacin:src), leurs
+  niveaux (l1 s1, l2 s2, l3 s3) ; leur somme mono mo ; un chorus ch ; un reseau de retards fz (le gel), son niveau
+  (l4 s4 e4 v4) ; un Shimmer ha (le halo), son niveau (l5 s5 e5 v5) ; la somme su, un passe-bas lo que fait respirer un
+  Random (rb) ; le niveau general (lm sm em vm) ; le buffer de sortie res et son writer wo ; l'ecoute m0, m1.
+*/
+var KM = 5;                                   // le niveau general (0, 1 : les etirements, 2 : les fragments, 3 : le gel, 4 : le halo)
+var MAST = -4;
+var NVl = array(`l1, `l2, `l3, `l4, `l5, `lm);
+var NVs = array(`s1, `s2, `s3, `s4, `s5, `sm);
+var NVc = malloc(6);
+var NVd = malloc(6);
+
+// les niveaux : une cible (un LFO constant "l...") et une pente (un Math Slew "s..." : de -80 a 0 dB, par pas de
+// 0.8 dB) ; ils modulent le volume d'un reader, le gain d'un writer, ou (Math Exp "e...", Math Mul "v...") un son ;
+// niv(k, dB, s) : le niveau k va vers dB en s secondes (au plus 10 s par 0.8 dB) ; ils partent de -80 dB
+var TNIV = data(Interstys  Effect glacier:7700000003  offset 7700000001  Effect glacier:7700000004  attack 7700000002  release 7700000002);
+function niv(k, db, s) local(t, d, a)
+(
+    t = borne(1 + db / 80, 0, 1);
+    d = 100 * abs(t - NVc[k]);
+    a = borne(1000 * s / max(0.01, d), 1, 10000);
+    NVc[k] = t; NVd[k] = db;
+    tab(TNIV, t, a, NVl[k], NVs[k]);
+);
+var k1 = 0;
+loop(KM + 1, NVd[k1] = -80; k1 += 1;);
+
+// le buffer d'entree (l'instance glacin : la ligne src et le writer rec, qui l'enregistre depuis In:0)
+var TIN = data(
+    Interstys
+    Algorithm GlacIn
+        Line src  length 7700000001  chan 7700000002
+        Writer rec  line src  source In:0  status Paused
+        Display Line src
+    End
+    Instance glacin GlacIn
+);
+var TFIC = data(Interstys  Line glacin:src  file 7700000001);
+var TREC = data(Interstys  Writer glacin:rec  status 7700000001);
+var TWS = data(Interstys  Writer glacier:7700000001  status 7700000002);
+var TRST = data(Interstys  Reader glacier:7700000001  status 7700000002);
+
+// l'enregistrement s'arrete quand le buffer d'entree est plein (sauf "continu")
+function finrec()
+(
+    (!avecfic && !continu && !recfin && (ptime() - Trec >= duree)) ? (
+        tab(TREC, `Paused); recfin = 1;
+        print(sprintf(0, "%s : le buffer d'entree est complet (%d s)", TITRE, duree));
+    );
+);
+
+var TCRE = data(
+    Interstys
+    Algorithm Glacier
+        Line res  length 7700000001  chan 1
+        Effect l1  type LFO  chan 1  freq 0.01  amp 0  offset 0
+        Effect s1  type Math  chan 1  source Effect l1  gain 40  mode Slew  attack 1000  release 1000  amp 0.01  offset -1
+        Effect l2  type LFO  chan 1  freq 0.01  amp 0  offset 0
+        Effect s2  type Math  chan 1  source Effect l2  gain 40  mode Slew  attack 1000  release 1000  amp 0.01  offset -1
+        Effect l3  type LFO  chan 1  freq 0.01  amp 0  offset 0
+        Effect s3  type Math  chan 1  source Effect l3  gain 40  mode Slew  attack 1000  release 1000  amp 0.01  offset -1
+        Effect l4  type LFO  chan 1  freq 0.01  amp 0  offset 0
+        Effect s4  type Math  chan 1  source Effect l4  gain 40  mode Slew  attack 1000  release 1000  amp 0.01  offset -1
+        Effect l5  type LFO  chan 1  freq 0.01  amp 0  offset 0
+        Effect s5  type Math  chan 1  source Effect l5  gain 40  mode Slew  attack 1000  release 1000  amp 0.01  offset -1
+        Effect lm  type LFO  chan 1  freq 0.01  amp 0  offset 0
+        Effect sm  type Math  chan 1  source Effect lm  gain 40  mode Slew  attack 1000  release 1000  amp 0.01  offset -1
+        Reader t1  line glacin:src  mode Stretch  outchan 2  loop loop  out Own  block 300  overlap 50  search 15  transp 0
+                   stretch 0.05  speed 1  mod Volume Effect s1  depth 80  law dB  status Reading
+        Reader t2  line glacin:src  mode Stretch  outchan 2  loop loop  out Own  block 400  overlap 50  search 15  transp 0
+                   stretch 0.03  speed 0.5  mod Volume Effect s2  depth 80  law dB  status Reading
+        Reader bg  line glacin:src  mode Brage  outchan 2  loop loop  out Own  block 600  overlap 40  search 0  transp 0
+                   speed 1  mod Volume Effect s3  depth 80  law dB  status Reading
+        Effect mo  type Mixer  chan 1  src1 Reader t1:0  gain1 -3  src2 Reader t1:1  gain2 -3  src3 Reader t2:0  gain3 -3
+                   src4 Reader t2:1  gain4 -3  src5 Reader bg:0  gain5 -3  src6 Reader bg:1  gain6 -3
+        Effect ch  type Chorus  chan 1  source Effect mo  delay 25  sweep 8  rate 0.12  wave Random  voices 3  jitter 0.5
+                   glide 2  mix 40
+        Effect fz  type Matrix  chan 1  source Effect mo  mode Hadamard  lines 16  delays Random  seed 7700000002  dmin 40
+                   dmax 260  decay 20  damp 5000  wow 6  rate 0.13  mix 100  loop Decay
+        Effect e4  type Math  chan 1  source Effect s4  gain 38.0618  mode Exp
+        Effect v4  type Math  chan 1  source Effect fz  src2 Effect e4  mode Mul
+        Effect ha  type Shimmer  chan 1  source Effect mo  mode Hadamard  lines 8  decay 8  shimmer 50  shift 12  shift2 7
+                   grain 120  damp 7000  hp 100  mix 100
+        Effect e5  type Math  chan 1  source Effect s5  gain 38.0618  mode Exp
+        Effect v5  type Math  chan 1  source Effect ha  src2 Effect e5  mode Mul
+        Effect su  type Mixer  chan 1  src1 Effect ch  gain1 0  src2 Effect v4  gain2 0  src3 Effect v5  gain3 0
+        Effect rb  type Random  chan 1  mode Smooth  dist Gauss  rate 0.04  jitter 0.5  amp 1  offset 0
+        Effect lo  type Filter  chan 1  source Effect su  mode LP  stages 2  freq 4500  q 0.7  mod Cutoff Effect rb  depth 1.5
+        Effect em  type Math  chan 1  source Effect sm  gain 38.0618  mode Exp
+        Effect vm  type Math  chan 1  source Effect lo  src2 Effect em  mode Mul  limiter On
+        Writer wo  line res  source Effect vm  status Paused
+        Effect m0  type Mixer  chan 1  src1 Effect vm  gain1 7700000003  out Out:0
+        Effect m1  type Mixer  chan 1  src1 Effect vm  gain1 7700000003  out Out:1
+        Display Line res
+    End
+    Instance glacier Glacier
+);
+
+// les modules : la graine des retards du gel, l'ecoute
+function creer() ( tab(TCRE, sortie + 30, floor(rand(99999)), borne(ecoute, -120, 40)); );
+
+var TN = array(`t1, `t2);                     // les etirements
+var TST = data(Interstys  Reader glacier:7700000001  from 7700000002  to 7700000003  stretch 7700000004  speed 7700000005  transp 7700000006  block 7700000007  overlap 7700000008
+    search 7700000009);
+var TSS = data(Interstys  Reader glacier:7700000001  stretch 7700000002);
+var TSP = data(Interstys  Reader glacier:7700000001  speed 7700000002);
+var TWIN = data(Interstys  Reader glacier:7700000001  from 7700000002  to 7700000003);
+var TBR = data(Interstys  Reader glacier:bg  from 7700000001  to 7700000002  block 7700000003  speed 7700000004  transp 7700000005  overlap 7700000006);
+var TFZ = data(Interstys  Effect glacier:fz  loop 7700000001  decay 7700000002);
+var THA = data(Interstys  Effect glacier:ha  shift 7700000001  shift2 7700000002  shimmer 7700000003  decay 7700000004);
+var TCH = data(Interstys  Effect glacier:ch  rate 7700000001  sweep 7700000002  delay 7700000003  Effect glacier:rb  rate 7700000004);
+
+var PIT = array(0.25, 0.5, 0.5, 0.75, 1, 1, 1, 1.5, 2);   // les vitesses de lecture des blocs (la hauteur)
+var HAL1 = array(12, 12, -12, 7, 0.15, 24, 5, 19);         // les halos : les transpositions des lignes paires
+var HAL2 = array(12, 7, -12, -5, -0.15, 12, -7, 12);       // et impaires (demi-tons)
+var WA = malloc(2);                           // les regions des etirements (s)
+var WB = malloc(2);
+var STv = malloc(2);                          // leurs etirements (la progression)
+var SPv = malloc(2);                          // leurs vitesses (la hauteur)
+var GELE = 0;                                 // 1 : le reseau est fige
+
+// l'etirement i : une region de w secondes au hasard, sa progression st (0.004 : 250 fois plus lent ; < 0 : a reculons),
+// sa hauteur sp (< 0 : les blocs a l'envers) et tr (demi-tons), ses blocs (ms)
+function etire(i, w, st, sp, tr, blk) local(d, a)
+(
+    d = dispo(); w = borne(w, min(d, 1), d); a = rand(max(0, d - w));
+    WA[i] = a; WB[i] = a + w; STv[i] = st; SPv[i] = sp;
+    tab(TST, TN[i], a, a + w, borne(st, -32, 32), borne(sp, -32, 32), borne(tr, -24, 24), borne(blk, 10, 5000),
+        floor(alea(30, 50)), alea(8, 25));
+);
+
+// les fragments : une region de w secondes, des segments de blk ms, leur vitesse, leur transposition
+function brage(w, blk, sp, tr) local(d, a)
+(
+    d = dispo(); w = borne(w, min(d, 0.5), d); a = rand(max(0, d - w));
+    tab(TBR, a, a + w, borne(blk, 10, 5000), borne(sp, -32, 32), borne(tr, -24, 24), floor(alea(20, 50)));
+);
+
+// le halo : ses transpositions, sa part transposee, sa duree
+function halo() local(k)
+(
+    k = floor(rand(7.999));
+    tab(THA, HAL1[k], HAL2[k], alea(30, 80), aleal(4, 20));
+);
+
+// la region de l'etirement i derive (de 2 a 20 % du buffer)
+function derive(i) local(d, w, a)
+(
+    d = dispo(); w = min(WB[i] - WA[i], d);
+    a = borne(WA[i] + signe(0.5) * aleal(0.02, 0.2) * d, 0, max(0, d - w));
+    WA[i] = a; WB[i] = a + w;
+    tab(TWIN, TN[i], a, a + w);
+);
+
+// un gel de h secondes : le reseau garde ce qu'il contient ; parfois les couches mouvantes se taisent d'un coup
+function gel(h) local(cut, a, b, c)
+(
+    print(sprintf(0, "%s %d:%02d  gel (%d s)", TITRE, floor(tps() / 60), floor(tps()) % 60, floor(h + 0.5)));
+    cut = proba(0.4);
+    GELE = 1;
+    tab(TFZ, `Freeze, 30);
+    niv(3, alea(-5, -1), alea(1, 5));
+    a = NVd[0]; b = NVd[1]; c = NVd[2];
+    cut ? (
+        niv(0, -80, alea(0.03, 0.4)); niv(1, -80, alea(0.03, 0.4)); niv(2, -80, alea(0.03, 0.4));
+    );
+    attend(h);
+    cut ? (
+        niv(0, a, alea(3, 12)); niv(1, b, alea(3, 12)); niv(2, c, alea(3, 12));
+    );
+    tab(TFZ, `Decay, aleal(8, 40));
+    niv(3, alea(-20, -12), aleal(8, 20));
+    GELE = 0;
+);
+
+// une section dure D secondes : toutes les 3 a 9 s, un etirement change de vitesse, de region ou de hauteur ; un gel
+// une fois sur deux, apres le premier quart
+function vivre(D) local(tf, u, i, g)
+(
+    tf = ptime() + D;
+    g = proba(0.55);
+    while ((arret === 0) && (ptime() < tf - 0.3) && (tps() < sortie - FIN)) (
+        attend(min(alea(3, 9), max(0.1, tf - ptime())));
+        finrec();
+        ((arret === 0) && (ptime() < tf - 1) && (tps() < sortie - FIN)) ? (
+            (g && (ptime() > tf - 0.75 * D)) ? (
+                g = 0;
+                gel(min(aleal(6, 30), max(3, sortie - FIN - tps() - 2)));
+            ) : (
+                i = floor(rand(1.999));
+                (NVd[i] > -60) ? (
+                    u = rand(1);
+                    (u < 0.35) ? (
+                        STv[i] = borne(STv[i] * aleal(0.6, 1.6), -32, 32);
+                        tab(TSS, TN[i], STv[i]);
+                    ) : ((u < 0.6) ? derive(i) : ((u < 0.72) ? (
+                        SPv[i] = sign(SPv[i]) * pioche(PIT);
+                        tab(TSP, TN[i], SPv[i]);
+                    ) : 0));
+                );
+            );
+        );
+    );
+);
+
+function section() local(D, tr)
+(
+    energie();
+    NS += 1;
+    D = aleal(18, 80);
+    tr = proba(0.25) ? alea(0.05, 0.4) : alea(3, 14);
+    print(sprintf(0, "%s %d:%02d  section %d : %d s (energie %.2f)", TITRE, floor(tps() / 60), floor(tps()) % 60, NS,
+        floor(D + 0.5), E));
+    etire(0, aleal(6, 60), signe(0.25) * aleal(0.004, 0.12), signe(0.12) * pioche(PIT), (proba(0.3) ? alea(-0.5, 0.5) : 0),
+        aleal(120, 600));
+    niv(0, (proba(0.85) ? alea(-6, -2) : -80), tr);
+    proba(0.45 + 0.4 * E) ? (
+        etire(1, aleal(6, 60), signe(0.25) * aleal(0.004, 0.12), signe(0.12) * pioche(PIT),
+            (proba(0.3) ? alea(-0.5, 0.5) : 0), aleal(120, 600));
+        niv(1, alea(-9, -4), tr);
+    ) : niv(1, -80, tr);
+    proba(0.2 + 0.5 * E) ? (
+        brage(aleal(2, 20), aleal(150, 2500), signe(0.4) * pioche(PIT), (proba(0.3) ? alea(-3, 3) : 0));
+        niv(2, alea(-14, -5), tr);
+    ) : niv(2, -80, tr);
+    proba(0.6) ? (
+        halo();
+        niv(4, alea(-14, -4), 2 * tr + 2);
+    ) : niv(4, -80, 2 * tr + 2);
+    (!GELE) ? niv(3, alea(-20, -10), tr);
+    tab(TCH, aleal(0.03, 0.4), alea(3, 12), alea(15, 40), aleal(0.015, 0.1));
+    vivre(D);
+);
+
+// la fin : les lecteurs s'arretent
+function arreter() ( tab(TRST, `t1, `Paused); tab(TRST, `t2, `Paused); tab(TRST, `bg, `Paused); );
+
+// ======================================================================================================================
+// Demarrage, generation, fin (les memes dans les cinq presets)
+// ======================================================================================================================
+// un depot precedent de ce preset : son chef d'orchestre s'arrete (ses modules sont refaits ci-dessous)
+(thread(`count, NOM) > 0) ? (
+    loop(thread(`count, NOM), event(`notify, 0, 0, 0, 0, NOM, `stop, 0, 10, 0, 0, 0, 1, 0));
+    wait(1.5);
+);
+thread(`name, NOM);
+// les instances precedentes (la ligne d'abord : lue d'un fichier, elle n'appartient plus a son instance)
+table(data( Free Instance glacier ));
+table(data( Free Line glacin:src  Free Instance glacin ));
+var r = tab(TIN, (avecfic ? 1 : borne(duree, 2, 1300)), (avecfic ? 1 : borne(canaux, 1, 2)));
+((r === 0) && avecfic) ? (r = tab(TFIC, fichier));
+(r === 0) ? (r = creer());
+(r !== 0) ? (
+    print(sprintf(0, "%s : les modules n'ont pas pu etre crees (erreur %04d), rien n'est genere.", TITRE, r));
+    arret = 2;
+);
+(arret === 0) ? (
+    Trec = ptime();
+    avecfic ? (
+        print(sprintf(0, "%s : le buffer d'entree vient du fichier %s (%d s utilisees)", TITRE, fichier, duree));
+    ) : (
+        tab(TREC, `Writing);
+        print(sprintf(0, "%s : enregistrement du buffer d'entree depuis In:0 (%d s, %d canal(aux))", TITRE, duree, canaux));
+        attend(min(duree, 6));
+    );
+);
+(arret === 0) ? (
+    T0 = ptime();
+    tab(TWS, `wo, `Writing);
+    niv(KM, MAST, 3);
+    print(sprintf(0, "%s : generation de %d s dans le buffer de sortie (glacier:res)", TITRE, sortie));
+);
+while ((arret === 0) && (tps() < sortie - FIN)) ( section(); );
+(arret !== 2) ? (
+    niv(KM, -80, (arret === 1) ? 3 : FIN);
+    attfin((arret === 1) ? 3.5 : (FIN + 0.5));
+);
+(arret !== 2) ? (
+    tab(TWS, `wo, `Paused);
+    arreter();
+    (!avecfic && !recfin) ? tab(TREC, `Paused);
+    print(sprintf(0, "%s : fin, %d s dans le buffer de sortie (glacier:res)", TITRE, ((T0 > 0) ? floor(tps()) : 0)));
+);

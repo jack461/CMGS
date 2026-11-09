@@ -19,7 +19,7 @@
 
 wArea = 0x100; // an array to keep infos.
 
-versionGMS=0x000105;
+versionGMS=0x000106; // 1.6 : command 30 : a name with a folder ("Data/Toto.mSL"), a long text
 
 
 <? include("GM-Libs/mSL_gmem_map.jsfx-inc"); ?>
@@ -64,6 +64,37 @@ local(ws,ls,i,c)
         detectProjectPath();
     );
     #buf;
+);
+
+// the text at "array" (6 characters per word, see mSL_g6packStr), from the word "ptin" : at most 2000 words in "str" (a long
+// text is written in several pieces) ; the index of the next word (a word 0 ends the text)
+function g6chunk(str, array, ptin)
+local (src, ch, n)
+(
+    strcpy(str, ""); n = 0;
+    while ((n < 2000) && ((src = gmem[array+ptin]) != 0)) (
+        while (src != 0) (
+            ch = src - 256 * floor(src / 256);
+            str_setchar(str, -0.25, ch, 'cu');
+            src = floor(src/256);
+        );
+        ptin += 1; n += 1;
+    );
+    ptin;
+);
+
+// the folder of the file "ffn" is created if it does not exist, when the name of the file in the project ("lp" : the length
+// of the folder of the project, without the separator) has a folder
+function makeFileDir(ffn, lp)
+local (i, ws)
+(
+    i = strlen(ffn) - 1;
+    while ((i > lp) && (str_getchar(ffn, i) != '/')) ( i -= 1; );
+    (i > lp) ? (
+        ws = #;
+        strncpy(ws, ffn, i);
+        RecursiveCreateDirectory(ws, 0);
+    );
 );
 //======================================================>
 
@@ -282,6 +313,7 @@ function doWork()
             strcat(#ffn, #fn);
             //sprintf(#st, "Full file name %s\n", #ffn);
             // ShowConsoleMsg(#st);
+            makeFileDir(#ffn, strlen(#ppath)); // ("Data/Toto.mSL")
             rpt = 1; ptin = 0; add = gmem[scptPar3];
             // mSL_g6unpackArray(#fc, add, ptin);
 
@@ -294,7 +326,7 @@ function doWork()
                 // write a string
 
                 while (rpt) (
-                ptin = mSL_g6unpackArray(#fc, add, ptin);
+                ptin = g6chunk(#fc, add, ptin);
                 fr = fwrite(fp, #fc, 0);
                 rpt = gmem[add + ptin] != 0;
                 (gmem[scptTrcs] & 2) ? (sprintf(#st, "Write %d  => cr  %d // %d\n", strlen(#fc), fr, rpt); ShowConsoleMsg(#st);); // trace
