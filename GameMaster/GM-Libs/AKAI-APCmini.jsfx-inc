@@ -85,6 +85,9 @@ vols1 = vols2 = 0;
 
 colorAOn = colorGreen;
 colorAOff = colorYellow;
+// the zone A (pad) and the page 8 : their colors for the projectors 1 ... 8 (1), 9 ... 16 (2) (see apc_SetColors)
+colorAOn1 = colorAOn2 = colorGreen;
+colorAOff1 = colorAOff2 = colorYellow;
 
 colorBOn = colorYellow;
 colorBOff = colorGreen;
@@ -141,11 +144,33 @@ dolistdate = xalloc; xalloc += dolistsiz;
 dolistflgs = xalloc; xalloc += dolistsiz;
 dolistacts = xalloc; xalloc += dolistsiz;
 PsetColors = xalloc; xalloc += 16; // A set of 16 Colors
+apc_bankPrj = xalloc; xalloc += 4; // the projector last chosen in each bank of 8 (0 ... 7, see apc_Bank)
+memset(apc_bankPrj, 0, 4);
+apc_shiftUsed = 0; // another key pressed while Shift is held : Shift is a modifier (no change of bank at its release)
+apc_prvBank = -1; // the bank shown by the leds
 
 midiwafree = midiwasize + midiwa - xalloc;
 justafter = 0;
 theent = 0;
 
+
+/*
+    Banks of projectors (2026-11-09) : the 8 projector buttons (0x40 ... 0x47) and the status line of the page 0
+    (0x30 ... 0x37) show the bank of the current projector : the projectors 1 ... 8, 9 ... 16 (projucnt ; at most 3
+    banks, akousmax = 24) ; a short press of Shift alone (no other key during the press) makes current the projector
+    last chosen in the next bank. The zone A of the page 0 (the pad, 0x00 ... 0x0F) and the 64 pads of the page 8 have
+    the colors of the bank : pale blue for the projectors 1 ... 8, pale green for the others (mk1 : green and yellow
+    exchanged).
+*/
+// the count of banks of 8 projectors ; the bank of the current projector (0 : the projectors 1 ... 8)
+function apc_Banks() ( max(1, ceil(projucnt / 8)); );
+function apc_Bank() ( max(0, min(apc_Banks() - 1, floor((slprjcur - 1) / 8))); );
+
+// the colors of the zone A and of the page 8 : those of the bank of the current projector
+function apc_SetColors()
+(
+    (apc_Bank() > 0) ? ( colorAOn = colorAOn2; colorAOff = colorAOff2; ) : ( colorAOn = colorAOn1; colorAOff = colorAOff1; );
+);
 
 // Select the AKAI APCmini model : 0 (mk1) or 1 (mk2)
 function setModel(mo)
@@ -166,7 +191,8 @@ function setModel(mo)
             // We are limited to these 3 colors
             colorGreen = 1; colorGreen2 = 2;
             colorRed = 3; colorYellow = 5; colorBlack = 0; colorChange = 4;
-            colorAOn = colorGreen; colorAOff = colorYellow;
+            colorAOn1 = colorGreen; colorAOff1 = colorYellow; // projectors 1 ... 8
+            colorAOn2 = colorYellow; colorAOff2 = colorGreen; // projectors 9 ... 16 : the colors exchanged
             colorBOn = colorYellow; colorBOff = colorGreen;
             colorCOn = colorGreen; colorCOff = colorYellow;
             // Set the array of presets colors for APCmini mk1
@@ -187,7 +213,8 @@ function setModel(mo)
             // More choices of colors
             colorGreen = 54; colorGreen2 = 32;
             colorRed = 60; colorYellow = 13; colorBlack = 0; colorChange = 70;
-            colorAOn = 32; colorAOff = 102;  // two shades
+            colorAOn1 = 32; colorAOff1 = 102; // projectors 1 ... 8 : pale blue, two shades
+            colorAOn2 = 20; colorAOff2 = 101; // projectors 9 ... 16 : pale green, two shades
             colorBOn = 13; colorBOff = 62; // two shades
             colorCOn = 36; colorCOff = 45; // two shades
             // Set the array of presets colors for APCmini mk2
@@ -196,6 +223,7 @@ function setModel(mo)
             PsetColors[8] = 113; PsetColors[9] = 69; PsetColors[10] = 127; PsetColors[11] = 74;
             PsetColors[12] = 1; PsetColors[13] = 2; PsetColors[14] = 3; PsetColors[15] = 52;
         );
+        apc_SetColors();
     );
 
 );
@@ -239,7 +267,7 @@ local (i, ent)
 );
 
 function updateLeds()
-local (n, u, v, w, ppro, disp_1, disp_2, cnt, bit, donow)
+local (n, u, v, w, ppro, disp_1, disp_2, cnt, bit, donow, bk)
 (
     disp_1 = disp_2 = 0;
 
@@ -547,18 +575,23 @@ local (n, u, v, w, ppro, disp_1, disp_2, cnt, bit, donow)
         n = 0; loop (min(projucnt, 8), midisend(0, NoteOnK, Firstpro + n, buttonOff); n += 1;);
         projUI = currentpro;
         prjnum = slprjcur - 1;
-        reledD = (prjnum < 8) ? Firstpro + prjnum : unusedled; // (a projector after the 8th : no button)
+        reledD = Firstpro + (prjnum % 8); // (the buttons show the bank of the current projector, see apc_Bank)
         s = projUI[prx_savprjst];
         w = (s & 1) ? buttonOn : buttonCli;
         (reledD != unusedled) ? midisend(0, NoteOnK, reledD, w); // buttonOn
     );
 
     (disp_2 & 1) ? (
-        // Display the 8 projectors status in 2nd pad line (the projectors 1 ... 8 ; the pads 0x38 ... are other controls)
+        // Display the 8 projectors status in 2nd pad line (the projectors of the bank of the current one, 1 ... 8 or
+        // 9 ... 16 ; the pads 0x38 ... are other controls)
+        bk = 8 * apc_Bank();
         n = 0;
-        loop (min(projucnt, 8), ppro = projectors + n * projsize;
-            s = ppro[prx_savprjst];
-            w = (s === 1) ? colorGreen : (s === 2) ? colorRed : (s === 3) ? colorYellow : 0;
+        loop (min(projucnt, 8),
+            (bk + n < projucnt) ? (
+                ppro = projectors + (bk + n) * projsize;
+                s = ppro[prx_savprjst];
+                w = (s === 1) ? colorGreen : (s === 2) ? colorRed : (s === 3) ? colorYellow : 0;
+            ) : (w = 0);
             midisend(0, NoteOn, 0x30 + n, w);
             n += 1;
         );
@@ -606,6 +639,31 @@ function MIDI_init()
 );
 
 
+// Makes the projector n (0 ... projucnt - 1) the current one, as its button does ; its status
+function apc_SelPrj(n)
+local (st)
+(
+    setModel(Model); // (Firstpro : the model of the key just pressed)
+    (reledD != unusedled) ? midisend(0, NoteOn, reledD, buttonOff);
+    reledD = Firstpro + (n % 8);
+    projUI = projectors + n * projsize;
+    st = projUI[prx_savprjst];
+    midisend(0, NoteOn, reledD, (st & 1) ? buttonOn : buttonCli);
+    // Now, update all the controls
+    slprjcur = n + 1; // actual number
+    slprjcurD = slprjcur -1;
+    sliderchange(slprjcurD);
+    projsmd = 1;
+    slsignal = 1;
+    zzrefreshUI |= refresh_all;
+    reledAtime = 1;
+    reledA2time = 1;
+    reledBtime = 1;
+    reledCtime = 1;
+    apc_bankPrj[floor(n / 8)] = n % 8;
+    st;
+);
+
 // mbu is for "MIDI buffer"
 function MIDI_in(mbu, lng)
 local (km, p1, p2, ppro, fvol, fpro, mpro, MIDIdate, pstat)
@@ -629,6 +687,8 @@ local (km, p1, p2, ppro, fvol, fpro, mpro, MIDIdate, pstat)
                 // a new note on ?
                 p1 = 256; // reject the note
             );
+            // a key pressed while Shift is held : Shift is a modifier (no change of bank at its release)
+            ((p1 !== 0x62) && (p1 !== 0x7A) && (p1 < 256) && (MIDInotedate[shiftB] < 0)) ? (apc_shiftUsed = 1);
 
 
             // Some buttons are always active
@@ -976,24 +1036,11 @@ local (km, p1, p2, ppro, fvol, fpro, mpro, MIDIdate, pstat)
                 ) : (
                     prjnum = p1 - 0x64; Model = 1;
                 );
-                (reledD != unusedled) ? midisend(0, NoteOn, reledD, buttonOff);
-                reledD = p1;
-                projUI = projectors + prjnum * projsize;
-                s = projUI[prx_savprjst];
-                w = (s & 1) ? buttonOn : buttonCli;
-                midisend(0, NoteOn, reledD, w);
-                mpro = 1;
-                // Now, update all the controls
-                slprjcur = prjnum + 1; // actual number
-                slprjcurD = slprjcur -1;
-                sliderchange(slprjcurD);
-                projsmd = 1;
-                slsignal = 1;
-                zzrefreshUI |= refresh_all;
-                reledAtime = 1;
-                reledA2time = 1;
-                reledBtime = 1;
-                reledCtime = 1;
+                prjnum += 8 * apc_Bank(); // (the buttons show the bank of the current projector)
+                (prjnum < projucnt) ? (
+                    s = apc_SelPrj(prjnum);
+                    mpro = 1;
+                );
             ) :
 
 
@@ -1033,6 +1080,7 @@ local (km, p1, p2, ppro, fvol, fpro, mpro, MIDIdate, pstat)
                     Model = 1;
                 );
                 shiftB = p1; // shift button
+                apc_shiftUsed = 0; // (its release changes the bank, unless another key is pressed meanwhile)
                 zzrefreshUI = zzrefreshNxt = refresh_all;
             );
         ) :
@@ -1045,15 +1093,30 @@ local (km, p1, p2, ppro, fvol, fpro, mpro, MIDIdate, pstat)
         (((km & 0xF0) === 0x80) || (((km & 0xF0) === 0x90) && (p2 === 0))) ? (
             MIDIdate = MIDInotedate[mbu[1]]; // keep the (negative) "note on" date
 
+            // Shift released, alone (no other key during the press) : the next bank of projectors, its projector last chosen
+            ((p1 === 0x62) || (p1 === 0x7A)) ? (
+                (!apc_shiftUsed && (apc_Banks() > 1)) ? (
+                    prjnum = (apc_Bank() + 1) % apc_Banks();
+                    prjnum = min(projucnt - 1, 8 * prjnum + apc_bankPrj[prjnum]);
+                    s = apc_SelPrj(prjnum);
+                    mpro = 1;
+                );
+                apc_shiftUsed = 0;
+            );
 
             // off note for a projector
             (((p1 >= 0x40) && (p1 <= 0x47)) || ((p1 >= 0x64) && (p1 <= 0x6B))) ? (
                 w = MIDIdate + timez;
-                ((w > 1.1) && (w < 6)) ? (
+                (p1 <= 0x47) ? (
+                    prjnum = p1 - 0x40 + 8 * apc_Bank();
+                ) : (
+                    prjnum = p1 - 0x64 + 8 * apc_Bank();
+                );
+                ((w > 1.1) && (w < 6) && (prjnum < projucnt)) ? (
                     (p1 <= 0x47) ? (
-                        prjnum = p1 - 0x40; Model = 0;
+                        Model = 0;
                     ) : (
-                        prjnum = p1 - 0x64; Model = 1;
+                        Model = 1;
                     );
                     (reledD != unusedled) ? midisend(0, NoteOn, reledD, buttonOff);
                     reledD = p1;
@@ -1079,8 +1142,9 @@ local (km, p1, p2, ppro, fvol, fpro, mpro, MIDIdate, pstat)
                     fpro = 1;
                 ) :
 
-                ((mbu[1] >= 0x30) && (mbu[1] <= 0x37)) ? (
-                    ppro = (mbu[1] - 0x30) * projsize + projectors;
+                ((mbu[1] >= 0x30) && (mbu[1] <= 0x37) && (mbu[1] - 0x30 + 8 * apc_Bank() < projucnt)) ? (
+                    // (the projectors of the bank of the current one)
+                    ppro = (mbu[1] - 0x30 + 8 * apc_Bank()) * projsize + projectors;
                     fpro = 1;
                 ) :
 
@@ -1261,8 +1325,17 @@ function thendo(flgs)
 );
 
 // Called every block
-function MIDI_handle() local (zzuleft)
+function MIDI_handle() local (zzuleft, bk)
 (
+    // the bank of the current projector changed (here, or in the plug-in) : the colors of the bank, all the leds
+    bk = apc_Bank();
+    (bk !== apc_prvBank) ? (
+        apc_prvBank = bk;
+        apc_SetColors();
+        zzrefreshUI |= refresh_all;
+    );
+    apc_bankPrj[bk] = max(0, slprjcur - 1) % 8;
+
     // Update occasionnaly, or when necessary
     zzupdrefreshUI |= zzrefreshUI;
     (slidersmod != 0) ? (
