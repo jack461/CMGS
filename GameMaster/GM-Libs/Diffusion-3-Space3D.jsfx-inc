@@ -35,7 +35,12 @@
     In the view : left drag = rotate, wheel = zoom, clic = select, right clic = options ;
     key 'h' : the gains and levels as balls, or as crosses and halos (s3d_style, as in the live screen).
 
-    Layouts : drop a GRM Spaces file on the window (.lay : one layout, .ala : a library) : see sx_Drop.
+    Layouts : drop a GRM Spaces file on the window (.lay : one layout, .ala : a library) : see sx_Drop (dropped on a
+    module "Edit A" ... "Edit D" : the library is read, the layout goes to the editor, not here).
+    Edit A ... D : the menus of the speakers and of the sources (right clic, cells 1 and 2) also list the configurations
+    of the editors (Diffusion-3-Edit) : a one-shot load (sx_edReq, done by ed_Frame ; the points fitted into [-1, 1]) ;
+    the menus of the trajectories A and B (cells 3 and 4) too : the path of the editor (its curves sampled) becomes the
+    trajectory "File".
     Sources : position = group center (on the trajectory) + spread * position in the sources layout.
 
     Speakers "Diffusion" (by default) : the speakers of the configuration of Diffusion (HP_Positions, scaled into
@@ -61,6 +66,8 @@ sx_lbg = 0;                 // its background : 0 black, 1 that of the live scre
 sx_spkHP = 1;               // the speakers are those of the configuration of Diffusion (sx_SpkHP)
 sx_hppos = -1;              // the HP_Positions they come from
 sx_hpcf = -1;               // the configuration of the gains (sx_ConfGains, in HP_Model)
+sx_edReq = 0;               // a load of the points of an editor "Edit A" ... "D" asked : the editor + 1 (ed_Frame)
+sx_edSrc = 0;               // 0 : as the speakers ; 1 : as the sources
 SX_MAXSPK = 128;
 SX_MAXSRC = 128;
 SX_MAXTRJ = 1024;          // (the Spiral exported by GRM Spaces has 1000 points)
@@ -161,8 +168,27 @@ local(k)
     );
 );
 
-// Menu of the library : the layouts of more than maxn points are greyed ; withsize : add the submenu "Source size".
-// Returns the layout (0 ... sx_libng - 1), sx_libng + i for the item i of the submenu, or -1
+// Adds to #sx_mnu, after a separator, the editors "Edit A" ... "Edit D" (Diffusion-3-Edit, included later : their
+// globals ED_NV, ed_st, ed_nm ... are read at run time) : "Edit A : name  (n)", greyed with fewer than minn points or
+// more than maxn
+function sx_EdList(minn, maxn)
+local(g, c)
+(
+    strcat(#sx_mnu, "|");
+    g = 0;
+    loop(ED_NV,
+        c = ed_st[g * ED_SS + ed_sN];
+        sprintf(#sx_it, (strlen(ed_nm[g]) > 0) ? "|%sEdit %c : %s  (%d)" : "|%sEdit %c%s  (%d)",
+            ((c < minn) || (c > maxn)) ? "#" : "", 'A' + g, ed_nm[g], c);
+        strcat(#sx_mnu, #sx_it);
+        g += 1;
+    );
+);
+
+// Menu of the library : the layouts of more than maxn points are greyed ; then the editors "Edit A" ... "Edit D" ;
+// withsize : add the submenu "Source size". Returns the layout (0 ... sx_libng - 1), sx_libng + i for the item i of
+// the submenu, 10000 + e for the editor e, or -1. (The editors are in Diffusion-3-Edit, included later : their
+// globals ED_NV, ed_st, ed_nm ... are read at run time.)
 function sx_LibMenu(maxn, curname, withsize)
 local(g, c)
 (
@@ -180,6 +206,8 @@ local(g, c)
             g += 1;
         );
     );
+    // the editors (greyed : empty, or too many points)
+    sx_EdList(1, maxn);
     withsize ? (
         strcat(#sx_mnu, "||>Source size");
         sx_MenuList(sx_SrcSizes, 5, -1, 1);
@@ -189,6 +217,9 @@ local(g, c)
     );
     gfx_x = mouse_x; gfx_y = mouse_y;
     c = gfx_showmenu(#sx_mnu);
+    // (the items : 1 the title ; 2 ... the layouts ; then the editors ; then the end of the menu)
+    ((c >= sx_libng + 2) && (c < sx_libng + 2 + ED_NV)) ? 10000 + c - sx_libng - 2 :
+    (c >= sx_libng + 2 + ED_NV) ? c - 2 - ED_NV :
     (c >= 2) ? c - 2 : -1;
 );
 
@@ -245,8 +276,9 @@ local(g, k, maxn)
     );
 );
 
-// A GRM Spaces file dropped on the window : it becomes the library
-function sx_Drop(fn)
+// A GRM Spaces file dropped on the window : it becomes the library ; take : a single layout is used at once (0 : the
+// file was dropped on a module "Edit", that takes the layout) ; returns the count of layouts read (<= 0 : none)
+function sx_Drop(fn, take)
 local(n, k)
 (
     n = s3d_load_lay(fn, sx_libpts, SX_LIBNPT, sx_libstart, sx_libcnt, SX_LIBG);
@@ -258,12 +290,13 @@ local(n, k)
         while ((k > 0) && (str_getchar(fn, k - 1) !== '/') && (str_getchar(fn, k - 1) !== '\\')) (k -= 1;);
         strcpy_substr(#sx_libfile, fn, k);
         // a single layout : used at once
-        (n === 1) ? sx_LibTake(0, matchi("*source*", #s3d_laytag));
+        (take && (n === 1)) ? sx_LibTake(0, matchi("*source*", #s3d_laytag));
         sprintf(#sx_it, "Space 3D : \"%s\", %d layout(s)", #sx_libfile, n);
     ) : (
         sprintf(#sx_it, "Space 3D : \"%s\", no layout read (%d)", fn, n);
     );
     mSL_log(SysLogBox, #sx_it);
+    n; // (the count of layouts read)
 );
 
 // the view corresponding to the camera
@@ -527,6 +560,7 @@ local(m, k, rc, sh)
     (c === 1) ? (
         rc ? (
             k = sx_LibMenu(SX_MAXSPK, #sx_spkname, 0);
+            (k >= 10000) ? (sx_edReq = k - 10000 + 1; sx_edSrc = 0; ui_GFXdoNow |= 4;) :
             (k === sx_libng) ? sx_SpkHP() : (k >= 0) ? sx_LibTake(k, 0);
         ) : (
             // the next : Diffusion, the layouts of the library, Diffusion
@@ -536,14 +570,15 @@ local(m, k, rc, sh)
     (c === 2) ? (
         rc ? (
             k = sx_LibMenu(SX_MAXSRC, #sx_srcname, 1);
+            (k >= 10000) ? (sx_edReq = k - 10000 + 1; sx_edSrc = 1; ui_GFXdoNow |= 4;) :
             ((k >= 0) && (k < sx_libng)) ? sx_LibTake(k, 1) :
             (k >= sx_libng) ? (sx_Nth(sx_SrcSizes, k - sx_libng, #sx_it); sx_size = s3d_atof(#sx_it, 0, strlen(#sx_it)) / 100;);
         ) : sx_LibNext(1);
     ) :
     (c === 3) ? (
         rc ? (
-            // trajectory A (1-T), dynamics (T+1 - T+10), mode (T+11 - T+14), radius (T+15 - T+19), reset S R T (T+20)
-            // with T = s3d_TrjCount
+            // trajectory A (1-T), dynamics (T+1 - T+10), mode (T+11 - T+14), radius (T+15 - T+19), reset S R T (T+20),
+            // the editors Edit A ... D (T+21 ... : their trajectory becomes "File", loaded by ed_Frame), with T = s3d_TrjCount
             strcpy(#sx_mnu, "");
             sx_TrjList(sx_traj);
             strcat(#sx_mnu, "||>Dynamics");
@@ -553,8 +588,10 @@ local(m, k, rc, sh)
             strcat(#sx_mnu, "|>Radius");
             sx_MenuList("0.2|0.4|0.6|0.8|1.0", 5, floor(sx_trjr * 5 + 0.5) - 1, 1);
             strcat(#sx_mnu, "||Reset size, rotation, position");
+            sx_EdList(2, SX_MAXTRJ);
             m = gfx_showmenu(#sx_mnu);
             k = s3d_TrjCount;
+            ((m >= k + 21) && (m < k + 21 + ED_NV)) ? (sx_edReq = m - k - 20; sx_edSrc = 2; ui_GFXdoNow |= 4;) :
             ((m >= 1) && (m <= k)) ? (sx_traj = m - 1;) :
             ((m >= k + 1) && (m <= k + 10)) ? (sx_curve = m - k - 1;) :
             ((m >= k + 11) && (m <= k + 14)) ? (sx_mode = m - k - 11;) :
@@ -568,7 +605,9 @@ local(m, k, rc, sh)
         rc ? (
             strcpy(#sx_mnu, "");
             sx_TrjList(sx_trajB);
+            sx_EdList(2, SX_MAXTRJ); // (the editors : T+1 ...)
             m = gfx_showmenu(#sx_mnu);
+            ((m > s3d_TrjCount) && (m <= s3d_TrjCount + ED_NV)) ? (sx_edReq = m - s3d_TrjCount; sx_edSrc = 3; ui_GFXdoNow |= 4;) :
             (m >= 1) ? sx_trajB = m - 1;
         ) : (
             sx_trajB = sx_TrjNext(sx_trajB);

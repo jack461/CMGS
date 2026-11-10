@@ -1,0 +1,2406 @@
+/*
+    Diffusion-3-Edit.jsfx-inc
+
+    The modules "Edit A" ... "Edit D" of Diffusion 3 (2026-11-09 ... 11-10, steps 1, 2, 3) : editors of configurations
+    of points in the room [-1,1]^3 (speakers, sources, trajectories), on the view of the module "Space 3D"
+    (mSL_ui_Space3D : its camera, its grid, its balls). Each module edits its own configuration : up to ED_MAXP points,
+    numbered 1 ... N (all different : the number of a point is its rank), a name, a kind (speakers, sources,
+    trajectory), a mode, its camera ; everything is saved with the project (ed_Serialize, called after pns_Serialize).
+
+    The pad (two lines of 9) :
+        0 the name (both clics : the prompt)
+        1 the kind : Speakers, Sources or Trajectory (left : the next one ; right : menu)
+        2 Open / Closed : a trajectory, closed by a segment from the point N to the point 1 (left : the other one ;
+          right : menu)
+        3 Straight / Smooth : the segments of a trajectory, straight lines bent by their bends, or the same curves
+          smoothed : at each point, its two segments share the mean of their tangents (no angle ; without bends, the
+          curve of Catmull-Rom) (left : the other one ; right : menu, also : straighten all)
+        4, 5, 6 the mode : View, Move, Add/Del (left : this mode ; right : menu ; keys v, m, p over the module)
+        7 Points N (both clics : menu : select all, none, invert, delete the selection, delete all)
+        8 the view : Front, Side, Top, 3D, Custom (left : the next one ; right : menu)
+        9 the grid : Room (the far faces of the room), Planes (the planes x = 0, y = 0, z = 0), Axes (no grid), Plane z
+          (the plane z = val only, where the new points are created), Polar z (the same plane, with circles and rays)
+          (left : the next one ; right : menu)
+        10 z= val : the height of the plane z = val (potentiometer, -1 ... 1 ; Shift + left : 0 ; right : menu)
+        11 Step 1/d : the step of the grids, d = 1 ... 10 squares per unit ; Polar z : the circles of radii 1/d ... d/d
+          (potentiometer ; Shift + left : 6 ; right : menu)
+        12 Rays n : Polar z, its rays, n = 2 ... 40, evenly spaced from the axis x (potentiometer ; Shift + left : 4 d,
+          at most 40 ; right : menu)
+        13 Snap on / off : the points placed or moved in the view go to the intersections of the grids (both clics)
+        14 Room / Free : the points in the room [-1, 1]^3, or free, up to ED_FAR (as trajectories) ; back to Room :
+          the points outside go to its walls (Undo : after Free again) (left : the other one ; right : menu)
+        15 Bary on / off : the barycentre of the selection shown, its coordinates in the column (both clics)
+        16 Proj on / off : the projections of the current point (or of the barycentre) shown (both clics)
+        17 Action (both clics : menu : rename, clear, copy another Edit, load the speakers or the sources of "Space 3D",
+          load a layout of its library, export the configuration : mSL table (to load again), .lay, hppos, trajectory
+          .xml)
+    The column at the left, the current point and the selection :
+        0 P k / N (left : the next one, Shift + left : the previous one, selected alone ; right : menu of the points)
+        1 No. k : its number (potentiometer, integer 1 ... N : the points in between move by one ; right : menu)
+        2, 3, 4 X, Y, Z : its coordinates, or Gx, Gy, Gz those of the barycentre (Bary on) (potentiometers ; Shift +
+          left : 0 ; right : menu) ; the selection moves with it
+        5 Scale : a homothety of the selection, centered on its barycentre (potentiometer, x 1/8 ... 8 ; right : menu,
+          ratios, symmetries normal to x, y, z)
+        6, 7, 8 Rot X, Rot Y, Rot Z : a rotation of the selection around the axis x, y or z through its barycentre (in
+          the plane normal to the axis ; potentiometer : the angle follows the mouse without limit, 1 degree per pixel,
+          shown modulo 360, -179 ... 180 ; right : menu)
+        9 Sel n : the count of selected points (left : all, or none when all are selected ; right : menu)
+        10 Delete, Delete n : the selected points (left) ; right : menu (the selection, all)
+        11 Undo, or Redo : the last change (one level, left)
+    The selection (ed_Sel1, ed_Norm) : the selected points (the flag 1) ; the current point is always one of them (the
+    last one clicked : the column, the projections) ; no current point only when nothing is selected (Select none, Cmd
+    + E ; after a deletion). The actions apply to the selection : moves (in the view, by the column : the shape kept,
+    the move limited by the walls), Scale, Rot, Delete. Its barycentre (ed_Bary : the mean of the selected points),
+    shown (Bary on : a magenta cross), may be dragged in the view : the selection moves with it.
+    The view : the grid (the far faces of the room, light green ; or the planes x = 0, y = 0, z = 0, light blue ; or
+    none ; or the plane z = val, yellow, square or polar, a green dot where the axis z crosses it), the axes over it (x
+    red, y green, z blue, an arrow at their end +1), the points (balls with their numbers ; selected : yellow ; current
+    : larger, with a white ring), the barycentre (Bary on, 2 points selected at least), the projections of the current
+    point, or of the barycentre (Bary on) (dotted lines, in the color of the axis normal to the plane ; none when the
+    point is on the plane) : grid Room, on the far faces shown ; Planes and Axes, on x = 0, y = 0, z = 0 ; Plane z and
+    Polar z, on x = 0, y = 0 and z = val.
+    A trajectory (step 3) : its points linked in the order of their numbers (open, or closed), an arrow on each segment
+        (the direction) ; each segment is a cubic Bezier curve (ed_SegCtl) : a straight line plus its bend (the words
+        4, 5, 6 of its first point : the shift of its middle ; moves, Scale, Rot transform it with the points) ;
+        Smooth (2026-11-10, second version), at each point, its two segments share the mean of their tangents (ed_Tan :
+        per unit of length of the chords, the bends included), so the curves bent smoothly by hand keep their shape. In the modes Move and Add/Del, a handle (a diamond) at the middle of
+        each segment : a drag bends it (the curve passes under the mouse ; in the plane of the screen, or horizontal for
+        the grids Plane z, Polar z ; Cmd : in depth, or the height ; no snap) ; Shift + clic : straight again ; Add/Del,
+        clic : a new point there (ed_Insert : it takes the number k + 1, the halves keep the shape).
+    The camera of an editor is free (ed_sFw, ed_sUp : the forward and up vectors ; the views Front ... 3D set them from
+    an azimuth and an elevation, as "Space 3D").
+    Mouse : wheel = zoom ; right clic = menu (views, grid, display, selection) ; Shift + right clic : the Studio menu
+        View    : left drag = orbit : horizontal around the axis z, vertical around the right of the view ; Shift +
+                  horizontal : around the axis x or y when it is vertical in the view (within 45 degrees ; else z)
+        Move    : drag from a point : selected, it becomes the current one and moves with the selection ; else it is
+                  selected alone and moves ; drag from the barycentre : the selection moves ; in the plane of the
+                  screen (grids Plane z, Polar z : in its horizontal plane, z kept) ; Cmd + vertical drag : in depth,
+                  up = farther (Plane z, Polar z : its height, up = higher) ; a drag from nothing = orbit
+        Add/Del : clic on nothing = a new point (number N + 1, selected alone), on the plane of the screen through the
+                  current point (the origin if none ; Plane z, Polar z : on the plane z = val), that a drag places ;
+                  clic on a point = delete it (a drag moves it, as Move)
+        all     : clic on a point (Add/Del : with a modifier) : not selected, it is selected alone ; selected, it
+                  becomes the current one (the selection unchanged) ; Cmd + clic : the point joins the selection (the
+                  current one) or leaves it ; Shift + clic : the points numbered from the current one to this one join
+                  the selection (this one becomes the current one) ; a clic on nothing changes nothing ; Shift + Alt +
+                  clic on a point : it gets the number 1, then Alt + clic on another point : the next number (2, 3
+                  ...), to renumber quickly (the point renumbered is selected alone)
+        The clic that chooses an entry of a menu is not seen by the view (prv_MenuEnd, after each gfx_showmenu)
+    Snap (ed_Snap) : the point created, or the point (or the barycentre) dragged (its free place followed, ed_fx ...),
+        goes to the nearest intersection of the grids (steps 1 / d), on its coordinates in the plane of the move : grid
+        Plane z, x and y (Cmd : z) ; Polar z, the radius (k / d, at most 1 in the room) and the angle (j * 360 / n
+        degrees, n rays) (Cmd : z) ; else the coordinates not along the axis of the view (Cmd, in depth : those along
+        it).
+    Files (step 2, 2026-11-10) : the exports, in the folder Data of the project (Data/name-d3-EditA-date.lay, .mSL or
+        .xml), written by GMAuxiliary.eel (mSL_Export : the script must run) : a layout of GRM Spaces (.lay, [-1, 1]) ;
+        the positions of the speakers for Diffusion (.mSL : D3_config(data( hppos n < x y z, ... ; )), [-5, 5] :
+        dropped, it changes only HP_Positions ; or the declaration copied in a configuration file) ; a trajectory of GRM
+        Spaces (.xml : Trajectory closed, P x y z end 0 ; the curves sampled, 16 points at most each, ed_Path). Points
+        (or a path) beyond 1 : first moved (their barycentre at the origin), then reduced (ed_Fit, ed_FitBuf). A .lay
+        or .ala file dropped on the module : its layout (a menu for a library) becomes the configuration ; the menu
+        Action also loads a layout of the library of "Space 3D". "Space 3D" loads a configuration on request (its menus
+        of the speakers, of the sources, of the trajectories A and B : sx_edReq, sx_edSrc, ed_Frame), fitted into
+        [-1, 1] in the same way ; a trajectory becomes its trajectory "File".
+        The configuration for mSL (2026-11-10) : table(data( Edit A name "..." kind Trajectory closed On smooth On free
+        Off point x y z bend dx dy dz ... )) (Data/name-d3-EditA-table-date.mSL) : the points as they are, in their
+        order (no number : a point added or removed in the file renumbers the next ones), with their bends ; dropped on a module Edit, it is loaded there again (elsewhere : in the module named in the file ; read by
+        Set_Table in Diffusion-3-Set-Table, staged, taken by ed_Frame : ed_TbTake).
+    Keys over the module : v, m, p the modes View, Move, Add/Del ; < the next mode ; > (Shift + <) the next grid ;
+        z : Undo (then Redo) ; Cmd + A : select all ; Cmd + E : select none ; Backspace, Delete : delete the
+        selection ; left, right arrows : the previous, the next point ; up, down : the first, the last one (selected
+        alone)
+    The presses are those of ui-lib (uix_click1, uix_click2 : the button went down since the last frame drawn) : the
+    @gfx of Diffusion is drawn on events only (else once per second), a delay can not tell a new press.
+    Everything runs in @gfx (and ed_Serialize in @serialize) ; the camera globals of the module "Space 3D" (s3d_az ...)
+    are saved and restored around each use of the camera of an editor (ed_CamSet / ed_CamRestore).
+    Included in @init, after the module "Space 3D" and the part 1 of Diffusion-3-Projectors (prv_Menu, prv_MenuVal),
+    while make_array allocates static memory.
+*/
+
+ED_NV = 4;                  // the modules Edit A ... D (the literal 4 is also in pns_Host_Modules, called before)
+ED_MAXP = 128;              // the points of a configuration
+ED_PS = 8;                  // a point : [0] x, [1] y, [2] z, [3] flags (1 : selected), [4 ... 6] the bend of the segment
+                            // from it to the next one (the shift of its middle, see ed_SegCtl), [7] reserved
+ED_SS = 32;                 // the state of a configuration
+ED_US = ED_MAXP * ED_PS + 4; // an undo buffer : [0] N, [1] the current point, [2] the next number (Alt), the points
+// the fields of the state
+ed_sN = 0;                  // the count of points
+ed_sCur = 1;                // the current point (its index : its number - 1), -1 : none
+ed_sKind = 2;               // 0 speakers, 1 sources, 2 trajectory
+ed_sMode = 3;               // 0 View, 1 Move, 2 Add/Del
+ed_sFree = 4;               // 0 : the points in the room [-1, 1]^3 ; 1 : free, up to ED_FAR
+ed_sRays = 5;               // Polar z : the count of rays, 2 ... 40 (24 by default)
+ed_sDist = 6;               // the distance of the camera to the center of the room
+ed_sView = 7;               // 0 Front, 1 Side, 2 Top, 3 3D, -1 Custom (after an orbit)
+ed_sOpt = 8;                // display options : ed_oNum, ed_oProj, ed_oBary
+ed_sUndo = 9;               // 0 : nothing to undo ; 1 : the undo buffer holds the previous state (Undo) ; 2 : the state undone (Redo)
+ed_sGrid = 10;              // the grid : 0 Room (the far faces), 1 Planes (x = 0, y = 0, z = 0), 2 Axes (none),
+                            // 3 Plane z (z = val), 4 Polar z (the same, circles and rays) : ed_PlaneZ
+ed_sZ = 11;                 // val : the height of the plane z = val, -1 ... 1
+ed_sFw = 12;                // 12, 13, 14 : the camera, its forward vector (towards the center ; the camera at - dist * fw)
+ed_sUp = 15;                // 15, 16, 17 : its up vector (the right : fw x up)
+ed_sDiv = 18;               // the squares of the grids per unit : 1 ... 10 (the step 1 / ed_sDiv ; 6 by default) ;
+                            // Polar z : the circles of radii k / ed_sDiv
+ed_sSnap = 19;              // 1 : the points placed or moved go to the intersections of the grids
+ed_sClosed = 20;            // Trajectory : 1 closed (a segment from the point N to the point 1)
+ed_sSmooth = 21;            // Trajectory : 1 smooth (at each point, the mean of the tangents of its two segments)
+ed_oNum = 1;                // the numbers of the points
+ed_oProj = 2;               // the projections of the current point (or of the barycentre)
+ed_oBary = 4;               // the barycentre of the selection
+ED_FAR = 10;                // the limit of the coordinates of free points (ed_sFree)
+ED_IMG = 92;                // the offscreen images of the views : 92 ... 95 (Space 3D : 90, 91)
+i__k = 0; loop(ED_NV, ui_reserve_image(ED_IMG + i__k); i__k += 1;);
+
+ed_st = make_array(ED_NV * ED_SS);
+ed_pts = make_array(ED_NV * ED_MAXP * ED_PS);
+ed_und = make_array(ED_NV * ED_US);
+ed_tmp = make_array(ED_MAXP * ED_PS);           // work area (undo, renumbering)
+ed_scr = make_array(ED_NV * ED_MAXP * 3);       // the projections of the points in the last frame : x, y, depth (> 0 : visible)
+ed_gsc = make_array(ED_NV * 3);                 // the same, for the barycentre (depth 0 : not shown)
+ed_ord = make_array(ED_MAXP);                   // the order of drawing : far points first
+ed_cam = make_array(24);                        // the camera of "Space 3D", saved
+ed_iw = make_array(ED_NV); ed_ih = make_array(ED_NV); // the sizes of the images
+ed_md = make_array(ED_NV);                      // the left button : 0 up, 1 pressed in the view, -1 pressed elsewhere
+ed_seen = make_array(ED_NV);                    // the last frame drawn (gfx_executed) where the view was shown
+ed_rn = make_array(ED_NV);                      // the renumbering by Alt + clic : the next number - 1 (0 : 1)
+ed_nm = make_array(ED_NV);                      // the names (strings)
+ed_nm[0] = #ed_nmA; ed_nm[1] = #ed_nmB; ed_nm[2] = #ed_nmC; ed_nm[3] = #ed_nmD;
+i__k = 0; loop(ED_NV, strcpy(ed_nm[i__k], ""); i__k += 1;);
+ed_ModeNames = "View|Move|Add/Del";
+ed_KindNames = "Speakers|Sources|Trajectory";
+ed_SmoothNames = "Straight segments (only their bends)|Smooth segments (their tangents joined at the points)|Straighten all the segments";
+ed_ViewNames = "Front|Side|Top|3D";
+ed_GridNames = "Room|Planes|Axes|Plane z|Polar z";
+ed_FreeNames = "Room : the points in [-1, 1]|Free : the points up to 10";
+ed_RotList = "-90|-45|-30|-15|-5|5|15|30|45|90|180";
+ed_Coords = "-1|-0.75|-0.5|-0.25|0|0.25|0.5|0.75|1";
+// the drag in a view (one at a time) : its kind (1 orbit, 2 move, 3 depth), the point pressed (-2 : the barycentre),
+// the point created, moved or not, the modifiers at the press, the positions
+ed_dk = ed_dhit = 0; ed_dnew = -1; ed_dmoved = ed_dmods = 0;
+ed_mx0 = ed_my0 = ed_lmx = ed_lmy = 0;
+ed_de = -1; ed_dkept = 0;           // the drag of a cell of the column : its editor, the undo buffer filled
+ed_pend = 0;                        // the prompt of the name : the editor + 1
+ed_rx = ed_ry = ed_rz = 0;          // a point under the mouse (ed_Ray)
+ed_oax = 2;                         // the axis of the horizontal orbit of the last drag : 0 x, 1 y, 2 z (ed_Orbit)
+ed_fx = ed_fy = ed_fz = 0;          // the free place of the point dragged (before the snap)
+ed_qx = ed_qy = ed_qz = 0;          // a place brought to the grid (ed_Snap)
+ed_gx = ed_gy = ed_gz = 0;          // the barycentre of the selection (ed_Bary)
+ed_tgx = ed_tgy = ed_tgz = 0;       // the center of a transform (Scale, Rot : ed_Xform)
+ed_pd = 0;                          // the square of the distance of the point found by ed_Pick
+ed_fitd = 0; ed_fitr = 1;           // ed_Fit : the configuration moved and reduced, the ratio
+ed_xe = 0;                          // the editor of the last export
+ed_mr = make_array(ED_NV * 4);      // the rectangles of the modules (screen pixels : x, y, w, h), for the drops
+ed_mf = make_array(ED_NV);          // the frame (gfx_executed) where they were drawn
+ed_hsc = make_array(ED_NV * ED_MAXP * 3); // the handles of the segments in the last frame : x, y, depth (> 0 : shown)
+ED_NPATH = 2048;                    // a trajectory sampled (ed_Path) : at most ED_NPATH points
+ed_pth = make_array(3 * ED_NPATH + 6);
+ed_trj8 = make_array(SX_MAXTRJ * s3d_st); // a trajectory for "Space 3D" (s3d_settraj : entries of s3d_st values)
+ed_s0 = ed_s1 = 0;                  // the segment of ed_SegCtl : its points, its control points ed_c1x ..., ed_c2x ...
+ed_c1x = ed_c1y = ed_c1z = ed_c2x = ed_c2y = ed_c2z = 0;
+ed_bx = ed_by = ed_bz = 0;          // a point of a segment (ed_SegAt)
+ed_tx = ed_ty = ed_tz = 0;          // a tangent (ed_Tan)
+ed_DivNames = "1|2|3|4|5|6|7|8|9|10";
+// the configurations read by the mSL "table" (Set_Table, Diffusion-3-Set-Table), taken by ed_Frame : pending (1), the
+// fields ([0] the keys given : 1 name, 2 kind, 4 closed, 8 smooth, 16 free, 32 points ; [1] kind, [2] closed, [3]
+// smooth, [4] free, [5] N), the points (ED_PS per point), the names
+ed_tq = make_array(ED_NV);
+ed_tf = make_array(ED_NV * 8);
+ed_tpt = make_array(ED_NV * ED_MAXP * ED_PS);
+ed_tnm = make_array(ED_NV);
+ed_tnm[0] = #ed_tnA; ed_tnm[1] = #ed_tnB; ed_tnm[2] = #ed_tnC; ed_tnm[3] = #ed_tnD;
+// the work areas of Set_Table (a table read : staged above if it has no error)
+ed_tf2 = make_array(ED_NV * 8);
+ed_tpt2 = make_array(ED_NV * ED_MAXP * ED_PS);
+ed_tnm2 = make_array(ED_NV);
+ed_tnm2[0] = #ed_twA; ed_tnm2[1] = #ed_twB; ed_tnm2[2] = #ed_twC; ed_tnm2[3] = #ed_twD;
+ed_RaysList = "2|3|4|5|6|8|10|12|16|18|20|24|30|32|36|40";
+
+// The pads : one line (the configuration), one column (the current point)
+pad_EDT_Siz = 18;
+pad_EDT = make_jpad(ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values, 2, 9, pad_EDT_Siz);
+pad_EDT_Labs = pad_EDT + pad_EDT[ui_jpad_labs];
+pad_EDT_Colrs = pad_EDT + pad_EDT[ui_jpad_clrs];
+pad_EDL_Siz = 12;
+pad_EDL = make_jpad(ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values, 12, 1, pad_EDL_Siz);
+pad_EDL_Labs = pad_EDL + pad_EDL[ui_jpad_labs];
+pad_EDL_Colrs = pad_EDL + pad_EDL[ui_jpad_clrs];
+i__k = 0; loop(pad_EDT_Siz, pad_EDT_Colrs[i__k] = Col_Inactive; pad_EDT_Labs[i__k] = ""; i__k += 1;);
+i__k = 0; loop(pad_EDL_Siz, pad_EDL_Colrs[i__k] = Col_Inactive; pad_EDL_Labs[i__k] = ""; i__k += 1;);
+
+
+// The state of the configuration e ; its point k
+function ed_St(e) ( ed_st + e * ED_SS; );
+function ed_P(e, k) ( ed_pts + (e * ED_MAXP + k) * ED_PS; );
+
+// A coordinate limited to the room
+function ed_Lim(v) ( max(-1, min(1, v)); );
+
+// The limit of the coordinates of the points of the editor e : 1 (the room), or ED_FAR (Free) ; a coordinate limited
+function ed_Bnd(e)
+local(st)
+(
+    st = ed_St(e);
+    st[ed_sFree] ? ED_FAR : 1;
+);
+function ed_LimP(e, v)
+local(b)
+(
+    b = ed_Bnd(e);
+    max(-b, min(b, v));
+);
+
+// The grid is a plane z = val (Plane z, Polar z)
+function ed_PlaneZ(g) ( g >= 3; );
+
+// The camera of the editor e from an azimuth and an elevation (as s3d_camera : the right horizontal)
+function ed_AzEl(e, az, el)
+local(st, f, u, ce, rx, ry)
+(
+    st = ed_St(e); f = st + ed_sFw; u = st + ed_sUp;
+    ce = cos(el);
+    f[0] = - ce * sin(az); f[1] = ce * cos(az); f[2] = - sin(el);
+    rx = cos(az); ry = sin(az);
+    // up = right x forward
+    u[0] = ry * f[2]; u[1] = - rx * f[2]; u[2] = rx * f[1] - ry * f[0];
+);
+
+// Turns the vector v[0 ... 2] around the unit axis (kx, ky, kz) by the angle t (Rodrigues)
+function ed_Rot(v, kx, ky, kz, t)
+local(c, s, d, x, y, z)
+(
+    c = cos(t); s = sin(t);
+    x = v[0]; y = v[1]; z = v[2];
+    d = (kx * x + ky * y + kz * z) * (1 - c);
+    v[0] = x * c + (ky * z - kz * y) * s + kx * d;
+    v[1] = y * c + (kz * x - kx * z) * s + ky * d;
+    v[2] = z * c + (kx * y - ky * x) * s + kz * d;
+);
+
+// The camera of the editor e made orthonormal again (after rotations, a load) ; degenerate : the 3D view
+function ed_Ortho(e)
+local(st, f, u, l, d)
+(
+    st = ed_St(e); f = st + ed_sFw; u = st + ed_sUp;
+    l = sqrt(sqr(f[0]) + sqr(f[1]) + sqr(f[2]));
+    (l > 0.001) ? (
+        f[0] /= l; f[1] /= l; f[2] /= l;
+        d = u[0] * f[0] + u[1] * f[1] + u[2] * f[2];
+        u[0] -= d * f[0]; u[1] -= d * f[1]; u[2] -= d * f[2];
+        l = sqrt(sqr(u[0]) + sqr(u[1]) + sqr(u[2]));
+    );
+    (l > 0.001) ? (
+        u[0] /= l; u[1] /= l; u[2] /= l;
+    ) : (
+        ed_AzEl(e, s3d_Az3D, s3d_El3D);
+    );
+);
+
+// The orbit of the camera of the editor e for a drag of (dx, dy) pixels : horizontal, around the axis z (sh : Shift,
+// around the axis x or y when it is vertical in the view, within 45 degrees ; else z) ; vertical, around the right of
+// the view. Returns the axis of the horizontal rotation : 0 x, 1 y, 2 z.
+function ed_Orbit(e, dx, dy, sh)
+local(st, f, u, k, a, rx, ry, rz)
+(
+    st = ed_St(e); f = st + ed_sFw; u = st + ed_sUp;
+    k = 2;
+    sh ? (
+        ((abs(u[0]) > 0.7) && (abs(u[0]) >= abs(u[1]))) ? (k = 0) : (abs(u[1]) > 0.7) ? (k = 1);
+    );
+    // (around x or y : the same feel as around z when it goes up in the view)
+    a = - dx * 0.008;
+    ((k < 2) && (u[k] < 0)) ? (a = - a);
+    ed_Rot(f, k === 0, k === 1, k === 2, a);
+    ed_Rot(u, k === 0, k === 1, k === 2, a);
+    // vertical : around the right of the view (fw x up), down = the camera goes up
+    rx = f[1] * u[2] - f[2] * u[1]; ry = f[2] * u[0] - f[0] * u[2]; rz = f[0] * u[1] - f[1] * u[0];
+    ed_Rot(f, rx, ry, rz, - dy * 0.008);
+    ed_Rot(u, rx, ry, rz, - dy * 0.008);
+    ed_Ortho(e);
+    k;
+);
+
+// The views : 0 Front, 1 Side, 2 Top, 3 3D (as the menu of the view of "Space 3D", s3d_menu)
+function ed_SetView(e, v)
+local(st)
+(
+    st = ed_St(e);
+    (v === 0) ? ed_AzEl(e, 0, 0) :
+    (v === 1) ? ed_AzEl(e, $pi / 2, 0) :
+    (v === 2) ? ed_AzEl(e, 0, 1.55) :
+    (ed_AzEl(e, s3d_Az3D, s3d_El3D); st[ed_sDist] = s3d_Dist3D;);
+    st[ed_sView] = v;
+);
+
+// The configuration e : empty, its defaults
+function ed_Init(e)
+local(st)
+(
+    st = ed_St(e);
+    memset(st, 0, ED_SS);
+    st[ed_sN] = 0; st[ed_sCur] = -1; st[ed_sKind] = 0; st[ed_sMode] = 2;
+    st[ed_sOpt] = ed_oNum | ed_oProj;
+    st[ed_sGrid] = 0; st[ed_sZ] = 0; st[ed_sDiv] = 6; st[ed_sRays] = 24; st[ed_sSnap] = 0; st[ed_sFree] = 0;
+    st[ed_sClosed] = 0; st[ed_sSmooth] = 0;
+    ed_SetView(e, 3);
+    memset(ed_P(e, 0), 0, ED_MAXP * ED_PS);
+);
+i__k = 0; loop(ED_NV, ed_Init(i__k); i__k += 1;);
+
+// The values of the state limited (after a load)
+function ed_Check()
+local(e, st, k, p)
+(
+    e = 0; loop(ED_NV,
+        st = ed_St(e);
+        st[ed_sN] = max(0, min(ED_MAXP, 0|st[ed_sN]));
+        st[ed_sCur] = max(-1, min(st[ed_sN] - 1, 0|st[ed_sCur]));
+        st[ed_sKind] = max(0, min(2, 0|st[ed_sKind]));
+        st[ed_sClosed] = !!st[ed_sClosed]; st[ed_sSmooth] = !!st[ed_sSmooth];
+        st[ed_sMode] = max(0, min(2, 0|st[ed_sMode]));
+        st[ed_sFree] = !!st[ed_sFree];
+        st[ed_sDist] = max(1.8, min(st[ed_sFree] ? 60 : 12, st[ed_sDist]));
+        st[ed_sView] = max(-1, min(3, 0|st[ed_sView]));
+        st[ed_sOpt] = 0|st[ed_sOpt];
+        st[ed_sUndo] = 0; // (the undo buffers are not saved)
+        st[ed_sGrid] = max(0, min(4, 0|st[ed_sGrid]));
+        st[ed_sZ] = ed_Lim(st[ed_sZ]);
+        st[ed_sDiv] = max(1, min(10, 0|st[ed_sDiv]));
+        st[ed_sRays] = (st[ed_sRays] >= 2) ? min(40, 0|st[ed_sRays]) : min(40, 4 * st[ed_sDiv]); // (none saved : 4 d)
+        st[ed_sSnap] = !!st[ed_sSnap];
+        ed_Ortho(e); // (the camera)
+        ed_rn[e] = 0;
+        k = 0; loop(st[ed_sN],
+            p = ed_P(e, k);
+            p[0] = ed_LimP(e, p[0]); p[1] = ed_LimP(e, p[1]); p[2] = ed_LimP(e, p[2]);
+            k += 1;
+        );
+        e += 1;
+    );
+);
+
+// Saved with the project, after the tabs and the panes (see pns_Serialize) : a header 'edt2', the states, the points,
+// the names ; an old project has no such block (nothing read : the defaults stay) ; 'edt1' (the tests of 2026-11-10) :
+// the field 4 held the old azimuth of the camera, now ed_sFree : cleared
+function ed_Serialize()
+local(e, st)
+(
+    (file_avail(0) >= 0) ? (
+        // ===LOAD===
+        (file_avail(0) > 0) ? (
+            memset(ser_hdr, 0, 4);
+            load_mem(0, ser_hdr, 4);
+            (((ser_hdr[0] === 'edt2') || (ser_hdr[0] === 'edt1')) && (ser_hdr[1] === ED_NV) && (ser_hdr[2] === ED_MAXP * ED_PS) && (ser_hdr[3] === ED_SS)) ? (
+                load_mem(0, ed_st, ED_NV * ED_SS);
+                load_mem(0, ed_pts, ED_NV * ED_MAXP * ED_PS);
+                e = 0; loop(ED_NV, file_string(0, ed_nm[e]); e += 1;);
+                (ser_hdr[0] === 'edt1') ? (e = 0; loop(ED_NV, st = ed_St(e); st[ed_sFree] = 0; st[5] = 0; e += 1;););
+                ed_Check();
+                mSL_log(SysLogBox, "Edit A ... D : configurations loaded");
+            );
+        );
+    ) : (
+        // ===SAVE===
+        ser_hdr[0] = 'edt2'; ser_hdr[1] = ED_NV; ser_hdr[2] = ED_MAXP * ED_PS; ser_hdr[3] = ED_SS;
+        save_mem(0, ser_hdr, 4);
+        save_mem(0, ed_st, ED_NV * ED_SS);
+        save_mem(0, ed_pts, ED_NV * ED_MAXP * ED_PS);
+        e = 0; loop(ED_NV, file_string(0, ed_nm[e]); e += 1;);
+    );
+);
+
+
+//====== The points
+
+// Keeps the configuration e in its undo buffer, before a change
+function ed_Keep(e)
+local(st, u)
+(
+    st = ed_St(e); u = ed_und + e * ED_US;
+    u[0] = st[ed_sN]; u[1] = st[ed_sCur]; u[2] = ed_rn[e];
+    memcpy(u + 4, ed_P(e, 0), ED_MAXP * ED_PS);
+    st[ed_sUndo] = 1;
+);
+
+// Exchanges the configuration e and its undo buffer : Undo, then Redo
+function ed_Undo(e)
+local(st, u, n, c, r)
+(
+    st = ed_St(e); u = ed_und + e * ED_US;
+    (st[ed_sUndo] > 0) ? (
+        n = u[0]; c = u[1]; r = u[2];
+        u[0] = st[ed_sN]; u[1] = st[ed_sCur]; u[2] = ed_rn[e];
+        ed_rn[e] = r;
+        memcpy(ed_tmp, u + 4, ED_MAXP * ED_PS);
+        memcpy(u + 4, ed_P(e, 0), ED_MAXP * ED_PS);
+        memcpy(ed_P(e, 0), ed_tmp, ED_MAXP * ED_PS);
+        st[ed_sN] = n; st[ed_sCur] = c;
+        st[ed_sUndo] = (st[ed_sUndo] === 1) ? 2 : 1;
+        // (Room : the points restored stay in the room ; Free again, then Undo, to get back the points outside)
+        !st[ed_sFree] ? (
+            c = 0; loop(n, r = ed_P(e, c); r[0] = ed_Lim(r[0]); r[1] = ed_Lim(r[1]); r[2] = ed_Lim(r[2]); c += 1;);
+        );
+    );
+);
+
+// The selection (the flag 1 of the points) and the current point : the current point is always one of the selected
+// points (the one shown in the column, with its projections ; the last one clicked) ; no selection : no current point.
+// (A clic : not selected, the point is selected alone ; selected, it becomes the current one. Cmd + clic : it joins
+// the selection or leaves it. Shift + clic : the numbers from the current one to it join the selection.)
+
+// Only the point k is selected, it is the current one (k = -1 : no selection, no current point)
+function ed_Sel1(e, k)
+local(st, i, p)
+(
+    st = ed_St(e);
+    i = 0; loop(st[ed_sN], p = ed_P(e, i); p[3] = (i === k) ? (p[3] | 1) : (p[3] & 0xFFFE); i += 1;);
+    st[ed_sCur] = ((k >= 0) && (k < st[ed_sN])) ? k : -1;
+);
+
+// After a change : the current point must be selected ; else the first selected point is the current one (none : -1)
+function ed_Norm(e)
+local(st, n, c, k, p)
+(
+    st = ed_St(e); n = st[ed_sN]; c = st[ed_sCur];
+    ((c >= 0) && (c < n)) ? (p = ed_P(e, c); !(p[3] & 1) ? (c = -1);) : (c = -1);
+    k = 0;
+    while ((c < 0) && (k < n)) (p = ed_P(e, k); (p[3] & 1) ? (c = k); k += 1;);
+    st[ed_sCur] = c;
+);
+
+// A new point (x, y, z), numbered N + 1, alone selected, the current one : its index, or -1 (no room)
+function ed_Add(e, x, y, z)
+local(st, n, p)
+(
+    st = ed_St(e); n = st[ed_sN];
+    (n < ED_MAXP) ? (
+        p = ed_P(e, n);
+        memset(p, 0, ED_PS);
+        p[0] = ed_LimP(e, x); p[1] = ed_LimP(e, y); p[2] = ed_LimP(e, z);
+        st[ed_sN] = n + 1;
+        ed_Sel1(e, n);
+        n;
+    ) : -1;
+);
+
+// Deletes the point k : the following ones move down (their numbers decrease by one)
+function ed_Del(e, k)
+local(st, n)
+(
+    st = ed_St(e); n = st[ed_sN];
+    ((k >= 0) && (k < n)) ? (
+        (k < n - 1) ? memcpy(ed_P(e, k), ed_P(e, k + 1), (n - 1 - k) * ED_PS);
+        st[ed_sN] = n - 1;
+        st[ed_sCur] = (n === 1) ? -1 : min(n - 2, st[ed_sCur] - (st[ed_sCur] > k));
+    );
+);
+
+// Deletes the selected points
+function ed_DelSel(e)
+local(st, k, p)
+(
+    st = ed_St(e);
+    k = st[ed_sN] - 1;
+    while (k >= 0) (
+        p = ed_P(e, k);
+        (p[3] & 1) ? ed_Del(e, k);
+        k -= 1;
+    );
+);
+
+// Renumbers : the point k becomes the point j (indexes) ; the points in between move by one
+function ed_Move(e, k, j)
+local(st, n)
+(
+    st = ed_St(e); n = st[ed_sN];
+    j = max(0, min(n - 1, 0|j));
+    ((k >= 0) && (k < n) && (j !== k)) ? (
+        memcpy(ed_tmp, ed_P(e, k), ED_PS);
+        (j < k) ? memcpy(ed_P(e, j + 1), ed_P(e, j), (k - j) * ED_PS) : memcpy(ed_P(e, k), ed_P(e, k + 1), (j - k) * ED_PS);
+        memcpy(ed_P(e, j), ed_tmp, ED_PS);
+        (st[ed_sCur] === k) ? (st[ed_sCur] = j);
+    );
+);
+
+// Moves the selected points (and the point k, if it is not selected ; -1 : the selection only) by (dx, dy, dz) ; the
+// move is limited so that they all stay in the room (Free : within ED_FAR) : the shape of the selection is kept
+function ed_Shift(e, k, dx, dy, dz)
+local(st, b, i, p)
+(
+    st = ed_St(e); b = ed_Bnd(e);
+    i = 0; loop(st[ed_sN],
+        p = ed_P(e, i);
+        ((i === k) || (p[3] & 1)) ? (
+            dx = max(- b - p[0], min(b - p[0], dx));
+            dy = max(- b - p[1], min(b - p[1], dy));
+            dz = max(- b - p[2], min(b - p[2], dz));
+        );
+        i += 1;
+    );
+    i = 0; loop(st[ed_sN],
+        p = ed_P(e, i);
+        ((i === k) || (p[3] & 1)) ? (
+            p[0] = ed_LimP(e, p[0] + dx); p[1] = ed_LimP(e, p[1] + dy); p[2] = ed_LimP(e, p[2] + dz);
+        );
+        i += 1;
+    );
+);
+
+// The count of selected points
+function ed_SelCount(e)
+local(st, k, n, p)
+(
+    st = ed_St(e); n = 0;
+    k = 0; loop(st[ed_sN], p = ed_P(e, k); (p[3] & 1) ? (n += 1); k += 1;);
+    n;
+);
+
+// The selection : 0 all, 1 none, 2 inverted (the current point stays if it is still selected ; else the first one)
+function ed_SelOp(e, op)
+local(st, k, p)
+(
+    st = ed_St(e);
+    k = 0; loop(st[ed_sN],
+        p = ed_P(e, k);
+        p[3] = (op === 0) ? (p[3] | 1) : (op === 1) ? (p[3] & 0xFFFE) : (p[3] ~ 1);
+        k += 1;
+    );
+    ed_Norm(e);
+);
+
+// Deletes the selected points (they may be undone)
+function ed_DelSelK(e)
+(
+    (ed_SelCount(e) > 0) ? (ed_Keep(e); ed_DelSel(e); ed_Norm(e););
+);
+
+// Selects the points from the index i to the index j (in any order), with those already selected
+function ed_SelRange(e, i, j)
+local(st, k, p)
+(
+    st = ed_St(e);
+    k = max(0, min(i, j));
+    loop(min(st[ed_sN] - 1, max(i, j)) - k + 1, p = ed_P(e, k); p[3] |= 1; k += 1;);
+);
+
+// The barycentre of the selected points (their mean) : ed_gx, ed_gy, ed_gz ; returns their count (0 : none, (0,0,0))
+function ed_Bary(e)
+local(st, i, p, n)
+(
+    st = ed_St(e); n = 0; ed_gx = ed_gy = ed_gz = 0;
+    i = 0; loop(st[ed_sN],
+        p = ed_P(e, i);
+        (p[3] & 1) ? (ed_gx += p[0]; ed_gy += p[1]; ed_gz += p[2]; n += 1;);
+        i += 1;
+    );
+    (n > 0) ? (ed_gx /= n; ed_gy /= n; ed_gz /= n;);
+    n;
+);
+
+// A transform of the selected points around the center (ed_tgx, ed_tgy, ed_tgz : their barycentre), computed from
+// their places kept in the undo buffer (ed_Keep before : a potentiometer computes again from them at each move) :
+// kind 0 the homothety of ratio v (limited so that every point stays within the bounds : the shape kept) ; 1, 2, 3
+// the rotation of v degrees around the axis x, y, z through the center (in the plane normal to it ; positive :
+// counterclockwise seen from the end + of the axis) ; 4, 5, 6 the symmetry through the plane x, y, z = center
+function ed_Xform(e, kind, v)
+local(st, u, b, f, c, s, i, p, o, dx, dy, dz, t)
+(
+    st = ed_St(e); u = ed_und + e * ED_US; b = ed_Bnd(e);
+    f = max(0, v);
+    (kind === 0) ? (
+        i = 0; loop(st[ed_sN],
+            p = ed_P(e, i); o = u + 4 + i * ED_PS;
+            (p[3] & 1) ? (
+                dx = o[0] - ed_tgx; dy = o[1] - ed_tgy; dz = o[2] - ed_tgz;
+                (dx > 0.000001) ? (f = min(f, (b - ed_tgx) / dx)) : (dx < -0.000001) ? (f = min(f, (- b - ed_tgx) / dx));
+                (dy > 0.000001) ? (f = min(f, (b - ed_tgy) / dy)) : (dy < -0.000001) ? (f = min(f, (- b - ed_tgy) / dy));
+                (dz > 0.000001) ? (f = min(f, (b - ed_tgz) / dz)) : (dz < -0.000001) ? (f = min(f, (- b - ed_tgz) / dz));
+            );
+            i += 1;
+        );
+    );
+    c = cos(v * $pi / 180); s = sin(v * $pi / 180);
+    i = 0; loop(st[ed_sN],
+        p = ed_P(e, i); o = u + 4 + i * ED_PS;
+        (p[3] & 1) ? (
+            dx = o[0] - ed_tgx; dy = o[1] - ed_tgy; dz = o[2] - ed_tgz;
+            (kind === 0) ? (dx *= f; dy *= f; dz *= f;) :
+            (kind === 1) ? (t = dy * c - dz * s; dz = dy * s + dz * c; dy = t;) :
+            (kind === 2) ? (t = dz * c - dx * s; dx = dz * s + dx * c; dz = t;) :
+            (kind === 3) ? (t = dx * c - dy * s; dy = dx * s + dy * c; dx = t;) :
+            (kind === 4) ? (dx = - dx) : (kind === 5) ? (dy = - dy) : (kind === 6) ? (dz = - dz);
+            p[0] = ed_LimP(e, ed_tgx + dx); p[1] = ed_LimP(e, ed_tgy + dy); p[2] = ed_LimP(e, ed_tgz + dz);
+            // the bend of its segment (a vector : the same transform, without the center)
+            dx = o[4]; dy = o[5]; dz = o[6];
+            (kind === 0) ? (dx *= f; dy *= f; dz *= f;) :
+            (kind === 1) ? (t = dy * c - dz * s; dz = dy * s + dz * c; dy = t;) :
+            (kind === 2) ? (t = dz * c - dx * s; dx = dz * s + dx * c; dz = t;) :
+            (kind === 3) ? (t = dx * c - dy * s; dy = dx * s + dy * c; dx = t;) :
+            (kind === 4) ? (dx = - dx) : (kind === 5) ? (dy = - dy) : (kind === 6) ? (dz = - dz);
+            p[4] = dx; p[5] = dy; p[6] = dz;
+        );
+        i += 1;
+    );
+);
+
+// A transform of the selection at once (the menus of the column) : kept for Undo, around its barycentre
+function ed_Xform1(e, kind, v)
+(
+    (ed_Bary(e) > 0) ? (
+        ed_tgx = ed_gx; ed_tgy = ed_gy; ed_tgz = ed_gz;
+        ed_Keep(e);
+        ed_Xform(e, kind, v);
+    );
+);
+
+// The mode Free (f = 1 : the points up to ED_FAR) or Room (f = 0 : the points outside go to its walls, kept for Undo)
+function ed_SetFree(e, f)
+local(st, k, p, out)
+(
+    st = ed_St(e);
+    (f != st[ed_sFree]) ? (
+        st[ed_sFree] = f;
+        !f ? (
+            out = 0;
+            k = 0; loop(st[ed_sN], p = ed_P(e, k); (max(abs(p[0]), max(abs(p[1]), abs(p[2]))) > 1) ? (out = 1); k += 1;);
+            out ? (
+                ed_Keep(e);
+                k = 0; loop(st[ed_sN], p = ed_P(e, k); p[0] = ed_Lim(p[0]); p[1] = ed_Lim(p[1]); p[2] = ed_Lim(p[2]); k += 1;);
+            );
+            st[ed_sDist] = min(12, st[ed_sDist]);
+        );
+    );
+);
+
+// Copies the configuration f into e (the points, not the name nor the camera)
+function ed_Copy(e, f)
+local(se, sf)
+(
+    se = ed_St(e); sf = ed_St(f);
+    memcpy(ed_P(e, 0), ed_P(f, 0), ED_MAXP * ED_PS);
+    se[ed_sN] = sf[ed_sN]; se[ed_sCur] = sf[ed_sCur]; se[ed_sKind] = sf[ed_sKind]; se[ed_sFree] = sf[ed_sFree];
+    se[ed_sClosed] = sf[ed_sClosed]; se[ed_sSmooth] = sf[ed_sSmooth];
+);
+
+// Loads n points from src (stride sz, x y z at the offsets 0, 1, 2 of an entry ; e.g. the speakers of "Space 3D")
+function ed_Load(e, src, n, sz, kind)
+local(st, k, p, q)
+(
+    st = ed_St(e);
+    n = max(0, min(ED_MAXP, n));
+    k = 0; loop(n,
+        p = ed_P(e, k); q = src + k * sz;
+        memset(p, 0, ED_PS);
+        p[0] = ed_LimP(e, q[0]); p[1] = ed_LimP(e, q[1]); p[2] = ed_LimP(e, q[2]);
+        k += 1;
+    );
+    st[ed_sN] = n; st[ed_sKind] = kind;
+    ed_Sel1(e, (n > 0) ? 0 : -1);
+);
+
+
+//====== The segments of a trajectory (step 3)
+
+// The segments of the configuration e : from each point to the next one (open : N - 1 ; closed : N, the last one to
+// the point 1 ; fewer than 2 points : none)
+function ed_NSeg(e)
+local(st, n)
+(
+    st = ed_St(e); n = st[ed_sN];
+    (n < 2) ? 0 : st[ed_sClosed] ? n : n - 1;
+);
+
+// The point k joins two segments of a smooth trajectory (closed : all the points ; open : not its ends) : their
+// tangents there are the same one (ed_Tan)
+function ed_Joint(e, k)
+local(st, n)
+(
+    st = ed_St(e); n = st[ed_sN];
+    st[ed_sSmooth] && (n >= 2) && (st[ed_sClosed] || ((k > 0) && (k < n - 1)));
+);
+
+// Smooth : the tangent at the point k (a joint), shared by its two segments, per unit of length of a chord (ed_tx,
+// ed_ty, ed_tz) : the mean of the tangents of the two curves when straight (incoming : the chord of the previous
+// segment minus 4 times its bend ; outgoing : the chord of the next one plus 4 times its bend), each one divided by
+// the length of its chord. Without bends : the tangent of Catmull-Rom (for chords of the same length) ; curves bent
+// smoothly by the mouse keep their shape (the tangents already have the same direction : only the angles are rounded)
+function ed_Tan(e, k)
+local(st, n, p, q, r, ax, ay, az, la, bx, by, bz, lb)
+(
+    st = ed_St(e); n = st[ed_sN];
+    p = ed_P(e, (k + n - 1) % n); q = ed_P(e, k); r = ed_P(e, (k + 1) % n);
+    ax = q[0] - p[0]; ay = q[1] - p[1]; az = q[2] - p[2]; la = sqrt(ax * ax + ay * ay + az * az);
+    bx = r[0] - q[0]; by = r[1] - q[1]; bz = r[2] - q[2]; lb = sqrt(bx * bx + by * by + bz * bz);
+    ax -= 4 * p[4]; ay -= 4 * p[5]; az -= 4 * p[6];
+    bx += 4 * q[4]; by += 4 * q[5]; bz += 4 * q[6];
+    ((la > 0.000001) && (lb > 0.000001)) ? (
+        ed_tx = (ax / la + bx / lb) / 2; ed_ty = (ay / la + by / lb) / 2; ed_tz = (az / la + bz / lb) / 2;
+    ) : (la > 0.000001) ? (
+        ed_tx = ax / la; ed_ty = ay / la; ed_tz = az / la;
+    ) : (lb > 0.000001) ? (
+        ed_tx = bx / lb; ed_ty = by / lb; ed_tz = bz / lb;
+    ) : (
+        ed_tx = ed_ty = ed_tz = 0;
+    );
+);
+
+// The segment k : a cubic Bezier curve from the point k (ed_s0) to the next one (ed_s1), its control points ed_c1x ...,
+// ed_c2x ... : at each end, a third of the tangent ; straight (or an end of an open path) : the chord plus 4 times the
+// bend of the point k (its words 4, 5, 6 : the shift of the middle of the curve, B(0.5)) ; smooth, at a joint : the
+// shared tangent (ed_Tan) times the length of the chord
+function ed_SegCtl(e, k)
+local(st, n, j, lx, ly, lz, l)
+(
+    st = ed_St(e); n = st[ed_sN];
+    j = (k + 1) % n;
+    ed_s0 = ed_P(e, k); ed_s1 = ed_P(e, j);
+    lx = ed_s1[0] - ed_s0[0]; ly = ed_s1[1] - ed_s0[1]; lz = ed_s1[2] - ed_s0[2];
+    ed_c1x = ed_s0[0] + (lx + 4 * ed_s0[4]) / 3; ed_c1y = ed_s0[1] + (ly + 4 * ed_s0[5]) / 3; ed_c1z = ed_s0[2] + (lz + 4 * ed_s0[6]) / 3;
+    ed_c2x = ed_s1[0] - (lx - 4 * ed_s0[4]) / 3; ed_c2y = ed_s1[1] - (ly - 4 * ed_s0[5]) / 3; ed_c2z = ed_s1[2] - (lz - 4 * ed_s0[6]) / 3;
+    st[ed_sSmooth] ? (
+        l = sqrt(lx * lx + ly * ly + lz * lz) / 3;
+        ed_Joint(e, k) ? (ed_Tan(e, k); ed_c1x = ed_s0[0] + ed_tx * l; ed_c1y = ed_s0[1] + ed_ty * l; ed_c1z = ed_s0[2] + ed_tz * l;);
+        ed_Joint(e, j) ? (ed_Tan(e, j); ed_c2x = ed_s1[0] - ed_tx * l; ed_c2y = ed_s1[1] - ed_ty * l; ed_c2z = ed_s1[2] - ed_tz * l;);
+    );
+);
+
+// The point at t (0 ... 1) of the segment set by ed_SegCtl : ed_bx, ed_by, ed_bz
+function ed_SegAt(t)
+local(u, a, b, c, d)
+(
+    u = 1 - t; a = u * u * u; b = 3 * u * u * t; c = 3 * u * t * t; d = t * t * t;
+    ed_bx = a * ed_s0[0] + b * ed_c1x + c * ed_c2x + d * ed_s1[0];
+    ed_by = a * ed_s0[1] + b * ed_c1y + c * ed_c2y + d * ed_s1[1];
+    ed_bz = a * ed_s0[2] + b * ed_c1z + c * ed_c2z + d * ed_s1[2];
+);
+
+// The segment k is a curve (Smooth, or a bend), not a straight line
+function ed_Bent(e, k)
+local(st, p)
+(
+    st = ed_St(e); p = ed_P(e, k);
+    st[ed_sSmooth] || (p[4] != 0) || (p[5] != 0) || (p[6] != 0);
+);
+
+// The middle of the segment k moves by (dx, dy, dz) : its bend changes by (dx, dy, dz) / c, c the part of the bend in
+// its middle : 1 (straight) ; smooth, 1/2 between two joints (half of each tangent), 3/4 at an end of an open path
+function ed_Bend(e, k, dx, dy, dz)
+local(st, p, c)
+(
+    st = ed_St(e); p = ed_P(e, k);
+    c = ((ed_Joint(e, k) ? 2 : 4) + (ed_Joint(e, (k + 1) % st[ed_sN]) ? 2 : 4)) / 8;
+    p[4] += dx / c; p[5] += dy / c; p[6] += dz / c;
+);
+
+// The bend of the segment k set so that its middle is at (x, y, z)
+function ed_FitMid(e, k, x, y, z)
+(
+    ed_SegCtl(e, k); ed_SegAt(0.5);
+    ed_Bend(e, k, x - ed_bx, y - ed_by, z - ed_bz);
+);
+
+// All the segments straight again (kept for Undo) ; k >= 0 : only the segment k
+function ed_Straight(e, k)
+local(st, i, p)
+(
+    st = ed_St(e);
+    ed_Keep(e);
+    i = 0; loop(st[ed_sN], p = ed_P(e, i); ((k < 0) || (i === k)) ? (p[4] = p[5] = p[6] = 0;); i += 1;);
+);
+
+// A new point in the middle of the segment k (kept for Undo) : its number k + 2, the next ones move by one ; the two
+// halves keep the shape of the curve (their middles on it ; smooth : the segments before and after too, their tangents
+// change) ; it is selected alone. Returns its index, or -1
+function ed_Insert(e, k)
+local(st, n, m, p, q, hp, hn, mx, my, mz, ax, ay, az, bx, by, bz, px, py, pz, nx, ny, nz)
+(
+    st = ed_St(e); n = st[ed_sN];
+    ((n < ED_MAXP) && (k >= 0) && (k < ed_NSeg(e))) ? (
+        ed_SegCtl(e, k);
+        ed_SegAt(0.5); mx = ed_bx; my = ed_by; mz = ed_bz;
+        ed_SegAt(0.25); ax = ed_bx; ay = ed_by; az = ed_bz;
+        ed_SegAt(0.75); bx = ed_bx; by = ed_by; bz = ed_bz;
+        hp = ed_Joint(e, k); hn = ed_Joint(e, (k + 1) % n); // (smooth : a segment before, after)
+        hp ? (ed_SegCtl(e, (k + n - 1) % n); ed_SegAt(0.5); px = ed_bx; py = ed_by; pz = ed_bz;);
+        hn ? (ed_SegCtl(e, (k + 1) % n); ed_SegAt(0.5); nx = ed_bx; ny = ed_by; nz = ed_bz;);
+        ed_Keep(e);
+        (k + 1 < n) ? memcpy(ed_P(e, k + 2), ed_P(e, k + 1), (n - 1 - k) * ED_PS);
+        st[ed_sN] = m = n + 1;
+        q = ed_P(e, k + 1);
+        memset(q, 0, ED_PS);
+        q[0] = ed_LimP(e, mx); q[1] = ed_LimP(e, my); q[2] = ed_LimP(e, mz);
+        p = ed_P(e, k); p[4] = p[5] = p[6] = 0;
+        // the bends that put the middles back on the curve : once (straight : exact), else again and again (smooth : a
+        // bend changes the tangents of the neighbours ; 24 passes, the error divided by more than 1000)
+        loop(st[ed_sSmooth] ? 24 : 1,
+            ed_FitMid(e, k, ax, ay, az);
+            ed_FitMid(e, k + 1, bx, by, bz);
+            hp ? ed_FitMid(e, (k + m - 1) % m, px, py, pz);
+            hn ? ed_FitMid(e, (k + 2) % m, nx, ny, nz);
+        );
+        ed_Sel1(e, k + 1);
+        k + 1;
+    ) : -1;
+);
+
+
+//====== The view
+
+// The camera of "Space 3D" saved, restored
+function ed_CamSave()
+(
+    ed_cam[0] = s3d_az; ed_cam[1] = s3d_el; ed_cam[2] = s3d_dist;
+    ed_cam[3] = s3d_cpx; ed_cam[4] = s3d_cpy; ed_cam[5] = s3d_cpz;
+    ed_cam[6] = s3d_fwx; ed_cam[7] = s3d_fwy; ed_cam[8] = s3d_fwz;
+    ed_cam[9] = s3d_rgx; ed_cam[10] = s3d_rgy; ed_cam[11] = s3d_rgz;
+    ed_cam[12] = s3d_upx; ed_cam[13] = s3d_upy; ed_cam[14] = s3d_upz;
+    ed_cam[15] = s3d_foc; ed_cam[16] = s3d_ox; ed_cam[17] = s3d_oy; ed_cam[18] = s3d_zmin; ed_cam[19] = s3d_zmax;
+);
+function ed_CamRestore()
+(
+    s3d_az = ed_cam[0]; s3d_el = ed_cam[1]; s3d_dist = ed_cam[2];
+    s3d_cpx = ed_cam[3]; s3d_cpy = ed_cam[4]; s3d_cpz = ed_cam[5];
+    s3d_fwx = ed_cam[6]; s3d_fwy = ed_cam[7]; s3d_fwz = ed_cam[8];
+    s3d_rgx = ed_cam[9]; s3d_rgy = ed_cam[10]; s3d_rgz = ed_cam[11];
+    s3d_upx = ed_cam[12]; s3d_upy = ed_cam[13]; s3d_upz = ed_cam[14];
+    s3d_foc = ed_cam[15]; s3d_ox = ed_cam[16]; s3d_oy = ed_cam[17]; s3d_zmin = ed_cam[18]; s3d_zmax = ed_cam[19];
+);
+
+// The camera of the editor e, for a view of w x h pixels (ed_CamRestore after use) : the globals of s3d_camera, from
+// the free camera of the editor (see ed_Orbit)
+function ed_CamSet(e, w, h)
+local(st, f, u, d)
+(
+    ed_CamSave();
+    st = ed_St(e); f = st + ed_sFw; u = st + ed_sUp; d = st[ed_sDist];
+    w = max(16, w|0); h = max(16, h|0);
+    s3d_dist = d;
+    s3d_fwx = f[0]; s3d_fwy = f[1]; s3d_fwz = f[2];
+    s3d_upx = u[0]; s3d_upy = u[1]; s3d_upz = u[2];
+    // right = forward x up
+    s3d_rgx = f[1] * u[2] - f[2] * u[1]; s3d_rgy = f[2] * u[0] - f[0] * u[2]; s3d_rgz = f[0] * u[1] - f[1] * u[0];
+    s3d_cpx = - d * f[0]; s3d_cpy = - d * f[1]; s3d_cpz = - d * f[2];
+    s3d_foc = 0.5 * min(w, h) / tan(0.5 * s3d_fov);
+    s3d_ox = 0.5 * w; s3d_oy = 0.5 * h;
+    s3d_zmin = d - 1.75; s3d_zmax = d + 1.75;
+);
+
+// The point under the mouse (mx, my : relative to the view), on the plane of the screen through the current point (the
+// origin if none) : ed_rx, ed_ry, ed_rz (the camera of the editor is set : ed_CamSet)
+function ed_Ray(e, mx, my)
+local(st, cur, p, t, a, b, qx, qy, qz)
+(
+    st = ed_St(e); cur = st[ed_sCur];
+    ((cur >= 0) && (cur < st[ed_sN])) ? (
+        p = ed_P(e, cur); qx = p[0]; qy = p[1]; qz = p[2];
+    ) : (
+        qx = qy = qz = 0;
+    );
+    t = max(s3d_near, (qx - s3d_cpx) * s3d_fwx + (qy - s3d_cpy) * s3d_fwy + (qz - s3d_cpz) * s3d_fwz); // its depth
+    a = (mx - s3d_ox) / s3d_foc; b = (s3d_oy - my) / s3d_foc;
+    ed_rx = s3d_cpx + t * (s3d_fwx + a * s3d_rgx + b * s3d_upx);
+    ed_ry = s3d_cpy + t * (s3d_fwy + a * s3d_rgy + b * s3d_upy);
+    ed_rz = s3d_cpz + t * (s3d_fwz + a * s3d_rgz + b * s3d_upz);
+);
+
+// The point of the plane z = zv under the mouse (mx, my : relative to the view) : ed_rx, ed_ry, ed_rz ; returns 0 when
+// the plane is seen edge-on (less than 5 degrees) or behind the camera (the camera of the editor is set : ed_CamSet)
+function ed_RayZ(mx, my, zv)
+local(a, b, dx, dy, dz, t)
+(
+    a = (mx - s3d_ox) / s3d_foc; b = (s3d_oy - my) / s3d_foc;
+    dx = s3d_fwx + a * s3d_rgx + b * s3d_upx;
+    dy = s3d_fwy + a * s3d_rgy + b * s3d_upy;
+    dz = s3d_fwz + a * s3d_rgz + b * s3d_upz;
+    (abs(dz) > 0.087 * sqrt(dx * dx + dy * dy + dz * dz)) ? (
+        t = (zv - s3d_cpz) / dz; // (the depth : the component of the ray on s3d_fw is 1)
+        (t > s3d_near) ? (
+            ed_rx = s3d_cpx + t * dx; ed_ry = s3d_cpy + t * dy; ed_rz = zv;
+            1;
+        ) : 0;
+    ) : 0;
+);
+
+// The place of a new point under the mouse : on the plane z = val (grid Plane z ; seen edge-on : on the plane of the
+// screen, then z = val), else on the plane of the screen through the current point : ed_rx, ed_ry, ed_rz
+function ed_NewPos(e, mx, my)
+local(st)
+(
+    st = ed_St(e);
+    ed_PlaneZ(st[ed_sGrid]) ? (
+        !ed_RayZ(mx, my, st[ed_sZ]) ? (ed_Ray(e, mx, my); ed_rz = st[ed_sZ];);
+    ) : (
+        ed_Ray(e, mx, my);
+    );
+);
+
+// The place (x, y, z) brought to the nearest intersection of the grids of the editor e (steps 1 / ed_sDiv), on the
+// coordinates of the mask m (1 x, 2 y, 4 z ; 8 : x and y on the polar grid, the radius to k / d, 0 ... d, the angle
+// to j * 360 / n degrees, n rays), when its option Snap is on : ed_qx, ed_qy, ed_qz
+function ed_Snap(e, x, y, z, m)
+local(st, d, r, a, q)
+(
+    st = ed_St(e);
+    !st[ed_sSnap] ? (m = 0);
+    d = st[ed_sDiv];
+    ed_qx = (m & 1) ? ed_LimP(e, floor(x * d + 0.5) / d) : x;
+    ed_qy = (m & 2) ? ed_LimP(e, floor(y * d + 0.5) / d) : y;
+    ed_qz = (m & 4) ? ed_LimP(e, floor(z * d + 0.5) / d) : z;
+    (m & 8) ? (
+        // (beyond the circle of radius 1 : on it ; Free : the circles k / d go on, up to ED_FAR)
+        r = min(d * ed_Bnd(e), floor(sqrt(x * x + y * y) * d + 0.5)) / d;
+        q = 2 * $pi / max(2, st[ed_sRays]);
+        a = floor(atan2(y, x) / q + 0.5) * q;
+        ed_qx = r * cos(a); ed_qy = r * sin(a);
+    );
+);
+
+// The masks of the coordinates (1 x, 2 y, 4 z) brought to the grid (the camera of the editor is set) : a move in the
+// plane of the screen, those not along the axis of the view ; a move in depth, those along it (an axis of the room
+// seen end-on keeps its coordinate in the plane of the screen, and only it moves in depth)
+function ed_InPlane()
+(
+    (abs(s3d_fwx) <= 0.9) | ((abs(s3d_fwy) <= 0.9) * 2) | ((abs(s3d_fwz) <= 0.9) * 4);
+);
+function ed_InDepth()
+(
+    (abs(s3d_fwx) >= 0.1) | ((abs(s3d_fwy) >= 0.1) * 2) | ((abs(s3d_fwz) >= 0.1) * 4);
+);
+
+// The point of the editor e under the mouse (mx, my : relative to the view), as drawn in the last frame : its index,
+// or -1 ; -2 : the barycentre (shown, nearer than the nearest point) ; -10 - k : the handle of the segment k ;
+// ed_pd : the square of the distance
+function ed_Pick(e, mx, my)
+local(st, sc, k, d, bd, r, g)
+(
+    st = ed_St(e); sc = ed_scr + e * ED_MAXP * 3;
+    r = -1; bd = 144; // (12 pixels)
+    k = 0; loop(st[ed_sN],
+        ((sc[3 * k + 2] > 0) && ((d = sqr(sc[3 * k] - mx) + sqr(sc[3 * k + 1] - my)) < bd)) ? (bd = d; r = k;);
+        k += 1;
+    );
+    g = ed_gsc + 3 * e;
+    ((g[2] > 0) && ((d = sqr(g[0] - mx) + sqr(g[1] - my)) < bd)) ? (bd = d; r = -2;);
+    // the handles of the segments (shown : a trajectory, modes Move, Add/Del) : -10 - k for the segment k
+    g = ed_hsc + e * ED_MAXP * 3;
+    k = 0; loop(st[ed_sN],
+        ((g[3 * k + 2] > 0) && ((d = sqr(g[3 * k] - mx) + sqr(g[3 * k + 1] - my)) < bd)) ? (bd = d; r = -10 - k;);
+        k += 1;
+    );
+    ed_pd = bd;
+    r;
+);
+
+// A dotted line from (x1, y1, z1) to (x2, y2, z2), a dot at its end (the camera is set)
+function ed_Dots(x1, y1, z1, x2, y2, z2, cr, cg, cb)
+local(i, n)
+(
+    gfx_set(cr, cg, cb, 0.9);
+    n = 16; i = 0;
+    loop(n,
+        !(i & 1) ? s3d_line(x1 + (x2 - x1) * i / n, y1 + (y2 - y1) * i / n, z1 + (z2 - z1) * i / n,
+                            x1 + (x2 - x1) * (i + 1) / n, y1 + (y2 - y1) * (i + 1) / n, z1 + (z2 - z1) * (i + 1) / n);
+        i += 1;
+    );
+    s3d_proj(x2, y2, z2) ? gfx_circle(s3d_px, s3d_py, 2.5, 1, 1);
+);
+
+// The grid of the plane normal to the axis ax (0 x, 1 y, 2 z) at the coordinate c, limited to the room (the color is
+// set ; the camera is set)
+function ed_Plane(ax, c)
+local(i, t)
+(
+    i = 0;
+    loop(s3d_GridN + 1,
+        t = -1 + 2 * i / s3d_GridN;
+        (ax === 0) ? (
+            s3d_line(c, t, -1, c, t, 1); s3d_line(c, -1, t, c, 1, t);
+        ) : (ax === 1) ? (
+            s3d_line(t, c, -1, t, c, 1); s3d_line(-1, c, t, 1, c, t);
+        ) : (
+            s3d_line(t, -1, c, t, 1, c); s3d_line(-1, t, c, 1, t, c);
+        );
+        i += 1;
+    );
+);
+
+// The polar grid of the plane z = c : the circles of radii k / d (k = 1 ... d), nr rays from the center, evenly spaced
+// from the axis x (the color is set ; the camera is set)
+function ed_Polar(c, d, nr)
+local(k, j, r, a, ns, x0, y0, x1, y1)
+(
+    ns = 72; // (the segments of a circle)
+    k = 1;
+    loop(d,
+        r = k / d;
+        x0 = r; y0 = 0; j = 1;
+        loop(ns,
+            a = 2 * $pi * j / ns;
+            x1 = r * cos(a); y1 = r * sin(a);
+            s3d_line(x0, y0, c, x1, y1, c);
+            x0 = x1; y0 = y1; j += 1;
+        );
+        k += 1;
+    );
+    j = 0;
+    loop(nr,
+        a = 2 * $pi * j / nr;
+        s3d_line(0, 0, c, cos(a), sin(a), c);
+        j += 1;
+    );
+);
+
+// An arrow at the end +1 of an axis (ux, uy, uz : its unit vector), pointing outwards, and the name of the axis (the
+// color is set ; the camera is set). An axis seen end-on : a ring, with a dot when its end +1 comes towards the eye,
+// with a cross when it goes away.
+function ed_Arrow(ux, uy, uz, lbl)
+local(bx, by, bz, tx, ty, tz, dx, dy, d, l, cx, cy)
+(
+    s3d_proj(0.9 * ux, 0.9 * uy, 0.9 * uz) ? (
+        bx = s3d_px; by = s3d_py; bz = s3d_pz;
+        s3d_proj(ux, uy, uz) ? (
+            tx = s3d_px; ty = s3d_py; tz = s3d_pz;
+            dx = tx - bx; dy = ty - by; d = sqrt(dx * dx + dy * dy); // (the last tenth of the axis, on the screen)
+            gfx_measurestr(lbl, s3d_tw, s3d_th);
+            (d > 0.6) ? (
+                l = min(11, 8 * d); dx /= d; dy /= d;
+                cx = tx - dx * l; cy = ty - dy * l; // the base of the head, its tip at the end of the axis
+                gfx_triangle(tx, ty, cx - dy * l * 0.45, cy + dx * l * 0.45, cx + dy * l * 0.45, cy - dx * l * 0.45);
+                gfx_x = tx + dx * 9 - s3d_tw / 2; gfx_y = ty + dy * 9 - s3d_th / 2;
+            ) : (
+                gfx_circle(tx, ty, 5, 0, 1);
+                (tz < bz) ? (
+                    gfx_circle(tx, ty, 1.5, 1, 1);
+                ) : (
+                    gfx_line(tx - 3, ty - 3, tx + 3, ty + 3, 1); gfx_line(tx - 3, ty + 3, tx + 3, ty - 3, 1);
+                );
+                gfx_x = tx + 8; gfx_y = ty - 6 - s3d_th;
+            );
+            gfx_drawstr(lbl);
+        );
+    );
+);
+
+// The segments of a trajectory (the camera is set) : the lines from each point to the next one (the curves : 24 steps),
+// an arrow at 0.7 of each (the direction), and in the modes Move, Add/Del a handle at its middle (a diamond : filled
+// when the segment is bent ; kept for the mouse in ed_hsc)
+function ed_DrawSegs(e, mode)
+local(st, ns, hs, k, j, p, x0, y0, z0, ux, uy, dx, dy, d, tx, ty, bt, r)
+(
+    st = ed_St(e);
+    hs = ed_hsc + e * ED_MAXP * 3;
+    memset(hs, 0, ED_MAXP * 3);
+    ns = ed_NSeg(e);
+    k = 0;
+    loop(ns,
+        p = ed_P(e, k);
+        ed_SegCtl(e, k);
+        bt = ed_Bent(e, k);
+        gfx_set(0.75, 0.88, 1, 0.9);
+        bt ? (
+            x0 = ed_s0[0]; y0 = ed_s0[1]; z0 = ed_s0[2];
+            j = 1;
+            loop(24,
+                ed_SegAt(j / 24);
+                s3d_line(x0, y0, z0, ed_bx, ed_by, ed_bz);
+                x0 = ed_bx; y0 = ed_by; z0 = ed_bz;
+                j += 1;
+            );
+        ) : (
+            s3d_line(ed_s0[0], ed_s0[1], ed_s0[2], ed_s1[0], ed_s1[1], ed_s1[2]);
+        );
+        // the direction : an arrow at 0.7 of the segment
+        ed_SegAt(0.68);
+        s3d_proj(ed_bx, ed_by, ed_bz) ? (
+            ux = s3d_px; uy = s3d_py;
+            ed_SegAt(0.72);
+            s3d_proj(ed_bx, ed_by, ed_bz) ? (
+                dx = s3d_px - ux; dy = s3d_py - uy; d = sqrt(dx * dx + dy * dy);
+                (d > 0.001) ? (
+                    dx /= d; dy /= d; tx = s3d_px + dx * 4; ty = s3d_py + dy * 4;
+                    gfx_triangle(tx, ty, tx - dx * 9 - dy * 4, ty - dy * 9 + dx * 4, tx - dx * 9 + dy * 4, ty - dy * 9 - dx * 4);
+                );
+            );
+        );
+        // the handle : its middle
+        ed_SegAt(0.5);
+        ((mode >= 1) && s3d_proj(ed_bx, ed_by, ed_bz)) ? (
+            hs[3 * k] = s3d_px; hs[3 * k + 1] = s3d_py; hs[3 * k + 2] = s3d_pz;
+            r = 4.5;
+            bt ? (
+                gfx_set(1, 0.55, 0.9, 1);
+                gfx_triangle(s3d_px - r, s3d_py, s3d_px, s3d_py - r, s3d_px + r, s3d_py, s3d_px, s3d_py + r);
+            ) : (
+                gfx_set(0.75, 0.88, 1, 1);
+                gfx_line(s3d_px - r, s3d_py, s3d_px, s3d_py - r, 1); gfx_line(s3d_px, s3d_py - r, s3d_px + r, s3d_py, 1);
+                gfx_line(s3d_px + r, s3d_py, s3d_px, s3d_py + r, 1); gfx_line(s3d_px, s3d_py + r, s3d_px - r, s3d_py, 1);
+            );
+        );
+        k += 1;
+    );
+);
+
+// The menu of the view (right clic)
+function ed_ViewMenu(e)
+local(st, c, g)
+(
+    st = ed_St(e); g = st[ed_sGrid];
+    sprintf(#ed_mnu, "Front view|Side view|Top view|3D view||%sGrid : the far faces of the room|%sGrid : the planes x = 0, y = 0, z = 0|%sNo grid : the axes only|%sGrid : the plane z = %.2f (the new points)|%sGrid : the circles of the plane z = %.2f (polar)|%sSnap to the grid (step 1/%d)||%sShow the numbers|%sShow the projections of the current point|%sShow the barycentre of the selection|%sFree points (beyond the room, up to %d)||Select all|Select none|Invert the selection",
+        (g === 0) ? "!" : "", (g === 1) ? "!" : "", (g === 2) ? "!" : "", (g === 3) ? "!" : "", st[ed_sZ],
+        (g === 4) ? "!" : "", st[ed_sZ], st[ed_sSnap] ? "!" : "", st[ed_sDiv],
+        (st[ed_sOpt] & ed_oNum) ? "!" : "", (st[ed_sOpt] & ed_oProj) ? "!" : "", (st[ed_sOpt] & ed_oBary) ? "!" : "",
+        st[ed_sFree] ? "!" : "", ED_FAR);
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    c = gfx_showmenu(#ed_mnu);
+    prv_MenuEnd(); // (the clic that chose the entry is not a new point)
+    ((c >= 1) && (c <= 4)) ? ed_SetView(e, c - 1) :
+    ((c >= 5) && (c <= 9)) ? (st[ed_sGrid] = c - 5) :
+    (c === 10) ? (st[ed_sSnap] = !st[ed_sSnap]) :
+    (c === 11) ? (st[ed_sOpt] = st[ed_sOpt] ~ ed_oNum) :
+    (c === 12) ? (st[ed_sOpt] = st[ed_sOpt] ~ ed_oProj) :
+    (c === 13) ? (st[ed_sOpt] = st[ed_sOpt] ~ ed_oBary) :
+    (c === 14) ? ed_SetFree(e, !st[ed_sFree]) :
+    ((c >= 15) && (c <= 17)) ? ed_SelOp(e, c - 15);
+    (c > 0) ? (ui_GFXdoNow |= 4);
+);
+
+// The mouse in the view of the editor e (x, y, w, h : screen pixels) ; returns 1 when the wheel was used.
+// A press is a press of ui-lib (uix_click1, uix_click2 : the button went down since the last frame drawn ; none after
+// a menu, while ui-lib blocks the clics) ; a drag goes on while the button stays down and the view is drawn.
+function ed_Mouse(e, x, y, w, h, wheel)
+local(st, mx, my, inside, used, dx, dy, f, p, cur, mode, grid, pz, dvx, dvy, dvz, ok, hit, hx, hy, ox, oy, oz)
+(
+    used = 0;
+    st = ed_St(e); mode = st[ed_sMode]; grid = st[ed_sGrid]; pz = ed_PlaneZ(grid);
+    mx = mouse_x - x; my = mouse_y - y;
+    inside = (mx >= 0) && (my >= 0) && (mx < w) && (my < h);
+    // a view not drawn in the previous frame (another tab, another module) : no drag going on
+    (ed_seen[e] < gfx_executed - 1) ? (ed_md[e] = 0);
+    ed_seen[e] = gfx_executed;
+    uix_click1 ? (
+        // the left button has just been pressed (not with the right one)
+        (inside && !(mouse_cap & 2)) ? (
+            ed_md[e] = 1; ed_dmoved = 0; ed_dk = 0; ed_dmods = mouse_cap; ed_dnew = -1;
+            ed_mx0 = ed_lmx = mouse_x; ed_my0 = ed_lmy = mouse_y;
+            ed_dhit = ed_Pick(e, mx, my); // (-2 : the barycentre)
+            ((mode === 2) && (ed_dhit === -1) && !(mouse_cap & (8 | 16))) ? (
+                // Add : a new point under the mouse (alone selected, the current one)
+                ed_Keep(e);
+                ed_CamSet(e, w, h);
+                ed_NewPos(e, mx, my);
+                ed_Snap(e, ed_rx, ed_ry, ed_rz, (grid === 4) ? 8 : (grid === 3) ? 3 : ed_InPlane());
+                ed_CamRestore();
+                ed_dnew = ed_Add(e, ed_qx, ed_qy, ed_qz);
+                ed_dhit = ed_dnew;
+                ui_GFXdoNow |= 4;
+            );
+            // (the selection changes when the drag starts, or at the release of a clic)
+        ) : (
+            ed_md[e] = -1;
+        );
+    ) : ((mouse_cap & 1) && (ed_md[e] === 1)) ? (
+        (!ed_dmoved && (abs(mouse_x - ed_mx0) + abs(mouse_y - ed_my0) > 3)) ? (
+            // the kind of the drag, at its start : a point or the barycentre moved (Move, Add/Del), or the orbit
+            ed_dmoved = 1;
+            ed_dk = ((mode >= 1) && (ed_dhit !== -1) && !(ed_dmods & 8)) ? ((ed_dmods & 4) ? 3 : 2) : 1;
+            (ed_dk >= 2) ? (
+                (ed_dnew < 0) ? ed_Keep(e); // (a new point : already kept)
+                (ed_dhit >= 0) ? (
+                    // the point dragged : selected, it becomes the current one and the selection moves with it ; else
+                    // it is selected alone
+                    p = ed_P(e, ed_dhit);
+                    (p[3] & 1) ? (st[ed_sCur] = ed_dhit) : ed_Sel1(e, ed_dhit);
+                    ed_fx = p[0]; ed_fy = p[1]; ed_fz = p[2];
+                ) : (ed_dhit <= -10) ? (
+                    // the handle of a segment : its middle (the bend changes, the curve passes under the mouse)
+                    ed_SegCtl(e, -10 - ed_dhit); ed_SegAt(0.5);
+                    ed_fx = ed_bx; ed_fy = ed_by; ed_fz = ed_bz;
+                ) : (
+                    // the barycentre : the selection moves with it
+                    ed_Bary(e); ed_fx = ed_gx; ed_fy = ed_gy; ed_fz = ed_gz;
+                );
+                // (ed_fx ... : the free place, that the snap brings to the grid at each frame)
+            );
+        );
+        ed_dmoved ? (
+            dx = mouse_x - ed_lmx; dy = mouse_y - ed_lmy;
+            (ed_dk === 1) ? (
+                ed_oax = ed_Orbit(e, dx, dy, mouse_cap & 8); // (Shift read at each frame : around x or y while held)
+                st[ed_sView] = -1;
+            ) : (
+                // the place moved : the current point, the barycentre, or the middle of a segment
+                cur = st[ed_sCur];
+                hit = 0;
+                (ed_dhit <= -10) ? (
+                    (-10 - ed_dhit < ed_NSeg(e)) ? (ed_SegCtl(e, -10 - ed_dhit); ed_SegAt(0.5); ox = ed_bx; oy = ed_by; oz = ed_bz; hit = 1;);
+                ) :
+                (ed_dhit === -2) ? (
+                    (ed_Bary(e) > 0) ? (ox = ed_gx; oy = ed_gy; oz = ed_gz; hit = 1;);
+                ) : ((cur >= 0) && (cur < st[ed_sN])) ? (
+                    p = ed_P(e, cur); ox = p[0]; oy = p[1]; oz = p[2]; hit = 1;
+                );
+                hit ? (
+                    ed_CamSet(e, w, h);
+                    ok = 0;
+                    ((ed_dk === 2) && pz) ? (
+                        // grids Plane z, Polar z : in the horizontal plane of the place (its z kept), under the mouse
+                        ed_RayZ(ed_lmx - x, ed_lmy - y, oz) ? (
+                            hx = ed_rx; hy = ed_ry;
+                            ed_RayZ(mx, my, oz) ? (
+                                dvx = max(-0.5, min(0.5, ed_rx - hx)); dvy = max(-0.5, min(0.5, ed_ry - hy)); dvz = 0;
+                                ok = 1;
+                            );
+                        );
+                    );
+                    !ok ? (
+                        (ed_dk === 2) ? (
+                            // in the plane of the screen, at the depth of the place
+                            f = max(s3d_near, (ox - s3d_cpx) * s3d_fwx + (oy - s3d_cpy) * s3d_fwy + (oz - s3d_cpz) * s3d_fwz) / s3d_foc;
+                            dvx = f * (dx * s3d_rgx - dy * s3d_upx);
+                            dvy = f * (dx * s3d_rgy - dy * s3d_upy);
+                            dvz = pz ? 0 : f * (dx * s3d_rgz - dy * s3d_upz); // (Plane z seen edge-on : z kept)
+                        ) : pz ? (
+                            // grids Plane z, Polar z, Cmd : the height, up = higher
+                            dvx = dvy = 0; dvz = - dy * 0.005;
+                        ) : (
+                            // Cmd : in depth, up = farther
+                            f = - dy * 0.005;
+                            dvx = f * s3d_fwx; dvy = f * s3d_fwy; dvz = f * s3d_fwz;
+                        );
+                    );
+                    // the free place moves ; the place goes to it, or to the nearest intersection of the grids (Snap),
+                    // with the selection (the move limited by the walls : the shape kept)
+                    ed_fx = ed_LimP(e, ed_fx + dvx); ed_fy = ed_LimP(e, ed_fy + dvy); ed_fz = ed_LimP(e, ed_fz + dvz);
+                    ed_Snap(e, ed_fx, ed_fy, ed_fz, (ed_dhit <= -10) ? 0 : // (a handle : no snap)
+                        (ed_dk === 2) ? ((grid === 4) ? 8 : (grid === 3) ? 3 : ed_InPlane()) : (pz ? 4 : ed_InDepth()));
+                    ed_CamRestore();
+                    (ed_dhit <= -10) ? ed_Bend(e, -10 - ed_dhit, ed_qx - ox, ed_qy - oy, ed_qz - oz) :
+                        ed_Shift(e, (ed_dhit === -2) ? -1 : cur, ed_qx - ox, ed_qy - oy, ed_qz - oz);
+                );
+            );
+            ui_GFXdoNow |= 4;
+        );
+        ed_lmx = mouse_x; ed_lmy = mouse_y;
+    ) : !(mouse_cap & 1) ? (
+        // released : a clic (not moved) on the handle of a segment : Shift, straight again ; Add/Del, a new point there
+        ((ed_md[e] === 1) && !ed_dmoved && (ed_dhit <= -10) && (-10 - ed_dhit < ed_NSeg(e))) ? (
+            (ed_dmods & 8) ? ed_Straight(e, -10 - ed_dhit) :
+            ((mode === 2) && !(ed_dmods & (4 | 16))) ? ed_Insert(e, -10 - ed_dhit);
+            ed_Norm(e);
+            ui_GFXdoNow |= 4;
+        );
+        // released : a clic (not moved) on a point (on nothing, on the barycentre, a point just created : nothing changes)
+        ((ed_md[e] === 1) && !ed_dmoved && (ed_dhit >= 0) && (ed_dnew < 0)) ? (
+            p = ed_P(e, ed_dhit);
+            (ed_dmods & 16) ? (
+                // Alt : the next number (Shift + Alt : the number 1) ; a point already renumbered stays ; the point
+                // renumbered is selected alone
+                (ed_dmods & 8) ? (ed_rn[e] = 0);
+                ((ed_dhit >= ed_rn[e]) && (ed_rn[e] < st[ed_sN])) ? (
+                    (ed_dhit !== ed_rn[e]) ? (ed_Keep(e); ed_Move(e, ed_dhit, ed_rn[e]););
+                    ed_Sel1(e, ed_rn[e]);
+                    ed_rn[e] += 1;
+                );
+            ) :
+            (ed_dmods & 4) ? (
+                // Cmd : the point joins the selection (it becomes the current one), or leaves it
+                p[3] = p[3] ~ 1;
+                (p[3] & 1) ? (st[ed_sCur] = ed_dhit);
+            ) :
+            (ed_dmods & 8) ? (
+                // Shift : the points numbered from the current one to this one join the selection
+                cur = st[ed_sCur];
+                ((cur >= 0) && (cur < st[ed_sN])) ? ed_SelRange(e, cur, ed_dhit) : (p[3] |= 1);
+                st[ed_sCur] = ed_dhit;
+            ) :
+            (mode === 2) ? (
+                ed_Keep(e); ed_Del(e, ed_dhit); // Add/Del : a clic on a point deletes it
+            ) : (
+                // a clic on a point : not selected, it is selected alone ; selected, it becomes the current one
+                (p[3] & 1) ? (st[ed_sCur] = ed_dhit) : ed_Sel1(e, ed_dhit);
+            );
+            ed_Norm(e);
+            ui_GFXdoNow |= 4;
+        );
+        (ed_md[e] === 1) ? (ed_dk = 0);
+        ed_md[e] = 0;
+    );
+    (uix_click2 && inside && !(mouse_cap & 8)) ? ed_ViewMenu(e); // (Shift + right clic : left to the host)
+    (inside && (wheel != 0)) ? (
+        st[ed_sDist] = max(1.8, min(st[ed_sFree] ? 60 : 12, st[ed_sDist] * exp(- wheel / 1000)));
+        used = 1;
+    );
+    used;
+);
+
+// Draws the view of the editor e (x, y, w, h : screen pixels)
+function ed_Draw(e, x, y, w, h)
+local(od, st, n, cur, img, ax, s, sc, k, j, i, p, r, cr, cg, cb, grid, aa, px, py, pz, ty, gn, ns, bo, g, qx, qy, qz, hq)
+(
+    od = gfx_dest;
+    w = max(16, w|0); h = max(16, h|0);
+    img = ED_IMG + e;
+    ((w != ed_iw[e]) || (h != ed_ih[e])) ? (
+        gfx_setimgdim(img, w, h);
+        ed_iw[e] = w; ed_ih[e] = h;
+    );
+    gfx_dest = img;
+    gfx_mode = 0;
+    gfx_set(s3d_bgr, s3d_bgg, s3d_bgb, 1);
+    gfx_rect(0, 0, w, h);
+    s3d_colors();
+    ed_CamSet(e, w, h);
+    st = ed_St(e); n = st[ed_sN]; cur = st[ed_sCur]; grid = st[ed_sGrid];
+    gn = s3d_GridN; s3d_GridN = 2 * st[ed_sDiv]; // the lines of a grid (s3d_face, ed_Plane ; "Space 3D" : restored)
+    ns = ed_Bary(e); // the selected points, their barycentre (ed_gx ...)
+    bo = st[ed_sOpt] & ed_oBary;
+
+    (grid === 0) ? (
+        // the far faces of the room, their grid
+        ax = 0;
+        loop(3,
+            s = -1;
+            loop(2, s3d_farface(ax, s) ? s3d_face(ax, s); s += 2;);
+            ax += 1;
+        );
+    ) : (grid === 1) ? (
+        // the planes x = 0, y = 0, z = 0 (where the current point is projected)
+        gfx_set(0.55, 0.78, 1, 0.3);
+        ed_Plane(0, 0); ed_Plane(1, 0); ed_Plane(2, 0);
+    ) : ed_PlaneZ(grid) ? (
+        // the plane z = val (where the new points are created) : its square grid, or its circles and rays (Polar z)
+        gfx_set(1, 0.85, 0.2, 0.5);
+        (grid === 3) ? ed_Plane(2, st[ed_sZ]) : ed_Polar(st[ed_sZ], st[ed_sDiv], st[ed_sRays]);
+    ); // (Axes : no grid)
+    // the axes, over the grid, an arrow at their end +1
+    aa = (grid === 0) ? 0.6 : 0.95;
+    gfx_set(0.85, 0.3, 0.3, aa); s3d_line(-1, 0, 0, 1, 0, 0); ed_Arrow(1, 0, 0, "x");
+    gfx_set(0.3, 0.8, 0.3, aa); s3d_line(0, -1, 0, 0, 1, 0); ed_Arrow(0, 1, 0, "y");
+    gfx_set(0.35, 0.5, 1, aa); s3d_line(0, 0, -1, 0, 0, 1); ed_Arrow(0, 0, 1, "z");
+    // grids Plane z, Polar z : where the axis z crosses the plane, a green dot
+    (ed_PlaneZ(grid) && s3d_proj(0, 0, st[ed_sZ])) ? (gfx_set(0.3, 0.95, 0.3, 1); gfx_circle(s3d_px, s3d_py, 2, 1, 1););
+
+    // the projections of the points on the screen (kept for the mouse), the order of drawing : far first
+    sc = ed_scr + e * ED_MAXP * 3;
+    k = 0;
+    loop(n,
+        p = ed_P(e, k);
+        s3d_proj(p[0], p[1], p[2]) ? (
+            sc[3 * k] = s3d_px; sc[3 * k + 1] = s3d_py; sc[3 * k + 2] = s3d_pz;
+        ) : (
+            sc[3 * k + 2] = 0;
+        );
+        i = k;
+        while ((i > 0) && (sc[3 * ed_ord[i - 1] + 2] < sc[3 * k + 2])) (ed_ord[i] = ed_ord[i - 1]; i -= 1;);
+        ed_ord[i] = k;
+        k += 1;
+    );
+
+    // the projections of the current point, or of the barycentre (Bary on) : grid Room, on the far faces shown (x = -1
+    // or 1 ...) ; Planes, Axes, on x = 0, y = 0, z = 0 ; Plane z, Polar z, on x = 0, y = 0 and z = val ; none when the
+    // point is on the plane
+    hq = 0;
+    (bo && (ns > 0)) ? (
+        qx = ed_gx; qy = ed_gy; qz = ed_gz; hq = 1;
+    ) : ((cur >= 0) && (cur < n)) ? (
+        p = ed_P(e, cur); qx = p[0]; qy = p[1]; qz = p[2]; hq = 1;
+    );
+    (hq && (st[ed_sOpt] & ed_oProj)) ? (
+        (grid === 0) ? (
+            px = (s3d_cpx > 0) ? -1 : 1; py = (s3d_cpy > 0) ? -1 : 1; pz = (s3d_cpz > 0) ? -1 : 1;
+        ) : (
+            px = py = 0; pz = ed_PlaneZ(grid) ? st[ed_sZ] : 0;
+        );
+        (abs(qx - px) > 0.0005) ? ed_Dots(qx, qy, qz, px, qy, qz, 0.95, 0.35, 0.35);
+        (abs(qy - py) > 0.0005) ? ed_Dots(qx, qy, qz, qx, py, qz, 0.35, 0.9, 0.35);
+        (abs(qz - pz) > 0.0005) ? ed_Dots(qx, qy, qz, qx, qy, pz, 0.4, 0.6, 1);
+    );
+
+    // a trajectory : its segments (under the balls) ; else no handle
+    (st[ed_sKind] === 2) ? ed_DrawSegs(e, st[ed_sMode]) : memset(ed_hsc + e * ED_MAXP * 3, 0, ED_MAXP * 3);
+
+    // the points : balls (speakers light blue, sources orange, trajectory light green, selected yellow), the current one
+    // (selected) larger and ringed
+    j = 0;
+    loop(n,
+        k = ed_ord[j];
+        (sc[3 * k + 2] > 0) ? (
+            p = ed_P(e, k);
+            r = max(3, 0.035 * s3d_foc / sc[3 * k + 2]);
+            (k === cur) ? (r *= 1.35);
+            (st[ed_sKind] === 0) ? (cr = 0.45; cg = 0.75; cb = 1;) : (st[ed_sKind] === 1) ? (cr = 1; cg = 0.6; cb = 0.25;) :
+                (cr = 0.55; cg = 0.9; cb = 0.6;);
+            (p[3] & 1) ? (cr = 1; cg = 0.9; cb = 0.2;);
+            s3d_ball(sc[3 * k], sc[3 * k + 1], r, cr, cg, cb, 1);
+            (k === cur) ? (gfx_set(1, 1, 1, 1); gfx_circle(sc[3 * k], sc[3 * k + 1], r + 2, 0, 1););
+            (st[ed_sOpt] & ed_oNum) ? (
+                gfx_set(s3d_txr, s3d_txg, s3d_txb, 1);
+                sprintf(#ed_lbl, "%d", k + 1);
+                s3d_label(sc[3 * k], sc[3 * k + 1], r, #ed_lbl);
+            );
+        );
+        j += 1;
+    );
+
+    // the barycentre of the selection (Bary on, 2 points at least) : a magenta cross in a ring (kept for the mouse)
+    g = ed_gsc + 3 * e;
+    g[2] = 0;
+    (bo && (ns > 1) && s3d_proj(ed_gx, ed_gy, ed_gz)) ? (
+        g[0] = s3d_px; g[1] = s3d_py; g[2] = s3d_pz;
+        gfx_set(0, 0, 0, 0.6); gfx_circle(s3d_px, s3d_py, 7, 0, 1);
+        gfx_set(1, 0.35, 0.95, 1);
+        gfx_circle(s3d_px, s3d_py, 6, 0, 1);
+        gfx_line(s3d_px - 9, s3d_py, s3d_px + 9, s3d_py, 1); gfx_line(s3d_px, s3d_py - 9, s3d_px, s3d_py + 9, 1);
+    );
+
+    // the text : the current point, the count of selected points ; Bary on : the barycentre
+    gfx_set(1, 0.85, 0.4, 1);
+    gfx_x = 8; gfx_y = 6;
+    ((cur >= 0) && (cur < n)) ? (
+        p = ed_P(e, cur);
+        (bo && (ns > 1)) ? (
+            sprintf(#ed_lbl, "G of %d points   x %.3f   y %.3f   z %.3f   (current : P%d)", ns, ed_gx, ed_gy, ed_gz, cur + 1);
+        ) : (
+            sprintf(#ed_lbl, "P%d   x %.3f   y %.3f   z %.3f", cur + 1, p[0], p[1], p[2]);
+            (ns > 1) ? (sprintf(#ed_it, "   (selected : %d)", ns); strcat(#ed_lbl, #ed_it););
+        );
+    ) : (
+        strcpy(#ed_lbl, (n === 0) ? "No point : mode Add/Del (key p), then a clic in the view" : "No point selected : a clic on a point");
+    );
+    gfx_drawstr(#ed_lbl);
+    // at the bottom : the mode Free, the height of the plane of the new points, the renumbering, the axis of the orbit
+    gfx_measurestr("0", s3d_tw, s3d_th);
+    ty = h - s3d_th - 6;
+    st[ed_sFree] ? (
+        gfx_set(1, 0.6, 0.3, 1);
+        sprintf(#ed_lbl, "Free points (up to %d)", ED_FAR);
+        gfx_x = 8; gfx_y = ty;
+        gfx_drawstr(#ed_lbl);
+        ty -= s3d_th + 2;
+    );
+    ed_PlaneZ(grid) ? (
+        gfx_set(1, 0.85, 0.2, 1);
+        sprintf(#ed_lbl, "Plane z = %.3f", st[ed_sZ]);
+        gfx_x = 8; gfx_y = ty;
+        gfx_drawstr(#ed_lbl);
+        ty -= s3d_th + 2;
+    );
+    ((ed_rn[e] > 0) && (ed_rn[e] < n)) ? (
+        gfx_set(1, 1, 1, 0.9);
+        sprintf(#ed_lbl, "Alt + clic : number %d   (Shift + Alt + clic : 1)", ed_rn[e] + 1);
+        gfx_x = 8; gfx_y = ty;
+        gfx_drawstr(#ed_lbl);
+    );
+    ((ed_md[e] === 1) && (ed_dk === 1)) ? (
+        gfx_set(1, 1, 1, 0.9);
+        sprintf(#ed_lbl, "Around %c", 'x' + ed_oax);
+        gfx_measurestr(#ed_lbl, s3d_tw, s3d_th);
+        gfx_x = w - s3d_tw - 8; gfx_y = h - s3d_th - 6;
+        gfx_drawstr(#ed_lbl);
+    );
+    s3d_GridN = gn;
+    ed_CamRestore();
+
+    // copy to the screen (or to the ui-lib clip screen)
+    gfx_dest = od;
+    gfx_x = x; gfx_y = y;
+    gfx_a = 1; gfx_mode = 2; // (the alpha of the image ignored)
+    gfx_blit(img, 1, 0);
+    gfx_mode = 0;
+);
+
+
+//====== The files : exports (GMAuxiliary.eel, mSL_Export), the library of layouts of "Space 3D", the drops
+
+// An error of the editor e : logged ; its code
+function ed_Err(code, e, msg)
+(
+    sprintf(#ed_em, "ERR: %04d    Edit %c : %s", code, 'A' + e, msg);
+    mSL_log(SysLogBox, #ed_em);
+    code;
+);
+
+// The name of the configuration e for the menus and the log : "Edit A : name", or "Edit A"
+function ed_LName(e, dst)
+(
+    (strlen(ed_nm[e]) > 0) ? sprintf(dst, "Edit %c : %s", 'A' + e, ed_nm[e]) : sprintf(dst, "Edit %c", 'A' + e);
+    dst;
+);
+
+// The places of the points of the editor e, for a file or for "Space 3D" : x, y, z per point in ed_tmp, multiplied by
+// sc (5 for hppos : [-5, 5]) ; when a coordinate goes beyond 1 (Free), the configuration is first moved (its
+// barycentre at the origin), then reduced (a homothety) so that no coordinate goes beyond 1. Returns the count of
+// points ; ed_fitd : 1 if moved and reduced, ed_fitr : the ratio.
+function ed_FitBuf(buf, n, sc)
+local(k, q, m, gx, gy, gz, f)
+(
+    m = 0; gx = gy = gz = 0; f = 1;
+    k = 0; loop(n, q = buf + 3 * k; m = max(m, max(abs(q[0]), max(abs(q[1]), abs(q[2])))); k += 1;);
+    ed_fitd = (n > 0) && (m > 1.000001);
+    ed_fitd ? (
+        k = 0; loop(n, q = buf + 3 * k; gx += q[0]; gy += q[1]; gz += q[2]; k += 1;);
+        gx /= n; gy /= n; gz /= n;
+        m = 0;
+        k = 0; loop(n, q = buf + 3 * k; m = max(m, max(abs(q[0] - gx), max(abs(q[1] - gy), abs(q[2] - gz)))); k += 1;);
+        f = (m > 1) ? 1 / m : 1;
+    );
+    ed_fitr = f;
+    k = 0; loop(n,
+        q = buf + 3 * k;
+        q[0] = (q[0] - gx) * f * sc; q[1] = (q[1] - gy) * f * sc; q[2] = (q[2] - gz) * f * sc;
+        k += 1;
+    );
+    n;
+);
+function ed_Fit(e, sc)
+local(st, n, k, p, q)
+(
+    st = ed_St(e); n = st[ed_sN];
+    k = 0; loop(n, p = ed_P(e, k); q = ed_tmp + 3 * k; q[0] = p[0]; q[1] = p[1]; q[2] = p[2]; k += 1;);
+    ed_FitBuf(ed_tmp, n, sc);
+);
+
+// The trajectory of the configuration e sampled in dst (x, y, z per point ; at most maxn points) : a straight segment
+// gives its first point, a curve sp points (16 at most, fewer when there are many curves) ; open : the last point at
+// the end ; closed : the first one is not repeated. Returns the count of points.
+function ed_Path(e, dst, maxn)
+local(st, n, ns, nb, sp, m, k, j, p, q)
+(
+    st = ed_St(e); n = st[ed_sN]; ns = ed_NSeg(e);
+    nb = 0; k = 0; loop(ns, ed_Bent(e, k) ? (nb += 1); k += 1;);
+    sp = (nb > 0) ? max(2, min(16, floor((maxn - n) / nb) + 1)) : 1;
+    m = 0;
+    k = 0;
+    loop(ns,
+        ed_SegCtl(e, k);
+        ed_Bent(e, k) ? (
+            j = 0;
+            loop(sp, ed_SegAt(j / sp); q = dst + 3 * m; q[0] = ed_bx; q[1] = ed_by; q[2] = ed_bz; m += 1; j += 1;);
+        ) : (
+            q = dst + 3 * m; q[0] = ed_s0[0]; q[1] = ed_s0[1]; q[2] = ed_s0[2]; m += 1;
+        );
+        k += 1;
+    );
+    ((n > 0) && !((ns > 0) && st[ed_sClosed])) ? (
+        p = ed_P(e, n - 1); q = dst + 3 * m; q[0] = p[0]; q[1] = p[1]; q[2] = p[2]; m += 1;
+    );
+    m;
+);
+
+// A name for an attribute of XML : the characters " < > & become _
+function ed_XmlName(dst, src)
+local(i, c)
+(
+    strcpy(dst, src);
+    i = 0; loop(strlen(dst),
+        c = str_getchar(dst, i, 'cu');
+        ((c === '"') || (c === '<') || (c === '>') || (c === '&')) ? str_setchar(dst, i, '_', 'cu');
+        i += 1;
+    );
+    dst;
+);
+
+// A name for a string of mSL : the characters " and \ become _
+function ed_MslName(dst, src)
+local(i, c)
+(
+    strcpy(dst, src);
+    i = 0; loop(strlen(dst),
+        c = str_getchar(dst, i, 'cu');
+        ((c === '"') || (c === 92)) ? str_setchar(dst, i, '_', 'cu'); // (92 : the backslash)
+        i += 1;
+    );
+    dst;
+);
+
+// A coordinate for a file of mSL : 6 decimals at most, without the zeros at the end (0.5, -0.25, 1, 0)
+function ed_Fmt(dst, v)
+local(l)
+(
+    (abs(v) < 0.0000005) ? (v = 0);
+    sprintf(dst, "%.6f", v);
+    l = strlen(dst);
+    while ((l > 1) && (str_getchar(dst, l - 1, 'cu') === '0')) ( l -= 1; );
+    (str_getchar(dst, l - 1, 'cu') === '.') ? (l -= 1);
+    str_setlen(dst, l);
+    dst;
+);
+
+// Exports the configuration e in the folder Data of the project : kd 0, a layout of GRM Spaces (.lay, the coordinates
+// in [-1, 1]) ; kd 1, the positions of the speakers for Diffusion (.mSL : D3_config(data( hppos ... )), the
+// coordinates in [-5, 5]) ; kd 2, a trajectory of GRM Spaces (.xml : the points in their order, the curves sampled,
+// ed_Path ; the coordinates in [-1, 1]) ; kd 3, the configuration for the mSL "table" (.mSL : table(data( Edit A ...
+// )), the points as they are, with their bends, the name, the kind, the options : dropped on a module Edit, it is
+// loaded again, see Set_Table in Diffusion-3-Set-Table) ; the file : Data/name-d3-EditA-YYYY-MM-DD-HH-MM-SS.lay (.xml ;
+// -hppos-date.mSL, -table-date.mSL), written by GMAuxiliary.eel (ed_Frame logs when it is written). Returns 0, or the
+// code of an error.
+function ed_Export(e, kd)
+local(st, n, k, p, q, c)
+(
+    st = ed_St(e); n = st[ed_sN];
+    (n === 0) ? (
+        ed_Err(2480, e, "no point to export");
+    ) :
+    ((kd === 2) && (n < 2)) ? (
+        ed_Err(2485, e, "a trajectory needs 2 points at least");
+    ) :
+    ((c = xpt_Ready()) !== 0) ? (
+        ed_Err(2481, e, (c === 1) ? "no auxiliary script (GMAuxiliary.eel) : nothing is written" :
+            (c === 2) ? "the auxiliary script GMAuxiliary.eel must be started again (an old version)" :
+            "the auxiliary script is busy : try again");
+    ) : (
+        (kd === 3) ? (ed_fitd = 0) : // (the table : the points as they are)
+        (kd === 2) ? (n = ed_Path(e, ed_pth, ED_NPATH); ed_FitBuf(ed_pth, n, 1);) : (n = ed_Fit(e, (kd === 1) ? 5 : 1));
+        // the names : of the file (only letters, digits, - and _), of the configuration (else "Edit A"), the date
+        strcpy(#ed_xn, ed_nm[e]); xpt_Clean(#ed_xn);
+        (strlen(#ed_xn) > 0) ? sprintf(#ed_xf, "%s/%s-d3-Edit%c-%s%s.%s", #xpt_Folder, #ed_xn, 'A' + e, (kd === 1) ? "hppos-" : (kd === 3) ? "table-" : "",
+            xpt_Date(#ed_xd, 0), (kd === 2) ? "xml" : kd ? "mSL" : "lay") :
+            sprintf(#ed_xf, "%s/d3-Edit%c-%s%s.%s", #xpt_Folder, 'A' + e, (kd === 1) ? "hppos-" : (kd === 3) ? "table-" : "",
+            xpt_Date(#ed_xd, 0), (kd === 2) ? "xml" : kd ? "mSL" : "lay");
+        (strlen(ed_nm[e]) > 0) ? strcpy(#ed_xa, ed_nm[e]) : sprintf(#ed_xa, "Edit %c", 'A' + e);
+        (strlen(#ed_xn) === 0) ? sprintf(#ed_xn, "Edit%c", 'A' + e);
+        xpt_Date(#ed_xd, 1);
+        xpt_Begin();
+        (kd === 3) ? (
+            // the configuration for the mSL "table" (Set_Table) : dropped on a module Edit, it is loaded there again
+            strcpy(#ed_xk, (st[ed_sKind] === 1) ? "sources" : (st[ed_sKind] === 2) ? "trajectoire" : "haut-parleurs");
+            sprintf(#ed_xt, "print(\"%s : configuration de Edit %c (%s), exportee le %s.\");", #ed_xn, 'A' + e, #ed_xk, #ed_xd);
+            xpt_Line(#ed_xt);
+            xpt_Line("");
+            xpt_Line(sprintf(#ed_xt, "%c*", '/'));
+            sprintf(#ed_xt, "  Configuration \"%s\" de Edit %c (Diffusion 3), exportee le %s : %d points (%s%s).", #ed_xa, 'A' + e, #ed_xd, n, #ed_xk,
+                (st[ed_sKind] === 2) ? (st[ed_sClosed] ? (st[ed_sSmooth] ? ", fermee, lissee" : ", fermee") : (st[ed_sSmooth] ? ", ouverte, lissee" : ", ouverte")) : "");
+            xpt_Line(#ed_xt);
+            xpt_Line("  Deposer ce fichier sur un module Edit (A ... D) : la configuration y est rechargee telle quelle (les points, les");
+            xpt_Line("  courbures des segments, le nom, la sorte, les options ; touche z : Undo). Depose ailleurs dans Diffusion 3 : dans le");
+            xpt_Line("  module nomme apres Edit. Chaque point : point x y z (dans [-1, 1] ; free On : [-10, 10]) puis, si le segment qui");
+            xpt_Line("  part de lui vers le suivant est courbe, bend dx dy dz (le deplacement du milieu de ce segment). Les points n'ont");
+            xpt_Line("  pas de numero : ils sont numerotes 1, 2, 3 ... dans l'ordre des lignes (une ligne ajoutee ou retiree renumerote les");
+            xpt_Line("  suivantes). Les cles absentes ne changent rien ; les points, s'il y en a, remplacent tous les points du module.");
+            xpt_Line(sprintf(#ed_xt, "*%c", '/'));
+            xpt_Line("");
+            xpt_Line("var r = table(data(");
+            (strlen(ed_nm[e]) > 0) ? sprintf(#ed_xq, "  name \"%s\"", ed_MslName(#ed_xx, ed_nm[e])) : strcpy(#ed_xq, "");
+            sprintf(#ed_xt, "    Edit %c%s  kind %s  closed %s  smooth %s  free %s", 'A' + e, #ed_xq,
+                (st[ed_sKind] === 1) ? "Sources" : (st[ed_sKind] === 2) ? "Trajectory" : "Speakers",
+                st[ed_sClosed] ? "On" : "Off", st[ed_sSmooth] ? "On" : "Off", st[ed_sFree] ? "On" : "Off");
+            xpt_Line(#ed_xt);
+            k = 0;
+            loop(n,
+                p = ed_P(e, k);
+                sprintf(#ed_xt, "        point %s %s %s", ed_Fmt(#ed_f1, p[0]), ed_Fmt(#ed_f2, p[1]), ed_Fmt(#ed_f3, p[2]));
+                ((abs(p[4]) >= 0.0000005) || (abs(p[5]) >= 0.0000005) || (abs(p[6]) >= 0.0000005)) ? (
+                    strcat(#ed_xt, sprintf(#ed_xq, "  bend %s %s %s", ed_Fmt(#ed_f4, p[4]), ed_Fmt(#ed_f5, p[5]), ed_Fmt(#ed_f6, p[6])));
+                );
+                xpt_Line(#ed_xt);
+                k += 1;
+            );
+            xpt_Line("));");
+            sprintf(#ed_xt, "print(sprintf(0, \"%s : table %%d (0 : OK)\", r));", #ed_xn);
+            xpt_Line(#ed_xt);
+        ) :
+        (kd === 2) ? (
+            // a trajectory of GRM Spaces (as the files that it exports : order, end at 0 ; the XML declaration built,
+            // see below)
+            sprintf(#ed_xt, "%c?xml version=\"1.0\" encoding=\"UTF-8\"?%c", '<', '>');
+            xpt_Line(#ed_xt);
+            xpt_Line("");
+            sprintf(#ed_xt, "<Trajectory name=\"%s\" closed=\"%s\" order=\"0.0\">", ed_XmlName(#ed_xx, #ed_xa), st[ed_sClosed] ? "true" : "false");
+            xpt_Line(#ed_xt);
+            k = 0;
+            loop(n,
+                q = ed_pth + 3 * k;
+                sprintf(#ed_xt, "  <P x=\"%.4f\" y=\"%.4f\" z=\"%.4f\" end=\"0.0\"/>", q[0], q[1], q[2]);
+                xpt_Line(#ed_xt);
+                k += 1;
+            );
+            xpt_Line("</Trajectory>");
+        ) :
+        kd ? (
+            // (an mSL script : D3_config with only hppos changes only the positions of the speakers)
+            sprintf(#ed_xt, "print(\"%s : positions des haut-parleurs (hppos) de Edit %c, exportees le %s.\");", #ed_xn, 'A' + e, #ed_xd);
+            xpt_Line(#ed_xt);
+            xpt_Line("");
+            xpt_Line(sprintf(#ed_xt, "%c*", '/'));
+            sprintf(#ed_xt, "  Configuration \"%s\" de Edit %c (Diffusion 3), exportee le %s : %d points (%s).", #ed_xa, 'A' + e, #ed_xd, n,
+                (st[ed_sKind] === 1) ? "sources" : (st[ed_sKind] === 2) ? "points d'une trajectoire" : "haut-parleurs");
+            xpt_Line(#ed_xt);
+            ed_fitd ? (
+                sprintf(#ed_xt, "  Mode Free : le barycentre est ramene a l'origine, puis reduit (rapport %.4f) : les coordonnees restent dans [-5, 5].", ed_fitr);
+                xpt_Line(#ed_xt);
+            );
+            xpt_Line("  Deposer ce fichier dans Diffusion 3 : seules les positions des haut-parleurs changent (ecran Live, Space 3D en mode");
+            xpt_Line("  Diffusion). Ou copier la declaration hppos dans un fichier de configuration (Diffusion-1.mSL ...).");
+            xpt_Line(sprintf(#ed_xt, "*%c", '/'));
+            xpt_Line("");
+            xpt_Line("D3_config(data(");
+            xpt_Line("    hppos");
+            k = 0;
+            loop(n,
+                q = ed_tmp + 3 * k;
+                sprintf(#ed_xt, "        %d < %.4f %.4f %.4f%s", k + 1, q[0], q[1], q[2], (k < n - 1) ? "," : " ;");
+                xpt_Line(#ed_xt);
+                k += 1;
+            );
+            xpt_Line("));");
+        ) : (
+            // a layout of GRM Spaces (its first line, the XML declaration, is built with %c : written literally in the
+            // source, its opening and closing marks would be taken by the preprocessor of JSFX)
+            sprintf(#ed_xt, "%c?xml version=\"1.0\" encoding=\"UTF-8\"?%c", '<', '>');
+            xpt_Line(#ed_xt);
+            xpt_Line("");
+            sprintf(#ed_xt, "<Speakers name=\"%s\">", ed_XmlName(#ed_xx, #ed_xa));
+            xpt_Line(#ed_xt);
+            k = 0;
+            loop(n,
+                q = ed_tmp + 3 * k;
+                sprintf(#ed_xt, "  <S x=\"%.4f\" y=\"%.4f\" z=\"%.4f\" weight=\"0.0\" name=\"\"/>", q[0], q[1], q[2]);
+                xpt_Line(#ed_xt);
+                k += 1;
+            );
+            xpt_Line("</Speakers>");
+        );
+        xpt_Ov ? (
+            ed_Err(2482, e, "the text is too long (xpt_Sz) : nothing is written");
+        ) : (
+            xpt_Send(#ed_xf);
+            ed_xe = e;
+            sprintf(#ed_lg, "Edit %c : export %s : %d points%s", 'A' + e, #ed_xf, n, ed_fitd ? sprintf(#ed_l2, " (beyond the room : fitted, ratio %.4f)", ed_fitr) : "");
+            mSL_log(SysLogBox, #ed_lg);
+            0;
+        );
+    );
+);
+
+// The menu of the layouts of the library of "Space 3D" (those of more than ED_MAXP points greyed) : the layout chosen,
+// or -1
+function ed_LibMenu(e)
+local(g, c)
+(
+    (sx_libng <= 0) ? (
+        strcpy(#ed_mnu, "#No library : drop a .lay or .ala file (GRM Spaces) on the window");
+    ) : (
+        sprintf(#ed_mnu, "#%s", #sx_libfile);
+        g = 0;
+        loop(sx_libng,
+            sx_Nth(#sx_liblist, g, #ed_ln);
+            sprintf(#ed_it, "|%s%s  (%d)", (sx_libcnt[g] > ED_MAXP) ? "#" : "", #ed_ln, sx_libcnt[g]);
+            strcat(#ed_mnu, #ed_it);
+            g += 1;
+        );
+    );
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    c = gfx_showmenu(#ed_mnu);
+    prv_MenuEnd();
+    ((c >= 2) && (c < sx_libng + 2)) ? c - 2 : -1;
+);
+
+// The layout g of the library of "Space 3D" becomes the configuration e (kept for Undo ; its kind unchanged ; its name
+// if it has none) ; points outside the room : the mode Free
+function ed_LibLoad(e, g)
+local(st, n, k, q, m)
+(
+    st = ed_St(e);
+    n = sx_libcnt[g];
+    (n > ED_MAXP) ? (
+        ed_Err(2484, e, sprintf(#ed_l2, "the layout has %d points (at most %d) : not loaded", n, ED_MAXP));
+    ) : (
+        m = 0;
+        k = 0; loop(n, q = sx_libpts + (sx_libstart[g] + k) * s3d_st; m = max(m, max(abs(q[s3d_fx]), max(abs(q[s3d_fy]), abs(q[s3d_fz])))); k += 1;);
+        ed_Keep(e);
+        (m > 1.000001) ? ed_SetFree(e, 1);
+        ed_Load(e, sx_libpts + sx_libstart[g] * s3d_st + s3d_fx, n, s3d_st, st[ed_sKind]);
+        sx_Nth(#sx_liblist, g, #ed_ln);
+        (strlen(ed_nm[e]) === 0) ? strcpy(ed_nm[e], #ed_ln);
+        sprintf(#ed_lg, "Edit %c : the layout \"%s\" (%s), %d points%s", 'A' + e, #ed_ln, #sx_libfile, n, (m > 1.000001) ? " (outside the room : Free)" : "");
+        mSL_log(SysLogBox, #ed_lg);
+        ui_GFXdoNow |= 4;
+    );
+);
+
+// The module "Edit" under the mouse when a file is dropped (drawn in the last frame) : its editor, or -1
+function ed_DropTarget()
+local(e, r, m)
+(
+    r = -1;
+    e = 0;
+    loop(ED_NV,
+        m = ed_mr + 4 * e;
+        ((r < 0) && (ed_mf[e] >= gfx_executed - 1) && (mouse_x >= m[0]) && (mouse_y >= m[1]) && (mouse_x < m[0] + m[2]) &&
+            (mouse_y < m[1] + m[3])) ? (r = e);
+        e += 1;
+    );
+    r;
+);
+
+// A file of GRM Spaces dropped on the module of the editor e, n layouts read in the library of "Space 3D" (sx_Drop) :
+// one, it becomes the configuration ; several (.ala), the menu of the library
+function ed_Drop(e, n)
+local(g)
+(
+    (n > 0) ? (
+        g = (n === 1) ? 0 : ed_LibMenu(e);
+        (g >= 0) ? ed_LibLoad(e, g);
+    );
+);
+
+// A configuration read by the mSL "table" (Set_Table, staged : ed_tf, ed_tpt, ed_tnm) becomes the configuration e
+// (kept for Undo : the points) : the keys given ; points outside the room : the mode Free
+function ed_TbTake(e)
+local(st, f, n, k, p, q, fr, out)
+(
+    st = ed_St(e); f = ed_tf + e * 8;
+    ed_Keep(e);
+    (f[0] & 1) ? strcpy(ed_nm[e], ed_tnm[e]);
+    (f[0] & 2) ? (st[ed_sKind] = f[1]);
+    (f[0] & 4) ? (st[ed_sClosed] = f[2]);
+    (f[0] & 8) ? (st[ed_sSmooth] = f[3]);
+    fr = (f[0] & 16) ? f[4] : st[ed_sFree];
+    out = 0;
+    (f[0] & 32) ? (
+        n = f[5];
+        k = 0; loop(n,
+            p = ed_P(e, k); q = ed_tpt + (e * ED_MAXP + k) * ED_PS;
+            memcpy(p, q, ED_PS); p[3] = 0;
+            (max(abs(p[0]), max(abs(p[1]), abs(p[2]))) > 1.000001) ? (out = 1);
+            k += 1;
+        );
+        st[ed_sN] = n;
+        (out && !fr) ? (fr = 1);
+        st[ed_sFree] = fr;
+        !fr ? (st[ed_sDist] = min(12, st[ed_sDist]));
+        ed_Sel1(e, (n > 0) ? 0 : -1);
+    ) : (
+        (f[0] & 16) ? ed_SetFree(e, fr);
+    );
+    st[ed_sCur] = max(-1, min(st[ed_sN] - 1, st[ed_sCur]));
+    ed_LName(e, #ed_ln);
+    sprintf(#ed_lg, "%s : read from a table%s%s", #ed_ln,
+        (f[0] & 32) ? sprintf(#ed_l2, ", %d points", st[ed_sN]) : "", out ? " (outside the room : Free)" : "");
+    mSL_log(SysLogBox, #ed_lg);
+    ui_GFXdoNow |= 4;
+);
+
+// Each frame of @gfx (called by Diffusion-3, after the drops) : a load asked by "Space 3D" (its menus of the speakers
+// and of the sources : sx_edReq, sx_edSrc ; the points fitted into [-1, 1]) ; the files written
+function ed_Frame()
+local(e, n, k, q, r, st)
+(
+    // the configurations read by the mSL "table"
+    e = 0; loop(ED_NV, ed_tq[e] ? ( ed_tq[e] = 0; ed_TbTake(e); ); e += 1;);
+    // a trajectory (sx_edSrc 2 : trajectory A ; 3 : B) : the trajectory "File" of "Space 3D", sampled (ed_Path)
+    ((sx_edReq > 0) && (sx_edSrc >= 2)) ? (
+        e = sx_edReq - 1; sx_edReq = 0;
+        ((e >= 0) && (e < ED_NV)) ? (
+            n = ed_Path(e, ed_pth, SX_MAXTRJ);
+            ed_FitBuf(ed_pth, n, 1);
+            k = 0;
+            loop(n,
+                q = ed_trj8 + k * s3d_st;
+                q[s3d_fx] = ed_pth[3 * k]; q[s3d_fy] = ed_pth[3 * k + 1]; q[s3d_fz] = ed_pth[3 * k + 2];
+                k += 1;
+            );
+            st = ed_St(e);
+            s3d_settraj(ed_trj8, n, st[ed_sClosed]);
+            ed_LName(e, #sx_trjname);
+            (sx_edSrc === 3) ? (sx_trajB = s3d_TrjFile) : (sx_traj = s3d_TrjFile);
+            sprintf(#ed_lg, "Space 3D : the trajectory %s (%s), %d points%s", #sx_trjname, (sx_edSrc === 3) ? "B" : "A", n,
+                ed_fitd ? sprintf(#ed_l2, " (beyond the room : fitted, ratio %.4f)", ed_fitr) : "");
+            mSL_log(SysLogBox, #ed_lg);
+            ui_GFXdoNow |= 4;
+        );
+    );
+    (sx_edReq > 0) ? (
+        e = sx_edReq - 1; sx_edReq = 0;
+        ((e >= 0) && (e < ED_NV)) ? (
+            n = ed_Fit(e, 1);
+            ed_LName(e, #ed_ln);
+            sx_edSrc ? (
+                n = sx_srcn = min(SX_MAXSRC, n);
+                memcpy(sx_srclay, ed_tmp, 3 * n);
+                strcpy(#sx_srcname, #ed_ln);
+            ) : (
+                n = s3d_nspk = min(SX_MAXSPK, n);
+                memset(s3d_spk, 0, SX_MAXSPK * s3d_st);
+                k = 0;
+                loop(n,
+                    q = s3d_spk + k * s3d_st;
+                    q[s3d_fx] = ed_tmp[3 * k]; q[s3d_fy] = ed_tmp[3 * k + 1]; q[s3d_fz] = ed_tmp[3 * k + 2];
+                    k += 1;
+                );
+                strcpy(#sx_spkname, #ed_ln);
+                sx_spkHP = 0;
+            );
+            s3d_sel = -1;
+            sprintf(#ed_lg, "Space 3D : %d %s from %s%s", n, sx_edSrc ? "sources" : "speakers", #ed_ln,
+                ed_fitd ? sprintf(#ed_l2, " (Free : fitted into the room, ratio %.4f)", ed_fitr) : "");
+            mSL_log(SysLogBox, #ed_lg);
+            ui_GFXdoNow |= 4;
+        );
+    );
+    ((r = xpt_Poll()) !== 0) ? (
+        (r > 0) ? (
+            sprintf(#ed_lg, "Edit : %s written in the folder of the project", #ed_xf);
+            mSL_log(SysLogBox, #ed_lg);
+        ) : (
+            ed_Err(2483, ed_xe, sprintf(#ed_l2, "the file %s can't be written", #ed_xf));
+        );
+    );
+);
+
+
+//====== The pads
+
+// The prompt of the name of the editor e ; ed_Prompted, each frame : the name typed (Cancel : unchanged)
+function ed_Prompt(e)
+(
+    ed_pend = e + 1;
+    strcpy(#ed_prm, ed_nm[e]);
+    ui_screen_open("control.prompt");
+    ui_screen_arg(0, #ed_prm);
+    ui_screen_arg(1, "The name of the configuration");
+);
+function ed_Prompted()
+(
+    ((ed_pend > 0) && !(ui_screen() == "control.prompt")) ? (
+        strcpy(ed_nm[ed_pend - 1], #ed_prm);
+        ed_pend = 0;
+    );
+);
+
+// A menu of the points 1 ... N (the point k checked) : the index chosen, or -1
+function ed_PointMenu(e, k, ttl)
+local(st, i, m)
+(
+    st = ed_St(e);
+    strcpy(#ed_mnu, ttl);
+    i = 0;
+    loop(st[ed_sN],
+        sprintf(#ed_it, (i === k) ? "|!%d" : "|%d", i + 1);
+        strcat(#ed_mnu, #ed_it);
+        i += 1;
+    );
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#ed_mnu) - 2; // (the title is the item 1)
+    prv_MenuEnd();
+    m;
+);
+
+// The menu Action
+function ed_ActMenu(e)
+local(st, c, f)
+(
+    st = ed_St(e);
+    sprintf(#ed_mnu, "Rename...|Clear all the points||%sCopy Edit A|%sCopy Edit B|%sCopy Edit C|%sCopy Edit D||Load the speakers of Space 3D|Load the sources of Space 3D|Load a layout of the library (Space 3D)...||Export : configuration (mSL table, to load again)|Export : layout of GRM Spaces (.lay)|Export : speakers of Diffusion (hppos, .mSL)|Export : trajectory of GRM Spaces (.xml)",
+        (e === 0) ? "#" : "", (e === 1) ? "#" : "", (e === 2) ? "#" : "", (e === 3) ? "#" : "");
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    c = gfx_showmenu(#ed_mnu);
+    prv_MenuEnd();
+    (c === 1) ? ed_Prompt(e) :
+    (c === 2) ? (ed_Keep(e); st[ed_sN] = 0; st[ed_sCur] = -1;) :
+    ((c >= 3) && (c <= 6) && (c - 3 !== e)) ? (
+        f = c - 3;
+        ed_Keep(e); ed_Copy(e, f);
+        (strlen(ed_nm[e]) === 0) ? strcpy(ed_nm[e], ed_nm[f]);
+    ) :
+    (c === 7) ? (
+        ed_Keep(e); ed_Load(e, s3d_spk + s3d_fx, s3d_nspk, s3d_st, 0);
+        (strlen(ed_nm[e]) === 0) ? strcpy(ed_nm[e], #sx_spkname);
+    ) :
+    (c === 8) ? (
+        ed_Keep(e); ed_Load(e, sx_srclay, sx_srcn, 3, 1);
+        (strlen(ed_nm[e]) === 0) ? strcpy(ed_nm[e], #sx_srcname);
+    ) :
+    (c === 9) ? (
+        f = ed_LibMenu(e);
+        (f >= 0) ? ed_LibLoad(e, f);
+    ) :
+    (c === 10) ? ed_Export(e, 3) :
+    (c === 11) ? ed_Export(e, 0) :
+    (c === 12) ? ed_Export(e, 1) :
+    (c === 13) ? ed_Export(e, 2);
+);
+
+// A clic on the cell c of the pad of the configuration e
+function ed_TopCell(e, c, ev)
+local(st, rc, m, v)
+(
+    st = ed_St(e);
+    rc = ev & ui_jpad_ev_rmc;
+    (c === 0) ? (
+        ed_Prompt(e);
+    ) :
+    (c === 1) ? (
+        m = rc ? prv_Menu(ed_KindNames, 3, st[ed_sKind]) : (st[ed_sKind] + 1) % 3;
+        (m >= 0) ? (st[ed_sKind] = m);
+    ) :
+    (c === 2) ? (
+        // a trajectory : open, or closed (the segment from the point N to the point 1)
+        m = rc ? prv_Menu("Open|Closed", 2, st[ed_sClosed]) : !st[ed_sClosed];
+        (m >= 0) ? (st[ed_sClosed] = m);
+    ) :
+    (c === 3) ? (
+        // a trajectory : straight or smooth segments (right : menu, also : all the segments straight again)
+        m = rc ? prv_Menu(ed_SmoothNames, 3, st[ed_sSmooth]) : !st[ed_sSmooth];
+        ((m === 0) || (m === 1)) ? (st[ed_sSmooth] = m) : (m === 2) ? ed_Straight(e, -1);
+    ) :
+    ((c >= 4) && (c <= 6)) ? (
+        m = rc ? prv_Menu(ed_ModeNames, 3, st[ed_sMode]) : c - 4;
+        (m >= 0) ? (st[ed_sMode] = m);
+    ) :
+    (c === 7) ? (
+        m = prv_Menu("Select all|Select none|Invert the selection|Delete the selection|Delete all the points", 5, -1);
+        ((m >= 0) && (m <= 2)) ? ed_SelOp(e, m) :
+        (m === 3) ? ed_DelSelK(e) :
+        (m === 4) ? (ed_Keep(e); st[ed_sN] = 0; st[ed_sCur] = -1;);
+    ) :
+    (c === 8) ? (
+        m = rc ? prv_Menu(ed_ViewNames, 4, st[ed_sView]) : (max(-1, st[ed_sView]) + 1) % 4;
+        (m >= 0) ? ed_SetView(e, m);
+    ) :
+    (c === 9) ? (
+        m = rc ? prv_Menu(ed_GridNames, 5, st[ed_sGrid]) : (st[ed_sGrid] + 1) % 5;
+        (m >= 0) ? (st[ed_sGrid] = m);
+    ) :
+    (c === 10) ? (
+        // (left : a drag, see ed_DragTop ; Shift + left : 0)
+        v = rc ? prv_MenuVal(ed_Coords, 9, st[ed_sZ]) : (mouse_cap & 8) ? 0 : st[ed_sZ];
+        st[ed_sZ] = ed_Lim(v);
+    ) :
+    (c === 11) ? (
+        // (left : a drag, see ed_DragTop ; Shift + left : 6)
+        m = rc ? prv_Menu(ed_DivNames, 10, st[ed_sDiv] - 1) : (mouse_cap & 8) ? 5 : -1;
+        (m >= 0) ? (st[ed_sDiv] = m + 1);
+    ) :
+    (c === 12) ? (
+        // (left : a drag, see ed_DragTop ; Shift + left : 4 d, at most 40)
+        rc ? (
+            v = prv_MenuVal(ed_RaysList, 16, st[ed_sRays]);
+            st[ed_sRays] = max(2, min(40, 0|v));
+        ) : (mouse_cap & 8) ? (
+            st[ed_sRays] = min(40, 4 * st[ed_sDiv]);
+        );
+    ) :
+    (c === 13) ? (
+        st[ed_sSnap] = !st[ed_sSnap];
+    ) :
+    (c === 14) ? (
+        m = rc ? prv_Menu(ed_FreeNames, 2, st[ed_sFree]) : !st[ed_sFree];
+        (m >= 0) ? ed_SetFree(e, m);
+    ) :
+    (c === 15) ? (
+        st[ed_sOpt] = st[ed_sOpt] ~ ed_oBary;
+    ) :
+    (c === 16) ? (
+        st[ed_sOpt] = st[ed_sOpt] ~ ed_oProj;
+    ) :
+    (c === 17) ? (
+        ed_ActMenu(e);
+    );
+);
+
+// The coordinate i (0 x, 1 y, 2 z) shown in the column : of the barycentre of the selection (Bary on), or of the
+// current point (none : 0)
+function ed_RefC(e, i)
+local(st, p)
+(
+    st = ed_St(e);
+    ((st[ed_sOpt] & ed_oBary) && (ed_Bary(e) > 0)) ? (
+        (i === 0) ? ed_gx : (i === 1) ? ed_gy : ed_gz;
+    ) : ((st[ed_sCur] >= 0) && (st[ed_sCur] < st[ed_sN])) ? (
+        p = ed_P(e, st[ed_sCur]);
+        p[i];
+    ) : 0;
+);
+
+// A clic on the cell c of the column of the current point
+function ed_LeftCell(e, c, ev)
+local(st, rc, sh, n, cur, ok, m, v)
+(
+    st = ed_St(e); n = st[ed_sN]; cur = st[ed_sCur];
+    ok = (cur >= 0) && (cur < n);
+    rc = ev & ui_jpad_ev_rmc; sh = mouse_cap & 8;
+    (c === 0) ? (
+        (n > 0) ? (
+            m = rc ? ed_PointMenu(e, cur, "#The current point") : sh ? ((cur <= 0) ? n - 1 : cur - 1) : (cur + 1) % n;
+            (m >= 0) ? ed_Sel1(e, m); // (selected alone)
+        );
+    ) :
+    (c === 1) ? (
+        (ok && rc) ? (
+            m = ed_PointMenu(e, cur, "#Its number");
+            ((m >= 0) && (m !== cur)) ? (ed_Keep(e); ed_Move(e, cur, m););
+        );
+    ) :
+    ((c >= 2) && (c <= 4)) ? (
+        // the coordinate of the current point, or of the barycentre (Bary on) : the selection moves
+        ok ? (
+            v = ed_RefC(e, c - 2);
+            v = ed_LimP(e, rc ? prv_MenuVal(ed_Coords, 9, v) : sh ? 0 : v) - v;
+            (v != 0) ? (ed_Keep(e); ed_Shift(e, cur, (c === 2) * v, (c === 3) * v, (c === 4) * v););
+        );
+    ) :
+    (c === 5) ? (
+        // Scale (right : the menu ; left : a drag, see ed_Drag)
+        (ok && rc) ? (
+            gfx_x = mouse_x; gfx_y = mouse_y;
+            m = gfx_showmenu("#Scale the selection (around its barycentre)|x 0.5|x 0.8|x 0.9|x 1.1|x 1.25|x 2||Mirror x (through the plane x = Gx)|Mirror y (through the plane y = Gy)|Mirror z (through the plane z = Gz)");
+            prv_MenuEnd();
+            ((m >= 2) && (m <= 7)) ? ed_Xform1(e, 0, (m === 2) ? 0.5 : (m === 3) ? 0.8 : (m === 4) ? 0.9 : (m === 5) ? 1.1 : (m === 6) ? 1.25 : 2) :
+            ((m >= 8) && (m <= 10)) ? ed_Xform1(e, m - 4, 0);
+        );
+    ) :
+    ((c >= 6) && (c <= 8)) ? (
+        // Rot X, Y, Z (right : the menu, degrees ; left : a drag, see ed_Drag)
+        (ok && rc) ? (
+            v = prv_MenuVal(ed_RotList, 11, 0);
+            (v != 0) ? ed_Xform1(e, c - 5, v);
+        );
+    ) :
+    (c === 9) ? (
+        rc ? (
+            m = prv_Menu("Select all|Select none|Invert the selection|Delete the selection", 4, -1);
+            ((m >= 0) && (m <= 2)) ? ed_SelOp(e, m) : (m === 3) ? ed_DelSelK(e);
+        ) : (
+            ed_SelOp(e, (ed_SelCount(e) < n) ? 0 : 1); // left : all, or none when all are selected
+        );
+    ) :
+    (c === 10) ? (
+        m = rc ? prv_Menu("Delete the selection|Delete all the points", 2, -1) : 0;
+        (m === 0) ? ed_DelSelK(e) :
+        (m === 1) ? (ed_Keep(e); st[ed_sN] = 0; st[ed_sCur] = -1;);
+    ) :
+    (c === 11) ? (
+        !rc ? ed_Undo(e);
+    );
+);
+
+// The drag of a cell of the column : potentiometers of the library (ui_jdrag, see mSL_ui_Pads) : No. (1), X Y Z (2, 3,
+// 4 : the current point or the barycentre, the selection moves), Scale (5 : the ratio, x 1/8 ... 8, logarithmic), Rot
+// X Y Z (6, 7, 8 : degrees) ; Scale and Rot are computed again at each move from the places at the start of the drag
+// (kept in the undo buffer), around the barycentre at the start (ed_tgx ...)
+function ed_Drag(blockId, e, c)
+local(st, n, cur, d, v, b)
+(
+    st = ed_St(e); n = st[ed_sN]; cur = st[ed_sCur]; b = ed_Bnd(e);
+    (ui_jdrag_can_start() && (cur >= 0) && (cur < n) && (c >= 1) && (c <= 8)) ? (
+        ed_de = e; ed_dkept = 0;
+        (c === 1) ? ui_jdrag_start(blockId, 1, cur + 1, 1, max(1, n), max(60, 8 * n), 2) : // (integer)
+        (c <= 4) ? ui_jdrag_start(blockId, c, ed_RefC(e, c - 2), - b, b, 300 * b, 0) :
+        (c === 5) ? ui_jdrag_start(blockId, 5, 1, 0.125, 8, 1200, 1) : // (logarithmic : 200 pixels per octave)
+        ui_jdrag_start(blockId, c, 0, -36000, 36000, 72000, 2); // (integer degrees, 1 per pixel : no limit, 100 turns)
+    );
+    d = ui_jdrag(blockId);
+    ((d & 1) && (ed_de === e)) ? (
+        cur = st[ed_sCur];
+        ((cur >= 0) && (cur < st[ed_sN])) ? (
+            !ed_dkept ? (
+                ed_Bary(e); ed_tgx = ed_gx; ed_tgy = ed_gy; ed_tgz = ed_gz;
+                ed_Keep(e); ed_dkept = 1;
+            );
+            c = ui_jdrag_cell;
+            (c === 1) ? (
+                ed_Move(e, cur, ui_jdrag_v - 1);
+            ) : (c <= 4) ? (
+                v = ed_LimP(e, ui_jdrag_v) - ed_RefC(e, c - 2);
+                ed_Shift(e, cur, (c === 2) * v, (c === 3) * v, (c === 4) * v);
+            ) : (
+                ed_Xform(e, (c === 5) ? 0 : c - 5, ui_jdrag_v);
+            );
+        );
+    );
+    d;
+);
+
+// The drag of the cells z= val (10), Step 1/d (11) and Rays n (12) of the pad of the configuration : potentiometers ;
+// their owner blockId + 0.5 (the column of the current point uses blockId)
+function ed_DragTop(blockId, e, c)
+local(st, d)
+(
+    st = ed_St(e);
+    ui_jdrag_can_start() ? (
+        (c === 10) ? ui_jdrag_start(blockId + 0.5, 10, st[ed_sZ], -1, 1, 300, 0) :
+        (c === 11) ? ui_jdrag_start(blockId + 0.5, 11, st[ed_sDiv], 1, 10, 120, 2) : // (integer)
+        (c === 12) ? ui_jdrag_start(blockId + 0.5, 12, st[ed_sRays], 2, 40, 190, 2); // (integer)
+    );
+    d = ui_jdrag(blockId + 0.5);
+    (d & 1) ? (
+        (ui_jdrag_cell === 10) ? (st[ed_sZ] = ed_Lim(ui_jdrag_v)) :
+        (ui_jdrag_cell === 11) ? (st[ed_sDiv] = max(1, min(10, ui_jdrag_v))) :
+        (ui_jdrag_cell === 12) ? (st[ed_sRays] = max(2, min(40, ui_jdrag_v)));
+    );
+    d;
+);
+
+/*
+    The module "Edit A" ... "Edit D" : the editor e (0 ... ED_NV - 1)
+*/
+function show_Edit_Pad(blockId, e)
+local(h1, hl, hv, hneed, wl, zz, zzmi, st, n, cur, ok, p, c, dr, x, y, w, h, i, ns, bo, dg)
+(
+    ed_Prompted();
+    ed_Norm(e); // (the current point is selected)
+    st = ed_St(e); n = st[ed_sN]; cur = st[ed_sCur];
+    h1 = uix_jpadHeight(2);
+    hl = uix_jpadHeight(pad_EDL_Siz);
+    hv = max(hl, max(160, min(ui_width() * 0.6, ui_height() - h1 - ui_jd_ctgr - 8)));
+    hneed = h1 + hv + ui_jd_ctgr + 8;
+    (ui_height() >= hneed) ? (
+        ui_split_top(hneed);
+            // (the rectangle of the module : a file dropped on it, see ed_DropTarget)
+            ed_mr[4 * e] = ui_left_retina(); ed_mr[4 * e + 1] = ui_top_retina();
+            ed_mr[4 * e + 2] = ui_width_retina(); ed_mr[4 * e + 3] = ui_height_retina();
+            ed_mf[e] = gfx_executed;
+            zzmi = ui_hover();
+            keepBlockInfos(blockId);
+            (zzmi) ? (
+                ui_push();
+                    ui_color(Col_Frame);
+                    ui_border();
+                ui_pop();
+            );
+            // the keys over the module : v View, m Move, p Add/Del (the points), < the next mode, > the next grid, z Undo ;
+            // Cmd + A : all the points selected ; Cmd + E : none ; Backspace, Delete : the selected points deleted ; the
+            // arrows (no modifier : Shift + arrows are left to the pane) : left, right the previous, the next point ;
+            // up, down the first, the last one (selected alone)
+            zzmi ? (
+                ((GM_key_mods() & 4) && (GM_key_take('a') || GM_key_take(1))) ? (ed_SelOp(e, 0); ui_GFXdoNow |= 4;) :
+                ((GM_key_mods() & 4) && (GM_key_take('e') || GM_key_take(5))) ? (ed_SelOp(e, 1); ui_GFXdoNow |= 4;) :
+                GM_key_take('v') ? (st[ed_sMode] = 0; ui_GFXdoNow |= 4;) :
+                GM_key_take('m') ? (st[ed_sMode] = 1; ui_GFXdoNow |= 4;) :
+                GM_key_take('p') ? (st[ed_sMode] = 2; ui_GFXdoNow |= 4;) :
+                GM_key_take('<') ? (st[ed_sMode] = (st[ed_sMode] + 1) % 3; ui_GFXdoNow |= 4;) :
+                GM_key_take('>') ? (st[ed_sGrid] = (st[ed_sGrid] + 1) % 5; ui_GFXdoNow |= 4;) :
+                GM_key_take('z') ? (ed_Undo(e); ui_GFXdoNow |= 4;) :
+                (GM_key_take(8) || GM_key_take('del')) ? (ed_DelSelK(e); ui_GFXdoNow |= 4;) :
+                ((n > 0) && (GM_key_mods() === 0)) ? (
+                    GM_key_take('left') ? (ed_Sel1(e, (cur <= 0) ? n - 1 : cur - 1); ui_GFXdoNow |= 4;) :
+                    GM_key_take('rght') ? (ed_Sel1(e, (cur + 1) % n); ui_GFXdoNow |= 4;) :
+                    GM_key_take('up') ? (ed_Sel1(e, 0); ui_GFXdoNow |= 4;) :
+                    GM_key_take('down') ? (ed_Sel1(e, n - 1); ui_GFXdoNow |= 4;);
+                );
+            );
+            sprintf(#ed_title, "Edit %c", 'A' + e);
+            control_group(#ed_title);
+            ui_pad(0, ui_cg_pad_top, 0, ui_cg_pad_bottom);
+
+            // the pad : the configuration
+            ui_split_top(h1);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_EDT_Labs, pad_EDT_Siz);
+                (strlen(ed_nm[e]) > 0) ? sprintf(pad_EDT_Labs[0], "%c: %s", 'A' + e, ed_nm[e]) :
+                    sprintf(pad_EDT_Labs[0], "%c: Name ?", 'A' + e);
+                sx_Nth(ed_KindNames, st[ed_sKind], pad_EDT_Labs[1]);
+                strcpy(pad_EDT_Labs[2], st[ed_sClosed] ? "Closed" : "Open");
+                strcpy(pad_EDT_Labs[3], st[ed_sSmooth] ? "Smooth" : "Straight");
+                strcpy(pad_EDT_Labs[4], "View");
+                strcpy(pad_EDT_Labs[5], "Move");
+                strcpy(pad_EDT_Labs[6], "Add/Del");
+                sprintf(pad_EDT_Labs[7], "Points %d", n);
+                (st[ed_sView] >= 0) ? sx_Nth(ed_ViewNames, st[ed_sView], pad_EDT_Labs[8]) : strcpy(pad_EDT_Labs[8], "Custom");
+                sx_Nth(ed_GridNames, st[ed_sGrid], pad_EDT_Labs[9]);
+                sprintf(pad_EDT_Labs[10], "z= %.2f", st[ed_sZ]);
+                sprintf(pad_EDT_Labs[11], "Step 1/%d", st[ed_sDiv]);
+                sprintf(pad_EDT_Labs[12], "Rays %d", st[ed_sRays]);
+                strcpy(pad_EDT_Labs[13], st[ed_sSnap] ? "Snap on" : "Snap off");
+                strcpy(pad_EDT_Labs[14], st[ed_sFree] ? "Free" : "Room");
+                strcpy(pad_EDT_Labs[15], (st[ed_sOpt] & ed_oBary) ? "Bary on" : "Bary off");
+                strcpy(pad_EDT_Labs[16], (st[ed_sOpt] & ed_oProj) ? "Proj on" : "Proj off");
+                strcpy(pad_EDT_Labs[17], "Action");
+                pad_EDT_Colrs[0] = (strlen(ed_nm[e]) > 0) ? Col_P1 : Color_Goldenrod;
+                pad_EDT_Colrs[1] = Col_P1;
+                // (Open / Closed, Straight / Smooth : for a trajectory)
+                pad_EDT_Colrs[2] = (st[ed_sKind] !== 2) ? Col_Inactive : st[ed_sClosed] ? Color_Limegreen : Col_InfoA;
+                pad_EDT_Colrs[3] = (st[ed_sKind] !== 2) ? Col_Inactive : st[ed_sSmooth] ? Color_Limegreen : Col_InfoA;
+                i = 0; loop(3, pad_EDT_Colrs[4 + i] = (st[ed_sMode] === i) ? Color_Limegreen : Col_InfoA; i += 1;);
+                pad_EDT_Colrs[7] = Col_InfoA;
+                pad_EDT_Colrs[8] = Col_P1;
+                pad_EDT_Colrs[9] = Col_P1;
+                pad_EDT_Colrs[10] = ed_PlaneZ(st[ed_sGrid]) ? Color_Goldenrod : Col_InfoA;
+                pad_EDT_Colrs[11] = Col_P1;
+                pad_EDT_Colrs[12] = (st[ed_sGrid] === 4) ? Color_Goldenrod : Col_InfoA;
+                pad_EDT_Colrs[13] = st[ed_sSnap] ? Color_Limegreen : Col_InfoA;
+                pad_EDT_Colrs[14] = st[ed_sFree] ? Color_Goldenrod : Col_InfoA;
+                pad_EDT_Colrs[15] = (st[ed_sOpt] & ed_oBary) ? Color_Limegreen : Col_InfoA;
+                pad_EDT_Colrs[16] = (st[ed_sOpt] & ed_oProj) ? Color_Limegreen : Col_InfoA;
+                pad_EDT_Colrs[17] = Col_P1;
+                zz = control_jpad(pad_EDT);
+                c = ui_jpad_cell_at();
+                dr = ed_DragTop(blockId, e, c); // the cells z= val, Step, Rays : a drag
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4;
+                    ((zz & (ui_jpad_ev_lmc | ui_jpad_ev_rmc)) && !((zz & ui_jpad_ev_lmc) && (dr & 2))) ? (
+                        ed_TopCell(e, pad_EDT[ui_jpad_last] - 1, zz);
+                    );
+                );
+            ui_pop();
+
+            // the column at the left : the current point (ui_split_left removes it from the rectangle : the view is
+            // what remains)
+            st = ed_St(e); n = st[ed_sN]; cur = st[ed_sCur];
+            ok = (cur >= 0) && (cur < n);
+            wl = max(84, min(140, floor(ui_width() * 0.2)));
+            ui_split_left(wl);
+                ui_split_top(hl);
+                    ui_pad(1,2,2,2);
+                    mSL_setStrArray(pad_EDL_Labs, pad_EDL_Siz);
+                    ns = ed_Bary(e); // (the selected points, their barycentre)
+                    bo = (st[ed_sOpt] & ed_oBary) && (ns > 0);
+                    dg = (ui_jdrag_own === blockId) && ui_jdrag_mv; // a drag of a cell of the column going on
+                    ok ? sprintf(pad_EDL_Labs[0], "P %d / %d", cur + 1, n) : sprintf(pad_EDL_Labs[0], "P - / %d", n);
+                    ok ? (
+                        p = ed_P(e, cur);
+                        sprintf(pad_EDL_Labs[1], "No. %d", cur + 1);
+                        bo ? (
+                            sprintf(pad_EDL_Labs[2], "Gx %.3f", ed_gx);
+                            sprintf(pad_EDL_Labs[3], "Gy %.3f", ed_gy);
+                            sprintf(pad_EDL_Labs[4], "Gz %.3f", ed_gz);
+                        ) : (
+                            sprintf(pad_EDL_Labs[2], "X %.3f", p[0]);
+                            sprintf(pad_EDL_Labs[3], "Y %.3f", p[1]);
+                            sprintf(pad_EDL_Labs[4], "Z %.3f", p[2]);
+                        );
+                    ) : (
+                        strcpy(pad_EDL_Labs[1], "No. -");
+                        strcpy(pad_EDL_Labs[2], "X -");
+                        strcpy(pad_EDL_Labs[3], "Y -");
+                        strcpy(pad_EDL_Labs[4], "Z -");
+                    );
+                    (dg && (ui_jdrag_cell === 5)) ? sprintf(pad_EDL_Labs[5], "x %.3f", ui_jdrag_v) : strcpy(pad_EDL_Labs[5], "Scale");
+                    i = 0;
+                    loop(3,
+                        // (the angle shown modulo 360 : -179 ... 180)
+                        (dg && (ui_jdrag_cell === 6 + i)) ? sprintf(pad_EDL_Labs[6 + i], "Rot %c %d", 'X' + i, ui_jdrag_v - 360 * ceil((ui_jdrag_v - 180) / 360)) :
+                            sprintf(pad_EDL_Labs[6 + i], "Rot %c", 'X' + i);
+                        i += 1;
+                    );
+                    sprintf(pad_EDL_Labs[9], "Sel %d", ns);
+                    (ns > 1) ? sprintf(pad_EDL_Labs[10], "Delete %d", ns) : strcpy(pad_EDL_Labs[10], "Delete");
+                    strcpy(pad_EDL_Labs[11], (st[ed_sUndo] === 2) ? "Redo" : "Undo");
+                    pad_EDL_Colrs[0] = (n > 0) ? Col_P1 : Col_Inactive;
+                    pad_EDL_Colrs[1] = ok ? Col_P1 : Col_Inactive;
+                    i = 2; loop(3, pad_EDL_Colrs[i] = !ok ? Col_Inactive : bo ? Color_Heliotrope : Col_P1; i += 1;);
+                    i = 5; loop(4, pad_EDL_Colrs[i] = (ns > 1) ? Col_P1 : Col_Inactive; i += 1;);
+                    pad_EDL_Colrs[9] = (ns > 0) ? Color_Goldenrod : Col_InfoA;
+                    pad_EDL_Colrs[10] = ok ? Col_P6 : Col_Inactive;
+                    pad_EDL_Colrs[11] = (st[ed_sUndo] > 0) ? Col_P1 : Col_Inactive;
+                    zz = control_jpad(pad_EDL);
+                    c = ui_jpad_cell_at();
+                    dr = ed_Drag(blockId, e, c); // the cells of values : a drag
+                    (zz > 0) ? (
+                        ui_GFXdoNow |= 4;
+                        ((zz & (ui_jpad_ev_lmc | ui_jpad_ev_rmc)) && !((zz & ui_jpad_ev_lmc) && (dr & 2))) ? (
+                            ed_LeftCell(e, pad_EDL[ui_jpad_last] - 1, zz);
+                        );
+                    );
+                ui_pop();
+            ui_pop();
+
+            // the view
+            ui_pad(2, 3, 2, 2);
+            x = ui_left_retina(); y = ui_top_retina(); w = ui_width_retina(); h = ui_height_retina(); // (screen pixels)
+            ed_Mouse(e, x, y, w, h, uix_scroll_y) ? (uix_scroll_y = 0; ui_GFXdoNow |= 4;);
+            ed_Norm(e);
+            ed_Draw(e, x, y, w, h);
+        ui_pop();
+    );
+);

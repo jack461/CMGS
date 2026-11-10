@@ -405,11 +405,7 @@ function mSL_define_extensions()
     mSL_define_opcode("print", 133); // define "print" as a synonym of "GM_Log"
 );
 
-
-function Set_Table(X)
-(
-    mSL_errX=118;
-);
+// (Set_Table, the mSL "table" : the configurations of the modules "Edit A" ... "Edit D", see Diffusion-3-Set-Table)
 
 syssrate = sysTempo = sysPlayState = sysPlayPosition = sysBeatPosition = 0; // set later
 sysSampPosition = sysSampBeatPosition = sysSampBeat = 0; // set later
@@ -2447,7 +2443,15 @@ function pns_Host_Modules(itdsp)
     blockDispNames[blockProjectors] = "Projectors";
     // the sub-menu "Projectors" of the Studio menu : the summary, then the views (see mkModuleMenu, mSL_Panes)
     pns_GrpTtl[0] = ">Projectors"; pns_GrpSum[0] = blockProjectors; pns_GrpFst[0] = blockPrjView0; pns_GrpNb[0] = 8;
-    pns_GrpCnt = 1;
+    // the editors of configurations "Edit A" ... "Edit D" (see Diffusion-3-Edit, ED_NV = 4 ; after "Projectors" : the
+    // numbers of the modules are saved), in the sub-menu "Edit" (no summary module)
+    blockEdit0 = itdsp + 1;
+    blockDispNames[(itdsp += 1)] = "Edit A";
+    blockDispNames[(itdsp += 1)] = "Edit B";
+    blockDispNames[(itdsp += 1)] = "Edit C";
+    blockDispNames[(itdsp += 1)] = "Edit D";
+    pns_GrpTtl[1] = ">Edit"; pns_GrpSum[1] = 0; pns_GrpFst[1] = blockEdit0; pns_GrpNb[1] = 4;
+    pns_GrpCnt = 2;
     itdsp;
 );
 
@@ -2467,10 +2471,15 @@ memoryBox2[19] = blockMemory2;
 // The modules "Global", "Projector A" ... "H" and "Projectors" : the settings of the native sliders (part 2 : after sliderevent)
 <? prv_part = 1; include("GM-Libs/Diffusion-3-Projectors.jsfx-inc"); ?>
 
-// Default configuration : the first tab as before (2 panes), the second one with the live display
+// A text file written by GMAuxiliary.eel in the folder Data of the project (the exports of the modules "Edit")
+<? include("GM-Libs/mSL_Export.jsfx-inc"); ?>
+
+// The modules "Edit A" ... "Edit D" : editors of configurations of points, on the view of "Space 3D" (uses prv_Menu)
+<? include("GM-Libs/Diffusion-3-Edit.jsfx-inc"); ?>
+
+// Default configuration : the first tab with 2 empty panes (no module shown by default : 2026-11-10), the second one
+// with the live display
 serialBlock[Pr7_StudConf] = 2;
-dcbBlocksAll[0] = blockMainInfos; dcbBlocksAll[1] = blockSysLog;
-dcbBlocksAll[dcbWSize] = blockMemory1; dcbBlocksAll[dcbWSize+1] = blockMemory2;
 serialBlock[Pr7_StudLive + 1] = 1;
 
 
@@ -5099,6 +5108,8 @@ s__wxy = timesy - timesz;
 @serialize
 // The tabs names and the tabs and panes configuration (see pns_Serialize, mSL_Panes.jsfx-inc)
 pns_Serialize();
+// The configurations of the modules "Edit A" ... "Edit D" (see Diffusion-3-Edit.jsfx-inc)
+ed_Serialize();
 
 
 @gfx
@@ -6014,7 +6025,7 @@ function colored_screen()
 
 
 // File dropped in the window
-g__efi = 1; g__idx = g__efs = 0;
+g__efi = 1; g__idx = g__efs = g__ed = 0;
 while (g__efi) (
     (g__efi = gfx_getdropfile(g__idx, #s)) ? (
         0 ? (sprintf(#drpfil, "Dropped file : \"%s\"", #s); mk_display_box(#drpfil););
@@ -6030,13 +6041,22 @@ while (g__efi) (
         ) :
         (match ("*mSL", g__efs)) ? (
             //sprintf(#s, "*  Compile: %s  (%d)  *", efs, strlen(#efs)); mSL_log(SysLogBox, #s);
+            // dropped on a module "Edit" : the first configuration of its "table" goes there (Set_Table)
+            ed_mslTgt = ed_DropTarget(); ed_mslT = time_precise();
             doMslCompile(g__efs); // add to compile list
         ) :
         (match ("*ala", g__efs)) ? (
-            sx_Drop(g__efs); // a library of GRM Spaces layouts : for the module "Space 3D"
+            // a library of GRM Spaces layouts : for the module "Space 3D" ; dropped on a module "Edit" : the layout
+            // chosen goes to it (ed_Drop)
+            g__ed = ed_DropTarget();
+            (g__ed >= 0) ? ed_Drop(g__ed, sx_Drop(g__efs, 0)) : sx_Drop(g__efs, 1);
         ) :
         ((match ("*xml", g__efs)) || (match ("*lay", g__efs))) ? (
-            (match ("*lay", g__efs)) ? sx_Drop(g__efs); // also for the module "Space 3D"
+            // also for the module "Space 3D" (or for a module "Edit")
+            (match ("*lay", g__efs)) ? (
+                g__ed = ed_DropTarget();
+                (g__ed >= 0) ? ed_Drop(g__ed, sx_Drop(g__efs, 0)) : sx_Drop(g__efs, 1);
+            );
             // a trajectory exported by GRM Spaces : only for "Space 3D" (not parsed for mSL)
             g__trj = (match ("*xml", g__efs)) ? sx_DropTraj(g__efs) : 0;
             // Do not accept empty strings
@@ -6060,6 +6080,9 @@ while (g__efi) (
     );
 );
 (g__idx != 0) ? gfx_getdropfile(-1);
+
+// The modules "Edit" : the loads asked by "Space 3D", the files written (see Diffusion-3-Edit)
+ed_Frame();
 
 
 
@@ -6729,6 +6752,9 @@ function show_Module(igb)
     ) :
     (igb === blockProjectors) ? (
         show_Projectors_Pad(blockProjectors);
+    ) :
+    ((igb >= blockEdit0) && (igb < blockEdit0 + ED_NV)) ? (
+        show_Edit_Pad(igb, igb - blockEdit0);
     );
 );
 

@@ -1518,3 +1518,188 @@ local (tbl, state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, 
 );
 
 
+
+
+/*
+    The mSL "table" in Diffusion 3 (2026-11-10) : the configurations of the modules "Edit A" ... "Edit D" (see
+    Diffusion-3-Edit.jsfx-inc), as written by their export "configuration (mSL table)" :
+
+        table(data(
+            Edit A  name "Etoile"  kind Trajectory  closed On  smooth On  free Off
+                point 0.5 0 0  bend 0.1 -0.05 0
+                point -0.25 0.5 0
+                ...
+        ));
+
+    A block Edit X (X : A, B, C, D, or 1 ... 4 ; a file dropped on a module Edit : its first block goes into this
+    module), then keys in any order : name "text" ; kind Speakers | Sources | Trajectory ; closed, smooth, free : On |
+    Off (or 1 | 0) ; point x y z [bend dx dy dz] (no number : the points are numbered 1, 2, 3 ... in their order,
+    ED_MAXP at most ; the coordinates up to ED_FAR ; the bend of the segment from this point to the next one : the
+    shift of its middle). The keys absent leave the configuration as it is ; the points, if any, replace all its
+    points. The commas and semicolons are ignored. The first error (2486 ... 2491) stops the analysis : nothing
+    changes.
+    This function comes before the evaluator (that calls it), the editors after it : a table is read in work areas
+    (ed_tf2, ed_tpt2, ed_tnm2), then, without error, staged (ed_tq, ed_tf, ed_tpt, ed_tnm : several tables before the
+    next frame add up ; all allocated by Diffusion-3-Edit), and ed_Frame takes them in @gfx (kept for Undo). Only
+    globals here : no function of the editors.
+*/
+ed_tbEnd = -(10^30);    // after the last word
+ed_tbtbl = ed_tbn = ed_tbptr = ed_tberr = ed_tbmask = 0; // (ed_tbmask : the editors named in the table, 2 ^ e)
+ed_tbdrop = -1;         // the module Edit where a file was dropped (its first block goes there)
+ed_mslTgt = -1; ed_mslT = 0; // set by the drop of an mSL file (Diffusion-3, @gfx) : the module Edit under the mouse, the time
+ed_tkEdit = mSL_symbol("Edit");
+ed_tkName = mSL_symbol("name"); ed_tkKind = mSL_symbol("kind"); ed_tkPoint = mSL_symbol("point"); ed_tkBend = mSL_symbol("bend");
+ed_tkClosed = mSL_symbol("closed"); ed_tkSmooth = mSL_symbol("smooth"); ed_tkFree = mSL_symbol("free");
+ed_tkOn = mSL_symbol("On"); ed_tkOff = mSL_symbol("Off");
+ed_tkSpk = mSL_symbol("Speakers"); ed_tkSrc = mSL_symbol("Sources"); ed_tkTrj = mSL_symbol("Trajectory");
+ed_tkA = mSL_symbol("A"); ed_tkB = mSL_symbol("B"); ed_tkC = mSL_symbol("C"); ed_tkD = mSL_symbol("D");
+
+// the first error stops the analysis
+function ed_Tb_Err(code, msg)
+(
+    (ed_tberr === 0) ? (
+        ed_tberr = code;
+        sprintf(#ed_tbm, "ERR: %04d    Diffusion table (word %d) : %s", code, ed_tbptr, msg);
+        mSL_log(SysLogBox, #ed_tbm);
+    );
+    code;
+);
+
+// the next word (the commas and semicolons are skipped), ed_tbEnd after the last one
+function ed_Tb_Peek() local(w)
+(
+    w = ed_tbEnd;
+    while ((ed_tbptr < ed_tbn) && (((w = ed_tbtbl[ed_tbptr]) === mSL_cstComma) || (w === ';' + mSL_CharConst))) (
+        ed_tbptr += 1; w = ed_tbEnd;
+    );
+    w;
+);
+function ed_Tb_Next() local(w)
+(
+    w = ed_Tb_Peek();
+    (ed_tbptr < ed_tbn) ? (ed_tbptr += 1);
+    w;
+);
+
+// a number in [vmin, vmax] (a "-" word before it changes its sign) ; 0 and an error otherwise
+function ed_Tb_Num(key, vmin, vmax) local(w, s)
+(
+    s = 1;
+    ((w = ed_Tb_Next()) === mSL_cstMinus) ? ( s = -1; w = ed_Tb_Next(); );
+    ((abs(w) < mSL_CharConst) && !mSL_isString(w) && (w * s >= vmin) && (w * s <= vmax)) ? w * s : (
+        sprintf(#ed_tbw, "%s : %s is not a value in [%g, %g]", key, (w === ed_tbEnd) ? "the end" : mSL_edit_value(#ed_tbv, w), vmin, vmax);
+        ed_Tb_Err(2490, #ed_tbw);
+        0;
+    );
+);
+
+// On | Off, or 1 | 0
+function ed_Tb_Bool(key) local(w)
+(
+    w = ed_Tb_Peek();
+    (w === ed_tkOn) ? ( ed_Tb_Next(); 1; ) :
+    (w === ed_tkOff) ? ( ed_Tb_Next(); 0; ) :
+    (ed_Tb_Num(key, 0, 1) != 0);
+);
+
+// A block Edit (its word read) : read in the work area of its editor (ed_tf2, ed_tpt2, ed_tnm2 ; the blocks of the same
+// editor in a table add up : their points follow one another) ; returns its editor, or -1
+function ed_Tb_Edit() local(w, e, f, pts, p, k)
+(
+    w = ed_Tb_Next();
+    e = (w === ed_tkA) ? 0 : (w === ed_tkB) ? 1 : (w === ed_tkC) ? 2 : (w === ed_tkD) ? 3 :
+        ((abs(w) < mSL_CharConst) && !mSL_isString(w) && (w === floor(w)) && (w >= 1) && (w <= ED_NV)) ? w - 1 : -1;
+    (e < 0) ? (
+        sprintf(#ed_tbw, "Edit %s : A, B, C or D expected", (w === ed_tbEnd) ? "(the end)" : mSL_edit_value(#ed_tbv, w));
+        ed_Tb_Err(2486, #ed_tbw);
+    ) : (
+        // a file dropped on a module Edit : its first block goes there
+        (ed_tbdrop >= 0) ? ( e = ed_tbdrop; ed_tbdrop = -1; );
+        f = ed_tf2 + e * 8;
+        pts = ed_tpt2 + e * ED_MAXP * ED_PS;
+        !(ed_tbmask & (2 ^ e)) ? (
+            ed_tbmask |= 2 ^ e;
+            memset(f, 0, 8); memset(pts, 0, ED_MAXP * ED_PS);
+        );
+        while ((ed_tberr === 0) && ((w = ed_Tb_Peek()) !== ed_tbEnd) && (w !== ed_tkEdit)) (
+            ed_Tb_Next();
+            (w === ed_tkName) ? (
+                w = ed_Tb_Next();
+                mSL_isString(w) ? ( strcpy(ed_tnm2[e], w); f[0] |= 1; ) :
+                ((w > mSL_Sym_Low) && (w < mSL_Sym_High)) ? ( mSL_edit_value(ed_tnm2[e], w); f[0] |= 1; ) :
+                ed_Tb_Err(2487, "name : a \"text\" expected");
+            ) :
+            (w === ed_tkKind) ? (
+                w = ed_Tb_Next();
+                k = (w === ed_tkSpk) ? 0 : (w === ed_tkSrc) ? 1 : (w === ed_tkTrj) ? 2 : -1;
+                (k < 0) ? (
+                    sprintf(#ed_tbw, "kind %s : Speakers, Sources or Trajectory expected", (w === ed_tbEnd) ? "(the end)" : mSL_edit_value(#ed_tbv, w));
+                    ed_Tb_Err(2488, #ed_tbw);
+                ) : ( f[1] = k; f[0] |= 2; );
+            ) :
+            (w === ed_tkClosed) ? ( f[2] = ed_Tb_Bool("closed"); f[0] |= 4; ) :
+            (w === ed_tkSmooth) ? ( f[3] = ed_Tb_Bool("smooth"); f[0] |= 8; ) :
+            (w === ed_tkFree) ? ( f[4] = ed_Tb_Bool("free"); f[0] |= 16; ) :
+            (w === ed_tkPoint) ? (
+                // the next point (its number : its rank)
+                (f[5] >= ED_MAXP) ? (
+                    sprintf(#ed_tbw, "Edit %c : more than %d points", 'A' + e, ED_MAXP);
+                    ed_Tb_Err(2491, #ed_tbw);
+                ) : (
+                    p = pts + f[5] * ED_PS;
+                    p[0] = ed_Tb_Num("point x", -ED_FAR, ED_FAR);
+                    p[1] = ed_Tb_Num("point y", -ED_FAR, ED_FAR);
+                    p[2] = ed_Tb_Num("point z", -ED_FAR, ED_FAR);
+                    (ed_Tb_Peek() === ed_tkBend) ? (
+                        ed_Tb_Next();
+                        p[4] = ed_Tb_Num("bend x", -100, 100); p[5] = ed_Tb_Num("bend y", -100, 100); p[6] = ed_Tb_Num("bend z", -100, 100);
+                    );
+                    f[5] += 1;
+                    f[0] |= 32;
+                );
+            ) : (
+                sprintf(#ed_tbw, "%s : a key (name, kind, closed, smooth, free, point) or Edit expected", mSL_edit_value(#ed_tbv, w));
+                ed_Tb_Err(2489, #ed_tbw);
+            );
+        );
+    );
+    (ed_tberr === 0) ? e : -1;
+);
+
+// Implementation of the mSL "table" operation : blocks Edit ; returns 0, or the first error. Read without error, the
+// configurations go to the editors (staged : ed_tq, ed_tf, ed_tpt, ed_tnm ; several tables before ed_Frame add up)
+function Set_Table(tbl) local(w, e, f, g)
+(
+    ed_tbtbl = tbl; ed_tbn = tbl[-1]; ed_tbptr = 0; ed_tberr = 0; ed_tbmask = 0;
+    ed_tbdrop = ((ed_mslTgt >= 0) && (time_precise() - ed_mslT < 10)) ? ed_mslTgt : -1;
+    ed_mslTgt = -1;
+    while ((ed_tberr === 0) && ((w = ed_Tb_Next()) !== ed_tbEnd)) (
+        (w === ed_tkEdit) ? ed_Tb_Edit() : (
+            sprintf(#ed_tbw, "%s : a block Edit expected", mSL_edit_value(#ed_tbv, w));
+            ed_Tb_Err(2486, #ed_tbw);
+        );
+    );
+    // everything read without error : staged for the editors (ed_Frame : ed_TbTake), the keys given added
+    (ed_tberr === 0) ? (
+        e = 0;
+        loop(ED_NV,
+            (ed_tbmask & (2 ^ e)) ? (
+                f = ed_tf2 + e * 8; g = ed_tf + e * 8;
+                !ed_tq[e] ? memset(g, 0, 8);
+                (f[0] & 1) ? strcpy(ed_tnm[e], ed_tnm2[e]);
+                (f[0] & 2) ? (g[1] = f[1]);
+                (f[0] & 4) ? (g[2] = f[2]);
+                (f[0] & 8) ? (g[3] = f[3]);
+                (f[0] & 16) ? (g[4] = f[4]);
+                (f[0] & 32) ? (
+                    g[5] = f[5];
+                    memcpy(ed_tpt + e * ED_MAXP * ED_PS, ed_tpt2 + e * ED_MAXP * ED_PS, ED_MAXP * ED_PS);
+                );
+                g[0] |= f[0];
+                ed_tq[e] = 1;
+            );
+            e += 1;
+        );
+    );
+    ed_tberr;
+);
