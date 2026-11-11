@@ -1,0 +1,1034 @@
+/*
+    Diffusion-3-Spatial.jsfx-inc
+
+    ====================================== The spatial projectors ======================================
+
+    (2026-11-11) A projector diffuses on N channels : the destinations of its configurations (through its diffusion of
+    the outputs, outdiff, if any). Its channels go either to the outputs (as before : 1 > 1, 2 > 2 ..., or through
+    outdiff), or, when it has a source, to the N points of that source :
+        source n : k < x y z, k < x y z, ... ;
+    (in the configuration : n in 1 ... SP_NSRC - 1, k in 1 ... SP_MAXP, x y z in [-1, 1] ; the point k receives the
+    channel k ; the channels beyond the last point are lost). The source of the projector p is
+    serialBlock[Pr7_PrjSpace + p - 1] (0 : none ; "space n" in a preset, cell 16 of the views "Projector A" ... "H",
+    cell 2 of the views "Space A" ... "D", Diffusion-3-Space3D). The source is placed in the room by the settings of
+    its projector (sp_st : trajectories A and B, mix, radius, dynamics, speed, frame, spread, size, yaw, pitch, roll,
+    size / rotation / translation of the trajectory, as in the module Space 3D), then projected on the speakers of
+    Diffusion (hppos, scaled into [-1, 1] as in Space 3D : the largest coordinate becomes 1 ; only the outputs in use)
+    by a law :
+        0 Equal (equal power, nothing lost) : the nearest speaker, and those less than "reach" farther than it (cosine
+          weight ; reach 0 : the nearest one only) ; normalized in power : all the energy of a point goes to the speakers ;
+        1 Radius (projective) : the speakers nearer than "reach" (cosine of d / reach) ; normalized only when the sum of
+          the powers exceeds 1 : a point far from every speaker gets weak, then silent ;
+        2 DBAP (projective) : all the speakers, 1 / (d^2 + b^2)^(a/2) (a = rolloff / 6.02, the rolloff in dB per doubling
+          of the distance ; b = SP_DBAPB), normalized in power, then multiplied by (reach / dn)^a when the nearest
+          speaker is at dn > reach ; the gains 60 dB below the largest one are dropped.
+    The level (dB ; -120 : silence) multiplies the gains (as the volume of the projector, module "Global").
+
+    Threads :
+      @gfx (sp_Gfx, at each run, even when the window is closed) publishes to @block through double buffers (a new
+           publication waits until @block has taken the previous one) : the speakers (from HP_Positions), the layout of
+           the source of each projector (sp_srcN / sp_srcP, written by the configuration), the path of its trajectory
+           (s3d_mkmorph from its settings ; its lengths and tangents) ; the views "Space A" ... "D" write the settings
+           (sp_st) directly and count their changes (sp_stSeq : placement and gains ; sp_pSeq : the path) ;
+      @block (sp_Block, after cf_IOBlock) : the phase of the motion (in audio time), the position of the group on the
+           path (dynamics), the points, the gains when something changed or moved ; prx_spv (the buffer of the points of
+           the projector, 0 : not spatial), prx_spn (N), prx_spq (1 / sqrt(N), for the blur) ;
+      @sample : the matrix of the projector writes into its points, sp_Sample sends them to the outputs ; each gain
+           reaches its target linearly in max(one block, SP_RAMPT) : a motion is followed with that lag, without clicks.
+    The functions run by @block are their own (sp_Ease ...) : the s3d_* functions and globals belong to @gfx (and the
+    local variables of a function are shared by all its callers).
+
+    The trajectories A, B, C, D of each projector (sp_fTrA, sp_fTrB, sp_fTrC, sp_fTrD : its own ; the mix runs along
+    the chain of sp_fTrN of them, sp_MkChain ; the radius, the dynamics, the size / rotation / translation of the path
+    too) are of a kind k : 0 ... 5 those of Space 3D (None, Circle, Square,
+    Star, Spiral, Central Point) ; SP_KED + e (6 ... 9) : the path of the editor Edit A ... D, a live link (each change of
+    the editor moves the sound : tr_EdSync, Diffusion-3-Trajectories, copies it into sp_edP) ; SP_KLIB + i (10 ... 137) :
+    the trajectory T(i + 1) of the library (2026-11-11 : SP_NTRJ = 128 trajectories of SP_MAXTRJ points at most, with a
+    name, saved with the project by sp_Serialize ; filled by the files of GRM Spaces dropped on the window (sx_DropTraj),
+    by the editors (copy of their path : ed_ToLib), by the configuration ("trajectory n "name" closed|open : x y z, ... ;",
+    Diffusion-3-Set-Table) ; the module "Trajectories" shows and manages them). sp_MkMorph builds the path from them
+    (the trajectory "File" of Space 3D is its work area) ; sp_libSeq counts the changes of the library and of the editors
+    (the paths are built again).
+
+    The adaptation of a source to the speakers (sp_Fit*, @gfx, some starts at each frame : sp_FitStep) : a fixed source,
+    fixed speakers ; the translation, the rotations (the yaw, or yaw, pitch and roll) and, if allowed, the size that
+    bring each point onto its own speaker (assignment : the points by increasing distance to their nearest speaker, each
+    one takes its nearest free speaker ; more points than speakers : the speakers are shared). An ICP (assignment, then
+    the best yaw, size and translation for it, closed forms ; pitch and roll by a local search) from many starts. The
+    best result becomes the settings of the projector : trajectory "Central Point" at the translation, spread 100 %,
+    size, rotations, frame Absolute, law Equal with reach 0 (each point on its nearest speaker).
+
+    Included in @init after mSL_ui_Space3D (s3d_mkmorph) and before Diffusion-3-Space3D (the views) and Diffusion-3-Edit
+    (ed_Frame calls sp_SetTrj). The table of the sources (SP_NSRC, SP_MAXP, sp_srcN, sp_srcP, sp_defSeq) is allocated
+    in Diffusion-3 before clearArea, which clears it ; the configuration (D3_config, Diffusion-3-Set-Table) fills it.
+*/
+
+@init
+
+SP_NP = projucnt;           // the projectors that may be spatial : 1 ... projucnt (index 0 ... SP_NP - 1)
+SP_SS = 40;                 // the settings of a projector (sp_st)
+SP_WS = 16;                 // its values computed by @block (sp_wk), read by the views
+SP_MAXTRJ = 1024;           // the points of a trajectory (as SX_MAXTRJ, Diffusion-3-Space3D, included later)
+SP_NTRJ = 128;              // the library of trajectories : T1 ... T128 (index 0 ... 127)
+SP_NMLEN = 32;              // their names : characters, as numbers (saved with the points)
+SP_KED = 6;                 // the kinds of trajectories : 0 ... 5 those of Space 3D, SP_KED + e the path of Edit A ... D
+SP_KLIB = 10;               // (live), SP_KLIB + i the trajectory T(i + 1) of the library
+SP_PTS = SP_MAXTRJ + 1;     // the points of a published path (a closed path ends on its first point again)
+SP_PW = 8;                  // a point of a path : x y z, length from the start, tangent x y z, (free)
+SP_LMAX = SP_MAXP * 128;    // the entries of a list of gains (one per point and output at most)
+SP_LS = SP_LMAX * 4 + 1;    // the list : (code = point * 128 + output, gain, increment, target) ..., -1
+SP_RAMPT = 0.02;            // the shortest ramp of the gains (s)
+SP_DBAPB = 0.1;             // DBAP : the blur b
+SP_LawNames = "Equal|Radius|DBAP";
+
+// the settings of a projector (sp_st + p * SP_SS)
+sp_fLaw = 0; sp_fReach = 1; sp_fLevel = 2; sp_fRoff = 3;
+sp_fTrA = 4; sp_fTrB = 5; sp_fMix = 6; sp_fRad = 7; sp_fCurve = 8; sp_fMode = 9;
+sp_fSpeed = 10; sp_fAnim = 11; sp_fFrame = 12; sp_fSpread = 13; sp_fGsc = 14;
+sp_fYaw = 15; sp_fPitch = 16; sp_fRoll = 17;
+sp_fTsc = 18; sp_fTrz = 19; sp_fTrx = 20; sp_fTtx = 21; sp_fTty = 22; sp_fTtz = 23;
+sp_fClamp = 24;
+// (2026-11-11) the trajectories C and D, the count of trajectories of the chain of the mix (2 : A B, 3 : A B C, 4 : A B C D)
+sp_fTrC = 25; sp_fTrD = 26; sp_fTrN = 27;
+// the values computed by @block (sp_wk + p * SP_WS)
+sp_wPhase = 0; sp_wGx = 1; sp_wGy = 2; sp_wGz = 3; sp_wDx = 4; sp_wDy = 5; sp_wDz = 6; sp_wN = 7; sp_wPairs = 8;
+
+sp_st = make_array(SP_NP * SP_SS);
+sp_wk = make_array(SP_NP * SP_WS);
+sp_stSeq = make_array(SP_NP);   // (@gfx) the settings changed : the placement and the gains (@block : sp_stDone)
+sp_stDone = make_array(SP_NP);
+sp_pSeq = make_array(SP_NP);    // (@gfx) the path to build again (sp_Gfx : sp_pDone)
+sp_pDone = make_array(SP_NP);
+sp_pFile = make_array(SP_NP);   // the sp_libSeq of its last path
+sp_rstSeq = make_array(SP_NP);  // (@gfx) restart the motion (@block : sp_rstDone)
+sp_rstDone = make_array(SP_NP);
+sp_libSeq = 0;                  // incremented when the library or the path of an editor changes (the paths built again)
+// the library of trajectories : count of points (0 : empty), closed, name, points (x y z)
+sp_trN = make_array(SP_NTRJ);
+sp_trC = make_array(SP_NTRJ);
+sp_trNm = make_array(SP_NTRJ * SP_NMLEN);
+sp_trP = make_array(SP_NTRJ * SP_MAXTRJ * 3);
+sp_trTmp = make_array(SP_MAXTRJ * 3);   // a trajectory being read by the configuration (Diffusion-3-Set-Table)
+// the paths of the editors Edit A ... D (tr_EdSync) : count, closed, the sum of their configurations, points
+sp_edN = make_array(4);
+sp_edC = make_array(4);
+sp_edSum = make_array(4);
+sp_edP = make_array(4 * SP_MAXTRJ * 3);
+sp_ser = make_array(4);                 // (sp_Serialize)
+sp_tsP = sp_tsC = 0;                    // (sp_TrjSrc)
+sp_lastPrj = 0;                 // the projector of the last view "Space" drawn (a trajectory file dropped goes there)
+// the double buffers : @gfx writes the buffer 1 - act when pend === act, then pend = 1 - act ; @block : act = pend
+sp_lay = make_array(SP_NP * 2 * SP_MAXP * 3);   // the layouts of the sources (x y z)
+sp_layN = make_array(SP_NP * 2);
+sp_lAct = make_array(SP_NP);
+sp_lPend = make_array(SP_NP);
+sp_lSrc = make_array(SP_NP);    // (@gfx) the source published, and the sp_defSeq then
+sp_lDef = make_array(SP_NP);
+sp_path = make_array(SP_NP * 2 * SP_PTS * SP_PW);
+sp_pathN = make_array(SP_NP * 2);
+sp_tAct = make_array(SP_NP);
+sp_tPend = make_array(SP_NP);
+sp_spk = make_array(2 * 128 * 4);   // the speakers : x y z, output (0 ...)
+sp_spkN = make_array(2);
+sp_sAct = sp_sPend = 0;
+sp_sHP = -1; sp_sDef = -1; sp_sOut = -1; // (@gfx) the HP_Positions, sp_defSeq and actchout published
+// @block
+sp_pos = make_array(SP_NP * SP_MAXP * 3);       // the points placed
+sp_gc = make_array(SP_NP * SP_MAXP * 128);      // the current gains (point * 128 + output), from the list
+sp_gN = make_array(SP_NP);                      // the points in sp_gc
+sp_list = make_array(SP_NP * SP_LS);            // the lists of gains (@sample)
+sp_left = make_array(SP_NP);                    // the samples left in the ramp
+sp_vb = make_array(SP_NP * (SP_MAXP + 1));      // the points in @sample (+ 1 : the channels beyond the last point)
+sp_hpg = make_array(SP_NP * 128);               // the power sent to each output (the views)
+sp_row = make_array(128);                       // work (@block) : the distances, the gains of a point
+sp_dt = 0; sp_R = 1; sp_spkChg = 0;
+i__k = 0; loop(SP_NP, sp_list[i__k * SP_LS] = -1; i__k += 1;);
+strcpy(#sp_log, ""); strcpy(#sp_l2, "");
+
+
+// The default settings of the projector p (0 ...) : the source as it is declared (no trajectory, spread 100 %, size 1),
+// law Equal
+function sp_Default(p)
+local(st)
+(
+    st = sp_st + p * SP_SS;
+    memset(st, 0, SP_SS);
+    st[sp_fLaw] = 0; st[sp_fReach] = 0.5; st[sp_fLevel] = 0; st[sp_fRoff] = 6;
+    st[sp_fTrA] = 0; st[sp_fTrB] = 1; st[sp_fMix] = 0; st[sp_fRad] = 0.6;
+    st[sp_fTrC] = 2; st[sp_fTrD] = 3; st[sp_fTrN] = 2;
+    st[sp_fSpeed] = 3; st[sp_fAnim] = 1; st[sp_fSpread] = 1; st[sp_fGsc] = 1;
+    st[sp_fTsc] = 1; st[sp_fClamp] = 1;
+    sp_stSeq[p] += 1; sp_pSeq[p] += 1;
+);
+i__k = 0; loop(SP_NP, sp_Default(i__k); i__k += 1;);
+
+// A trajectory of the projector p (0 ...) : A (b = 0) or B (b = 1) becomes k (@gfx : a file, an editor)
+function sp_SetTrj(p, b, k)
+(
+    ((p >= 0) && (p < SP_NP)) ? (
+        sp_st[p * SP_SS + (b ? sp_fTrB : sp_fTrA)] = k;
+        sp_pSeq[p] += 1;
+    );
+);
+
+// The settings of the projectors and the library of trajectories, saved with the project (@serialize) ; after a load,
+// everything is computed again
+function sp_Serialize()
+local(p, i, n, ok)
+(
+    (file_avail(0) >= 0) ? (
+        // reading
+        (file_avail(0) > 0) ? (
+            memset(ser_hdr, 0, 4);
+            load_mem(0, ser_hdr, 4);
+            ((ser_hdr[0] === 'spa2') && (ser_hdr[1] === SP_NP) && (ser_hdr[2] === SP_SS) && (ser_hdr[3] === SP_NTRJ)) ? (
+                load_mem(0, sp_st, SP_NP * SP_SS);
+                // the library : the count of trajectories, then for each one : its index, count of points, closed,
+                // its name, its points
+                memset(sp_trN, 0, SP_NTRJ);
+                load_mem(0, sp_ser, 1); n = sp_ser[0]; ok = 1;
+                while (ok && (n > 0)) (
+                    load_mem(0, sp_ser, 3);
+                    i = sp_ser[0];
+                    ((i >= 0) && (i < SP_NTRJ) && (sp_ser[1] > 0) && (sp_ser[1] <= SP_MAXTRJ)) ? (
+                        sp_trC[i] = sp_ser[2];
+                        load_mem(0, sp_trNm + i * SP_NMLEN, SP_NMLEN);
+                        load_mem(0, sp_trP + i * SP_MAXTRJ * 3, sp_ser[1] * 3);
+                        sp_trN[i] = sp_ser[1];
+                    ) : (ok = 0);
+                    n -= 1;
+                );
+                sp_libSeq += 1;
+                p = 0; loop(SP_NP, sp_stSeq[p] += 1; sp_pSeq[p] += 1; p += 1;);
+                mSL_log(SysLogBox, "Space : the settings of the spatial projectors and the trajectories loaded");
+            );
+        );
+    ) : (
+        // writing
+        ser_hdr[0] = 'spa2'; ser_hdr[1] = SP_NP; ser_hdr[2] = SP_SS; ser_hdr[3] = SP_NTRJ;
+        save_mem(0, ser_hdr, 4);
+        save_mem(0, sp_st, SP_NP * SP_SS);
+        n = 0; i = 0; loop(SP_NTRJ, (sp_trN[i] > 0) ? (n += 1); i += 1;);
+        sp_ser[0] = n; save_mem(0, sp_ser, 1);
+        i = 0;
+        loop(SP_NTRJ,
+            (sp_trN[i] > 0) ? (
+                sp_ser[0] = i; sp_ser[1] = sp_trN[i]; sp_ser[2] = sp_trC[i];
+                save_mem(0, sp_ser, 3);
+                save_mem(0, sp_trNm + i * SP_NMLEN, SP_NMLEN);
+                save_mem(0, sp_trP + i * SP_MAXTRJ * 3, sp_trN[i] * 3);
+            );
+            i += 1;
+        );
+    );
+);
+
+
+/*
+    @gfx : the publications for @block
+*/
+
+// The speakers of Diffusion (HP_Positions : number, x, y, z ; scaled as in Space 3D : the largest coordinate becomes 1),
+// only the outputs in use (actchout) : x y z, output (0 ...)
+function sp_PubSpk()
+local(b, d, c, i, n, m, k)
+(
+    b = 1 - sp_sAct; d = sp_spk + b * 512; k = 0;
+    (HP_Positions > 0) ? (
+        c = HP_Positions[-1];
+        m = 0; i = 0;
+        while (i < c) (
+            n = HP_Positions[i];
+            ((n >= 1) && (n <= 128)) ? (
+                m = max(m, max(abs(HP_Positions[i+1]), max(abs(HP_Positions[i+2]), abs(HP_Positions[i+3]))));
+            );
+            i += 4;
+        );
+        m = (m > 0) ? 1 / m : 1;
+        i = 0;
+        while (i < c) (
+            n = HP_Positions[i];
+            ((n >= 1) && (n <= min(128, actchout)) && (k < 128)) ? (
+                d[4*k] = HP_Positions[i+1] * m; d[4*k+1] = HP_Positions[i+2] * m; d[4*k+2] = HP_Positions[i+3] * m;
+                d[4*k+3] = n - 1;
+                k += 1;
+            );
+            i += 4;
+        );
+    );
+    sp_spkN[b] = k;
+    sp_sPend = b;
+);
+
+// The layout of the source s for the projector p (0 : none, the projector is not spatial)
+function sp_PubLay(p, s)
+local(b, d, n)
+(
+    b = 1 - sp_lAct[p]; d = sp_lay + (p * 2 + b) * SP_MAXP * 3;
+    n = ((s > 0) && (s < SP_NSRC)) ? sp_srcN[s] : 0;
+    (n > 0) ? memcpy(d, sp_srcP + s * SP_MAXP * 3, n * 3);
+    sp_layN[p * 2 + b] = n;
+    sp_lSrc[p] = s; sp_lDef[p] = sp_defSeq;
+    sp_lPend[p] = b;
+);
+
+// the direction of the segment j of the path d (points j, j + 1), normalized, in sp_sdx, sp_sdy, sp_sdz (0 : length 0)
+function sp_SegDir(d, j)
+local(p, q, l)
+(
+    p = d + j * SP_PW; q = p + SP_PW;
+    sp_sdx = q[0] - p[0]; sp_sdy = q[1] - p[1]; sp_sdz = q[2] - p[2];
+    l = sqrt(sp_sdx * sp_sdx + sp_sdy * sp_sdy + sp_sdz * sp_sdz);
+    (l > 0) ? (sp_sdx /= l; sp_sdy /= l; sp_sdz /= l;) : (sp_sdx = sp_sdy = sp_sdz = 0;);
+);
+
+/*
+    The library of trajectories (@gfx)
+*/
+
+// The name of the trajectory i (0 ...) of the library : set from the string s ; copied into dst
+function sp_NmSet(i, s)
+local(a, n, k)
+(
+    a = sp_trNm + i * SP_NMLEN;
+    n = min(SP_NMLEN - 1, strlen(s));
+    k = 0; loop(n, a[k] = str_getchar(s, k, 'cu'); k += 1;);
+    a[n] = 0;
+);
+function sp_NmGet(i, dst)
+local(a, k, c)
+(
+    a = sp_trNm + i * SP_NMLEN;
+    strcpy(dst, "");
+    k = 0;
+    while ((k < SP_NMLEN) && ((c = a[k]) > 0)) ( sprintf(#sp_ch, "%c", c); strcat(dst, #sp_ch); k += 1; );
+    dst;
+);
+
+// The trajectory of the library named s, else the first one empty, else -1
+function sp_TrjFind(s)
+local(i, r)
+(
+    r = -1;
+    (strlen(s) > 0) ? (
+        i = 0;
+        while ((r < 0) && (i < SP_NTRJ)) ( ((sp_trN[i] > 0) && (strcmp(sp_NmGet(i, #sp_nm), s) === 0)) ? (r = i); i += 1; );
+    );
+    i = 0;
+    while ((r < 0) && (i < SP_NTRJ)) ( (sp_trN[i] <= 0) ? (r = i); i += 1; );
+    r;
+);
+
+// The trajectory i of the library : n points of src (x y z, every sz values), closed or not, the name s ; returns n
+function sp_TrjPut(i, src, n, sz, closed, s)
+local(k, d)
+(
+    n = max(0, min(SP_MAXTRJ, n));
+    d = sp_trP + i * SP_MAXTRJ * 3;
+    k = 0; loop(n, d[3*k] = src[sz*k]; d[3*k+1] = src[sz*k+1]; d[3*k+2] = src[sz*k+2]; k += 1;);
+    sp_trN[i] = n; sp_trC[i] = closed ? 1 : 0;
+    sp_NmSet(i, s);
+    sp_libSeq += 1;
+    n;
+);
+
+function sp_TrjClear(i)
+(
+    sp_trN[i] = 0; sp_trC[i] = 0; sp_trNm[i * SP_NMLEN] = 0;
+    sp_libSeq += 1;
+);
+
+// The points of the trajectory of kind k (an editor, the library) : sp_tsP (x y z), sp_tsC (closed) ; returns their
+// count (0 : none, or a kind of Space 3D)
+function sp_TrjSrc(k)
+local(i)
+(
+    sp_tsP = 0; sp_tsC = 0;
+    ((k >= SP_KLIB) && (k < SP_KLIB + SP_NTRJ)) ? (
+        i = k - SP_KLIB; sp_tsP = sp_trP + i * SP_MAXTRJ * 3; sp_tsC = sp_trC[i]; sp_trN[i];
+    ) :
+    ((k >= SP_KED) && (k < SP_KED + 4)) ? (
+        i = k - SP_KED; sp_tsP = sp_edP + i * SP_MAXTRJ * 3; sp_tsC = sp_edC[i]; sp_edN[i];
+    ) : 0;
+);
+
+// The trajectory of kind k in s3d_trj (s3d_ntrj, s3d_trjclosed ; with the size, rotation and translation s3d_tsc ...,
+// radius r for those of Space 3D) : s3d_mktraj, or a path (an editor, the library) through the trajectory "File" of
+// Space 3D, used as a work area (transformed around its center)
+function sp_MkTraj(k, r)
+local(n, i)
+(
+    (k < SP_KED) ? s3d_mktraj(k, 0, 0, 0, r) : (
+        n = min(s3d_mtrj, sp_TrjSrc(k));
+        s3d_nftrj = n; s3d_ftclosed = sp_tsC;
+        s3d_fcx = s3d_fcy = s3d_fcz = 0;
+        i = 0;
+        loop(n,
+            s3d_ftrj[3*i] = sp_tsP[3*i]; s3d_ftrj[3*i+1] = sp_tsP[3*i+1]; s3d_ftrj[3*i+2] = sp_tsP[3*i+2];
+            s3d_fcx += s3d_ftrj[3*i]; s3d_fcy += s3d_ftrj[3*i+1]; s3d_fcz += s3d_ftrj[3*i+2];
+            i += 1;
+        );
+        (n > 0) ? (s3d_fcx /= n; s3d_fcy /= n; s3d_fcz /= n;);
+        s3d_mktraj((n > 0) ? s3d_TrjFile : 0, 0, 0, 0, r);
+    );
+);
+
+// The trajectory between the kinds ka (w = 0) and kb (w = 1), as s3d_mkmorph (both resampled with the same number of
+// points, from their start ; "None" counts as the center)
+function sp_MkMorph(ka, kb, w, r)
+local(m, ca, cb, n, k)
+(
+    w = max(0, min(1, w));
+    (w <= 0) ? sp_MkTraj(ka, r) :
+    (w >= 1) ? sp_MkTraj(kb, r) : (
+        m = min(s3d_mtrj, 512);
+        sp_MkTraj(ka, r); ca = s3d_trjclosed;
+        ((n = s3d_ntrj) === 0) ? (s3d_trjpt(0, 0, 0, 0); n = 1;);
+        s3d_resample(s3d_trj, n, ca, s3d_ta, m);
+        sp_MkTraj(kb, r); cb = s3d_trjclosed;
+        ((n = s3d_ntrj) === 0) ? (s3d_trjpt(0, 0, 0, 0); n = 1;);
+        s3d_resample(s3d_trj, n, cb, s3d_tb, m);
+        k = 0; loop(3 * m, s3d_trj[k] = s3d_ta[k] + w * (s3d_tb[k] - s3d_ta[k]); k += 1;);
+        s3d_ntrj = m;
+        s3d_trjclosed = ca && cb;
+    );
+);
+
+// The trajectory along the chain of the trajectories ka, kb, kc, kd (n of them : 2 ... 4) : the mix (0 ... 1) goes
+// from the first one to the last one (with 4 : 0 A, 1/3 B, 2/3 C, 1 D), between two neighbours as sp_MkMorph
+function sp_MkChain(ka, kb, kc, kd, n, mix, r)
+local(x, f, k1, k2)
+(
+    n = max(2, min(4, n));
+    x = max(0, min(1, mix)) * (n - 1);
+    f = min(n - 2, floor(x));
+    k1 = (f === 0) ? ka : (f === 1) ? kb : kc;
+    k2 = (f === 0) ? kb : (f === 1) ? kc : kd;
+    sp_MkMorph(k1, k2, x - f, r);
+);
+
+// The path of the projector p : its trajectories A, B (C, D), mixed (sp_MkChain, with its size, rotation, translation
+// and its limit to the room) ; then the length from the start at each point, and the tangents (at a vertex, the mean of
+// the directions of its two segments, as s3d_trjpos). The s3d globals used are restored.
+function sp_PubPath(p)
+local(st, b, d, n, m, k, q, l, cl, otsc, otrz, otrx, ottx, otty, ottz, oopt, ax, ay, az)
+(
+    st = sp_st + p * SP_SS;
+    otsc = s3d_tsc; otrz = s3d_trz; otrx = s3d_trx; ottx = s3d_ttx; otty = s3d_tty; ottz = s3d_ttz; oopt = s3d_opt;
+    s3d_tsc = st[sp_fTsc]; s3d_trz = st[sp_fTrz]; s3d_trx = st[sp_fTrx];
+    s3d_ttx = st[sp_fTtx]; s3d_tty = st[sp_fTty]; s3d_ttz = st[sp_fTtz];
+    s3d_opt = st[sp_fClamp] ? (s3d_opt | s3d_oClamp) : (s3d_opt & (0x7FFFFFFF - s3d_oClamp));
+    sp_MkChain(st[sp_fTrA], st[sp_fTrB], st[sp_fTrC], st[sp_fTrD], st[sp_fTrN], st[sp_fMix], st[sp_fRad]);
+    n = s3d_ntrj; cl = s3d_trjclosed && (n > 1);
+    b = 1 - sp_tAct[p]; d = sp_path + (p * 2 + b) * SP_PTS * SP_PW;
+    m = min(n, SP_PTS - 1);
+    k = 0; l = 0;
+    loop(m,
+        q = d + k * SP_PW;
+        q[0] = s3d_trj[3*k]; q[1] = s3d_trj[3*k+1]; q[2] = s3d_trj[3*k+2];
+        (k > 0) ? (l += sqrt(sqr(q[0] - q[-SP_PW]) + sqr(q[1] - q[1-SP_PW]) + sqr(q[2] - q[2-SP_PW])););
+        q[3] = l;
+        k += 1;
+    );
+    cl ? (
+        // closed : the first point again at the end
+        q = d + m * SP_PW;
+        q[0] = d[0]; q[1] = d[1]; q[2] = d[2];
+        l += sqrt(sqr(q[0] - q[-SP_PW]) + sqr(q[1] - q[1-SP_PW]) + sqr(q[2] - q[2-SP_PW]));
+        q[3] = l;
+        m += 1;
+    );
+    // the tangents
+    k = 0;
+    loop(m,
+        ax = ay = az = 0;
+        (k > 0) ? (sp_SegDir(d, k - 1); ax += sp_sdx; ay += sp_sdy; az += sp_sdz;) :
+        (cl && (m > 2)) ? (sp_SegDir(d, m - 2); ax += sp_sdx; ay += sp_sdy; az += sp_sdz;);
+        (k < m - 1) ? (sp_SegDir(d, k); ax += sp_sdx; ay += sp_sdy; az += sp_sdz;) :
+        (cl && (m > 2)) ? (sp_SegDir(d, 0); ax += sp_sdx; ay += sp_sdy; az += sp_sdz;);
+        l = sqrt(ax * ax + ay * ay + az * az);
+        q = d + k * SP_PW;
+        (l > 0.000001) ? (q[4] = ax / l; q[5] = ay / l; q[6] = az / l;) : (q[4] = 0; q[5] = 1; q[6] = 0;);
+        k += 1;
+    );
+    sp_pathN[p * 2 + b] = m;
+    sp_tPend[p] = b;
+    s3d_tsc = otsc; s3d_trz = otrz; s3d_trx = otrx; s3d_ttx = ottx; s3d_tty = otty; s3d_ttz = ottz; s3d_opt = oopt;
+);
+
+/*
+    @block
+*/
+
+// The dynamics (as s3d_easein, s3d_ease : the functions of @gfx are not called by @block)
+function sp_EaseIn(curve, t)
+local(r)
+(
+    (curve === 0) ? t :
+    (curve <= 4) ? t ^ (curve + 1) :
+    (curve === 5) ? ((t <= 0) ? 0 : 2 ^ (10 * t - 10)) :
+    (curve === 6) ? 1 - sqrt(max(0, 1 - t * t)) :
+    (curve === 7) ? 1 - cos(t * $pi / 2) :
+    (curve === 8) ? (((t <= 0) || (t >= 1)) ? t : - (2 ^ (10 * t - 10)) * sin((t * 10 - 10.75) * 2 * $pi / 3)) :
+    (
+        t = 1 - t;
+        r = (t < 1 / 2.75) ? 7.5625 * t * t :
+            (t < 2 / 2.75) ? (t -= 1.5 / 2.75; 7.5625 * t * t + 0.75) :
+            (t < 2.5 / 2.75) ? (t -= 2.25 / 2.75; 7.5625 * t * t + 0.9375) :
+            (t -= 2.625 / 2.75; 7.5625 * t * t + 0.984375);
+        1 - r;
+    );
+);
+
+function sp_Ease(curve, mode, t)
+(
+    t = max(0, min(1, t));
+    (mode === 0) ? sp_EaseIn(curve, t) :
+    (mode === 1) ? 1 - sp_EaseIn(curve, 1 - t) :
+    (mode === 2) ? ((t < 0.5) ? 0.5 * sp_EaseIn(curve, 2 * t) : 1 - 0.5 * sp_EaseIn(curve, 2 - 2 * t)) :
+    ((t < 0.5) ? 0.5 - 0.5 * sp_EaseIn(curve, 1 - 2 * t) : 0.5 + 0.5 * sp_EaseIn(curve, 2 * t - 1));
+);
+
+// The projector p is no more spatial, or becomes spatial : no gain (they will rise from 0)
+function sp_Clear(p)
+(
+    memset(sp_gc + p * SP_MAXP * 128, 0, SP_MAXP * 128);
+    sp_list[p * SP_LS] = -1;
+    sp_left[p] = 0;
+    sp_gN[p] = 0;
+    memset(sp_vb + p * (SP_MAXP + 1), 0, SP_MAXP + 1);
+    memset(sp_hpg + p * 128, 0, 128);
+);
+
+// The motion of the projector p : the phase (audio time), the group center on the path and the direction of the path
+// there (sp_wk) ; 1 when they changed
+function sp_Motion(p)
+local(st, w, d, b, m, ph, u, lt, lo, hi, mid, q, r, f, x, y, z, dx, dy, dz, l, mv)
+(
+    st = sp_st + p * SP_SS; w = sp_wk + p * SP_WS;
+    b = sp_tAct[p];
+    m = sp_pathN[p * 2 + b];
+    d = sp_path + (p * 2 + b) * SP_PTS * SP_PW;
+    dx = 0; dy = 1; dz = 0;
+    (m <= 0) ? (
+        x = y = z = 0;
+    ) : (m === 1) ? (
+        x = d[0]; y = d[1]; z = d[2];
+    ) : (
+        ph = w[sp_wPhase];
+        (st[sp_fAnim] && (st[sp_fSpeed] != 0)) ? (
+            ph += st[sp_fSpeed] / 60 * sp_dt;
+            ph -= floor(ph);
+            w[sp_wPhase] = ph;
+        );
+        lt = d[(m - 1) * SP_PW + 3];
+        u = sp_Ease(st[sp_fCurve], st[sp_fMode], ph) * lt;
+        // the segment : the last vertex whose length from the start is <= u
+        lo = 0; hi = m - 1;
+        while (hi - lo > 1) (
+            mid = (lo + hi) >> 1;
+            (d[mid * SP_PW + 3] <= u) ? (lo = mid) : (hi = mid);
+        );
+        q = d + lo * SP_PW; r = q + SP_PW;
+        l = r[3] - q[3];
+        f = (l > 0) ? max(0, min(1, (u - q[3]) / l)) : 0;
+        x = q[0] + f * (r[0] - q[0]); y = q[1] + f * (r[1] - q[1]); z = q[2] + f * (r[2] - q[2]);
+        dx = q[4] + f * (r[4] - q[4]); dy = q[5] + f * (r[5] - q[5]); dz = q[6] + f * (r[6] - q[6]);
+        l = sqrt(dx * dx + dy * dy + dz * dz);
+        (l > 0.000001) ? (
+            dx /= l; dy /= l; dz /= l;
+        ) : (
+            // (opposite tangents) the direction of the segment
+            dx = r[0] - q[0]; dy = r[1] - q[1]; dz = r[2] - q[2];
+            l = sqrt(dx * dx + dy * dy + dz * dz);
+            (l > 0) ? (dx /= l; dy /= l; dz /= l;) : (dx = 0; dy = 1; dz = 0;);
+        );
+    );
+    mv = (x != w[sp_wGx]) || (y != w[sp_wGy]) || (z != w[sp_wGz]) || (dx != w[sp_wDx]) || (dy != w[sp_wDy]) || (dz != w[sp_wDz]);
+    w[sp_wGx] = x; w[sp_wGy] = y; w[sp_wGz] = z;
+    w[sp_wDx] = dx; w[sp_wDy] = dy; w[sp_wDz] = dz;
+    mv;
+);
+
+// The n points of the projector p (as s3d_place_sources) : the layout scaled by spread * size, rolled (around y),
+// pitched (around x), turned (yaw, around z), in the frame of the room or of the trajectory (front = the direction of
+// the motion, reversed when the speed is negative), around the group center ; limited to the room (option)
+function sp_Place(p, n)
+local(st, w, lay, pos, k, x, y, z, a, sc, fx, fy, fz, rx, ry, rz, ux, uy, uz, l, crl, srl, cpt, spt, cyw, syw, cl)
+(
+    st = sp_st + p * SP_SS; w = sp_wk + p * SP_WS;
+    lay = sp_lay + (p * 2 + sp_lAct[p]) * SP_MAXP * 3;
+    pos = sp_pos + p * SP_MAXP * 3;
+    fx = 0; fy = 1; fz = 0; rx = 1; ry = 0; rz = 0; ux = 0; uy = 0; uz = 1;
+    st[sp_fFrame] ? (
+        l = (st[sp_fSpeed] < 0) ? -1 : 1;
+        fx = l * w[sp_wDx]; fy = l * w[sp_wDy]; fz = l * w[sp_wDz];
+        // right = front x vertical ; a vertical motion : front x (0, 1, 0)
+        rx = fy; ry = - fx; rz = 0;
+        l = sqrt(rx * rx + ry * ry);
+        (l < 0.001) ? (rx = - fz; ry = 0; rz = fx; l = sqrt(rx * rx + rz * rz););
+        (l > 0) ? (rx /= l; ry /= l; rz /= l;) : (rx = 1; ry = rz = 0;);
+        // up = right x front
+        ux = ry * fz - rz * fy; uy = rz * fx - rx * fz; uz = rx * fy - ry * fx;
+    );
+    sc = st[sp_fSpread] * st[sp_fGsc];
+    crl = cos(st[sp_fRoll]); srl = sin(st[sp_fRoll]);
+    cpt = cos(st[sp_fPitch]); spt = sin(st[sp_fPitch]);
+    cyw = cos(st[sp_fYaw]); syw = sin(st[sp_fYaw]);
+    cl = st[sp_fClamp];
+    k = 0;
+    loop(n,
+        x = sc * lay[3*k]; y = sc * lay[3*k+1]; z = sc * lay[3*k+2];
+        a = x * crl + z * srl; z = - x * srl + z * crl; x = a;      // roll
+        a = y * cpt - z * spt; z = y * spt + z * cpt; y = a;        // pitch
+        a = x * cyw - y * syw; y = x * syw + y * cyw; x = a;        // yaw
+        a = w[sp_wGx] + x * rx + y * fx + z * ux; pos[3*k] = cl ? max(-1, min(1, a)) : a;
+        a = w[sp_wGy] + x * ry + y * fy + z * uy; pos[3*k+1] = cl ? max(-1, min(1, a)) : a;
+        a = w[sp_wGz] + x * rz + y * fz + z * uz; pos[3*k+2] = cl ? max(-1, min(1, a)) : a;
+        k += 1;
+    );
+    w[sp_wN] = n;
+);
+
+// The gains of the n points of the projector p on the speakers (the law, the reach, the level) : the list of @sample,
+// each gain going from its current value to its target in sp_R samples ; the power sent to each output (sp_hpg)
+function sp_Gains(p, n)
+local(st, law, reach, lv, a, b2, spk, ns, pos, gc, e, hp, i, k, d, dn, s, t, g, x, y, z, c, cnt, mx, att, o)
+(
+    st = sp_st + p * SP_SS;
+    law = st[sp_fLaw]; reach = max(0, st[sp_fReach]);
+    lv = (st[sp_fLevel] <= -120) ? 0 : 10 ^ (st[sp_fLevel] / 20);
+    a = max(0.1, st[sp_fRoff]) / 6.0206; b2 = sqr(SP_DBAPB);
+    spk = sp_spk + sp_sAct * 512; ns = sp_spkN[sp_sAct];
+    pos = sp_pos + p * SP_MAXP * 3;
+    gc = sp_gc + p * SP_MAXP * 128;
+    hp = sp_hpg + p * 128;
+    // the current gains (those of the list : the ramps go on from there)
+    memset(gc, 0, max(n, sp_gN[p]) * 128);
+    e = sp_list + p * SP_LS;
+    while ((c = e[0]) >= 0) ( gc[c] = e[1]; e += 4; );
+    memset(hp, 0, 128);
+    e = sp_list + p * SP_LS; cnt = 0;
+    i = 0;
+    loop(n,
+        x = pos[3*i]; y = pos[3*i+1]; z = pos[3*i+2];
+        // the distances to the speakers, the nearest one
+        dn = 1000; k = 0;
+        loop(ns,
+            sp_row[k] = d = sqrt(sqr(spk[4*k] - x) + sqr(spk[4*k+1] - y) + sqr(spk[4*k+2] - z));
+            dn = min(dn, d);
+            k += 1;
+        );
+        // the weights, their power s, the largest one
+        s = 0; mx = 0; k = 0;
+        loop(ns,
+            d = sp_row[k];
+            t = (law === 0) ? (
+                    (reach <= 0) ? ((d <= dn + 0.000001) ? 1 : 0) :
+                    ((d - dn < reach) ? cos(0.5 * $pi * (d - dn) / reach) : 0)
+                ) :
+                (law === 1) ? ((d < reach) ? cos(0.5 * $pi * d / reach) : 0) :
+                (sqr(d) + b2) ^ (-0.5 * a);
+            sp_row[k] = t; s += t * t; mx = max(mx, t);
+            k += 1;
+        );
+        // Equal and DBAP : normalized in power ; Radius : only beyond 1 ; DBAP : weaker beyond the reach
+        att = (law === 0) ? ((s > 0) ? 1 / sqrt(s) : 0) :
+              (law === 1) ? 1 / sqrt(max(1, s)) :
+              ((s > 0) ? 1 / sqrt(s) : 0) * ((dn > reach) ? (max(reach, 0.000001) / dn) ^ a : 1);
+        att *= lv;
+        k = 0;
+        loop(ns,
+            t = sp_row[k];
+            ((law === 2) && (t < 0.001 * mx)) ? (t = 0);
+            t *= att;
+            (abs(t) < 0.00001) ? (t = 0);
+            o = spk[4*k+3];
+            c = i * 128 + o;
+            g = gc[c];
+            (((t != 0) || (abs(g) > 0.00001)) && (cnt < SP_LMAX)) ? (
+                e[0] = c; e[1] = g; e[2] = (t - g) / sp_R; e[3] = t;
+                e += 4; cnt += 1;
+                hp[o] += t * t;
+            );
+            k += 1;
+        );
+        i += 1;
+    );
+    e[0] = -1;
+    sp_gN[p] = n;
+    sp_left[p] = sp_R;
+    sp_wk[p * SP_WS + sp_wPairs] = cnt;
+);
+
+// Each block (after cf_IOBlock) : the publications of @gfx taken, the motions, the points and the gains when something
+// changed ; the fields of the projectors for @sample (prx_spv, prx_spn, prx_spq ; prx_spv 0 for the others)
+function sp_Block()
+local(p, pp, n, chg, nspk)
+(
+    sp_dt = samplesblock / srate;
+    sp_R = max(1, max(samplesblock, floor(SP_RAMPT * srate)));
+    sp_spkChg = 0;
+    (sp_sPend !== sp_sAct) ? (sp_sAct = sp_sPend; sp_spkChg = 1;);
+    nspk = sp_spkN[sp_sAct];
+    p = 0; pp = projectors;
+    loop(akousmax,
+        (p < SP_NP) ? (
+            chg = sp_spkChg;
+            (sp_lPend[p] !== sp_lAct[p]) ? (sp_lAct[p] = sp_lPend[p]; chg = 1;);
+            (sp_tPend[p] !== sp_tAct[p]) ? (sp_tAct[p] = sp_tPend[p]; chg = 1;);
+            (sp_stSeq[p] !== sp_stDone[p]) ? (sp_stDone[p] = sp_stSeq[p]; chg = 1;);
+            (sp_rstSeq[p] !== sp_rstDone[p]) ? (sp_rstDone[p] = sp_rstSeq[p]; sp_wk[p * SP_WS + sp_wPhase] = 0; chg = 1;);
+            n = sp_layN[p * 2 + sp_lAct[p]];
+            ((n > 0) && (nspk > 0)) ? (
+                (pp[prx_spv] <= 0) ? (sp_Clear(p); chg = 1;); // it becomes spatial : the gains rise from 0
+                sp_Motion(p) ? (chg = 1);
+                chg ? (
+                    sp_Place(p, n);
+                    sp_Gains(p, n);
+                );
+                pp[prx_spn] = n; pp[prx_spq] = 1 / sqrt(n);
+                pp[prx_spv] = sp_vb + p * (SP_MAXP + 1);
+            ) : (
+                (pp[prx_spv] > 0) ? sp_Clear(p);
+                pp[prx_spv] = 0;
+            );
+        ) : (
+            pp[prx_spv] = 0;
+        );
+        p += 1; pp += projsize;
+    );
+);
+
+/*
+    @sample : the points of the projector pp (its matrix wrote them into pp[prx_spv]) sent to the outputs ; the ramps ;
+    the points cleared for the next sample (the last one, prx_spn : the channels beyond the source)
+*/
+function sp_Sample(pp)
+local(p, vb, e, c)
+(
+    p = pp[prx_fident] - 1;
+    vb = pp[prx_spv];
+    e = sp_list + p * SP_LS;
+    (sp_left[p] > 0) ? (
+        while ((c = e[0]) >= 0) (
+            outputs[c & 0x7f] += vb[c >> 7] * e[1];
+            e[1] += e[2];
+            e += 4;
+        );
+        ((sp_left[p] -= 1) <= 0) ? (
+            // the targets reached (exactly)
+            e = sp_list + p * SP_LS;
+            while (e[0] >= 0) ( e[1] = e[3]; e[2] = 0; e += 4; );
+        );
+    ) : (
+        while ((c = e[0]) >= 0) (
+            outputs[c & 0x7f] += vb[c >> 7] * e[1];
+            e += 4;
+        );
+    );
+    memset(vb, 0, pp[prx_spn] + 1);
+);
+
+
+/*
+    The adaptation of the source of a projector to the speakers (@gfx) : sp_FitStart, then sp_FitStep at each frame
+    (about 20 ms of work : some starts of the ICP), sp_FitEnd. The parameters (sp_fc, sp_fb) : 0 cost (the sum of the
+    squared distances of the points to their speakers), 1 yaw, 2 pitch, 3 roll, 4 size, 5 6 7 the translation.
+*/
+sp_fitP = -1;           // the projector being adapted (0 ...), -1 : none
+sp_fitRot = 0;          // the options : 0 the yaw only, 1 yaw, pitch and roll
+sp_fitScl = 1;          // 1 : the size too
+sp_fitPct = 0;          // the progress (%)
+sp_ftN = sp_ftP = sp_ftK = sp_ftNK = sp_ftCl = sp_ftRot = sp_ftScl = 0;
+sp_fs = make_array(SP_MAXP * 3);    // the source (its layout)
+sp_fe = make_array(128 * 4);        // the speakers (x y z output)
+sp_ft = make_array(SP_MAXP * 3);    // the points transformed (or rotated, sp_FitAlign)
+sp_fa = make_array(SP_MAXP);        // the speaker of each point (index in sp_fe)
+sp_fd = make_array(SP_MAXP);        // the squared distance to its nearest speaker, then to its speaker
+sp_fo = make_array(SP_MAXP);        // the points by increasing distance to their nearest speaker
+sp_fu = make_array(128);            // the speakers taken
+sp_fc = make_array(8);              // the parameters of the current start
+sp_fb = make_array(8);              // the best ones
+
+// The points of the source transformed (yaw, pitch, roll, size, translation : as sp_Place, frame Absolute) in sp_ft
+function sp_FitPts(yaw, pitch, roll, lam, tx, ty, tz)
+local(k, x, y, z, a, crl, srl, cpt, spt, cyw, syw)
+(
+    crl = cos(roll); srl = sin(roll); cpt = cos(pitch); spt = sin(pitch); cyw = cos(yaw); syw = sin(yaw);
+    k = 0;
+    loop(sp_ftN,
+        x = lam * sp_fs[3*k]; y = lam * sp_fs[3*k+1]; z = lam * sp_fs[3*k+2];
+        a = x * crl + z * srl; z = - x * srl + z * crl; x = a;
+        a = y * cpt - z * spt; z = y * spt + z * cpt; y = a;
+        a = x * cyw - y * syw; y = x * syw + y * cyw; x = a;
+        x += tx; y += ty; z += tz;
+        sp_ftCl ? (x = max(-1, min(1, x)); y = max(-1, min(1, y)); z = max(-1, min(1, z)););
+        sp_ft[3*k] = x; sp_ft[3*k+1] = y; sp_ft[3*k+2] = z;
+        k += 1;
+    );
+);
+
+// The assignment of the points (sp_ft) to the speakers (sp_fa, sp_fd) : by increasing distance to their nearest
+// speaker, each point takes its nearest free speaker (all taken : they are free again) ; returns the cost
+function sp_FitAssign()
+local(i, j, k, t, d, bd, bk, nu, cost)
+(
+    i = 0;
+    loop(sp_ftN,
+        bd = 10^30; k = 0;
+        loop(sp_ftP,
+            d = sqr(sp_fe[4*k] - sp_ft[3*i]) + sqr(sp_fe[4*k+1] - sp_ft[3*i+1]) + sqr(sp_fe[4*k+2] - sp_ft[3*i+2]);
+            (d < bd) ? (bd = d);
+            k += 1;
+        );
+        sp_fd[i] = bd; sp_fo[i] = i;
+        i += 1;
+    );
+    // (insertion sort)
+    i = 1;
+    while (i < sp_ftN) (
+        t = sp_fo[i]; j = i - 1;
+        while ((j >= 0) && (sp_fd[sp_fo[j]] > sp_fd[t])) ( sp_fo[j + 1] = sp_fo[j]; j -= 1; );
+        sp_fo[j + 1] = t;
+        i += 1;
+    );
+    memset(sp_fu, 0, sp_ftP); nu = 0; cost = 0;
+    j = 0;
+    loop(sp_ftN,
+        i = sp_fo[j];
+        (nu >= sp_ftP) ? (memset(sp_fu, 0, sp_ftP); nu = 0;);
+        bd = 10^30; bk = 0; k = 0;
+        loop(sp_ftP,
+            (sp_fu[k] === 0) ? (
+                d = sqr(sp_fe[4*k] - sp_ft[3*i]) + sqr(sp_fe[4*k+1] - sp_ft[3*i+1]) + sqr(sp_fe[4*k+2] - sp_ft[3*i+2]);
+                (d < bd) ? (bd = d; bk = k;);
+            );
+            k += 1;
+        );
+        sp_fu[bk] = 1; nu += 1;
+        sp_fa[i] = bk; sp_fd[i] = bd;
+        cost += bd;
+        j += 1;
+    );
+    cost;
+);
+
+// The cost of the parameters sp_fc (in sp_fc[0]) and their assignment
+function sp_FitEval()
+(
+    sp_FitPts(sp_fc[1], sp_fc[2], sp_fc[3], sp_fc[4], sp_fc[5], sp_fc[6], sp_fc[7]);
+    sp_fc[0] = sp_FitAssign();
+);
+
+// For the assignment sp_fa : the best yaw (the pitch and the roll kept), then the best size (if allowed) and the best
+// translation (closed forms : a 2D Procrustes in the horizontal plane, a least squares)
+function sp_FitAlign()
+local(n, i, x, y, z, a, e, crl, srl, cpt, spt, mux, muy, muz, mex, mey, mez, sxy, sdot, yaw, cyw, syw, qx, qy, vx, vy, num, den, lam)
+(
+    n = sp_ftN;
+    crl = cos(sp_fc[3]); srl = sin(sp_fc[3]); cpt = cos(sp_fc[2]); spt = sin(sp_fc[2]);
+    mux = muy = muz = mex = mey = mez = 0;
+    i = 0;
+    loop(n,
+        x = sp_fs[3*i]; y = sp_fs[3*i+1]; z = sp_fs[3*i+2];
+        a = x * crl + z * srl; z = - x * srl + z * crl; x = a;
+        a = y * cpt - z * spt; z = y * spt + z * cpt; y = a;
+        sp_ft[3*i] = x; sp_ft[3*i+1] = y; sp_ft[3*i+2] = z;
+        e = sp_fe + 4 * sp_fa[i];
+        mux += x; muy += y; muz += z; mex += e[0]; mey += e[1]; mez += e[2];
+        i += 1;
+    );
+    mux /= n; muy /= n; muz /= n; mex /= n; mey /= n; mez /= n;
+    sxy = sdot = 0;
+    i = 0;
+    loop(n,
+        e = sp_fe + 4 * sp_fa[i];
+        x = sp_ft[3*i] - mux; y = sp_ft[3*i+1] - muy;
+        vx = e[0] - mex; vy = e[1] - mey;
+        sxy += x * vy - y * vx; sdot += x * vx + y * vy;
+        i += 1;
+    );
+    yaw = (abs(sxy) + abs(sdot) > 0.000000001) ? atan2(sxy, sdot) : sp_fc[1];
+    cyw = cos(yaw); syw = sin(yaw);
+    num = den = 0;
+    i = 0;
+    loop(n,
+        e = sp_fe + 4 * sp_fa[i];
+        x = sp_ft[3*i] - mux; y = sp_ft[3*i+1] - muy; z = sp_ft[3*i+2] - muz;
+        qx = x * cyw - y * syw; qy = x * syw + y * cyw;
+        num += qx * (e[0] - mex) + qy * (e[1] - mey) + z * (e[2] - mez);
+        den += qx * qx + qy * qy + z * z;
+        i += 1;
+    );
+    lam = (sp_ftScl && (den > 0.000000001) && (num > 0)) ? max(0.05, min(10, num / den)) : sp_fc[4];
+    sp_fc[1] = yaw; sp_fc[4] = lam;
+    sp_fc[5] = mex - lam * (mux * cyw - muy * syw);
+    sp_fc[6] = mey - lam * (mux * syw + muy * cyw);
+    sp_fc[7] = mez - lam * muz;
+);
+
+// The field f of sp_fc moved by dv : kept (1) if the cost decreases
+function sp_FitTry(f, dv)
+local(v, c)
+(
+    v = sp_fc[f]; c = sp_fc[0];
+    sp_fc[f] = v + dv;
+    sp_FitEval();
+    (sp_fc[0] < c - 0.000000001) ? 1 : (sp_fc[f] = v; sp_fc[0] = c; 0);
+);
+
+// The ICP from the start sp_fc : assignment, alignment, until the cost stops decreasing
+function sp_FitRun()
+local(it, prev, del, go)
+(
+    del = 8 * $pi / 180;
+    sp_FitEval(); prev = sp_fc[0];
+    it = 0; go = 1;
+    while (go) (
+        sp_FitAlign();
+        sp_FitEval();
+        sp_ftRot ? (
+            (sp_FitTry(2, del) || sp_FitTry(2, - del) || sp_FitTry(3, del) || sp_FitTry(3, - del)) ? 0 : (del *= 0.5);
+            sp_FitEval();
+        );
+        it += 1;
+        go = (it < 60) && ((prev - sp_fc[0] > 0.000000001) || (sp_ftRot && (del > 0.002)));
+        prev = min(prev, sp_fc[0]);
+    );
+);
+
+// The start k : the yaw every 10 degrees (and the pitch and the roll at -30, 0, 30 degrees), the size of the start, the
+// translation that brings the mean of the points onto the mean of the speakers
+function sp_FitOne(k)
+local(j, cl, i, tx, ty, tz)
+(
+    j = floor(k / 36);
+    sp_fc[1] = (k % 36) * $pi / 18;
+    sp_fc[2] = sp_ftRot ? ((j % 3) - 1) * $pi / 6 : sp_ft0P;
+    sp_fc[3] = sp_ftRot ? (floor(j / 3) - 1) * $pi / 6 : sp_ft0R;
+    sp_fc[4] = sp_ft0L;
+    cl = sp_ftCl; sp_ftCl = 0;
+    sp_FitPts(sp_fc[1], sp_fc[2], sp_fc[3], sp_fc[4], 0, 0, 0);
+    sp_ftCl = cl;
+    tx = ty = tz = 0; i = 0;
+    loop(sp_ftN, tx += sp_ft[3*i]; ty += sp_ft[3*i+1]; tz += sp_ft[3*i+2]; i += 1;);
+    sp_fc[5] = sp_ft0X - tx / sp_ftN; sp_fc[6] = sp_ft0Y - ty / sp_ftN; sp_fc[7] = sp_ft0Z - tz / sp_ftN;
+    sp_FitRun();
+    (sp_fc[0] < sp_fb[0]) ? memcpy(sp_fb, sp_fc, 8);
+);
+
+// Start the adaptation of the projector p (0 ...) : its source, the speakers ; 0 if there is nothing to adapt
+function sp_FitStart(p)
+local(st, s, n, k, sx, sy, sz, ex, ey, ez, rs, re, r)
+(
+    st = sp_st + p * SP_SS;
+    s = 0|serialBlock[Pr7_PrjSpace + p];
+    n = ((s > 0) && (s < SP_NSRC)) ? sp_srcN[s] : 0;
+    ((n <= 0) || (sp_spkN[sp_sPend] <= 0)) ? (
+        sprintf(#sp_log, "Space : projector %d : %s, nothing to adapt", p + 1, (n <= 0) ? "no source" : "no speaker (hppos)");
+        mSL_log(SysLogBox, #sp_log);
+        0;
+    ) : (
+        sp_ftN = n; sp_ftP = sp_spkN[sp_sPend];
+        memcpy(sp_fs, sp_srcP + s * SP_MAXP * 3, 3 * n);
+        memcpy(sp_fe, sp_spk + sp_sPend * 512, 4 * sp_ftP);
+        sp_ftCl = st[sp_fClamp]; sp_ftRot = sp_fitRot; sp_ftScl = sp_fitScl;
+        // the means, the spreads (rms distances to the means)
+        sx = sy = sz = 0; k = 0; loop(n, sx += sp_fs[3*k]; sy += sp_fs[3*k+1]; sz += sp_fs[3*k+2]; k += 1;);
+        sx /= n; sy /= n; sz /= n;
+        ex = ey = ez = 0; k = 0; loop(sp_ftP, ex += sp_fe[4*k]; ey += sp_fe[4*k+1]; ez += sp_fe[4*k+2]; k += 1;);
+        ex /= sp_ftP; ey /= sp_ftP; ez /= sp_ftP;
+        rs = 0; k = 0; loop(n, rs += sqr(sp_fs[3*k] - sx) + sqr(sp_fs[3*k+1] - sy) + sqr(sp_fs[3*k+2] - sz); k += 1;);
+        re = 0; k = 0; loop(sp_ftP, re += sqr(sp_fe[4*k] - ex) + sqr(sp_fe[4*k+1] - ey) + sqr(sp_fe[4*k+2] - ez); k += 1;);
+        rs = sqrt(rs / n); re = sqrt(re / sp_ftP);
+        r = st[sp_fSpread] * st[sp_fGsc];
+        sp_ft0L = (sp_ftScl && (rs > 0.000001) && (re > 0.000001)) ? max(0.05, min(10, re / rs)) : max(0.05, r);
+        sp_ft0X = ex; sp_ft0Y = ey; sp_ft0Z = ez;
+        sp_ft0P = st[sp_fPitch]; sp_ft0R = st[sp_fRoll];
+        sp_ftK = 0; sp_ftNK = sp_ftRot ? 36 * 9 : 36;
+        sp_fb[0] = 10^30;
+        sp_fitP = p; sp_fitPct = 0;
+        sprintf(#sp_log, "Space : projector %d : adaptation of the source %d (%d points) to %d speakers%s%s ...", p + 1, s, n,
+            sp_ftP, sp_ftRot ? ", yaw pitch roll" : ", yaw", sp_ftScl ? ", size" : "");
+        mSL_log(SysLogBox, #sp_log);
+        1;
+    );
+);
+
+// The end : the best parameters become the settings of the projector ; a report in the log
+function sp_FitEnd()
+local(p, st, i, mx, sh, k, j)
+(
+    p = sp_fitP; sp_fitP = -1;
+    st = sp_st + p * SP_SS;
+    memcpy(sp_fc, sp_fb, 8);
+    sp_FitEval(); // (the assignment of the best one)
+    st[sp_fTrA] = 5; st[sp_fMix] = 0; // the trajectory "Central Point", moved by the translation
+    st[sp_fTsc] = 1; st[sp_fTrz] = 0; st[sp_fTrx] = 0;
+    st[sp_fTtx] = sp_fb[5]; st[sp_fTty] = sp_fb[6]; st[sp_fTtz] = sp_fb[7];
+    st[sp_fFrame] = 0; st[sp_fSpread] = 1; st[sp_fGsc] = sp_fb[4];
+    st[sp_fYaw] = atan2(sin(sp_fb[1]), cos(sp_fb[1]));
+    st[sp_fPitch] = atan2(sin(sp_fb[2]), cos(sp_fb[2]));
+    st[sp_fRoll] = atan2(sin(sp_fb[3]), cos(sp_fb[3]));
+    st[sp_fLaw] = 0; st[sp_fReach] = 0;
+    sp_pSeq[p] += 1; sp_stSeq[p] += 1;
+    sprintf(#sp_log, "Space : projector %d adapted : yaw %.1f, pitch %.1f, roll %.1f degrees, size %.3f, center %.3f %.3f %.3f",
+        p + 1, st[sp_fYaw] * 180 / $pi, st[sp_fPitch] * 180 / $pi, st[sp_fRoll] * 180 / $pi, sp_fb[4],
+        sp_fb[5], sp_fb[6], sp_fb[7]);
+    mSL_log(SysLogBox, #sp_log);
+    // the points and their outputs (distance) ; the outputs shared by several points
+    mx = 0; sh = 0;
+    strcpy(#sp_log, "  point > output (distance) :");
+    i = 0;
+    loop(sp_ftN,
+        sprintf(#sp_l2, "  %d > %d (%.3f)", i + 1, sp_fe[4 * sp_fa[i] + 3] + 1, sqrt(sp_fd[i]));
+        strcat(#sp_log, #sp_l2);
+        mx = max(mx, sqrt(sp_fd[i]));
+        k = 0; j = 0; loop(i, (sp_fa[j] === sp_fa[i]) ? (k = 1); j += 1;);
+        sh += k;
+        (strlen(#sp_log) > 160) ? (mSL_log(SysLogBox, #sp_log); strcpy(#sp_log, " "););
+        i += 1;
+    );
+    (strlen(#sp_log) > 1) ? mSL_log(SysLogBox, #sp_log);
+    sprintf(#sp_log, "  the largest distance : %.3f ; %d point(s) on a speaker already taken", mx, sh);
+    mSL_log(SysLogBox, #sp_log);
+);
+
+// At each frame : the starts of the adaptation in progress, for about 20 ms
+function sp_FitStep()
+local(t0)
+(
+    (sp_fitP >= 0) ? (
+        t0 = time_precise();
+        while ((sp_ftK < sp_ftNK) && (time_precise() - t0 < 0.02)) (
+            sp_FitOne(sp_ftK);
+            sp_ftK += 1;
+        );
+        sp_fitPct = floor(100 * sp_ftK / max(1, sp_ftNK));
+        (sp_ftK >= sp_ftNK) ? sp_FitEnd();
+        ui_GFXdoNow |= 4;
+    );
+);
+
+// At each run of @gfx (even when the window is closed) : the speakers, the layouts and the paths for @block ; an
+// adaptation in progress
+function sp_Gfx()
+local(p, s)
+(
+    ((sp_sPend === sp_sAct) && ((HP_Positions !== sp_sHP) || (sp_defSeq !== sp_sDef) || (actchout !== sp_sOut))) ? (
+        sp_sHP = HP_Positions; sp_sDef = sp_defSeq; sp_sOut = actchout;
+        sp_PubSpk();
+    );
+    p = 0;
+    loop(SP_NP,
+        s = 0|serialBlock[Pr7_PrjSpace + p];
+        ((sp_lPend[p] === sp_lAct[p]) && ((s !== sp_lSrc[p]) || (sp_defSeq !== sp_lDef[p]))) ? sp_PubLay(p, s);
+        ((s > 0) && (sp_tPend[p] === sp_tAct[p]) && ((sp_pSeq[p] !== sp_pDone[p]) || (sp_libSeq !== sp_pFile[p]))) ? (
+            sp_pDone[p] = sp_pSeq[p]; sp_pFile[p] = sp_libSeq;
+            sp_PubPath(p);
+        );
+        p += 1;
+    );
+    sp_FitStep();
+);

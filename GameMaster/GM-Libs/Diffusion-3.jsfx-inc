@@ -132,8 +132,10 @@ sldrndchinc = 0.01;
 // Op Mode
 sldopmodmin = 0;
 sldopmodmax = 7;
-// Ambitus
-sldhypamax = 8;
+// Ambitus (2026-11-11 : up to HYP_AMAX configurations ; the Hyper Slider loads only the two matrices of its current
+// interval, sldhypamax per projector, see rebuildhypconf)
+sldhypamax = 2;
+HYP_AMAX = 32;
 
 firstslakous = 27; // first acousmonium slider
 freeword =  - 138462547 / 256; // used as "free word in the allocatable memory"
@@ -186,7 +188,6 @@ matrsiz = chmax * chinmax; // size of a matrix : 16384 words
 matrcnt = 336; // X matrices available : X * 16384 words
 matrmask = matrsiz - 1;
 conflsize = 4096; // # of configurations
-settsize = 512; // accept up to this number of sets
 actlnumb = 16;
 actcnumb = 8;
 actlsize = actlnumb * actcnumb; // list of 128 actions linked to the pad
@@ -218,7 +219,6 @@ projareasize = projsize * projcnt; //
 projlsiz = projcnt + 4; // Size of the list of active projectors
 proprescnt = 512; // number of projectors presets
 sincossize = 1024;
-iochsiz = max(chmax, chinmax);
 defaultconf = 1; // the number of the default configuration
 // Remember that Memory is initially set to 0
 
@@ -605,7 +605,7 @@ uix_jmbsel = 0;
 uix_jG_menuscrSz = dcbTabsCount + 2; // tabs width in the menu bar
 
 // Tabs and panes configuration (see mSL_Panes.jsfx-inc), saved in @serialize
-serialSize = 128;
+serialSize = 192;
 serialBlock = make_array(serialSize);
 Pr7_StudConf = 8;  // size : 8 -- number of panes of each tab
 Pr7_StudRat = Pr7_StudConf + 8;  // size : 8 * 4 -- panes widths
@@ -615,7 +615,17 @@ Pr7_UiTheme = Pr7_UiStyle + 1; // uix_jtheme (theme of the GUI)
 Pr7_UiSize = Pr7_UiTheme + 1; // the display size, in percent (0 : the default, see ui_jzoom_set)
 Pr7_PrjView = Pr7_UiSize + 1; // size : 8 -- the projector shown by each module "Projector view" (0 : that of its number)
 Pr7_PrjVol = Pr7_PrjView + 8; // size : 24 (akousmax) -- the volume of each projector, in dB (module "Global" ; 0 : 0 dB)
-Pr7_Free = Pr7_PrjVol + 24;
+// the diffusions of the inputs and of the outputs of each projector (indiff, outdiff : numbers of conf, 0 : none ; see
+// confload ; @gfx writes them, cf_IOBlock gives them to the projectors in @block)
+Pr7_PrjInD = Pr7_PrjVol + 24; // size : 24 (akousmax)
+Pr7_PrjOutD = Pr7_PrjInD + 24; // size : 24 (akousmax)
+// the source of each spatial projector (2026-11-11, see Diffusion-3-Spatial : 0 none), the projector shown by each
+// module "Space A" ... "D" (0 : that of its letter)
+Pr7_PrjSpace = Pr7_PrjOutD + 24; // size : 24 (akousmax)
+Pr7_SpcView = Pr7_PrjSpace + 24; // size : 4
+// the mode of the Hyper Slider of each projector (2026-11-11 : 0 Linear, 1 Circular, 2 Infinite ; see rebuildhypconf)
+Pr7_HypMode = Pr7_SpcView + 4; // size : 24 (akousmax)
+Pr7_Free = Pr7_HypMode + 24;
 dcbBlocksAll = 0; // allocated by pns_Init()
 
 // Alternate tabs names, edited with "Rename tab..." (right click in the menu bar), saved in @serialize
@@ -723,10 +733,9 @@ SchedActive = 1; // scheduler activity
 // A block with all dynamic memory references used by "Diffusion 3"
 //
 mm_rem_siz = 256; // also serves for users defined actions
-mm_total_siz = mm_rem_siz + settsize + proprescnt + conflsize + actlsize;
+mm_total_siz = mm_rem_siz + proprescnt + conflsize + actlsize;
 memadd = make_array(mm_total_siz);
 mm_rem_mm = memadd; memadd += mm_rem_siz; // A list of remanent/protected objects
-setlist = memadd; memadd += settsize; // list of defined sets
 proprerefs = memadd; memadd += proprescnt; // area for projectors presets references
 conflist = memadd; memadd += conflsize; // list of configurations + size for pcdef config.
 actlist = memadd; memadd += actlsize; // list of actions
@@ -888,7 +897,25 @@ memoryBox2[20] = 0;
 //// Memory description for Diffusion 3
 inputs = make_array(chmax); // list of inputs samples values
 outputs = make_array(chmax); // list of outputs samples values
-bliostd = make_array(iochsiz + 8);  // Definition of identity chset
+// the diffusions of the inputs and of the outputs of the projectors (2026-11-10, instead of the channel sets) : the
+// diffusion of the inputs transposed (confload), the lists of the outputs of the projectors (cf_OutList : count,
+// 1/sqrt(count), channels)
+cf_inT = make_array(matrsiz);
+cf_outl = make_array(akousmax * 132);
+// the sources of the spatial projectors (2026-11-11, see Diffusion-3-Spatial ; "source n : k < x y z, ... ;" in the
+// configuration, Diffusion-3-Set-Table) : the count of points of each source (0 : not defined), their coordinates in
+// [-1, 1] ; sp_defSeq : incremented by each change of the configuration that concerns them (source, hppos, clear)
+// the sequences of the Hyper Slider of the projectors (rebuildhypconf) : the configurations (their blocks, 0 : silence),
+// their count, the interval whose two matrices are loaded (computehypconf, -1 : none)
+HYP_SS = HYP_AMAX + 4;
+hyp_seq = make_array(akousmax * HYP_SS);
+hyp_len = make_array(akousmax);
+hyp_f = make_array(akousmax);
+SP_NSRC = 256;  // the sources 1 ... 255
+SP_MAXP = 128;  // their points 1 ... 128
+sp_srcN = make_array(SP_NSRC);
+sp_srcP = make_array(SP_NSRC * SP_MAXP * 3);
+sp_defSeq = 0;
 historywa = make_array(historysiz); // Area for history keeping
 firstgroup = groupdefs = make_array(groupdefsize); // contents of groups
 paddef = firstgroup;
@@ -1223,8 +1250,8 @@ prx_svmorph = prjidx; prjidx+=1; // save morphing time
 prx_svrdlay = prjidx; prjidx+=1; // save random delay
 prx_cpadadd = prjidx; prjidx+=1; // current pad addr [relative in 0 4095]
 prx_sgi = prjidx; prjidx+=1; // short entry in [0 4095]
-prx_inset = prjidx; prjidx+=1; // set for input channels
-prx_outset = prjidx; prjidx+=1; // set for output channels
+prx_indiff = prjidx; prjidx+=1; // the diffusion of the inputs (a conf number, 0 : none ; see confload)
+prx_outdiff = prjidx; prjidx+=1; // the diffusion of the outputs (a conf number, 0 : none)
 prx_blurval = prjidx; prjidx+=1; // blur value
 // -- End of preset modified values
 // -- Other pre-inited values
@@ -1283,6 +1310,21 @@ prx_tr_19 = prjidx; prjidx+=1;  //  -- trace
 // the volume of the projector (module "Global", serialBlock[Pr7_PrjVol + p - 1] in dB ; see prv_PVolBlock, @sample)
 prx_vtgt = prjidx; prjidx+=1; // its target, linear (@block) -- work
 prx_vcur = prjidx; prjidx+=1; // its current value, smoothed (@sample) -- work
+// the diffusions of the inputs and of the outputs changed (cf_IOBlock : the configuration is loaded again) ; the list of
+// the outputs of the diffusion of the outputs, for the blur (cf_OutList ; 0 : all the outputs) -- work
+prx_iochg = prjidx; prjidx+=1;
+prx_blout = prjidx; prjidx+=1;
+// the spatial projectors (2026-11-11, see Diffusion-3-Spatial) : the source (a preset : "space n" ; the truth :
+// serialBlock[Pr7_PrjSpace + p - 1], cf_IOBlock copies it here) ; -- work, set by sp_Block for @sample : the buffer of
+// the points (0 : not spatial), their count, 1 / sqrt(count) (the blur)
+prx_space = prjidx; prjidx+=1;
+prx_spv = prjidx; prjidx+=1;
+prx_spn = prjidx; prjidx+=1;
+prx_spq = prjidx; prjidx+=1;
+// the Hyper Slider (2026-11-11) : its mode (serialBlock[Pr7_HypMode + p - 1], copied by cf_IOBlock), the configuration
+// chosen in the cell Config when it is in no group (0 : that of the scene / group / item ; see rebuildhypconf)
+prx_hypmode = prjidx; prjidx+=1;
+prx_hypbase = prjidx; prjidx+=1;
 prx_lastword = projsize - 1; //  -- debug --
 prx_free = projsize - prjidx;
 //----------------------------------------------------------
@@ -1387,6 +1429,7 @@ wrefresh = 0;
 #projfmt = "%d<%c";
 projstt = '.'; // projector status
 projsmd = 1; // projector status modified
+u__prq = 0; // the queue of the projectors to rebuild at the next block (updpstatus : @block, or @gfx by a preset)
 prid = -1; // current projector
 prselected = -1; // selected projector
 curconf = -1; // current configuation
@@ -1524,8 +1567,6 @@ local (sik)
     // memset(diffstart, 0, diffend-diffstart);
     // pcfdef : config steréo par defaut, 1 > left / 2 > right
     // All these are actual dynamically allocated memory blocks
-    // memset(setlist, 0, settsize); // Clear the set list
-    mSL_mfree_all(setlist, settsize);  // Clear the set list
     // memset(conflist, 0, conflsize + 4); // Clear the conflist
     mSL_mfree_all(conflist, conflsize);  //  Clear the conflist
     // memset(proprerefs, 0, proprescnt); // Clear the projectors preset list
@@ -1539,11 +1580,11 @@ local (sik)
     ptconfs = 0;
     memset(historywa, pcfdef, historysiz);
     historypnt = 0; // last recorded number
-    // Create [0 1 2 3 .. 127]
-    bliostd[0] = freeword; bliostd[1] = -1; bliostd[2] = 0; bliostd[3] = iochsiz;
-    iostdch = bliostd + 4;
-    sik = 0; loop (iochsiz, iostdch[sik] = sik; sik += 1;);
-    iostdch[sik] = endmark;
+    // (the diffusions of the inputs and outputs of the projectors : their numbers stay, their contents are read again)
+    cf_reload = 1;
+    // the sources of the spatial projectors (their numbers in the projectors stay : a source defined again is used)
+    memset(sp_srcN, 0, SP_NSRC);
+    sp_defSeq += 1;
 );
 clearArea();
 
@@ -1568,7 +1609,6 @@ kxw_vol = mSL_symbol("vol");
 kxw_vadj = mSL_symbol("vadj");
 kxw_opmod = mSL_symbol("opmod");
 kxw_scene = mSL_symbol("scene");
-kxw_set = mSL_symbol("set");
 kxw_clear = mSL_symbol("clear");
 kxw_defaultconf = mSL_symbol("defaultconf");
 kxw_history = mSL_symbol("history");
@@ -1588,8 +1628,9 @@ kxw_Random4 = mSL_symbol("Random4");
 kxw_Random8 = mSL_symbol("Random8");
 kxw_Random16 = mSL_symbol("Random16");
 kxw_HyperSlider = mSL_symbol("HyperSlider");
-kxw_inset = mSL_symbol("inset");
-kxw_outset = mSL_symbol("outset");
+kxw_indiff = mSL_symbol("indiff");
+kxw_outdiff = mSL_symbol("outdiff");
+kxw_invert = mSL_symbol("invert");
 kxw_pad = mSL_symbol("pad");
 kxw_sgi = mSL_symbol("sgi");
 kxw_default = mSL_symbol("default");
@@ -1597,6 +1638,11 @@ kxw_pload = mSL_symbol("pload");
 kxw_actions = mSL_symbol("actions");
 kxw_color = mSL_symbol("color");
 kxw_hppos = mSL_symbol("hppos");
+kxw_source = mSL_symbol("source"); // the sources of the spatial projectors (Diffusion-3-Spatial)
+kxw_space = mSL_symbol("space");   // the source of a projector preset
+kxw_trajectory = mSL_symbol("trajectory"); // the library of trajectories of the spatial projectors (Diffusion-3-Spatial)
+kxw_closed = mSL_symbol("closed");
+kxw_open = mSL_symbol("open");
 kxw_bgcolor = mSL_symbol("bgcolor");
 
 
@@ -2167,8 +2213,13 @@ function createdefaultprojector()
     defaultprojector[prx_cpadval] = 0; // padd entry [0 15]
     defaultprojector[prx_citmval] = 0; // item entry [0 15]
     defaultprojector[prx_cgrpval] = 0; // group entry [0 15]
-    defaultprojector[prx_inset] = iostdch; // standard ordering of 16 input channels
-    defaultprojector[prx_outset] = iostdch; // standard ordering of 16 output channels
+    defaultprojector[prx_indiff] = 0; // no diffusion of the inputs : the inputs as they are
+    defaultprojector[prx_outdiff] = 0; // no diffusion of the outputs
+    defaultprojector[prx_space] = 0; // no source : the channels go to the outputs (prx_spv ... : Undef, set by sp_Block)
+    defaultprojector[prx_hypmode] = 0; // Hyper Slider : Linear
+    defaultprojector[prx_hypbase] = 0;
+    defaultprojector[prx_iochg] = 0;
+    defaultprojector[prx_blout] = 0; // the blur on all the outputs
     defaultprojector[prx_pcolor] = 0; // For default color chosing
     defaultprojector[prx_blurdry] = 1;
     defaultprojector[prx_blurwet] = 0;
@@ -2233,6 +2284,22 @@ function updmainp()
     mainpro[prx_flvol] = prx__flvolmod;
 );
 
+
+// The blur of a projector (0 ... 100 : the dry and wet parts) ; its slider if it is the current projector (or sld)
+// (2026-11-11 : moved here from after the morphing functions, the module Configurations calls it : cg_Restore)
+function changblur(proj, newval, sld)
+(
+    newval = max(0, min(100, floor(newval)));
+    ((proj === currentpro) || sld) ? (
+        dispsldcblur = sldblur = newval;
+        sliderchange(sldblur);
+    );
+    (newval != proj[prx_blurval]) ? (
+        proj[prx_blurval] = newval;
+        proj[prx_blurdry] = sqrt((100 - newval) / 100);
+        proj[prx_blurwet] = sqrt(newval / 100);
+    );
+);
 
 
 // Update the "opmod" of a projector - parameter in 0 - 7
@@ -2299,7 +2366,12 @@ local (exmode,stat)
             stat &= 0x7FFFFFFF - prx__stop;
             stat |= prx__start | prx__activ;
             proj[prx_pcvol] = 1;  // volume consigne
+            // (2026-11-11 : the return is fast, about 50 ms : prx_prvol at once, the volume of the projector, prx_vcur,
+            // rises from 0 (prv_PVolBlock : 0 while it was off, muted, or silenced by a solo))
+            proj[prx_prvol] = 1;
         );
+        // the queue of the projectors rebuilt at the next block (updprqueue), not one second later
+        u__prq = 1;
     );
     // keep value
     proj[prx_prsvprjst] = proj[prx_savprjst] = newmode;
@@ -2328,6 +2400,16 @@ local (pvals, ip, v)
     );
     // Other things to do ?
     prjx[prx_presetid] = pset[0]; // preset number
+    // the diffusions of the inputs and outputs (indiff, outdiff), if the preset gives them : where @gfx shows and changes
+    // them (serialBlock), cf_IOBlock loads the configuration again
+    ip = prjx[prx_fident] - 1;
+    ((ip >= 0) && (ip < akousmax)) ? (
+        serialBlock[Pr7_PrjInD + ip] = max(0, 0|prjx[prx_indiff]);
+        serialBlock[Pr7_PrjOutD + ip] = max(0, 0|prjx[prx_outdiff]);
+        prjx[prx_iochg] = 1;
+        // its source (spatial projector : see Diffusion-3-Spatial)
+        serialBlock[Pr7_PrjSpace + ip] = max(0, 0|prjx[prx_space]);
+    );
     // Update the status of the projector
     updpstatus(prjx, prjx[prx_savprjst], 0);
     slsignal = 1;
@@ -2336,6 +2418,92 @@ local (pvals, ip, v)
 );
 
 
+
+/*
+    The diffusions of the inputs and of the outputs of the projectors (2026-11-10, instead of the channel sets) : a
+    projector may take its inputs through a diffusion (indiff : e.g. conf 201 : 5 > 1 ; 6 > 2 ; 2 > 3 ; 1 > 4 ; the
+    inputs 5, 6, 2, 1 become its channels 1 ... 4), and give its outputs through another one (outdiff : e.g. conf 202 :
+    invert 201 ; its channels 1 ... 4 go back to 5, 6, 2, 1). confload composes them with each configuration loaded
+    (outdiff x configuration x indiff, once per change, in @block) : @sample sees only the composed matrix, no
+    indirection, no intermediate buffer ; a grouping or a permutation gives as many entries as the configuration.
+    Their numbers : serialBlock[Pr7_PrjInD / Pr7_PrjOutD + p - 1] (saved with the project ; the pad of the projector,
+    the presets : prop indiff n, outdiff n) ; cf_IOBlock (@block) gives them to the projectors (prx_indiff,
+    prx_outdiff) and asks for a new load (prx_iochg).
+*/
+cf_reload = 0; // the configurations were read again (clearArea) : the diffusions of the inputs and outputs too
+
+// The list of the destinations of the source s (1 ... 128) in the conf block blk (its number, then for each source :
+// s, (d, gain) ..., -1 ; then -2, endmark) : a pointer to its first pair (d, gain), or 0
+function cf_Src(blk, s)
+local(p, r)
+(
+    r = 0;
+    (blk > 0) ? (
+        p = blk + 1;
+        while ((r === 0) && (p[0] > 0)) (
+            (p[0] === s) ? (r = p + 1) : (
+                p += 1;
+                while (p[0] > 0) (p += 2;);
+                p += 1;
+            );
+        );
+    );
+    r;
+);
+
+// The conf block of the diffusion number n (indiff, outdiff), or 0 (none, or not defined)
+function cf_Blk(n)
+(
+    ((n > 0) && (n < conflsize) && (conflist[n] > 0)) ? conflist[n] : 0;
+);
+
+// The outputs of the projector pro for the blur : those of its diffusion of the outputs (in cf_outl : count, 1/sqrt,
+// channels 0 ...), or all the outputs (prx_blout 0)
+function cf_OutList(pro)
+local(oud, l, p, q, n, i, k, dup)
+(
+    oud = cf_Blk(pro[prx_outdiff]);
+    (oud > 0) ? (
+        l = cf_outl + (pro[prx_fident] - 1) * 132;
+        n = 0;
+        p = oud + 1;
+        while (p[0] > 0) (
+            p += 1;
+            while ((q = p[0]) > 0) (
+                dup = 0; i = 0; loop(n, (l[2 + i] === q - 1) ? dup = 1; i += 1;);
+                (!dup && (n < 128)) ? (l[2 + n] = q - 1; n += 1;);
+                p += 2;
+            );
+            p += 1;
+        );
+        l[0] = n; l[1] = 1 / sqrt(max(1, n));
+        pro[prx_blout] = (n > 0) ? l : 0;
+    ) : (
+        pro[prx_blout] = 0;
+    );
+);
+
+// Each block : the diffusions of the inputs and outputs chosen (serialBlock) given to the projectors ; a change (or the
+// configurations read again) : prx_iochg, the configuration is loaded again (see the loop of the projectors)
+function cf_IOBlock()
+local(pp, i, a, b)
+(
+    pp = projectors; i = 0;
+    loop(akousmax,
+        a = 0|serialBlock[Pr7_PrjInD + i]; b = 0|serialBlock[Pr7_PrjOutD + i];
+        (cf_reload || (a != pp[prx_indiff]) || (b != pp[prx_outdiff])) ? (
+            pp[prx_indiff] = a; pp[prx_outdiff] = b;
+            pp[prx_iochg] = 1;
+        );
+        // the source of the projector (the preset loaded keeps it : projectorload ; the spatialization : sp_Block)
+        pp[prx_space] = 0|serialBlock[Pr7_PrjSpace + i];
+        // the mode of its Hyper Slider : a change builds its sequence again (prx_iochg -> hypamch)
+        a = 0|serialBlock[Pr7_HypMode + i];
+        (a != pp[prx_hypmode]) ? (pp[prx_hypmode] = a; pp[prx_iochg] = 1;);
+        pp += projsize; i += 1;
+    );
+    cf_reload = 0;
+);
 
 <? include("GM-Libs/Diffusion-3-Set-Table.jsfx-inc"); ?>
 
@@ -2423,8 +2591,9 @@ function pns_Host_Modules(itdsp)
     blockDispNames[blockScheduler] = "Scheduler";
     blockProcessesMgr = (itdsp += 1);
     blockDispNames[blockProcessesMgr] = "Processes Manager";
+    // the view "Space A" of a projector (until 2026-11-11 : the module "Space 3D" ; its number is kept)
     blockSpace3D = (itdsp += 1);
-    blockDispNames[blockSpace3D] = "Space 3D";
+    blockDispNames[blockSpace3D] = "Space A";
     // the global settings and the volumes of the projectors (see Diffusion-3-Projectors ; until 2026-11-09 : "Diffusion")
     blockGlobal = (itdsp += 1);
     blockDispNames[blockGlobal] = "Global";
@@ -2450,8 +2619,34 @@ function pns_Host_Modules(itdsp)
     blockDispNames[(itdsp += 1)] = "Edit B";
     blockDispNames[(itdsp += 1)] = "Edit C";
     blockDispNames[(itdsp += 1)] = "Edit D";
-    pns_GrpTtl[1] = ">Edit"; pns_GrpSum[1] = 0; pns_GrpFst[1] = blockEdit0; pns_GrpNb[1] = 4;
-    pns_GrpCnt = 2;
+    pns_GrpTtl[1] = ">Edit"; pns_GrpSum[1] = 0; pns_GrpFst[1] = blockEdit0; pns_GrpNb[1] = 4; // (Sum : see below)
+    // the views "Space B" ... "Space D" of the spatial projectors (2026-11-11, see Diffusion-3-Space3D, SV_NV = 4 ; after
+    // "Edit D" : the numbers of the modules are saved), in the sub-menu "Space" after "Space A" (blockSpace3D)
+    blockSpace1 = itdsp + 1;
+    blockDispNames[(itdsp += 1)] = "Space B";
+    blockDispNames[(itdsp += 1)] = "Space C";
+    blockDispNames[(itdsp += 1)] = "Space D";
+    pns_GrpTtl[2] = ">Space"; pns_GrpSum[2] = blockSpace3D; pns_GrpFst[2] = blockSpace1; pns_GrpNb[2] = 3;
+    // the library of trajectories (2026-11-11, see Diffusion-3-Trajectories ; after "Space D"), first in the sub-menu "Edit"
+    blockTrajs = (itdsp += 1);
+    blockDispNames[blockTrajs] = "Trajectories";
+    pns_GrpSum[1] = blockTrajs;
+    // the configurations and the sources, saved with the project (2026-11-11, see Diffusion-3-Configurations)
+    blockConfs = (itdsp += 1);
+    blockDispNames[blockConfs] = "Configurations";
+    // the modules "VU meter A" ... "D" and "Limiter A" ... "D" (2026-11-11, see GM-Meters-Modules ; after "Configurations" :
+    // the numbers of the modules are saved), in the sub-menu "Effects" (no summary module)
+    blockFxMeter0 = itdsp + 1; // blockFxMeter0 ... blockFxMeter0 + 7 (FM_NM)
+    blockDispNames[(itdsp += 1)] = "VU meter A";
+    blockDispNames[(itdsp += 1)] = "VU meter B";
+    blockDispNames[(itdsp += 1)] = "VU meter C";
+    blockDispNames[(itdsp += 1)] = "VU meter D";
+    blockDispNames[(itdsp += 1)] = "Limiter A";
+    blockDispNames[(itdsp += 1)] = "Limiter B";
+    blockDispNames[(itdsp += 1)] = "Limiter C";
+    blockDispNames[(itdsp += 1)] = "Limiter D";
+    pns_GrpTtl[3] = ">Effects"; pns_GrpSum[3] = 0; pns_GrpFst[3] = blockFxMeter0; pns_GrpNb[3] = 8;
+    pns_GrpCnt = 4;
     itdsp;
 );
 
@@ -2464,8 +2659,10 @@ mkModuleMenu();
 memoryBox1[19] = blockMemory1; // for keepBlockInfos
 memoryBox2[19] = blockMemory2;
 
-// The module "Space 3D" : 3D view of the speakers and sources (static memory, uses keepBlockInfos)
+// The modules "Space A" ... "Space D" (until 2026-11-11 : "Space 3D") : 3D views of the speakers and of the spatial
+// projectors (static memory, uses keepBlockInfos) ; the spatial projectors (Diffusion-3-Spatial : their engine)
 <? include("GM-Libs/mSL_ui_Space3D.jsfx-inc"); ?>
+<? include("GM-Libs/Diffusion-3-Spatial.jsfx-inc"); ?>
 <? include("GM-Libs/Diffusion-3-Space3D.jsfx-inc"); ?>
 
 // The modules "Global", "Projector A" ... "H" and "Projectors" : the settings of the native sliders (part 2 : after sliderevent)
@@ -2476,6 +2673,16 @@ memoryBox2[19] = blockMemory2;
 
 // The modules "Edit A" ... "Edit D" : editors of configurations of points, on the view of "Space 3D" (uses prv_Menu)
 <? include("GM-Libs/Diffusion-3-Edit.jsfx-inc"); ?>
+// The library of trajectories of the spatial projectors : the module "Trajectories", the live links with the editors
+<? include("GM-Libs/Diffusion-3-Trajectories.jsfx-inc"); ?>
+// The configuration saved with the project, the module "Configurations"
+<? include("GM-Libs/Diffusion-3-Configurations.jsfx-inc"); ?>
+// The modules "VU meter A" ... "D" and "Limiter A" ... "D" : the engines of the plugins Multichannel_VU_meter and
+// SmoothMultiLimiter (GM-Meters) on the inputs or on the outputs (GM-Meters-Modules ; static memory)
+fm_HasIn = 1;
+<? include("GM-Libs/GM-Meters.jsfx-inc"); ?>
+<? include("GM-Libs/GM-Meters-Modules.jsfx-inc"); ?>
+fm_Init();
 
 // Default configuration : the first tab with 2 empty panes (no module shown by default : 2026-11-10), the second one
 // with the live display
@@ -2506,6 +2713,7 @@ mm_usr_prot[mm_usr_prot_ptr] = defaultprojector; mm_usr_prot_ptr += 1;
 mm_usr_prot[mm_usr_prot_ptr] = projlist; mm_usr_prot_ptr += 1;
 mm_usr_prot[mm_usr_prot_ptr] = pcfdef; mm_usr_prot_ptr += 1;
 mm_usr_prot[mm_usr_prot_ptr] = projectors; mm_usr_prot_ptr += 1;
+mm_usr_prot[mm_usr_prot_ptr] = fm_ptr; mm_usr_prot_ptr += 1; // the work areas of the modules "VU meter", "Limiter"
 
 
 ////
@@ -3114,16 +3322,20 @@ function getconf(ginum)
     getconfux(groupdefs[ginum]);
 );
 
-// Load a channel configuration in the appropriate array (matrsiz)
-prvchcnf = prvdest = -1;
+// Load a channel configuration in the appropriate array (matrsiz) : the configuration chcnf of the projector pro,
+// composed with its diffusions of the inputs and of the outputs (indiff, outdiff : each entry l -> m, gain g, gives the
+// entries p -> q, gain a g b, for each p -> l, gain a, of indiff and each m -> q, gain b, of outdiff ; without them,
+// the inputs and the outputs as they are)
+prvchcnf = prvdest = prvind = prvoud = -1;
 // Avoid repetitive loads of the same config
-function confload(chcnf, dest)
-local(pcf, src, dstx, tg, res, E4092, zv1, zv2, zv3, zv5)
+function confload(chcnf, dest, pro)
+local(pcf, src, dstx, tg, res, E4092, zv1, zv2, zv3, zv5, ind, oud, g, k, p, a, ql)
 (
     //
+    ind = cf_Blk(pro[prx_indiff]); oud = cf_Blk(pro[prx_outdiff]);
     zv1 = chcnf; zv2 = dest; zv3 = 0;
-    (res = ((chcnf != prvchcnf) || (dest != prvdest))) ? (
-        prvchcnf = chcnf; prvdest = dest; zv0 += 1;
+    (res = ((chcnf != prvchcnf) || (dest != prvdest) || (ind != prvind) || (oud != prvoud))) ? (
+        prvchcnf = chcnf; prvdest = dest; prvind = ind; prvoud = oud; zv0 += 1;
         (dest < C_memrArea) ? ((lErr === 0) ? ( E4092 = dest; lErr = 4092;));
         zv4 = 0;
         zv8 = chcnf; zv9 = pcfdef[0];
@@ -3131,16 +3343,52 @@ local(pcf, src, dstx, tg, res, E4092, zv1, zv2, zv3, zv5)
         pcf = chcnf + 1; // point to description, skipping number
         src = pcf[0] -1; // internal chan. source number
         memset(dest, 0, matrsiz);
-        while ((src = pcf[0] - 1) >= 0) (
-            dstx = dest + src * chmax;
-            pcf += 1;
-            // zv3 += 1;
-            while ((tg = pcf[0]) > 0) (
-                zv4 += 1;
-                dstx[tg - 1] = pcf[1]; zv3 += pcf[1];
-                pcf += 2;
+        ((ind === 0) && (oud === 0)) ? (
+            while ((src = pcf[0] - 1) >= 0) (
+                dstx = dest + src * chmax;
+                pcf += 1;
+                // zv3 += 1;
+                while ((tg = pcf[0]) > 0) (
+                    zv4 += 1;
+                    dstx[tg - 1] = pcf[1]; zv3 += pcf[1];
+                    pcf += 2;
+                );
+                pcf += 1; // skip end mark
             );
-            pcf += 1; // skip end mark
+        ) : (
+            // the diffusion of the inputs transposed : cf_inT[l * chmax + p], the gain from the input p to the channel l
+            (ind > 0) ? (
+                memset(cf_inT, 0, matrsiz);
+                k = ind + 1;
+                while ((p = k[0] - 1) >= 0) (
+                    k += 1;
+                    while ((tg = k[0]) > 0) ( cf_inT[(tg - 1) * chmax + p] += k[1]; k += 2; );
+                    k += 1;
+                );
+            );
+            while ((src = pcf[0] - 1) >= 0) (
+                pcf += 1;
+                while ((tg = pcf[0]) > 0) (
+                    g = pcf[1]; zv4 += 1; zv3 += g;
+                    ql = (oud > 0) ? cf_Src(oud, tg) : 0; // the outputs of the channel tg (none : tg itself)
+                    p = 0;
+                    loop((ind > 0) ? chinmax : 1,
+                        a = (ind > 0) ? cf_inT[src * chmax + p] : 1;
+                        (a != 0) ? (
+                            dstx = dest + ((ind > 0) ? p : src) * chmax;
+                            (oud > 0) ? (
+                                k = ql;
+                                while ((k > 0) && (k[0] > 0)) ( dstx[k[0] - 1] += a * g * k[1]; k += 2; );
+                            ) : (
+                                dstx[tg - 1] += a * g;
+                            );
+                        );
+                        p += 1;
+                    );
+                    pcf += 2;
+                );
+                pcf += 1; // skip end mark
+            );
         );
     );
     // showmem(12, dest);
@@ -3269,38 +3517,58 @@ local (khpn, kcf, kra, krc, kct, knb, knt, kp, kxw, xscene, xgroup, xitem, ukpp,
     zanew = anewchoice = sgipos;
 );
 
-// Recreate the whole Hyper slider configuration for the target projector
+/*
+    The Hyper Slider (2026-11-11) : its sequence (rebuildhypconf) : the configuration of the projector (that of its
+    scene / group / item, or the one chosen in the cell Config when it is in no group, prx_hypbase), then the
+    configurations defined after it, by increasing numbers, ambitus in all (fewer at the end of the list) ; in the
+    history mode, the last configurations loaded. Its mode (serialBlock[Pr7_HypMode + p - 1], prx_hypmode) : 0 Linear
+    (the sequence as it is), 1 Circular (its first configuration again at the end), 2 Infinite (the silence, a null
+    matrix, before and after it : a fade in from the silence, the interpolations, a fade out to the silence). hyp_seq :
+    the blocks of the configurations (0 : the silence), hyp_len : their count ; computehypconf loads only the two
+    matrices of the current interval (hyp_f), when it changes.
+*/
 function rebuildhypconf(tpro)
-local (i, k, l, dpt, cpf)
+local (p, s, n, k, amb, b, md, nmax)
 (
+    p = tpro[prx_fident] - 1;
+    s = hyp_seq + p * HYP_SS;
+    amb = max(1, min(HYP_AMAX, tpro[prx_svhypam]));
+    md = tpro[prx_hypmode];
+    n = 0;
+    (md === 2) ? (s[n] = 0; n += 1;);
+    nmax = n + amb;
     ((tpro[prx_flgopmod] & hyphmodon) === 0) ? (
-        // Create all the "prvhypambi" temps from selected group
-        k = tpro[prx_newchoice] % 16; // position in group
-        l = tpro[prx_newchoice] - k; // group number * 16, unchanged
-        i = 0; // load index
-        loop ((zzkhyc = tpro[prx_svhypam]),
-            // select the configuration
-            cpf = getconf(k + l);
-            // load in the array
-            confload(cpf, tpro[prx_hypermats+i]);
-            // iterate
-            k = (k+1) % 16; i += 1;
+        // the configuration of the projector, then the next ones defined
+        b = (tpro[prx_hypbase] > 0) ? conflist[tpro[prx_hypbase]] : getconf(max(0, tpro[prx_newchoice]));
+        (b > 0) ? (
+            s[n] = b; n += 1;
+            k = b[0] + 1;
+            while ((n < nmax) && (k < conflsize - 1)) (
+                (conflist[k] > 0) ? (s[n] = conflist[k]; n += 1;);
+                k += 1;
+            );
         );
     ) : (
-        // Create the sources from current history
-        i = 0; // where to load
+        // the last configurations loaded (history)
         k = histstart;
-        loop (tpro[prx_svhypam],
+        loop (amb,
             k = k % historysiz;
-            cpf = historywa[k]; // point to a memory
-            // load in the array
-            confload(cpf, tpro[prx_hypermats+i]);
-            // iterate
+            s[n] = historywa[k]; n += 1;
             k = (k - 1 + historysiz) % historysiz;
-            i += 1;
         );
     );
+    ((md === 1) && (n > 0)) ? (s[n] = s[0]; n += 1;);
+    (md === 2) ? (s[n] = 0; n += 1;);
+    hyp_len[p] = n; hyp_f[p] = -1;
+);
 
+// A configuration of the sequence (its block ; 0 : the silence) loaded in dest
+function hyp_Load(blk, dest, tpro)
+(
+    (blk > 0) ? confload(blk, dest, tpro) : (
+        memset(dest, 0, matrsiz);
+        prvchcnf = -1; // (the cache of confload : dest changed)
+    );
 );
 
 // Merge src1 and src2 in dst using a sin/cos function
@@ -3321,16 +3589,26 @@ local (i, j, k, ac, bc, a, b, u, s)
     s;
 );
 
-// The Hyper Slider has been changed for the target projector
+// The Hyper Slider has been changed for the target projector : its interval in the sequence (rebuildhypconf), the two
+// matrices of the interval loaded if it changed, merged in its target (prx_pcons)
 function computehypconf(tpro)
-local (ar1, ar2, hysl, f, zzzhyar1, zzzhyar2, zzzhyf)
+local (p, s, n, hysl, f)
 (
-    hysl = tpro[prx_svhypsl] * (tpro[prx_svhypam] - 1); // interval count
-    zzzhyf = f = min(tpro[prx_svhypam] - 1, floor(hysl)); // first concerned area
-    zzzhyar1 = ar1 = tpro[prx_hypermats + f];
-    zzzhyar2 = ar2 = tpro[prx_hypermats + f+1];
-    // create in consigne the appropriate value.
-    mergeconf(tpro[prx_pcons], ar1, ar2, hysl - f);
+    p = tpro[prx_fident] - 1;
+    s = hyp_seq + p * HYP_SS; n = hyp_len[p];
+    (n >= 2) ? (
+        hysl = max(0, min(1, tpro[prx_svhypsl])) * (n - 1); // (n - 1 intervals)
+        f = min(n - 2, floor(hysl));
+        (hyp_f[p] !== f) ? (
+            hyp_f[p] = f;
+            hyp_Load(s[f], tpro[prx_hypermats], tpro);
+            hyp_Load(s[f + 1], tpro[prx_hypermats + 1], tpro);
+        );
+        mergeconf(tpro[prx_pcons], tpro[prx_hypermats], tpro[prx_hypermats + 1], hysl - f);
+    ) : (n === 1) ? (
+        hyp_f[p] = 0;
+        hyp_Load(s[0], tpro[prx_pcons], tpro);
+    );
 );
 
 
@@ -3413,19 +3691,7 @@ local (csteps)
 );
 
 
-function changblur(proj, newval, sld)
-(
-    newval = max(0, min(100, floor(newval)));
-    ((proj === currentpro) || sld) ? (
-        dispsldcblur = sldblur = newval;
-        sliderchange(sldblur);
-    );
-    (newval != proj[prx_blurval]) ? (
-        proj[prx_blurval] = newval;
-        proj[prx_blurdry] = sqrt((100 - newval) / 100);
-        proj[prx_blurwet] = sqrt(newval / 100);
-    );
-);
+// (changblur : defined before updtopmod, the module Configurations uses it ; 2026-11-11)
 
 function switchdelaytim(proj, newval, sld)
 (
@@ -3874,7 +4140,7 @@ mididclsld(5,  "Vol.Resp.",  0.01, 60, 0.01, 2, 2, ctrlshow); // slider 3 : volu
 mididclsld(8,  "Scene",  0, 15, 1, 0, 1, ctrlshow|ctrlown); // slider 6 : scene number : sldconfscn
 mididclsld(21, "Rand.Delay", sldrndchmin, sldrndchmax, sldrndchinc, 2, sldrndchdef, ctrlshow|ctrlown); // random delay : sldrndch
 mididclsld(22, "Hyperslider",  0, 1, 0.001, 0, 0.5, ctrlshow|ctrlown); // slider 22 : hyper slider : sldhypersl
-mididclsld(23, "Ambitus", 2, 8, 1, 0, 2, ctrlshow|ctrlown); // slider 23, hyper slider ambitus : sldhypambi
+mididclsld(23, "Ambitus", 2, HYP_AMAX, 1, 0, 2, ctrlshow|ctrlown); // slider 23, hyper slider ambitus : sldhypambi
 zzzz_dclmorph = mididclsld(11,  "Morph.Dur.",  0.01, 60, 0.01, 2, 8, ctrlshow|ctrlown); // slider 11 : morphing time : sldcmrphtim
 mididclsld(12,  "Blur",  0, 100, 1, 0, 0, ctrlshow|ctrlown); // slider 12 : blur: sldblur
 
@@ -4203,6 +4469,18 @@ function x(ss) local (rr, ww)
     // reset4095();
 );
 
+// the configuration restored from the project (cg_Restore, @gfx) : the projectors choose their configurations again,
+// as after a load of the file
+cg_rsDone ? (
+    cg_rsDone = 0;
+    currentpro[prx_prvchoice] = -2;
+    currentpro[prx_newchoice] = -1;
+    currentpro[prx_ptrconf] = -3;
+    akousmod ? akouchange = akouchconfs;
+    hypchange = 1;
+    actreload = 1;
+);
+
 
 (zzzz_dclmorph[mctlprv] != Undef) ? (
     (lErr === 0) ? (lErr = 4410;  lErrbc = blockcnt;); // (4401 is an error of the mSL compiler)
@@ -4223,8 +4501,16 @@ while ((recvlen = midirecv_buf(offset, midirbuf, midirsize)) > 0) (
 
 // The settings changed in the modules "Global", "Projector A" ... "H" and "Projectors" (see Diffusion-3-Projectors)
 prv_Block();
-// the volumes of the projectors (module "Global") : their targets for @sample
+// the volumes of the projectors (module "Global") : their targets for @sample (0 : off, muted, silenced by a solo)
 prv_PVolBlock();
+// a status changed (updpstatus) : the queue of the projectors rebuilt now
+u__prq ? (u__prq = 0; updprqueue(););
+// the diffusions of the inputs and outputs of the projectors (indiff, outdiff)
+cf_IOBlock();
+// the spatial projectors : their motions, their points, their gains (see Diffusion-3-Spatial)
+sp_Block();
+// the modules "VU meter", "Limiter" : the work areas prepared by @gfx (see GM-Meters-Modules)
+fm_Block();
 
 slsignal ? sliderevent(0);
 
@@ -4645,6 +4931,15 @@ while ((ppro = dlist[0]) > 0) (
 
         hypchange ? (pflgso |= hypamch;);
 
+        // the diffusions of the inputs or outputs changed (cf_IOBlock) : the configuration loaded again (Hyper Slider : its
+        // configurations), the outputs of the blur
+        ppro[prx_iochg] ? (
+            ppro[prx_iochg] = 0;
+            cf_OutList(ppro);
+            prvchcnf = -1;
+            (pflgso & hypmodon) ? (pflgso |= hypamch) : (ppro[prx_ptrconf] > 0) ? (ppro[prx_cnfupdt] = 1);
+        );
+
         actreload ? (
             ppro[prx_flghypmd] = 1;
             anew = -1;
@@ -4683,6 +4978,7 @@ while ((ppro = dlist[0]) > 0) (
         // A change in configuration ?
         // A choice is a number in [0 4095]
         (anew != prev) ? (
+            ppro[prx_hypbase] = 0; // (the configuration chosen in the cell Config : that of the new choice now)
             // build the new destination
             (pflgso & hypmodon) ? (
                 pflgso |= hypamch;
@@ -4726,7 +5022,7 @@ while ((ppro = dlist[0]) > 0) (
                 ppro[prx_numconf] = blkn[0]; // keep config.
                 // Load the injunction in consigne
 
-                confload(blkn, ppro[prx_pcons]);
+                confload(blkn, ppro[prx_pcons], ppro);
                 // keep the value in history
                 historypnt = (historypnt + 1) % historysiz;
                 historywa[historypnt] = blkn;
@@ -4962,6 +5258,8 @@ timesz = time_precise();
 
 // Create input values, modulated by global volume
 inch = 0; loop(actchin, inputs[inch] = spl(inch) * glvol; inch += 1;);
+// the modules "Limiter", "VU meter" on the inputs (see GM-Meters-Modules)
+fm_act ? fm_Sample(0, inputs, actchin);
 // Clear output values
 memset(outputs, 0, actchout);
 
@@ -5008,18 +5306,17 @@ while ((ppro = dlist[0]) > 0) (
             s__vd = s__vt - ppro[prx_vcur];
             ppro[prx_vcur] = (abs(s__vd) < 0.000001) ? s__vt : ppro[prx_vcur] + s__vd * prv_VolK;
         );
-        // generate the output values
+        // generate the output values (the matrix composed with the diffusions of the inputs and outputs : see confload) ;
+        // a spatial projector (Diffusion-3-Spatial) : its channels are the points of its source (s__dst, their count
+        // s__lim : the channels beyond go into the slot s__lim, never read), sp_Sample sends them to the outputs
         (
             s__pld = proutdiffs;
             lvol = ppro[prx_prvol] * ppro[prx_vcur];
-            inset = ppro[prx_inset];
-            outset = ppro[prx_outset];
+            ((s__dst = ppro[prx_spv]) > 0) ? (s__lim = ppro[prx_spn]) : (s__dst = outputs; s__lim = 127;);
             (ppro[prx_blurval] === 0) ? (
                 zzwkv = 0;
                 while ((s__uch = s__pld[0]) >= 0) (
-                    s__ich = s__uch >> 7;  // in channel, in [0 .. 127]
-                    s__jch = s__uch & 0x7f; // out channel, in [0 .. 127]
-                    outputs[outset[s__jch]] += (s__wk = lvol * inputs[inset[s__ich]] * practualout[s__uch]);
+                    s__dst[min(s__uch & 0x7f, s__lim)] += (s__wk = lvol * inputs[s__uch >> 7] * practualout[s__uch]); // (in : bits 7 ..., out : 0 ... 6)
                     zzwkv += abs(s__wk);
                     s__pld += 1;
                 );
@@ -5027,25 +5324,38 @@ while ((ppro = dlist[0]) > 0) (
                 s__wkd = ppro[prx_blurdry];
                 ttsp = 0;
                 while ((s__uch = s__pld[0]) >= 0) (
-                    s__ich = s__uch >> 7;  // in channel, in [0 .. 127]
-                    s__jch = s__uch & 0x7f; // out channel, in [0 .. 127]
-                    s__ssp = lvol * inputs[inset[s__ich]] * practualout[s__uch];
-                    outputs[outset[s__jch]] += s__wkd * s__ssp;
+                    s__ssp = lvol * inputs[s__uch >> 7] * practualout[s__uch];
+                    s__dst[min(s__uch & 0x7f, s__lim)] += s__wkd * s__ssp;
                     ttsp += s__ssp;
                     s__pld += 1;
                 );
-                s__wkw = ppro[prx_blurwet] * sqivactchout * ttsp;
-                s__uch = 0;
-                loop(actchout,
-                    outputs[outset[s__uch]] += s__wkw;
-                    s__uch += 1;
+                // the wet part on the outputs of the projector : those of its diffusion of the outputs, or all ; spatial :
+                // on all the points of its source
+                (s__dst !== outputs) ? (
+                    s__wkw = ppro[prx_blurwet] * ppro[prx_spq] * ttsp;
+                    s__uch = 0;
+                    loop(s__lim, s__dst[s__uch] += s__wkw; s__uch += 1;);
+                ) :
+                ((s__blo = ppro[prx_blout]) > 0) ? (
+                    s__wkw = ppro[prx_blurwet] * s__blo[1] * ttsp;
+                    s__uch = 2;
+                    loop(s__blo[0], outputs[s__blo[s__uch]] += s__wkw; s__uch += 1;);
+                ) : (
+                    s__wkw = ppro[prx_blurwet] * sqivactchout * ttsp;
+                    s__uch = 0;
+                    loop(actchout, outputs[s__uch] += s__wkw; s__uch += 1;);
                 );
             );
+            // the points of a spatial projector, to the outputs
+            (s__dst !== outputs) ? sp_Sample(ppro);
         );
         ppro[prx_date] = timec;
     );
 );
 
+
+// the modules "Limiter", "VU meter" on the outputs (see GM-Meters-Modules)
+fm_act ? fm_Sample(1, outputs, actchout);
 
 // Output the values - compute the power
 ouch = s__mch = 0;
@@ -5110,6 +5420,12 @@ s__wxy = timesy - timesz;
 pns_Serialize();
 // The configurations of the modules "Edit A" ... "Edit D" (see Diffusion-3-Edit.jsfx-inc)
 ed_Serialize();
+// The settings of the spatial projectors (see Diffusion-3-Spatial.jsfx-inc)
+sp_Serialize();
+// The whole configuration (see Diffusion-3-Configurations.jsfx-inc : read, the configuration file is not loaded)
+cg_Serialize();
+// The settings of the modules "VU meter", "Limiter" (see GM-Meters-Modules)
+fm_Serialize();
 
 
 @gfx
@@ -6138,7 +6454,8 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
                 (xx === ':') ? (
                     HP_Dr_updsize(mh_cur_box, max(10, floor(mh_cur_box[bx_sfact]  * 0.96)));
                 ) :
-                // the view of Space 3D (sx_*, s3d_* : the same scene as the module Space 3D)
+                // the view of the HP box (sx_*, s3d_* : the globals of Space 3D ; the views "Space A" ... "D" keep their own
+                // camera, sv_Swap)
                 (xx === ';') ? (
                     s3d_dist = max(1.8, s3d_dist * 0.98); // zoom in
                 ) :
@@ -6742,7 +7059,10 @@ function show_Module(igb)
         show_ProcessesMgr("Processes Manager", blockProcessesMgr);
     ) :
     (igb === blockSpace3D) ? (
-        show_Space3D_Pad(blockSpace3D);
+        show_Space_Pad(blockSpace3D, 0);
+    ) :
+    ((igb >= blockSpace1) && (igb < blockSpace1 + SV_NV - 1)) ? (
+        show_Space_Pad(igb, igb - blockSpace1 + 1);
     ) :
     (igb === blockGlobal) ? (
         show_Global_Pad(blockGlobal);
@@ -6755,6 +7075,15 @@ function show_Module(igb)
     ) :
     ((igb >= blockEdit0) && (igb < blockEdit0 + ED_NV)) ? (
         show_Edit_Pad(igb, igb - blockEdit0);
+    ) :
+    (igb === blockTrajs) ? (
+        show_Trajectories_Pad(blockTrajs);
+    ) :
+    (igb === blockConfs) ? (
+        show_Configurations_Pad(blockConfs);
+    ) :
+    ((igb >= blockFxMeter0) && (igb < blockFxMeter0 + FM_NM)) ? (
+        show_FxMeter_Pad(igb, igb - blockFxMeter0);
     );
 );
 
@@ -6778,6 +7107,13 @@ local (r, w, k)
 );
 
 live_requests();
+// the spatial projectors : the paths of the editors (live links, Diffusion-3-Trajectories), then the speakers, the sources
+// and the paths for @block, an adaptation in progress (even when the window is closed : see Diffusion-3-Spatial)
+cg_Gfx();
+tr_EdSync();
+sp_Gfx();
+// the work areas of the modules "VU meter", "Limiter" (even when the window is closed : see GM-Meters-Modules)
+fm_Gfx(actchin, actchout);
 
 
 //====== GRAPHIC EXECUTION START ======

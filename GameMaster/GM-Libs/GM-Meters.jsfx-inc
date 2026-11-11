@@ -1,0 +1,863 @@
+/*
+    GM-Meters.jsfx-inc : the engines of the VU meter (prefix vu_) and of the Smooth Limiter (prefix lm_), shared by
+    Interstys (the effect types "VU meter" and "Limiter"), Diffusion-3 and the File Player (the modules "VU meter A" ...
+    "D" and "Limiter A" ... "D", see GM-Meters-Modules.jsfx-inc). 2026-11-11.
+
+    The code is the one of the separate plugins, made per instance (an area for each one, its settings in an array) :
+        Multichannel_VU_meter_U.jsfx (S&M Multichannel VU meter v0.8b, Copyright (C) 2009 Jeff Bedague aka Jeffos, GPL ;
+            128 channels, menu, saturation threshold, colors, auto clear : JJG 2026), the loop version (spl(i) replaced by
+            the array of samples of the host) ;
+        SmoothMultiLimiter.jsfx v1.18 (Geraint Luff, mods. JJG 2021-2026).
+    Include it in @init (it only defines functions and constants), after ui-lib, mSL_ui_Pads and mSL_ui_Menus ; then,
+    after ui_setup, in the static memory : lm_hctab = make_array(lm_TabSize); lm_InitTab(lm_hctab); ui_reserve_image(VU_IMG);
+
+    The threads : vu_Sample, lm_Sample run in the audio thread (@sample) ; their areas are prepared by @gfx (vu_Reset,
+    lm_Reset) before the audio thread sees them ; the drawings (@gfx) read them, a clear of the peaks is a request
+    (vu_Clr) done by the audio thread.
+
+    VU meter : the settings st[0 ... 5] : 0 the sample time (ms : 25 ... 1000, 45), 1 the GUI mode (0 horizontal meters,
+        fixed height ; 1 horizontal, fit to height ; 2 vertical, fixed width ; 3 vertical, fit to width), 2 the
+        highlighted channel (its number as shown, 0 : none), 3 the saturation threshold (0 ... 8 : -20, -6, -2, -1, 0, +1,
+        +2, +6, +20 dB), 4 the color (0 ... 5 : Green, Orange, Blue, Yellow, Cyan, Violet), 5 the auto clear of the
+        saturations (0 ... 3 : permanent, 1, 3, 5 minutes after the last over)
+        its area (vu_Size(n) words) : the header (vu_H words), then for n channels : the peak during the sample time
+        (bufCh), the max value (bufPeak, dB), the value (bufValue, dB), the time of the last over (bufOverT, -1 : none)
+    Limiter : the settings st[0 ... 7] : 0 the limit (dB : -40 ... 0, -3), 1 the channels displayed (1 ... 8, 4), 2 the zoom
+        of the display (0.1 ... 10, 1), 3 the distortion (% : 0 ... 100, 0), 4 the pre-gain (dB : -12 ... 24, 0), 5 the
+        volume out (dB : -12 ... 24, 0), 6 the anticipation (ms : 0.1 ... 200, 10), 7 the release (ms : 1 ... 1000, 100)
+        (the sliders 1, 6, 7, 4, 5, 8, 2, 3 of SmoothMultiLimiter : the order of the parameters of an effect of Interstys)
+        its area (lm_Size(n) words) : the header (lm_H words), then xspl, xnrg (n + 2 : a sentinel), curmin, curmax, tops
+        (lm_NDMax), the peak buffer (lm_BL), the delay lines (n x lm_BL), the display history histmin, histmax (n x lm_HN
+        each), histpk (lm_HN)
+        the signal is delayed by the anticipation (no plugin delay compensation : the hosts do not declare it)
+*/
+
+// ====== VU meter ======
+vu_DbMin = 60; // the scale (dB below 0)
+vu_RStep = 6; // the dB lines
+vu_sc = 6 / log(2); // log -> dB
+vu_WRatio = 75; // width of the saturation indicators (horizontal meters : gfx_w / 75)
+vu_H = 8; // words of the header of the area
+vu_N = 0; vu_Cnt = 1; vu_Cpt = 2; vu_Clr = 3; // (its channels, the sample counter, the time, a request to clear the peaks)
+VU_IMG = 88; // the offscreen image of the drawings (one for all the meters : drawn then copied, see vu_Draw ; reserved by the host)
+vu_ThrList = "-20 dB|-6 dB|-2 dB|-1 dB|0 dB|+1 dB|+2 dB|+6 dB|+20 dB";
+vu_ModeList = "H fixed|H fit|V fixed|V fit";
+vu_ModeLong = "Horizontal meters - fixed height|Horizontal meters - fit to height|Vertical meters - fixed width|Vertical meters - fit to width";
+vu_ColList = "Green|Orange|Blue|Yellow|Cyan|Violet";
+vu_HoldList = "Permanent|1 minute|3 minutes|5 minutes";
+vu_HoldLong = "Permanent|After 1 minute|After 3 minutes|After 5 minutes";
+
+// the saturation threshold (dB) of the index k (st[3]) ; the delay of the auto clear (s) of the index k (st[5])
+function vu_ThrDb(k)
+(
+    k = max(0, min(8, 0|k));
+    (k === 0) ? -20 : (k === 1) ? -6 : (k === 2) ? -2 : (k === 3) ? -1 : (k === 4) ? 0 : (k === 5) ? 1 : (k === 6) ? 2 :
+    (k === 7) ? 6 : 20;
+);
+function vu_HoldS(k)
+(
+    k = max(0, min(3, 0|k));
+    (k === 0) ? 0 : (k === 1) ? 60 : (k === 2) ? 180 : 300;
+);
+
+// the default settings
+function vu_Default(st)
+(
+    st[0] = 45; st[1] = 0; st[2] = 0; st[3] = 4; st[4] = 0; st[5] = 0;
+);
+
+function vu_Size(n) ( vu_H + 4 * max(1, 0|n); );
+
+// clear all the peaks (saturation indicators and max dB values) and the values ; the area of n = e[vu_N] channels
+function vu_Clear(e) local(n)
+(
+    n = e[vu_N];
+    e[vu_Cnt] = e[vu_Cpt] = e[vu_Clr] = 0;
+    memset(e + vu_H, 0, n);
+    memset(e + vu_H + n, -vu_DbMin, 2 * n);
+    memset(e + vu_H + 3 * n, -1, n);
+);
+
+// a new area of n channels
+function vu_Reset(e, n)
+(
+    e[vu_N] = max(1, 0|n);
+    vu_Clear(e);
+);
+
+/*
+    the audio thread, at each sample : the n channels src[0 ... n-1] (times the gain g) ; every sample time, the values
+    (dB), the max values, the saturations (as the @block of the plugin)
+*/
+function vu_Sample(st, e, src, g, n)
+local(nc, b, pk, vl, ot, i, thr, hold, cpt)
+(
+    nc = e[vu_N]; n = min(n, nc);
+    b = e + vu_H;
+    i = 0; loop(n, b[i] = max(b[i], abs(g * src[i])); i += 1;);
+    cpt = (e[vu_Cpt] += 1);
+    pk = b + nc; vl = pk + nc; ot = vl + nc;
+    e[vu_Clr] ? (
+        memset(pk, -vu_DbMin, nc); memset(ot, -1, nc);
+        e[vu_Clr] = 0;
+    );
+    (e[vu_Cnt] > max(25, st[0]) * srate / 1000) ? (
+        thr = vu_ThrDb(st[3]);
+        hold = vu_HoldS(st[5]) * srate;
+        i = 0;
+        loop(n,
+            // (log(0) is undefined in EEL2 : here it gave 0 dB, a silent channel was shown full and saturated ; a floor
+            // of 10^-10 : about -200 dB, below the scale ; max() also gets rid of a NaN)
+            vl[i] = log(max(b[i], 0.0000000001)) * vu_sc;
+            pk[i] = max(pk[i], vl[i]);
+            // saturation indicator : the time of the last over, cleared after the delay of the auto clear
+            ((vl[i] == thr) || (vl[i] > thr)) ? (
+                ot[i] = cpt;
+            ) : ((pk[i] == thr) || (pk[i] > thr)) ? (
+                (ot[i] < 0) ? (
+                    ot[i] = cpt; // indicator without date (threshold lowered)
+                ) : ((hold > 0) && (cpt - ot[i] > hold)) ? (
+                    pk[i] = -vu_DbMin; ot[i] = -1;
+                );
+            );
+            b[i] = 0;
+            i += 1;
+        );
+        e[vu_Cnt] = 0;
+    );
+    e[vu_Cnt] += 1;
+);
+
+// the meter color of st[4], scaled by f (0.55 = bar, 1 = highlighted bar, 0.9 = text) ; gfx_a unchanged
+function vu_Rgb(c, f)
+(
+    c = 0|c;
+    (c === 1) ? (gfx_r = 1; gfx_g = 0.65; gfx_b = 0) :      // orange (yellowish, far from the red of the overs)
+    (c === 2) ? (gfx_r = 0.3; gfx_g = 0.55; gfx_b = 1) :    // blue
+    (c === 3) ? (gfx_r = 1; gfx_g = 0.95; gfx_b = 0.1) :    // yellow
+    (c === 4) ? (gfx_r = 0; gfx_g = 0.9; gfx_b = 0.95) :    // cyan
+    (c === 5) ? (gfx_r = 0.7; gfx_g = 0.35; gfx_b = 1) :    // violet
+                (gfx_r = 0.05; gfx_g = 0.9; gfx_b = 0.15);  // green
+    gfx_r *= f; gfx_g *= f; gfx_b *= f;
+);
+
+/*
+    the drawing of the plugin, in the current image (W x H pixels, from 0, 0 : the @gfx of the plugin, gfx_w -> W,
+    gfx_h -> H, num_ch -> n, slider4 ... slider7 -> st) ; "off" : the number of the first channel minus 1 (the channels
+    are numbered off + 1 ... off + n ; the highlighted one is a number as shown) ; cw, rm : the width of a character and
+    the right margin (the plugin : 10 and 45 pixels ; here from the current font)
+*/
+function vu_DrawImg(st, e, n, off, W, H, cw, rm)
+local(nc, pk, vl, md, hl, thr, uiTop, uiLeft, vuHeight, vuWidth, dBstep, i, tmp, dv, nbChar, tmp10, cx)
+(
+    nc = e[vu_N]; pk = e + vu_H + nc; vl = pk + nc;
+    n = min(n, nc);
+    md = max(0, min(3, 0|st[1])); hl = (0|st[2]) - off; thr = vu_ThrDb(st[3]);
+    gfx_r = gfx_g = gfx_b = 0; gfx_a = 1;
+    gfx_rect(0, 0, W, H);
+    (n > 0) ? (
+        uiTop = vuHeight = (H / (n + 1)) | 0; // +1 for the lines
+        vuWidth = W / (n + 1);
+        dBstep = floor(((6 * W) / vu_DbMin) + 0.5);
+        (md <= 1) ? (
+            ////////////////////
+            // horizontal meters
+            ////////////////////
+            uiTop = gfx_texth + 4;
+            md ? (vuHeight = ((H - uiTop) / n) | 0) : (vuHeight = gfx_texth + 1);
+            // default master peak
+            gfx_r = 1; gfx_g = 1; gfx_b = 1; gfx_a = 0.8;
+            gfx_x = W; gfx_y = 1;
+            gfx_rectto(W - floor(W / vu_WRatio + 0.5), uiTop - 1);
+            gfx_r = 0; gfx_g = 0; gfx_b = 0;
+            gfx_x = W - 1; gfx_y = 2;
+            gfx_rectto(W - floor(W / vu_WRatio + 0.5) + 1, uiTop - 2);
+            i = 0;
+            loop(n,
+                // Full rectangle (the color)
+                vu_Rgb(st[4], (i == (hl - 1)) ? 1 : 0.55); gfx_a = 0.8;
+                gfx_x = 0; gfx_y = uiTop + vuHeight * i;
+                gfx_rectto(W, gfx_y + vuHeight - 1);
+                // Black rectangle according to the value
+                gfx_r = 0; gfx_g = 0; gfx_b = 0; gfx_a = 1;
+                gfx_x = W + 1;
+                gfx_y = uiTop + vuHeight * i;
+                gfx_rectto(W - floor((-max(-vu_DbMin, min(0, vl[i])) * W) / vu_DbMin + 0.5), gfx_y + vuHeight);
+                // Channel number
+                (vuHeight >= gfx_texth) ? (
+                    gfx_x = 5;
+                    gfx_y = uiTop + vuHeight * i + floor(abs(gfx_texth - vuHeight) / 2 + 0.5);
+                    gfx_a = (pk[i] > -vu_DbMin) ? 0.8 : 0.3;
+                    (i == (hl - 1)) ? (
+                        gfx_a = 0.8; gfx_r = 1; gfx_g = 1; gfx_b = 1;
+                    ) : (
+                        vu_Rgb(st[4], 0.9);
+                    );
+                    gfx_drawnumber(off + i + 1, 0);
+                );
+                // max dB
+                (vuHeight >= gfx_texth) ? (
+                    gfx_x = W - rm;
+                    gfx_y = uiTop + vuHeight * i + floor(abs(gfx_texth - vuHeight) / 2 + 0.5);
+                    gfx_r = 1; gfx_g = 1; gfx_b = 1;
+                    gfx_a = (pk[i] > -vu_DbMin) ? 0.8 : 0.3;
+                    gfx_drawnumber(pk[i], 1);
+                );
+                // peaks
+                ((pk[i] == thr) || (pk[i] > thr)) ? ( // (">=" KO when "-0.0")
+                    gfx_x = W; gfx_y = uiTop + vuHeight * i;
+                    gfx_r = 1; gfx_g = 0; gfx_b = 0; gfx_a = 1;
+                    gfx_rectto(W - floor(W / vu_WRatio + 0.5), gfx_y + vuHeight - 1);
+                    // master peak
+                    gfx_x = W - 1;
+                    gfx_y = 2;
+                    gfx_rectto(W - floor(W / vu_WRatio + 0.5) + 1, uiTop - 2);
+                );
+                // "dB"
+                ((vuHeight > gfx_texth) && (dBstep > (cw * 4 + rm))) ? ( // e.g. 4 'cause "-6" & "dB"
+                    gfx_x = W - rm;
+                    gfx_y = floor(abs(gfx_texth - uiTop) / 2 + 0.5);
+                    gfx_r = 0.5; gfx_g = 0.5; gfx_b = 0.5; gfx_a = 0.8;
+                    gfx_drawchar($'d');
+                    gfx_drawchar($'B');
+                );
+                i += 1;
+            );
+            // dB lines
+            gfx_r = 0.5; gfx_g = 0.5; gfx_b = 0.5;
+            i = vu_RStep;
+            while (
+                tmp = W - floor(((i * W) / vu_DbMin) + 0.5);
+                gfx_a = 0.2;
+                gfx_x = tmp; gfx_y = uiTop;
+                gfx_lineto(gfx_x, H, 0.4);
+                gfx_a = 0.8;
+                gfx_x = tmp + 1;
+                gfx_y = floor(abs(gfx_texth - uiTop) / 2 + 0.5);
+                gfx_drawnumber(i * -1, 0);
+                i += vu_RStep;
+                i <= vu_DbMin;
+            );
+        ) : (
+            ////////////////////
+            // vertical meters
+            ////////////////////
+            uiLeft = cw * 3; // e.g. -60
+            (md == 3) ? (vuWidth = ((W - uiLeft) / n) | 0) : (vuWidth = cw);
+            i = 0;
+            loop(n,
+                // Full rectangle (the color)
+                vu_Rgb(st[4], (i == (hl - 1)) ? 1 : 0.55); gfx_a = 0.8;
+                gfx_x = uiLeft + vuWidth * i; gfx_y = 0;
+                gfx_rectto(gfx_x + vuWidth - 1, H);
+                // Black rectangle according to the value
+                gfx_r = 0; gfx_g = 0; gfx_b = 0; gfx_a = 1;
+                gfx_x = uiLeft + vuWidth * i;
+                gfx_y = 0;
+                gfx_rectto(gfx_x + vuWidth, floor(((-max(-vu_DbMin, min(0, vl[i])) * (H + 1)) / vu_DbMin) + 0.5));
+                cx = uiLeft + vuWidth * i + floor(abs(cw - vuWidth) / 2 + 0.5);
+                // Channel number : one digit per row (3 rows from 100)
+                (vuWidth >= cw) ? (
+                    gfx_a = (pk[i] > -vu_DbMin) ? 0.8 : 0.3;
+                    (i == (hl - 1)) ? (
+                        gfx_r = 1; gfx_g = 1; gfx_b = 1; gfx_a = 0.8;
+                    ) : (
+                        vu_Rgb(st[4], 0.9);
+                    );
+                    tmp = off + i + 1;
+                    dv = (tmp >= 100) ? 100 : (tmp >= 10) ? 10 : 1;
+                    gfx_y = H - gfx_texth * ((tmp >= 100) ? 3 : 2) - 5;
+                    loop((tmp >= 100) ? 3 : (tmp >= 10) ? 2 : 1,
+                        gfx_x = cx;
+                        gfx_drawnumber(((tmp / dv) | 0) % 10, 0);
+                        gfx_y += gfx_texth;
+                        dv /= 10;
+                    );
+                );
+                // max dB
+                (vuWidth >= cw) ? (
+                    gfx_r = 1; gfx_g = 1; gfx_b = 1;
+                    gfx_a = (pk[i] > -vu_DbMin) ? 0.8 : 0.3;
+                    nbChar = 1; // top margin
+                    gfx_x = cx; gfx_y = gfx_texth * nbChar;
+                    tmp = pk[i];
+                    ((tmp == 0) || (tmp > 0)) ? gfx_drawchar($' ') : gfx_drawchar($'-');
+                    nbChar += 1;
+                    tmp = abs(tmp);
+                    tmp10 = (tmp / 10) | 0;
+                    gfx_x = cx; gfx_y = gfx_texth * nbChar;
+                    (tmp10 != 0) ? (gfx_drawnumber(tmp10, 0); nbChar += 1;);
+                    gfx_x = cx; gfx_y = gfx_texth * nbChar;
+                    gfx_drawnumber((tmp - tmp10 * 10) | 0, 0);
+                    gfx_x = cx; gfx_y = gfx_texth * nbChar + 4;
+                    gfx_drawchar($'.'); nbChar += 1;
+                    gfx_x = cx; gfx_y = gfx_texth * nbChar + 4;
+                    gfx_drawnumber((tmp - (tmp | 0)) * 10, 0);
+                );
+                // peaks
+                ((pk[i] == thr) || (pk[i] > thr)) ? ( // (">=" KO when "-0.0")
+                    gfx_x = uiLeft + vuWidth * i; gfx_y = 0;
+                    gfx_r = 1; gfx_g = 0; gfx_b = 0; gfx_a = 1;
+                    gfx_rectto(uiLeft + vuWidth * (i + 1) - 1, gfx_texth); // -1 for black lines between peaks
+                    // master peak
+                    gfx_x = 1; gfx_y = 0;
+                    gfx_rectto(uiLeft - 1, gfx_texth); // -1 for black line between following peaks
+                );
+                i += 1;
+            );
+            // dB lines
+            gfx_r = 0.5; gfx_g = 0.5; gfx_b = 0.5;
+            i = vu_RStep;
+            while (
+                gfx_a = 0.2;
+                tmp = floor(((i * H) / vu_DbMin) + 0.5);
+                gfx_y = tmp; gfx_x = uiLeft;
+                gfx_lineto(W, gfx_y, 0.4);
+                gfx_a = 0.8;
+                gfx_x = floor(abs(cw * 3 - uiLeft) / 2 + 0.5);
+                gfx_y = tmp - floor(gfx_texth / 2 + 0.5);
+                gfx_drawnumber(i * -1, 0);
+                i += vu_RStep;
+                i < vu_DbMin;
+            );
+        );
+    );
+);
+
+/*
+    the VU meter of the area "e" (n channels shown, numbered off + 1 ...), in the current rect of ui-lib : drawn in the
+    offscreen image VU_IMG (the drawing of the plugin, clipped to the rect), then copied ; e === 0 : an empty rect
+*/
+function vu_Draw(st, e, n, off)
+local(x0, y0, W, H, od, cw, rm, tw, th)
+(
+    x0 = ui_left_retina(); y0 = ui_top_retina();
+    W = floor(ui_width_retina()); H = floor(ui_height_retina());
+    ((W > 4) && (H > 4)) ? (
+        gfx_measurestr("0", tw, th); cw = max(10, tw + 3);
+        gfx_measurestr("-60.0", tw, th); rm = max(45, tw + 8);
+        od = gfx_dest;
+        gfx_setimgdim(VU_IMG, W, H);
+        gfx_dest = VU_IMG;
+        (e > 0) ? vu_DrawImg(st, e, n, off, W, H, cw, rm) : (gfx_r = gfx_g = gfx_b = 0; gfx_a = 1; gfx_rect(0, 0, W, H););
+        gfx_dest = od;
+        gfx_a = 1; gfx_mode = 0;
+        gfx_x = x0; gfx_y = y0;
+        gfx_blit(VU_IMG, 1, 0, 0, 0, W, H, x0, y0, W, H);
+    );
+);
+
+// after a gfx_showmenu : the clic that chose (or dismissed) the entry is not seen again by the controls under the mouse
+function vu_MenuEnd()
+(
+    uix_click_block();
+    uix_mouseblock_until = time_precise() + 0.25;
+    uix_mousecap_prev = 0;
+    uix_mghost = 67; // a button released in the menu may stay pressed in mouse_cap : ignored until released (see ui-lib)
+);
+
+// the item k (0 ...) of a list "a|b|c", copied into dst
+function vu_Nth(list, k, dst) local(i, j, n)
+(
+    n = strlen(list); i = 0;
+    while ((k > 0) && (i < n)) ( (str_getchar(list, i) == '|') ? (k -= 1); i += 1; );
+    j = i; while ((j < n) && (str_getchar(list, j) != '|')) ( j += 1; );
+    strcpy_substr(dst, list, i, j - i);
+    dst;
+);
+
+// a menu of the list "a|b|c" (n items, the item chk checked) at the mouse : the item chosen (0 ...), or -1
+function vu_ListMenu(list, n, chk) local(k, m)
+(
+    strcpy(#vu_mnu, "");
+    k = 0;
+    loop(n,
+        vu_Nth(list, k, #vu_it);
+        (k > 0) ? strcat(#vu_mnu, "|");
+        (k === chk) ? strcat(#vu_mnu, "!");
+        strcat(#vu_mnu, #vu_it);
+        k += 1;
+    );
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#vu_mnu) - 1;
+    vu_MenuEnd();
+    m;
+);
+
+// a sub-menu "title" of the list (n items, the item chk checked ; "last" : the last sub-menu), added to #vu_mnu
+function vu_SubMenu(title, list, n, chk, last) local(k)
+(
+    strcat(#vu_mnu, ">"); strcat(#vu_mnu, title); strcat(#vu_mnu, "|");
+    k = 0;
+    loop(n,
+        vu_Nth(list, k, #vu_it);
+        (k === n - 1) ? strcat(#vu_mnu, "<");
+        (k === chk) ? strcat(#vu_mnu, "!");
+        strcat(#vu_mnu, #vu_it);
+        ((k < n - 1) || !last) ? strcat(#vu_mnu, "|");
+        k += 1;
+    );
+);
+
+// the menu of the plugin (right clic on the meter) : GUI mode, saturation threshold, meter color, saturation auto clear
+// (the settings st change) ; returns 1 if a setting changed
+function vu_Menu(st) local(m)
+(
+    strcpy(#vu_mnu, "");
+    vu_SubMenu("GUI mode", vu_ModeLong, 4, 0|st[1], 0);
+    vu_SubMenu("Saturation threshold", vu_ThrList, 9, 0|st[3], 0);
+    vu_SubMenu("Meter color", vu_ColList, 6, 0|st[4], 0);
+    vu_SubMenu("Saturation auto clear", vu_HoldLong, 4, 0|st[5], 1);
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#vu_mnu);
+    vu_MenuEnd();
+    ((m >= 1) && (m <= 4)) ? (st[1] = m - 1; 1)
+    : ((m >= 5) && (m <= 13)) ? (st[3] = m - 5; 1)
+    : ((m >= 14) && (m <= 19)) ? (st[4] = m - 14; 1)
+    : ((m >= 20) && (m <= 23)) ? (st[5] = m - 20; 1) : 0;
+);
+
+// the mouse on the meter (the current rect) : left clic, clear all the peaks ; right clic, the menu of the plugin, opened
+// when the button is released (opened when it is pressed, its release happens in the menu and is not seen : mouse_cap
+// keeps the right button, the clics stay blocked until a left clic) ; returns 1 if a setting changed
+function vu_Mouse(st, e) local(r)
+(
+    r = 0;
+    ui_mouse_down(1) ? (
+        (e > 0) ? (e[vu_Clr] = 1);
+        ui_GFXdoNow |= 4;
+    ) :
+    (ui_click(2) > 0) ? (
+        r = vu_Menu(st);
+        ui_GFXdoNow |= 4;
+    );
+    r;
+);
+
+
+// ====== Smooth Limiter ======
+lm_MaxAtt = 200; // max anticipation (ms)
+lm_NDMax = 8; // max number of channels displayed
+lm_Huge = 10000000000; // initial value of the min/max of a display bucket
+lm_NrgMin = 0.0000000001; // channels below this energy (-100 dB) are not displayed
+lm_EpsNrg = 1 / (2 * srate); // energy of each channel, smoothed over ~2 s (display order)
+lm_Over = 1.002; // overcorrect factor : about 0.02 dB
+lm_AdjLim = -0.06; // adjust limiter
+lm_HCN = 8192; // half cosine table : hctab[k] = 0.5 + 0.5*cos(k*$pi/HCN), k = 0 ... HCN (+ 1 guard)
+lm_TabSize = lm_HCN + 2;
+lm_hctab = 0; // (given by the host, lm_InitTab)
+lm_BL = ceil(srate * (lm_MaxAtt + 50) / 1000); // delay lines : just what the max anticipation needs
+lm_HN = 2048; // display history : HN buckets of hstep samples, keeping min/max of each channel
+lm_HistSec = 6; // seconds displayed
+lm_HStep = max(1, ceil(srate * lm_HistSec / lm_HN));
+// the header of the area
+lm_N = 0; lm_WP = 1; lm_RI = 2; lm_RSV = 3; lm_A = 4; lm_B = 5; lm_HP = 6; lm_HC = 7; lm_CP = 8;
+lm_AS = 9; lm_RS = 10; lm_DS = 11; lm_ATS = 12; lm_RLS = 13; lm_LIM = 14; lm_PG = 15; lm_XV = 16; lm_SP = 17;
+lm_ND = 18; lm_ZM = 19; lm_ACT = 20; lm_RED = 21; lm_REDM = 22;
+lm_C0 = 24; // the settings of the derived values (lm_Update) : 8 words
+lm_H = 32;
+
+// the half cosine table (lm_TabSize words, static memory of the host)
+function lm_InitTab(t) local(i)
+(
+    lm_hctab = t;
+    i = 0;
+    loop(lm_HCN + 1,
+        t[i] = 0.5 + 0.5 * cos(i * $pi / lm_HCN); i += 1;
+    );
+    t[lm_HCN + 1] = t[lm_HCN];
+);
+
+// the default settings
+function lm_Default(st)
+(
+    st[0] = -3; st[1] = 4; st[2] = 1; st[3] = 0; st[4] = 0; st[5] = 0; st[6] = 10; st[7] = 100;
+);
+
+function lm_Size(n) local(k)
+(
+    k = max(1, 0|n);
+    lm_H + k + (k + 2) + 2 * k + lm_NDMax + lm_BL + k * lm_BL + 2 * k * lm_HN + lm_HN;
+);
+
+// the derived values of the settings st (the function update() of the plugin)
+function lm_Update(st, e) local(atk, rs)
+(
+    atk = min(max(1, ceil(max(0.1, min(lm_MaxAtt, st[6])) * srate / 1000)), lm_BL - 2);
+    rs = max(1, ceil(max(1, min(1000, st[7])) * srate / 1000));
+    e[lm_AS] = atk;
+    e[lm_RS] = rs;
+    e[lm_DS] = ceil(atk);
+    e[lm_ATS] = lm_HCN / atk; // steps in hctab for one sample
+    e[lm_RLS] = lm_HCN / rs;
+    e[lm_LIM] = 10 ^ ((max(-40, min(0, st[0])) + lm_AdjLim) / 20);
+    e[lm_PG] = 10 ^ (max(-12, min(24, st[4])) / 20);
+    e[lm_ZM] = max(0.1, min(10, st[2]));
+    e[lm_ND] = max(1, min(lm_NDMax, floor(st[1] + 0.5)));
+    e[lm_XV] = 10 ^ (max(-12, min(24, st[5])) / 20);
+    e[lm_SP] = max(0, min(100, st[3])) / 100;
+    memcpy(e + lm_C0, st, 8);
+);
+
+// clear the state (the signal, the history) of the area of n = e[lm_N] channels
+function lm_Clear(e) local(n, xnrg, cmin, i)
+(
+    n = e[lm_N];
+    memset(e + 1, 0, lm_H - 1);
+    memset(e + lm_H, 0, lm_Size(n) - lm_H);
+    xnrg = e + lm_H + n; xnrg[n] = -0.1; // sentinel for lm_Ord
+    cmin = xnrg + n + 2;
+    i = 0; loop(n, cmin[i] = lm_Huge; cmin[n + i] = -lm_Huge; i += 1;);
+    e[lm_WP] = 10; e[lm_RSV] = 1; e[lm_RI] = srate; e[lm_A] = 0; e[lm_B] = 1;
+    e[lm_C0] = -1000; // (lm_Update at the first sample)
+);
+
+// a new area of n channels
+function lm_Reset(e, n)
+(
+    e[lm_N] = max(1, 0|n);
+    lm_Clear(e);
+);
+
+/*
+    the audio thread, at each sample (the @sample of the plugin) : the n channels src[0 ... n-1] (times the gain g, then the
+    pre-gain), delayed and limited together, into dst[0 ... n-1] (add : added to dst, else written ; src and dst may be
+    the same array)
+*/
+function lm_Sample(st, e, src, g, dst, n, add)
+local(nc, bl, xspl, xnrg, cmin, cmax, bpk, bufs, hmin, hmax, hpk, hct, i, ih, v, u, tp, rlp, hp, hk, pk, lim, ri, wp, ds, atk,
+      sp, fa, fi, ii, bc, bi, bsp, w, rdp, op, nsp, df, ib, fr, fw, np, ka, kb, xv, pb, pg)
+(
+    // the derived values, when a setting changes
+    ((st[0] !== e[lm_C0]) || (st[1] !== e[lm_C0 + 1]) || (st[2] !== e[lm_C0 + 2]) || (st[3] !== e[lm_C0 + 3])
+        || (st[4] !== e[lm_C0 + 4]) || (st[5] !== e[lm_C0 + 5]) || (st[6] !== e[lm_C0 + 6]) || (st[7] !== e[lm_C0 + 7])) ?
+        lm_Update(st, e);
+    nc = e[lm_N]; n = min(n, nc); bl = lm_BL;
+    xspl = e + lm_H; xnrg = xspl + nc; cmin = xnrg + nc + 2; cmax = cmin + nc; bpk = cmax + nc + lm_NDMax;
+    bufs = bpk + bl; hmin = bufs + nc * bl; hmax = hmin + nc * lm_HN; hpk = hmax + nc * lm_HN;
+    hct = lm_hctab;
+    e[lm_ACT] = n;
+
+    tp = 0; pg = g * e[lm_PG];
+    i = 0;
+    loop(n,
+        xspl[i] = v = src[i] * pg;
+        xnrg[i] += lm_EpsNrg * (v * v - xnrg[i]);
+        tp = max(tp, abs(v));
+        i += 1;
+    );
+
+    lim = e[lm_LIM]; ri = e[lm_RI]; wp = e[lm_WP]; ds = e[lm_DS]; atk = e[lm_AS];
+    rlp = lim; // releasepeak
+    (ri < e[lm_RS]) ? (
+        // 0.5 + 0.5*cos(x*$pi), read in hctab with linear interpolation
+        hp = ri * e[lm_RLS]; hk = hp | 0;
+        rlp = lim + (e[lm_RSV] - lim) * (hct[hk] + (hp - hk) * (hct[hk + 1] - hct[hk]));
+        ri += 1;
+    );
+    pk = max(rlp, tp);
+
+    (pk < lim) ? (
+        pk = lim;
+        e[lm_RSV] = lim;
+        ri = srate;
+    ) : (tp == pk) ? (
+        // It's a new peak
+        pk *= lm_Over; // Add just a little bit extra, in the hopes that we don't have to do this again soon
+        // For future decay
+        e[lm_RSV] = pk;
+        ri = 0;
+        // Attempt to extend an existing attack
+        i = 1;
+        sp = lim; // startpeak
+        fa = 0; fi = 0; // foundabove, foundintersection
+        ii = -1; // intersectionindex
+        bc = -1; // bestcorrection
+        bi = ds - 1; // bestindex
+        bsp = lim; // beststartpeak
+        while ((i < atk) && !fi) (
+            hp = lm_HCN - i * e[lm_ATS]; hk = hp | 0;
+            w = 1 - (hct[hk] + (hp - hk) * (hct[hk + 1] - hct[hk])); // window
+            rdp = wp - i;
+            (rdp < 0) ? (rdp += bl);
+            op = bpk[rdp];
+            nsp = pk + (op - pk) / (1 - w);
+            (nsp > sp) ? (
+                // Keep track of the smallest alteration
+                df = (nsp - sp) * (1 - w);
+                ((bc < 0) || (df < bc)) ? (
+                    bc = df;
+                    bi = i;
+                    bsp = nsp;
+                );
+                sp = nsp;
+                ii = i;
+                fa = 1;
+            ) : fa ? (
+                fi = 1;
+            );
+            i += 1;
+        );
+        fi ? (
+            i = 0;
+            while (i < ii) (
+                hp = lm_HCN - i * e[lm_ATS]; hk = hp | 0;
+                w = 1 - (hct[hk] + (hp - hk) * (hct[hk + 1] - hct[hk]));
+                rdp = wp - i;
+                (rdp < 0) ? (rdp += bl);
+                bpk[rdp] = sp + (pk - sp) * w;
+                i += 1;
+            );
+        ) : (
+            i = 0;
+            ib = 1 / bi;
+            while (i < bi) (
+                hp = lm_HCN - i * e[lm_ATS]; hk = hp | 0;
+                w = 1 - (hct[hk] + (hp - hk) * (hct[hk + 1] - hct[hk]));
+                rdp = wp - i;
+                (rdp < 0) ? (rdp += bl);
+                np = bsp + (pk - bsp) * w;
+                fr = 1 - i * ib;
+                fw = 1 - (1 - fr) * (1 - fr);
+                bpk[rdp] += (np - bpk[rdp]) * fw;
+                i += 1;
+            );
+        );
+    );
+
+    i = 0;
+    loop(n,
+        pb = bufs + i * bl;
+        pb[wp] = xspl[i];
+        i += 1;
+    );
+    bpk[wp] = pk;
+    wp += 1;
+    (wp >= bl) ? (wp = 0);
+    rdp = wp - ds;
+    (rdp < 0) ? (rdp += bl);
+    // never below limit : the buffer may hold zeros (start) or values computed for a lower limit (setting change)
+    op = max(bpk[rdp], lim);
+    (op > lim) ? (
+        // The gain reduction limit/oldpeak is split : (1-sclpeak) as a linear gain B, sclpeak by the soft clipper, so that
+        // dist(oldpeak) == limit.
+        kb = (lim / op) ^ (1 - e[lm_SP]);
+        ka = kb / lim - 1 / op; // B must be computed first
+    ) : (
+        kb = 1; ka = 0;
+    );
+    e[lm_A] = ka; e[lm_B] = kb;
+    xv = e[lm_XV];
+    i = 0;
+    loop(n,
+        pb = bufs + i * bl;
+        // soft clipper, dist(u) = B*u/(A*abs(u) + 1)
+        u = pb[rdp];
+        v = xv * (kb * u / (ka * abs(u) + 1));
+        add ? (dst[i] += v) : (dst[i] = v);
+        // display history (input, aligned with the output)
+        cmin[i] = min(cmin[i], u);
+        cmax[i] = max(cmax[i], u);
+        i += 1;
+    );
+    e[lm_CP] = max(e[lm_CP], op);
+    e[lm_RED] = op / lim; // the gain reduction (the pad shows its max since the last frame, lm_REDM)
+    e[lm_REDM] = max(e[lm_REDM], e[lm_RED]);
+
+    ((e[lm_HC] += 1) >= lm_HStep) ? (
+        // close the bucket, for all channels (stale values for inactive ones)
+        hp = e[lm_HP]; ih = hp;
+        i = 0;
+        loop(nc,
+            hmin[ih] = cmin[i]; hmax[ih] = cmax[i];
+            cmin[i] = lm_Huge; cmax[i] = -lm_Huge;
+            ih += lm_HN; i += 1;
+        );
+        hpk[hp] = e[lm_CP]; e[lm_CP] = 0;
+        hp += 1;
+        (hp >= lm_HN) ? (hp = 0);
+        e[lm_HP] = hp;
+        e[lm_HC] = 0;
+    );
+    e[lm_RI] = ri; e[lm_WP] = wp;
+);
+
+// the gain reduction (dB, >= 0) : its max since the last call (@gfx : the pad) ; e === 0 : 0
+function lm_Reduction(e) local(r)
+(
+    (e > 0) ? (
+        r = 20 * log10(max(1, e[lm_REDM]));
+        e[lm_REDM] = 0;
+        r;
+    ) : 0;
+);
+
+// the latency (ms) : the anticipation of the settings st
+function lm_Latency(st)
+(
+    min(max(1, ceil(max(0.1, min(lm_MaxAtt, st[6])) * srate / 1000)), lm_BL - 2) * 1000 / srate;
+);
+
+// Sort the n loudest channels into tops[] (unused slots stay = nc) ; silent channels (energy <= lm_NrgMin) are ignored
+function lm_Ord(e, n) local(nc, xnrg, tops, ip, j, v)
+(
+    nc = e[lm_N]; xnrg = e + lm_H + nc; tops = xnrg + nc + 2 + 2 * nc;
+    j = 0; loop(n, tops[j] = nc; j += 1;);
+    ip = 0;
+    loop(e[lm_ACT],
+        v = xnrg[ip];
+        ((v > lm_NrgMin) && (v > xnrg[tops[n - 1]])) ? (
+            j = n - 1;
+            while ((j > 0) && (v > xnrg[tops[j - 1]])) (
+                tops[j] = tops[j - 1]; j -= 1;
+            );
+            tops[j] = ip;
+        );
+        ip += 1;
+    );
+    tops;
+);
+
+function lm_ChnColor(k)
+(
+    (k == 0) ? ui_color(64, 128, 192) :      // blue
+    (k == 1) ? ui_color(218, 168, 64) :      // yellow
+    (k == 2) ? ui_color(0x22, 0x8B, 0x22) :  // green
+    (k == 3) ? ui_color(0xE0, 0x40, 0x30) :  // red
+    (k == 4) ? ui_color(0x9A, 0x60, 0xD0) :  // purple
+    (k == 5) ? ui_color(0x30, 0xC0, 0xC0) :  // cyan
+    (k == 6) ? ui_color(0xF0, 0x80, 0x20) :  // orange
+               ui_color(0xE0, 0x70, 0xB0);   // pink
+);
+
+function lm_ValY(v)
+(
+    ui_top() + max(0, min(1, 0.5 * (1 - v))) * ui_height();
+);
+
+// the response of the soft clipper (the current rect) ; e === 0 : the background only
+function lm_DrawResponse(e) local(i, x, y, ref, u, ka, kb, lim)
+(
+    ui_push();
+    ui_retina(1);
+    control_background_passive();
+    (e > 0) ? (
+        ka = e[lm_A]; kb = e[lm_B]; lim = e[lm_LIM];
+        ui_push(0.2);
+            ref = lim * 2;
+            ui_color(192, 0, 0);
+            y = lm_ValY(lim / ref);
+            gfx_line(ui_left(), y, ui_right() - 1, y);
+            y = lm_ValY(-lim / ref);
+            gfx_line(ui_left(), y, ui_right() - 1, y);
+        ui_pop();
+        i = 0;
+        while (i < ui_width()) (
+            x = 2 * i / (ui_width() - 1) - 1;
+            u = x * ref; y = lm_ValY((kb * u / (ka * abs(u) + 1)) / ref); // dist(u)/ref
+            (i == 0) ? (
+                gfx_x = ui_left() + i;
+                gfx_y = y;
+            ) : (
+                gfx_lineto(ui_left() + i, y);
+            );
+            i += 1;
+        );
+    );
+    control_finish_passive();
+    ui_pop();
+);
+
+// Draw the history (oldest bucket on the left) : one min/max line for each column of pixels
+function lm_DrawHist(e, bmin, bmax, multiplier)
+local(width, i, r, r2, b, sp, low, high, x)
+(
+    width = ui_width();
+    sp = e[lm_HP]; // snapshot, the audio thread moves it
+    i = 0;
+    while (i < width) (
+        r = floor(i * lm_HN / width);
+        r2 = max(r + 1, floor((i + 1) * lm_HN / width));
+        b = (sp + r) % lm_HN;
+        low = bmin[b]; high = bmax[b];
+        r += 1;
+        while (r < r2) (
+            b = (sp + r) % lm_HN;
+            low = min(low, bmin[b]);
+            high = max(high, bmax[b]);
+            r += 1;
+        );
+        x = ui_left() + i;
+        gfx_line(x, lm_ValY(low * multiplier), x, lm_ValY(high * multiplier));
+        i += 1;
+    );
+);
+
+// the history of the loudest channels and of the peak envelope (the current rect ; the channels numbered off + 1 ...) ;
+// e === 0 : the background only
+function lm_DrawPeaks(e, off) local(scale, y, k, n, f, df, ch, nc, lim, hmin, hmax, hpk, tops)
+(
+    ui_push();
+    ui_retina(1);
+    ui_color(0, 0, 0);
+    ui_fill();
+    (e > 0) ? (
+        nc = e[lm_N]; lim = e[lm_LIM];
+        scale = 0.5 * e[lm_ZM];
+        hmin = e + lm_H + nc + (nc + 2) + 2 * nc + lm_NDMax + lm_BL + nc * lm_BL;
+        hmax = hmin + nc * lm_HN; hpk = hmax + nc * lm_HN;
+        ui_color(255, 0, 0);
+        y = ui_top() + 0.5 * (1 - lim * scale) * ui_height();
+        gfx_line(ui_left(), y, ui_right() - 1, y);
+        y = ui_top() + 0.5 * (1 + lim * scale) * ui_height();
+        gfx_line(ui_left(), y, ui_right() - 1, y);
+
+        n = max(1, min(e[lm_ND], e[lm_ACT]));
+        tops = lm_Ord(e, n);
+
+        // loudest first, each drawn a bit smaller (1.02 ... 0.30) so that they stay visible
+        df = (n > 1) ? 0.72 / (n - 1) : 0;
+        f = 1.02; k = 0;
+        loop(n,
+            ch = tops[k];
+            (ch < nc) ? (
+                lm_ChnColor(k);
+                lm_DrawHist(e, hmin + ch * lm_HN, hmax + ch * lm_HN, scale * f);
+            );
+            f -= df; k += 1;
+        );
+        ui_color(255, 255, 255);
+        lm_DrawHist(e, hpk, hpk, scale);
+        lm_DrawHist(e, hpk, hpk, -scale);
+
+        // legend : numbers of the displayed channels
+        gfx_x = ui_left() + 6; gfx_y = ui_top() + 4;
+        k = 0;
+        loop(n,
+            ch = tops[k];
+            (ch < nc) ? (
+                lm_ChnColor(k);
+                gfx_drawnumber(off + ch + 1, 0);
+                gfx_x += gfx_texth; // spacing : one character height
+            );
+            k += 1;
+        );
+    );
+    control_finish_passive();
+    ui_pop();
+);
+
+// the display of the plugin in the current rect : the response on the left (a square, at most a quarter of the width),
+// the history on the right
+function lm_Draw(e, off) local(w)
+(
+    ui_push();
+        w = min(ui_height(), floor(ui_width() / 4));
+        ui_split_left(w);
+            ui_pad(1, 1, 2, 1);
+            lm_DrawResponse(e);
+        ui_pop();
+        ui_pad(1, 1, 1, 1);
+        lm_DrawPeaks(e, off);
+    ui_pop();
+);

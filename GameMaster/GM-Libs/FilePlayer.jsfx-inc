@@ -3168,6 +3168,19 @@ function pns_Host_Modules(itdsp)
     blockDispNames[blockScheduler] = "Scheduler";
     blockProcessesMgr = (itdsp += 1);
     blockDispNames[blockProcessesMgr] = "Processes Manager";
+    // the modules "VU meter A" ... "D" and "Limiter A" ... "D" on the outputs (2026-11-11, see GM-Meters-Modules ; after
+    // "Processes Manager" : the numbers of the modules are saved), in the sub-menu "Effects" (no summary module)
+    blockFxMeter0 = itdsp + 1; // blockFxMeter0 ... blockFxMeter0 + 7 (FM_NM)
+    blockDispNames[(itdsp += 1)] = "VU meter A";
+    blockDispNames[(itdsp += 1)] = "VU meter B";
+    blockDispNames[(itdsp += 1)] = "VU meter C";
+    blockDispNames[(itdsp += 1)] = "VU meter D";
+    blockDispNames[(itdsp += 1)] = "Limiter A";
+    blockDispNames[(itdsp += 1)] = "Limiter B";
+    blockDispNames[(itdsp += 1)] = "Limiter C";
+    blockDispNames[(itdsp += 1)] = "Limiter D";
+    pns_GrpTtl[0] = ">Effects"; pns_GrpSum[0] = 0; pns_GrpFst[0] = blockFxMeter0; pns_GrpNb[0] = 8;
+    pns_GrpCnt = 1;
     itdsp;
 );
 
@@ -3179,6 +3192,19 @@ pns_Init();
 mkModuleMenu();
 memoryBox1[19] = blockMemory1; // for keepBlockInfos
 memoryBox2[19] = blockMemory2;
+
+// The modules "VU meter A" ... "D" and "Limiter A" ... "D" (2026-11-11) : the engines of the plugins
+// Multichannel_VU_meter and SmoothMultiLimiter (GM-Meters) on the outputs (GM-Meters-Modules ; static memory)
+fm_HasIn = 0;
+<? include("GM-Libs/GM-Meters.jsfx-inc"); ?>
+<? include("GM-Libs/GM-Meters-Modules.jsfx-inc"); ?>
+fm_Init();
+// the objects kept by the garbage collector (gc_mark_active marks mm_usr_prot ; until 2026-11-11 the File Player had
+// none, mm_usr_prot was 0) : the work areas of these modules (between mm_lowblocks and mm_highblocks)
+mm_usr_prot_siz = 8; mm_usr_prot_ptr = 0;
+mm_usr_prot = make_array(mm_usr_prot_siz);
+mm_usr_prot[mm_usr_prot_ptr] = fm_ptr; mm_usr_prot_ptr += 1;
+fm_buf = make_array(128); // the samples of the outputs, for the modules (@sample)
 
 // Default configuration : the first tab as before (1 pane : status and log)
 serialBlock[Pr7_StudConf] = 1;
@@ -3592,6 +3618,8 @@ mSL_log(SysLogBox, "*** File Player initialized ***");
 @block
 
 gm_time_keep(); // shared gmem time fields, if nobody keeps them (see mSL_clip_lib)
+// the modules "VU meter", "Limiter" : the work areas prepared by @gfx (see GM-Meters-Modules)
+fm_Block();
 
 // Sample counter received from the GamePlayer (channels 1-2) : it must advance at each block.
 // Without it, the sample dated events (smplNewEV) would never happen : say it in the system log.
@@ -5852,15 +5880,27 @@ ActivePlaying ? (
 
 
 
+// the modules "Limiter", "VU meter" on the outputs (see GM-Meters-Modules) : the samples of the outputs, changed in place
+fm_act ? (
+    s__n = min(num_ch, 128);
+    s__i = 0; loop(s__n, fm_buf[s__i] = spl(s__i); s__i += 1;);
+    fm_Sample(1, fm_buf, s__n);
+    s__i = 0; loop(s__n, spl(s__i) = fm_buf[s__i]; s__i += 1;);
+);
+
 
 @serialize
 // The tabs names and the tabs and panes configuration (see pns_Serialize, mSL_Panes.jsfx-inc)
 pns_Serialize();
+// The settings of the modules "VU meter", "Limiter" (see GM-Meters-Modules)
+fm_Serialize();
 
 
 @gfx
 gfxCurrT = time_precise() + timeD;
 gfxWStat = gfx_getchar(65536);
+// the work areas of the modules "VU meter", "Limiter" (even when the window is closed : see GM-Meters-Modules)
+fm_Gfx(0, min(num_ch, 128));
 
 
 mSL_loc_tim = max(mSL_loc_tim - 1, 0);
@@ -7529,6 +7569,9 @@ function show_Module(igb)
     ) :
     (igb === blockProcessesMgr) ? (
         show_ProcessesMgr("Processes Manager", blockProcessesMgr);
+    ) :
+    ((igb >= blockFxMeter0) && (igb < blockFxMeter0 + FM_NM)) ? (
+        show_FxMeter_Pad(igb, igb - blockFxMeter0);
     );
 );
 

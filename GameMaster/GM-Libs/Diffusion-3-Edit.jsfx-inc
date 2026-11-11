@@ -31,7 +31,8 @@
           the points outside go to its walls (Undo : after Free again) (left : the other one ; right : menu)
         15 Bary on / off : the barycentre of the selection shown, its coordinates in the column (both clics)
         16 Proj on / off : the projections of the current point (or of the barycentre) shown (both clics)
-        17 Action (both clics : menu : rename, clear, copy another Edit, load the speakers or the sources of "Space 3D",
+        17 Action (both clics : menu : rename, clear, copy another Edit, load the speakers of Diffusion or the source of
+          the projector of the last view "Space",
           load a layout of its library, export the configuration : mSL table (to load again), .lay, hppos, trajectory
           .xml)
     The column at the left, the current point and the selection :
@@ -98,9 +99,10 @@
         Spaces (.xml : Trajectory closed, P x y z end 0 ; the curves sampled, 16 points at most each, ed_Path). Points
         (or a path) beyond 1 : first moved (their barycentre at the origin), then reduced (ed_Fit, ed_FitBuf). A .lay
         or .ala file dropped on the module : its layout (a menu for a library) becomes the configuration ; the menu
-        Action also loads a layout of the library of "Space 3D". "Space 3D" loads a configuration on request (its menus
-        of the speakers, of the sources, of the trajectories A and B : sx_edReq, sx_edSrc, ed_Frame), fitted into
-        [-1, 1] in the same way ; a trajectory becomes its trajectory "File".
+        Action also loads a layout of the library of "Space 3D". The path of an editor is a trajectory of the spatial
+        projectors (2026-11-11, Diffusion-3-Spatial) : a live link (the kinds Edit A ... D of the menus of the
+        trajectories of the views "Space A" ... "D" : tr_EdSync copies it, fitted into [-1, 1], at each change), or a
+        copy into the library of trajectories (Action : ed_ToLib ; module "Trajectories" : "copy from Edit X").
         The configuration for mSL (2026-11-10) : table(data( Edit A name "..." kind Trajectory closed On smooth On free
         Off point x y z bend dx dy dz ... )) (Data/name-d3-EditA-table-date.mSL) : the points as they are, in their
         order (no number : a point added or removed in the file renumbers the next ones), with their bends ; dropped on a module Edit, it is loaded there again (elsewhere : in the module named in the file ; read by
@@ -194,7 +196,6 @@ ed_mf = make_array(ED_NV);          // the frame (gfx_executed) where they were 
 ed_hsc = make_array(ED_NV * ED_MAXP * 3); // the handles of the segments in the last frame : x, y, depth (> 0 : shown)
 ED_NPATH = 2048;                    // a trajectory sampled (ed_Path) : at most ED_NPATH points
 ed_pth = make_array(3 * ED_NPATH + 6);
-ed_trj8 = make_array(SX_MAXTRJ * s3d_st); // a trajectory for "Space 3D" (s3d_settraj : entries of s3d_st values)
 ed_s0 = ed_s1 = 0;                  // the segment of ed_SegCtl : its points, its control points ed_c1x ..., ed_c2x ...
 ed_c1x = ed_c1y = ed_c1z = ed_c2x = ed_c2y = ed_c2z = 0;
 ed_bx = ed_by = ed_bz = 0;          // a point of a segment (ed_SegAt)
@@ -1880,35 +1881,16 @@ local(st, f, n, k, p, q, fr, out)
     ui_GFXdoNow |= 4;
 );
 
-// Each frame of @gfx (called by Diffusion-3, after the drops) : a load asked by "Space 3D" (its menus of the speakers
-// and of the sources : sx_edReq, sx_edSrc ; the points fitted into [-1, 1]) ; the files written
+// Each frame of @gfx (called by Diffusion-3, after the drops) : a load asked by "Space 3D" (sx_edReq, sx_edSrc : no
+// more asked since the views "Space A" ... "D", 2026-11-11 ; the points fitted into [-1, 1]) ; the files written (by the
+// editors, or by the module "Trajectories")
 function ed_Frame()
 local(e, n, k, q, r, st)
 (
     // the configurations read by the mSL "table"
     e = 0; loop(ED_NV, ed_tq[e] ? ( ed_tq[e] = 0; ed_TbTake(e); ); e += 1;);
-    // a trajectory (sx_edSrc 2 : trajectory A ; 3 : B) : the trajectory "File" of "Space 3D", sampled (ed_Path)
-    ((sx_edReq > 0) && (sx_edSrc >= 2)) ? (
-        e = sx_edReq - 1; sx_edReq = 0;
-        ((e >= 0) && (e < ED_NV)) ? (
-            n = ed_Path(e, ed_pth, SX_MAXTRJ);
-            ed_FitBuf(ed_pth, n, 1);
-            k = 0;
-            loop(n,
-                q = ed_trj8 + k * s3d_st;
-                q[s3d_fx] = ed_pth[3 * k]; q[s3d_fy] = ed_pth[3 * k + 1]; q[s3d_fz] = ed_pth[3 * k + 2];
-                k += 1;
-            );
-            st = ed_St(e);
-            s3d_settraj(ed_trj8, n, st[ed_sClosed]);
-            ed_LName(e, #sx_trjname);
-            (sx_edSrc === 3) ? (sx_trajB = s3d_TrjFile) : (sx_traj = s3d_TrjFile);
-            sprintf(#ed_lg, "Space 3D : the trajectory %s (%s), %d points%s", #sx_trjname, (sx_edSrc === 3) ? "B" : "A", n,
-                ed_fitd ? sprintf(#ed_l2, " (beyond the room : fitted, ratio %.4f)", ed_fitr) : "");
-            mSL_log(SysLogBox, #ed_lg);
-            ui_GFXdoNow |= 4;
-        );
-    );
+    // (the trajectories of the editors : a live link, tr_EdSync in Diffusion-3-Trajectories ; or a copy into the library,
+    // ed_ToLib)
     (sx_edReq > 0) ? (
         e = sx_edReq - 1; sx_edReq = 0;
         ((e >= 0) && (e < ED_NV)) ? (
@@ -1939,7 +1921,7 @@ local(e, n, k, q, r, st)
     );
     ((r = xpt_Poll()) !== 0) ? (
         (r > 0) ? (
-            sprintf(#ed_lg, "Edit : %s written in the folder of the project", #ed_xf);
+            sprintf(#ed_lg, "Export : %s written in the folder of the project", #ed_xf);
             mSL_log(SysLogBox, #ed_lg);
         ) : (
             ed_Err(2483, ed_xe, sprintf(#ed_l2, "the file %s can't be written", #ed_xf));
@@ -1985,12 +1967,37 @@ local(st, i, m)
     m;
 );
 
+// The path of the editor e copied into the trajectory i of the library of the spatial projectors (Diffusion-3-Spatial ;
+// i < 0 : that of the same name, or the first one empty), fitted into the room if it goes beyond it ; returns i, or -1
+function ed_ToLib(e, i)
+local(st, n)
+(
+    st = ed_St(e);
+    (strlen(ed_nm[e]) > 0) ? strcpy(#ed_ln, ed_nm[e]) : sprintf(#ed_ln, "Edit %c", 'A' + e);
+    (st[ed_sN] < 2) ? (
+        ed_Err(2476, e, "a trajectory needs 2 points at least"); -1;
+    ) : (
+        (i < 0) ? (i = sp_TrjFind(#ed_ln));
+        (i < 0) ? (
+            ed_Err(2475, e, "the library of trajectories is full (128) : clear one (module Trajectories)"); -1;
+        ) : (
+            n = ed_Path(e, ed_pth, SP_MAXTRJ);
+            ed_FitBuf(ed_pth, n, 1);
+            sp_TrjPut(i, ed_pth, n, 3, st[ed_sClosed], #ed_ln);
+            sprintf(#ed_lg, "Edit %c : its path (%d points%s) copied into the trajectory T%d \"%s\"", 'A' + e, n,
+                ed_fitd ? sprintf(#ed_l2, ", fitted into the room, ratio %.4f", ed_fitr) : "", i + 1, #ed_ln);
+            mSL_log(SysLogBox, #ed_lg);
+            i;
+        );
+    );
+);
+
 // The menu Action
 function ed_ActMenu(e)
 local(st, c, f)
 (
     st = ed_St(e);
-    sprintf(#ed_mnu, "Rename...|Clear all the points||%sCopy Edit A|%sCopy Edit B|%sCopy Edit C|%sCopy Edit D||Load the speakers of Space 3D|Load the sources of Space 3D|Load a layout of the library (Space 3D)...||Export : configuration (mSL table, to load again)|Export : layout of GRM Spaces (.lay)|Export : speakers of Diffusion (hppos, .mSL)|Export : trajectory of GRM Spaces (.xml)",
+    sprintf(#ed_mnu, "Rename...|Clear all the points||%sCopy Edit A|%sCopy Edit B|%sCopy Edit C|%sCopy Edit D||Load the speakers of Diffusion (hppos)|Load the source of the projector of the last view Space|Load a layout of the library (files dropped)...|Copy the path into the library of trajectories (same name, or free)||Export : configuration (mSL table, to load again)|Export : layout of GRM Spaces (.lay)|Export : speakers of Diffusion (hppos, .mSL)|Export : trajectory of GRM Spaces (.xml)",
         (e === 0) ? "#" : "", (e === 1) ? "#" : "", (e === 2) ? "#" : "", (e === 3) ? "#" : "");
     gfx_x = mouse_x; gfx_y = mouse_y;
     c = gfx_showmenu(#ed_mnu);
@@ -2007,17 +2014,26 @@ local(st, c, f)
         (strlen(ed_nm[e]) === 0) ? strcpy(ed_nm[e], #sx_spkname);
     ) :
     (c === 8) ? (
-        ed_Keep(e); ed_Load(e, sx_srclay, sx_srcn, 3, 1);
-        (strlen(ed_nm[e]) === 0) ? strcpy(ed_nm[e], #sx_srcname);
+        // the source of the projector of the last view "Space" drawn (2026-11-11 : the sources belong to the projectors,
+        // see Diffusion-3-Spatial)
+        f = 0|serialBlock[Pr7_PrjSpace + sp_lastPrj];
+        ((f > 0) && (f < SP_NSRC) && (sp_srcN[f] > 0)) ? (
+            ed_Keep(e); ed_Load(e, sp_srcP + f * SP_MAXP * 3, sp_srcN[f], 3, 1);
+            (strlen(ed_nm[e]) === 0) ? sprintf(ed_nm[e], "Source %d", f);
+        ) : (
+            sprintf(#ed_lg, "Edit %c : the projector %d has no source", 'A' + e, sp_lastPrj + 1);
+            mSL_log(SysLogBox, #ed_lg);
+        );
     ) :
     (c === 9) ? (
         f = ed_LibMenu(e);
         (f >= 0) ? ed_LibLoad(e, f);
     ) :
-    (c === 10) ? ed_Export(e, 3) :
-    (c === 11) ? ed_Export(e, 0) :
-    (c === 12) ? ed_Export(e, 1) :
-    (c === 13) ? ed_Export(e, 2);
+    (c === 10) ? ed_ToLib(e, -1) :
+    (c === 11) ? ed_Export(e, 3) :
+    (c === 12) ? ed_Export(e, 0) :
+    (c === 13) ? ed_Export(e, 1) :
+    (c === 14) ? ed_Export(e, 2);
 );
 
 // A clic on the cell c of the pad of the configuration e

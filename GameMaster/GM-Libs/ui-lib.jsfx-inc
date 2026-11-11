@@ -52,6 +52,10 @@ set_black_theme_color(210, 130, 80); // some orange as base color
 uix_mouseblocked = 0;
 uix_clickmods = 0; // (JJG) the modifiers (cmd, shift, alt, ctrl) when the last button was pressed
 uix_mouseblock_until = 0; // (JJG) clicks stay blocked at least until this time (see control_jmenu)
+// (JJG 2026-11-11) the buttons that may stay "pressed" in mouse_cap after a gfx_showmenu (set to 67 by the end of the
+// menus : control_jmenu, prv_MenuEnd, vu_MenuEnd) : ignored until seen released ; uix_mcap : mouse_cap without them
+uix_mghost = 0;
+uix_mcap = 0;
 uix_doubleclicktime = 0.2;
 uix_draglimit = 10;
 uix_click1count = uix_click2count = uix_click64count = 0;
@@ -308,7 +312,13 @@ function ui_start(defaultScreen) local(i, click, clickdelta, imgW, imgH, retina_
 		uix_font_dirty = 1;
 		uix_setgfxfont();
 
-		uix_interacted = (!!mouse_cap) || (mouse_cap != uix_mousecap_prev);
+		// (JJG 2026-11-11) after a gfx_showmenu, a button released in the native menu may stay pressed in mouse_cap (macOS :
+		// an entry chosen with a left clic leaves the left button "down" until the next left clic, and the block of the
+		// clics, which waits for all the buttons released, never ended : the right clics were lost) ; such a button
+		// (uix_mghost) is ignored by the clics and by the block until it is seen released : uix_mcap
+		uix_mghost &= mouse_cap;
+		uix_mcap = mouse_cap - (mouse_cap & uix_mghost & 67);
+		uix_interacted = (!!uix_mcap) || (uix_mcap != uix_mousecap_prev);
 		uix_undo_pending ? (
 			sliderchange(-1);
 			uix_undo_pending = 0;
@@ -318,7 +328,7 @@ function ui_start(defaultScreen) local(i, click, clickdelta, imgW, imgH, retina_
 		uix_prev_mouse_y = uix_mouse_y;
 		uix_mouse_x = mouse_x/retina_scaling;
 		uix_mouse_y = mouse_y/retina_scaling;
-		(mouse_cap&67) && (uix_mouse_x != uix_prev_mouse_x || uix_mouse_y != uix_prev_mouse_y) ? uix_interacted = 1;
+		(uix_mcap&67) && (uix_mouse_x != uix_prev_mouse_x || uix_mouse_y != uix_prev_mouse_y) ? uix_interacted = 1;
 
 		uix_scroll_y = mouse_wheel;
 		uix_scroll_x = mouse_hwheel;
@@ -326,9 +336,9 @@ function ui_start(defaultScreen) local(i, click, clickdelta, imgW, imgH, retina_
 		uix_scroll_y || uix_scroll_x ? uix_interacted = 1;
 
 		// (JJG) the modifiers when a button is pressed : a menu opened on release uses them (see control_jmenu)
-		(mouse_cap & 67 & (67 - (uix_mousecap_prev & 67))) ? uix_clickmods = mouse_cap & 0x3C;
-		uix_unclick1 = (!(mouse_cap&1) && uix_mousecap_prev&1);
-		uix_click1 = (mouse_cap&1 && !(uix_mousecap_prev&1)) ? (
+		(uix_mcap & 67 & (67 - (uix_mousecap_prev & 67))) ? uix_clickmods = mouse_cap & 0x3C;
+		uix_unclick1 = (!(uix_mcap&1) && uix_mousecap_prev&1);
+		uix_click1 = (uix_mcap&1 && !(uix_mousecap_prev&1)) ? (
 			clickdelta = time_precise() - uix_click1_t;
 			uix_click1_x = uix_mouse_x;
 			uix_click1_y = uix_mouse_y;
@@ -341,8 +351,8 @@ function ui_start(defaultScreen) local(i, click, clickdelta, imgW, imgH, retina_
 			);
 
 		);
-		uix_unclick2 = (!(mouse_cap&2) && uix_mousecap_prev&2);
-		uix_click2 = (mouse_cap&2 && !(uix_mousecap_prev&2)) ? (
+		uix_unclick2 = (!(uix_mcap&2) && uix_mousecap_prev&2);
+		uix_click2 = (uix_mcap&2 && !(uix_mousecap_prev&2)) ? (
 			clickdelta = time_precise() - uix_click2_t;
 			uix_click2 = 1;
 			uix_click2_x = uix_mouse_x;
@@ -354,8 +364,8 @@ function ui_start(defaultScreen) local(i, click, clickdelta, imgW, imgH, retina_
 				uix_click2count = 1;
 			);
 		);
-		uix_unclick64 = (!(mouse_cap&64) && uix_mousecap_prev&64);
-		uix_click64 = (mouse_cap&64 && !(uix_mousecap_prev&64)) ? (
+		uix_unclick64 = (!(uix_mcap&64) && uix_mousecap_prev&64);
+		uix_click64 = (uix_mcap&64 && !(uix_mousecap_prev&64)) ? (
 			clickdelta = time_precise() - uix_click64_t;
 			uix_click64 = 1;
 			uix_click64_x = uix_mouse_x;
@@ -367,10 +377,10 @@ function ui_start(defaultScreen) local(i, click, clickdelta, imgW, imgH, retina_
 				uix_click64count = 1;
 			);
 		);
-		uix_mousecap_prev = mouse_cap;
+		uix_mousecap_prev = uix_mcap;
 
 		uix_mouseblocked ? uix_click_block(); // Must be first, so unclick events get removed too
-		!(mouse_cap&1) && !(mouse_cap&2) && !(mouse_cap&64) && (time_precise() >= uix_mouseblock_until) ? uix_mouseblocked = 0;
+		!(uix_mcap&1) && !(uix_mcap&2) && !(uix_mcap&64) && (time_precise() >= uix_mouseblock_until) ? uix_mouseblocked = 0;
 
 		// Keyboard
 		!uix_latestchar || !uix_char_consumed ? (

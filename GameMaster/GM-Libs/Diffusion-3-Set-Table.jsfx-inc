@@ -90,9 +90,6 @@ local (tbl, state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, 
                         clearArea();
                         un = 0;
                     ) :
-                    (curcod === kxw_set) ? (
-                        state = 21; un = 0;
-                    ) :
                     (curcod === kxw_pad)   ? (
                         state = 20; padcnt = 0; un = 0;
                     ) :
@@ -114,6 +111,12 @@ local (tbl, state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, 
                     (curcod === kxw_hppos) ? (
                         c = 0; px = tmpwork;
                         state = 54; un = 0;
+                    ) :
+                    (curcod === kxw_source) ? (
+                        state = 21; un = 0;
+                    ) :
+                    (curcod === kxw_trajectory) ? (
+                        state = 62; un = 0;
                     ) :
                     (curcod === kxw_bgcolor) ? (
                         state = 60; un = 0;
@@ -189,6 +192,46 @@ local (tbl, state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, 
                     // Keep the channel number
                     ptconfs[0] = curcod; ptconfs += 1;
                     state = 5; un = 0;
+                ) :
+                ((un === 'idnt') && (curcod === kxw_invert)) ? (
+                    // "conf n : invert m" (2026-11-10) : the transposed configuration of m, defined before : its
+                    // destinations become the sources, with the same gains (the inverse of a grouping or of a permutation,
+                    // e.g. a diffusion of the outputs of a projector, outdiff)
+                    un = 0;
+                    ((ptr < itc) && (mSL_value_type(tbl[ptr]) === 'intg') && ((ip = mSL_v_val) > 0) && (ip < conflsize)
+                        && (ip !== cfnumb) && (conflist[ip] > 0)) ? (
+                        ptr += 1;
+                        c = 1;
+                        loop(chmax,
+                            // the source c : the sources of m that have c as a destination
+                            sz = 0;
+                            pt = conflist[ip] + 1;
+                            while (pt[0] > 0) (
+                                i = pt[0]; pt += 1;
+                                while (pt[0] > 0) (
+                                    (pt[0] === c) ? (
+                                        !sz ? ( ptconfs[0] = c; ptconfs += 1; sz = 1; );
+                                        ptconfs[0] = i; ptconfs[1] = pt[1] * cglvol; ptconfs += 2;
+                                    );
+                                    pt += 2;
+                                );
+                                pt += 1;
+                            );
+                            sz ? ( ptconfs[0] = -1; ptconfs += 1; );
+                            c += 1;
+                        );
+                        // close the configuration (its gains as they are : no normalization, see state 10)
+                        ptconfs[0] = -2; ptconfs += 1;
+                        ptconfs[0] = endmark; ptconfs += 1;
+                        px = mSL_Dyn_Alloc(ptconfs - tmpwork, 'conf', 0);
+                        (px != 0) ? (
+                            ptaddr[0] = px;
+                            memcpy(px, tmpwork, ptconfs - tmpwork);
+                        );
+                        state = 1;
+                    ) : (
+                        xErr = 259; // invert : a configuration defined before (not this one) is expected
+                    );
                 ) : (
                     xErr = 204; // a channel. number is expected
                 );
@@ -620,27 +663,13 @@ local (tbl, state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, 
 
 
                 //===21===//
-                // found : "set"
-                // expect a set number in [1 ... settsize]
-                ((un === 'intg') && (curcod > 0) && (curcod < settsize)) ? (
-                    //This is a set. number
-                    (setlist[curcod] === 0) ? (
-                        // The set number is not used. Save a pointer to it
-                        ptaddr = setlist + curcod;
-                        ptconfs = tmpwork;
-                        // setlist[curcod] = memarea + ptconfs;
-                        // Keep the conf. number
-                        // memarea[ptconfs] = cfnumb = curcod; ptconfs += 1;
-                        ptconfs[0] = curcod; ptconfs += 1;
-                        // pcnf = ptconfs + memarea; // point to the conf start, after the conf. number
-                        ptconfs += 1; // skip the size for now
-                        state = 22; un = 0;
-                    ) : (
-                        xErr = 201; // the set. number is already used
-                    );
+                // "source n : k < x y z, k < x y z, ... ;" (2026-11-11) : the sources of the spatial projectors (see
+                // Diffusion-3-Spatial ; the states 21 ... 24 and 30 were those of the channel sets, unused since
+                // 2026-11-10) ; expect the number of the source
+                ((un === 'intg') && (curcod >= 1) && (curcod < SP_NSRC)) ? (
+                    c = curcod; un = 0; state = 22;
                 ) : (
-                    // syntax error
-                    xErr = 205;
+                    xErr = 2492; // source : a number in [1, 255] is expected
                 );
                 //===21===//
 
@@ -649,10 +678,12 @@ local (tbl, state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, 
 
 
                 //===22===//
+                // source : expect ":"
                 ((un === 'char') && (curcod === ':')) ? (
-                    un = 0;
+                    un = 0; px = tmpwork; sz = 0; state = 23;
+                ) : (
+                    xErr = 2493; // source : ":" expected after its number
                 );
-                state = 23; // consider the ":" optional
                 //===22===//
 
 
@@ -660,14 +691,14 @@ local (tbl, state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, 
 
 
                 //===23===//
-                // expect at least an input channel number in [1 chinmax]
-                ((un === 'intg') && (curcod >= 1) && (curcod <= chinmax)) ? (
-                    // Keep the channel number (in origin 0)
-                    // memarea[ptconfs] = curcod; ptconfs += 1;
-                    ptconfs[0] = curcod - 1; ptconfs += 1;
-                    state = 24; un = 0;
+                // source : expect the number of a point (1 ... SP_MAXP), then "<" (read ahead), at most SP_MAXP points
+                ((un === 'intg') && (curcod >= 1) && (curcod <= SP_MAXP) && (px < tmpwork + SP_MAXP * 4)
+                    && (ptr < itc) && (mSL_value_type(tbl[ptr]) === 'char') && (mSL_v_val === '<')) ? (
+                    ptr += 1;
+                    px[0] = curcod; px += 1; sz = max(sz, curcod);
+                    i = 0; un = 0; state = 24;
                 ) : (
-                    xErr = 204; // a channel. number is expected
+                    xErr = 2494; // source : a point number in [1, 128] followed by "<" is expected (or too many points)
                 );
                 //===23===//
 
@@ -676,54 +707,13 @@ local (tbl, state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, 
 
 
                 //===24===//
-                // expect other input channel numbers in [1 chinmax]
-                ((un === 'intg') && (curcod >= 1) && (curcod <= chinmax)) ? (
-                    // Keep the channel number
-                    // memarea[ptconfs] = curcod; ptconfs += 1;
-                    ptconfs[0] = curcod - 1; ptconfs += 1;
-                    state = 24; un = 0; // keep getting numbers
-                ) :
-                (
-                    (un === 'char') && (curcod === ';') ? (
-                        un = 0;
-                    );
-                    state = 1;
-                    // close the configuration
-                    // memarea[ptconfs] = -3; ptconfs += 1;
-                    // ptconfs[0] = -3; ptconfs += 1;
-                    tmpwork[1] = ptconfs - tmpwork - 2; // keep the size
-                    // pcnf[0] = memarea + ptconfs - pcnf - 2; // keep the size
-                    // Add an end marker
-                    ptconfs[0] = endmark; ptconfs += 1;
-                    // Create an auxiliary work area
-                    auxwork = tmpwork + 132;
-                    memset(auxwork, 0, 132); // clear it
-                    // Mark all referenced channels
-                    ip = 2; // start with 1st channel
-                    while (tmpwork[ip] != endmark) (
-                        (auxwork[tmpwork[ip]] != 0) ? (
-                            xErr = 232; // repeated channel number in a set
-                        );
-                        auxwork[tmpwork[ip]] = 1;
-                        ip += 1;
-                    );
-                    // Fill up the rest of the channels
-                    px = 0; loop (128,
-                        (auxwork[px] === 0) ? (
-                            // add the channel to the list
-                            tmpwork[ip] = px; ip += 1;
-                        );
-                        px += 1;
-                    );
-                    tmpwork[ip] = endmark;
-                    // ask for memory : <number> <size> <128 channels> <endmark>
-                    // px = memalloc(131, ptaddr);
-                    px = mSL_Dyn_Alloc(131, 'chn7', 0);
-                    (px != 0) ? (
-                        ptaddr[0] = px;
-                        // copy the entry in the area
-                        memcpy(px, tmpwork, 131);
-                    );
+                // source : expect the coordinates x, y, z of the point, in [-1, 1]
+                (((un === 'intg') || (un === 'numb')) && (curcod >= -1) && (curcod <= 1)) ? (
+                    px[0] = curcod; px += 1; i += 1;
+                    un = 0;
+                    (i >= 3) ? (state = 30);
+                ) : (
+                    xErr = 2495; // source : a coordinate in [-1, 1] is expected
                 );
                 //===24===//
 
@@ -785,9 +775,6 @@ local (tbl, state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, 
                 ((un === 'idnt') && ((curcod === kxw_conf) || (curcod === kxw_diff))) ? (
                     un = 0; state = 29;
                 ) :
-                ((un === 'idnt') && (curcod === kxw_set)) ? (
-                    un = 0; state = 30;
-                ) :
                 ((un === 'idnt') && (curcod === kxw_prop)) ? (
                     un = 0; state = 44;
                 ) : (
@@ -820,17 +807,25 @@ local (tbl, state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, 
 
 
                 //===30===//
-                // expect a set number in [1 ... settsize]
-                ((un === 'intg') && (curcod > 0) && (curcod < settsize)) ? (
-                    //This is a set. number
-                    (setlist[curcod] != 0) ? (
-                        // free the entry
-                        mSL_Dyn_Free(setlist[curcod]);
-                        setlist[curcod] = 0;
+                // source : "," (the next point) or ";" (the end : the source is kept ; a point not given stays at the
+                // center ; a source defined again replaces the former one)
+                ((un === 'char') && (curcod === ',')) ? (
+                    un = 0; state = 23;
+                ) :
+                ((un === 'char') && (curcod === ';')) ? (
+                    sp_srcN[c] = 0;
+                    memset(sp_srcP + c * SP_MAXP * 3, 0, SP_MAXP * 3);
+                    pt = tmpwork;
+                    while (pt < px) (
+                        ip = c * SP_MAXP * 3 + (pt[0] - 1) * 3;
+                        sp_srcP[ip] = pt[1]; sp_srcP[ip + 1] = pt[2]; sp_srcP[ip + 2] = pt[3];
+                        pt += 4;
                     );
+                    sp_srcN[c] = sz;
+                    sp_defSeq += 1; // (@gfx publishes the layouts again : sp_Gfx)
                     un = 0; state = 1;
                 ) : (
-                    xErr = 221;  // a set number is expected after "remove conf"
+                    xErr = 2496; // source : "," or ";" expected after a point
                 );
                 //===30===//
 
@@ -925,8 +920,13 @@ local (tbl, state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, 
                     (curcod === kxw_color) ? (
                         un = 0; state = 51;
                     ) :
-                    ((curcod === kxw_inset) || (curcod === kxw_outset)) ? (
-                        addprx = (curcod === kxw_inset) ? prx_inset : prx_outset;
+                    ((curcod === kxw_indiff) || (curcod === kxw_outdiff)) ? (
+                        addprx = (curcod === kxw_indiff) ? prx_indiff : prx_outdiff;
+                        un = 0; state = 37;
+                    ) :
+                    (curcod === kxw_space) ? (
+                        // the source of the projector (a spatial projector : see Diffusion-3-Spatial ; 0 : none)
+                        addprx = prx_space;
                         un = 0; state = 37;
                     ) :
                     ((curcod === kxw_pad) || (curcod === kxw_sgi)) ? (
@@ -1009,23 +1009,32 @@ local (tbl, state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, 
 
 
                 //===37===//
-                // Expect a defined set
-                ((un === 'intg') && (curcod >= 0) && (curcod < settsize)) ? (
-                    (setlist[curcod] !== 0) ? (
-                        // keep the set in its appropriate location
-                        ptpro[addprx] = setlist[curcod] +2;
-                    ) :
-                    (curcod === 0) ? (
-                        // use default set
-                        ptpro[addprx] = iostdch;
+                // Expect a defined configuration (indiff, outdiff ; 0 : none, the channels as they are), or a defined
+                // source (space ; 0 : none, the channels go to the outputs)
+                (addprx === prx_space) ? (
+                    ((un === 'intg') && (curcod >= 0) && (curcod < SP_NSRC)) ? (
+                        ((curcod === 0) || (sp_srcN[curcod] > 0)) ? (
+                            ptpro[prx_space] = curcod;
+                        ) : (
+                            xErr = 2497; // space : this source is not defined (before)
+                        );
+                        un = 0; state = 33;
+                    ) : (
+                        xErr = 2498; // space : a source number in [0, 255] is expected
+                    );
+                ) :
+                ((un === 'intg') && (curcod >= 0) && (curcod < conflsize)) ? (
+                    ((curcod === 0) || (conflist[curcod] > 0)) ? (
+                        // keep its number (the projector reads the configuration when it is loaded, see confload)
+                        ptpro[addprx] = curcod;
                     ) : (
                         // syntax error
-                        xErr = 230; // This set is undefined
+                        xErr = 230; // This configuration is undefined
                     );
                     un = 0; state = 33;
                 ) : (
                     // syntax error
-                    xErr = 231; // a set number is expected
+                    xErr = 231; // a configuration number is expected
                 );
                 //===37===//
 
@@ -1437,6 +1446,7 @@ local (tbl, state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, 
                     HP_Positions = mSL_Dyn_Alloc((c+1)*4, 'hpps', mSL_StM_FlClear);
                     // protect it from the garbage collector (it was freed, then reused : garbage HP numbers)
                     (mm_usr_prot_hpps > 0) ? mm_usr_prot[mm_usr_prot_hpps] = HP_Positions;
+                    sp_defSeq += 1; // (the speakers of the spatial projectors : sp_Gfx)
                     pt = tmpwork;
                     while (pt < px) (
                         ip = pt[0] * 4; // 1st elt. is HP number
@@ -1476,6 +1486,7 @@ local (tbl, state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, 
                 ((un === 'intg') && (curcod >= 0) && (curcod <= 0xFFFFFF)) ? (
                     un = 0;
                     colorlimits(c, curcod);
+                    cg_bgSet = 1; cg_bg1 = c; cg_bg2 = curcod; // (saved with the project : Diffusion-3-Configurations)
                     state = 1;
                 ) : (
                     // syntax error
@@ -1487,9 +1498,89 @@ local (tbl, state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, 
             ):(
 
 
+                (state<64) ? ((state<63) ? (
+
+
                 //===62===//
-                xErr=62;
+                // "trajectory n "name" closed|open : x y z, x y z, ... ;" (2026-11-11) : the trajectory Tn of the library
+                // of the spatial projectors (see Diffusion-3-Spatial ; the name and closed / open are optional : no name,
+                // open) ; expect its number
+                ((un === 'intg') && (curcod >= 1) && (curcod <= SP_NTRJ)) ? (
+                    c = curcod - 1; i = 0; px = -1; ip = 0;
+                    un = 0; state = 63;
+                ) : (
+                    xErr = 2470; // trajectory : a number in [1, 128] is expected
+                );
                 //===62===//
+
+
+                ) : (
+
+
+                //===63===//
+                // trajectory : its name, closed or open, then ":"
+                (un === 'strg') ? (
+                    px = curcod; un = 0;
+                ) :
+                ((un === 'idnt') && ((curcod === kxw_closed) || (curcod === kxw_open))) ? (
+                    i = (curcod === kxw_closed); un = 0;
+                ) :
+                ((un === 'char') && (curcod === ':')) ? (
+                    un = 0; state = 64;
+                ) : (
+                    xErr = 2471; // trajectory : a "name", closed, open or ":" is expected
+                );
+                //===63===//
+
+
+                );) : ((state<65) ? (
+
+
+                //===64===//
+                // trajectory : the coordinates x, y, z of a point (in [-10, 10] ; at most SP_MAXTRJ points), in sp_trTmp
+                (((un === 'intg') || (un === 'numb')) && (curcod >= -10) && (curcod <= 10) && (ip < SP_MAXTRJ * 3)) ? (
+                    sp_trTmp[ip] = curcod; ip += 1;
+                    un = 0;
+                    ((ip % 3) === 0) ? (state = 65);
+                ) : (
+                    xErr = 2472; // trajectory : a coordinate in [-10, 10] is expected (or more than 1024 points)
+                );
+                //===64===//
+
+
+                ) : ((state<66) ? (
+
+
+                //===65===//
+                // trajectory : "," (the next point) or ";" (the end : the trajectory replaces the former one)
+                ((un === 'char') && (curcod === ',')) ? (
+                    un = 0; state = 64;
+                ) :
+                ((un === 'char') && (curcod === ';')) ? (
+                    memcpy(sp_trP + c * SP_MAXTRJ * 3, sp_trTmp, ip);
+                    sp_trN[c] = floor(ip / 3); sp_trC[c] = i;
+                    // its name (characters as numbers, see sp_NmSet)
+                    pt = sp_trNm + c * SP_NMLEN;
+                    sz = (px >= 0) ? min(SP_NMLEN - 1, strlen(px)) : 0;
+                    sum = 0; loop(sz, pt[sum] = str_getchar(px, sum, 'cu'); sum += 1;);
+                    pt[sz] = 0;
+                    sp_libSeq += 1; // (the paths built again : sp_Gfx)
+                    un = 0; state = 1;
+                ) : (
+                    xErr = 2473; // trajectory : "," or ";" expected after a point
+                );
+                //===65===//
+
+
+                ) : (
+
+
+                //===66===//
+                xErr=66;
+                //===66===//
+
+
+                );););
 
 
             );););););););

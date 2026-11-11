@@ -652,7 +652,9 @@ its_Efx_TyNoise = 15; // noises : colors, impulses, chaotic maps (see exec_noise
 its_Efx_TyRandom = 16; // random control signals (see exec_random)
 its_Efx_TyMath = 17; // operations on cables (see exec_math)
 its_Efx_TyRing = 18; // ring modulator, AM, frequency shifter (see exec_ring)
-its_Efx_TyCnt = 19; // count of types
+its_Efx_TyVU = 19; // the VU meter of the plugin Multichannel_VU_meter (see exec_vu, GM-Meters ; 2026-11-11)
+its_Efx_TyLimiter = 20; // the Smooth Limiter of the plugin SmoothMultiLimiter (see exec_limiter, GM-Meters ; 2026-11-11)
+its_Efx_TyCnt = 21; // count of types
 // Filter modes (its_Efx_Par3)
 its_FltLP1 = 0; // low pass, 1 pole
 its_FltHP1 = 1; // high pass, 1 pole
@@ -690,6 +692,7 @@ its_MxH = 24; // words of its header (after the one of the work area)
 its_MxLW = 10; // words per line
 its_SatHarm = 16; // count of the weights of the mode Cheb. sum (its_Efx_Harm1)
 its_HarmH = 90; // height of the editor of the weights (pixels)
+its_VuGraphH = 160; // VU meter, Limiter : the least height of their graphic area (they take all the height left)
 its_SatOSCnt = 4; // oversampling (its_Efx_Par5) : 1, 2, 4 or 8 times
 // words per channel in the work area : previous input, DC blocker (2), anti-aliasing biquads (4 x 2), ADAA : the previous
 // input of the shape and its primitive (see its_Sat_Adaa)
@@ -919,6 +922,8 @@ KW_rdwk = 'rdwk'; // the work area of a reader in mode Stretch (its_Rdr_Work)
 <? include("GM-Libs/mSL_clip_lib.jsfx-inc"); ?>
 // ui-lib-3
 <? include("GM-Libs/ui-lib-JJ-GUI.jsfx-inc"); ?>
+// The engines of the VU meter and of the Smooth Limiter (the effect types "VU meter" and "Limiter")
+<? include("GM-Libs/GM-Meters.jsfx-inc"); ?>
 // The mSL compiler
 <? include("GM-Libs/mSL_Comp_lib.jsfx-inc"); ?>
 
@@ -1442,6 +1447,9 @@ p_fxRgAmt = idx; idx += 1; // the amount (AM)
 p_fxRgMix = idx; idx += 1; // the mix (%)
 p_fxRgModD1 = idx; idx += 3; // depths of the 3 modulation inputs : frequency (octaves), amount, mix
 p_fxRgModA1 = idx; idx += 3; // their attenuverters [-10 ... 10]
+p_fxVuTime = idx; idx += 1; // VU meter : the sample time (ms)
+p_fxVuHl = idx; idx += 1; // the highlighted channel (0 : none)
+p_fxLmLimit = idx; idx += 8; // Limiter : limit, pre-gain, volume out, anticipation, release, distortion, zoom, channels shown
 its_ParLast = idx - 1; // the last parameter of Interstys : in its range (paramNMax), see the error 2716
 
 // Global variables
@@ -1477,6 +1485,9 @@ ui_lib_start = mSL_StM_BlockStart('uilb'); // ui lib block
 ui_lib_end = ui_setup(ui_lib_start);
 mSL_StM_BlockEnd(ui_lib_end);
 gfxInit();
+// the VU meter and the limiter (GM-Meters) : the table of the limiter, the offscreen image of the meters
+lm_hctab = make_array(lm_TabSize); lm_InitTab(lm_hctab);
+ui_reserve_image(VU_IMG);
 //====== Init "ui-lib-JJ-GUI.jsfx-inc" ======
 studPrefDispPanes = 2;
 studPrefDispSize = 1;
@@ -2546,11 +2557,21 @@ local (ns)
     ) :
     (fx[its_Efx_Type] === its_Efx_TyRing) ? (
         its_FxW_Hdr + its_RgH + its_RgCW * max(1, min(128, floor(fx[its_Efx_CCnt])));
+    ) :
+    // the VU meter, the Limiter : the area of their engine (GM-Meters) after the header
+    (fx[its_Efx_Type] === its_Efx_TyVU) ? (
+        its_FxW_Hdr + vu_Size(max(1, min(128, floor(fx[its_Efx_CCnt]))));
+    ) :
+    (fx[its_Efx_Type] === its_Efx_TyLimiter) ? (
+        its_FxW_Hdr + lm_Size(max(1, min(128, floor(fx[its_Efx_CCnt]))));
     ) : 0;
 );
 
 // a generator of control signals (LFO, Random) : no auto-limiter ; in Bypass, nothing (a Random : not its trigger)
 function its_Fx_Ctl(ty) ( (ty === its_Efx_TyLFO) || (ty === its_Efx_TyRandom); );
+
+// a meter (the VU meter, the Limiter : the engines of GM-Meters, one source) : no auto-limiter, no modulation input
+function its_Fx_Meter(ty) ( (ty === its_Efx_TyVU) || (ty === its_Efx_TyLimiter); );
 
 // count of sources of an effect type (-1 : a type not executed) ; the Random : its trigger (optional)
 function its_Fx_NSrc(ty)
@@ -2558,7 +2579,7 @@ function its_Fx_NSrc(ty)
     ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? 8 :
     ((ty === its_Efx_TyMath) || (ty === its_Efx_TyRing)) ? 2 : // A, B (optional : the Ring, its carrier)
     ((ty === its_Efx_TyFilter) || (ty === its_Efx_TySat) || its_Mx_Is(ty) || its_Fl_Is(ty) || (ty === its_Efx_TyPhaser)
-        || (ty === its_Efx_TyRandom)) ? 1 :
+        || (ty === its_Efx_TyRandom) || its_Fx_Meter(ty)) ? 1 :
     ((ty === its_Efx_TyLFO) || (ty === its_Efx_TyNoise)) ? 0 : -1;
 );
 
@@ -4889,6 +4910,8 @@ its_EfxTyS[15] = "Noise";
 its_EfxTyS[16] = "Random";
 its_EfxTyS[17] = "Math";
 its_EfxTyS[18] = "Ring";
+its_EfxTyS[19] = "VU";
+its_EfxTyS[20] = "Limiter";
 // the menus of a cell of these modules (right clic, see its_Sum_Menu ; also the boxes of the module "Patch") : the states,
 // (readers) mute and solo, open the object in a module of the tab, in a new module, show its patch (the module "Patch") ;
 // results : 1-3 the states, then (readers : 4 mute, 5 solo) open, open new, its patch
@@ -5326,6 +5349,15 @@ local (k)
         fx[its_Efx_Par1 + 9] = 0; // B : all the channels it has
         fx[its_Efx_Lim] = 1; // the auto-limiter in service
     );
+    // the VU meter, the Limiter : the default values of the plugins (GM-Meters) ; no auto-limiter
+    ((ty === its_Efx_TyVU) && (k !== ty)) ? (
+        vu_Default(fx + its_Efx_Par1);
+        fx[its_Efx_Lim] = 0;
+    );
+    ((ty === its_Efx_TyLimiter) && (k !== ty)) ? (
+        lm_Default(fx + its_Efx_Par1);
+        fx[its_Efx_Lim] = 0;
+    );
 );
 
 
@@ -5358,6 +5390,8 @@ menu_Efx_Type_N[15] = "Noise";
 menu_Efx_Type_N[16] = "Random";
 menu_Efx_Type_N[17] = "Math";
 menu_Efx_Type_N[18] = "Ring";
+menu_Efx_Type_N[19] = "VU meter";
+menu_Efx_Type_N[20] = "Limiter";
 menu_Efx_Type = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "effect-type", its_Efx_TyCnt, menu_Efx_Type_N);
@@ -8085,6 +8119,18 @@ local (ix, p, pdx, pp, pb, ii, ix, iy, u, w,mi, ma)
     parDcl(p_fxRgModA1+1, "Amount atten.",  "RgAttA",  i_UB|i_SP, "%.3f", "Amount atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_fxRgModA1+2, "Mix atten.",  "RgAttM",  i_UB|i_SP, "%.3f", "Mix atten.: %.3f",   -10,   10,    1,  0.001, 0);
     parDcl(p_fxNzRFreq, "Rumble freq",  "NzRFreq",  i_UB|i_SP, "%.1f Hz", "Rumble frequency: %.1f Hz",   5,   500,    40,  0.1, 7);
+    // VU meter, Limiter : the settings of the plugins Multichannel_VU_meter and SmoothMultiLimiter (the texts and curves of
+    // the sliders of SmoothMultiLimiter)
+    parDcl(p_fxVuTime, "Sample time",  "VuTime",  i_UB|i_SP, "%i ms", "sample time: %ims",   25,   1000,    45,  1, 0);
+    parDcl(p_fxVuHl, "Highlight",  "VuHigh",  i_UB|i_SP, "%i", "highlight channel: %i",   0,   128,    0,  1, 0);
+    parDcl(p_fxLmLimit, "Limit",  "LmLimit",  i_UB|i_SP, "%0.1fdB", "limit: %0.1fdB",   -40,   0,    -3,  0.1, -3.5);
+    parDcl(p_fxLmLimit+1, "Pre-gain",  "LmPreG",  i_UB|i_SP, "%0.1fdB", "pre-gain: %0.1fdB",   -12,   24,    0,  0.1, 0);
+    parDcl(p_fxLmLimit+2, "Volume",  "LmVol",  i_UB|i_SP, "%.1fdB", "volume %.1fdB",   -12,   24,    0,  0.1, 0);
+    parDcl(p_fxLmLimit+3, "Attack",  "LmAtt",  i_UB|i_SP, "%0.1fms", "attack: %0.1fms",   0.1,   200,    10,  0.1, 4);
+    parDcl(p_fxLmLimit+4, "Release",  "LmRel",  i_UB|i_SP, "%ims", "release: %ims",   1,   1000,    100,  1, 4);
+    parDcl(p_fxLmLimit+5, "Distortion",  "LmDist",  i_UB|i_SP, "%i%%", "distortion: %i%%",   0,   100,    0,  1, 0);
+    parDcl(p_fxLmLimit+6, "Zoom",  "LmZoom",  i_UB|i_SP, "%0.2f", "zoom: %0.2f",   0.1,   10,    1,  0.01, 5);
+    parDcl(p_fxLmLimit+7, "Display",  "LmDisp",  i_UB|i_SP, "%i ch.", "display: %i ch.",   1,   8,    4,  1, 0);
 );
 
 
@@ -10401,6 +10447,40 @@ local (wk, hd, sf, cw, st, src, g, mp, md, sh, ns, bm, rs, f0, sw, rt, fb, mix, 
 );
 
 /*
+    the VU meter (the plugin Multichannel_VU_meter, GM-Meters) : the meters of the channels of its source (times its gain),
+    which goes unchanged to the output (the meter can be inserted in a chain) ; its engine after the header of its work
+    area (made again after a bypass, its_FxW_Md)
+*/
+function exec_vu(fx, ccnt, out)
+local (wk, e, src, g, i)
+(
+    wk = fx[its_Efx_Work];
+    ((wk > BASE_MEMORY) && (wk[its_FxW_Size] === its_Fx_WorkSize(fx))) ? (
+        e = wk + its_FxW_Hdr;
+        (wk[its_FxW_Md] !== 1) ? ( vu_Reset(e, ccnt); wk[its_FxW_Md] = 1; );
+        src = smpl_tab + fx[its_Efx_Cell1]; g = fx[its_Efx_Vol1];
+        vu_Sample(fx + its_Efx_Par1, e, src, g, ccnt);
+        i = 0; loop(ccnt, out[i] += g * src[i]; i += 1;);
+    );
+);
+
+/*
+    the Limiter (the plugin SmoothMultiLimiter, GM-Meters) : the channels of its source (times its gain) delayed by the
+    anticipation and limited together, added to the output ; its engine after the header of its work area (made again
+    after a bypass, its_FxW_Md)
+*/
+function exec_limiter(fx, ccnt, out)
+local (wk, e)
+(
+    wk = fx[its_Efx_Work];
+    ((wk > BASE_MEMORY) && (wk[its_FxW_Size] === its_Fx_WorkSize(fx))) ? (
+        e = wk + its_FxW_Hdr;
+        (wk[its_FxW_Md] !== 1) ? ( lm_Reset(e, ccnt); wk[its_FxW_Md] = 1; );
+        lm_Sample(fx + its_Efx_Par1, e, smpl_tab + fx[its_Efx_Cell1], fx[its_Efx_Vol1], out, ccnt, 1);
+    );
+);
+
+/*
     execute the effect "fx" (number "nbr") : called by @sample, in the phase of the effect
     the output is the own cable of the effect (assigned), or Out or a bus (added)
     Mixer and Auto Mixer (the Auto Mixer only sets equal gains, see FX_Auto_Gains) :
@@ -10428,6 +10508,8 @@ local (wk, hd, sf, cw, st, src, g, mp, md, sh, ns, bm, rs, f0, sw, rt, fb, mix, 
         see exec_random
     Math : operations on its sources A and B (Mul, Add, Env, Gate, Slew, Log ...), see exec_math
     Ring : the ring modulator, AM, the frequency shifter (Up, Down) ; the carrier : B or an oscillator, see exec_ring
+    VU meter : the meters of the plugin Multichannel_VU_meter on its source, unchanged to the output, see exec_vu
+    Limiter : the plugin SmoothMultiLimiter on its source (delayed by the anticipation), see exec_limiter
     Bypass (its_EfxStat_Bypass) : Out = the first source not null, unchanged (an LFO, a Noise, a Random : nothing)
     Auto-limiter (its_Efx_Lim, not the LFO) : the output of the type, divided by max(1, its smoothed peak), then the output gain
     the structure is checked again after each modification (its_Efx_Check reset to 0) ; the error is kept in its_Efx_Error
@@ -10494,7 +10576,7 @@ local (tw, sj, ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, d
             fx[its_Efx_OutDirty] = 1;
         );
         // the auto-limiter (not the LFO, not in Bypass) : the effect writes into its_FxTmp, then the limiter adds it to dst
-        lim = fx[its_Efx_Lim] && !its_Fx_Ctl(fx[its_Efx_Type]) && (fx[its_Efx_Status] !== its_EfxStat_Bypass);
+        lim = fx[its_Efx_Lim] && !its_Fx_Ctl(fx[its_Efx_Type]) && !its_Fx_Meter(fx[its_Efx_Type]) && (fx[its_Efx_Status] !== its_EfxStat_Bypass);
         out = lim ? its_FxTmp : dst;
         lim ? memset(out, 0, ccnt);
         go = 1; // the output gain, after the limiter (Saturation : Par6)
@@ -10645,6 +10727,12 @@ local (tw, sj, ty, ptsrc, src, dst, cc, ccnt, g, i, c, err, ph, x, v, sh, amp, d
         ) :
         (fx[its_Efx_Type] === its_Efx_TyRing) ? (
             exec_ring(fx, ccnt, out);
+        ) :
+        (fx[its_Efx_Type] === its_Efx_TyVU) ? (
+            exec_vu(fx, ccnt, out);
+        ) :
+        (fx[its_Efx_Type] === its_Efx_TyLimiter) ? (
+            exec_limiter(fx, ccnt, out);
         ) :
         (fx[its_Efx_Type] === its_Efx_TySat) ? (
             wk = fx[its_Efx_Work];
@@ -11677,7 +11765,7 @@ i__ii = 0; loop(6, its_TbRLp[i__ii] = mSL_symbol(menu_Rdr_Loop_N[i__ii]); i__ii 
 
 // the keys of the effects (one table for all the types : its_Tb_FxOk tells which keys a type takes) ; "source" and "gain"
 // are src1 and gain1 ; the keys its_TbFMod ... : "mod" for each modulation input (its_TbFMI)
-its_TbFMod = 90;
+its_TbFMod = 100;
 its_TbFMINb = 21;
 its_TbFNk = its_TbFMod + its_TbFMINb;
 its_TbFKey = make_array(its_TbFNk); its_TbFNam = make_array(its_TbFNk);
@@ -11752,6 +11840,16 @@ its_TbKey(its_TbFKey, its_TbFNam, 88, "attack");
 // Ring : detune (Par7, Hz) ; and the keys of the others : freq (Par1), mode (Par2), mix (Par4, %), spread (Par5, turns),
 // curve (Par6), wave (Par8 : the shape), amount (Par9 : AM), bchan (Par10), src1 (source : A), src2 (B : the carrier)
 its_TbKey(its_TbFKey, its_TbFNam, 89, "detune");
+// Limiter : limit (Par1, dB), shown (Par2 : the channels displayed), zoom (Par3), distortion (Par4, %), pregain (Par5, dB) ;
+// and the keys of the others : output (Par6, dB : the volume out), attack (Par7, ms : the anticipation), release (Par8, ms)
+its_TbKey(its_TbFKey, its_TbFNam, 90, "limit"); its_TbKey(its_TbFKey, its_TbFNam, 91, "shown");
+its_TbKey(its_TbFKey, its_TbFNam, 92, "zoom"); its_TbKey(its_TbFKey, its_TbFNam, 93, "distortion");
+its_TbKey(its_TbFKey, its_TbFNam, 94, "pregain");
+// VU meter : time (Par1, ms : the sample time), highlight (Par3), thresh (Par4 : the saturation threshold, dB ; a word of the
+// Random too), color (Par5 : a word of the Noise too), autoclear (Par6 : minutes, 0 permanent) ; and "mode" (Par2 : the GUI)
+its_TbKey(its_TbFKey, its_TbFNam, 95, "time"); its_TbKey(its_TbFKey, its_TbFNam, 96, "highlight");
+its_TbKey(its_TbFKey, its_TbFNam, 97, "thresh"); its_TbKey(its_TbFKey, its_TbFNam, 98, "color");
+its_TbKey(its_TbFKey, its_TbFNam, 99, "autoclear");
 // the order of the keys of a Flanger, of a Chorus in a Dump (from the key 22 ; the others : 22, not one of their keys)
 its_TbFlOrdN = 16; its_TbFlOrd = make_array(its_TbFlOrdN);
 its_TbFlOrd[0] = 24; its_TbFlOrd[1] = 54; its_TbFlOrd[2] = 55; its_TbFlOrd[3] = 51; its_TbFlOrd[4] = 57; // mode delay sweep rate wave
@@ -11778,6 +11876,12 @@ its_TbMtOrd[4] = 85; its_TbMtOrd[5] = 26; its_TbMtOrd[6] = 27; // release amp of
 its_TbRgOrdN = 9; its_TbRgOrd = make_array(its_TbRgOrdN); // (the Ring)
 its_TbRgOrd[0] = 24; its_TbRgOrd[1] = 22; its_TbRgOrd[2] = 57; its_TbRgOrd[3] = 38; its_TbRgOrd[4] = 89; // mode freq wave curve detune
 its_TbRgOrd[5] = 28; its_TbRgOrd[6] = 36; its_TbRgOrd[7] = 87; its_TbRgOrd[8] = 31; // spread amount bchan mix
+its_TbLmOrdN = 8; its_TbLmOrd = make_array(its_TbLmOrdN); // (the Limiter : the order of the sliders of the plugin)
+its_TbLmOrd[0] = 90; its_TbLmOrd[1] = 94; its_TbLmOrd[2] = 33; its_TbLmOrd[3] = 88; // limit pregain output attack
+its_TbLmOrd[4] = 85; its_TbLmOrd[5] = 93; its_TbLmOrd[6] = 92; its_TbLmOrd[7] = 91; // release distortion zoom shown
+its_TbVuOrdN = 6; its_TbVuOrd = make_array(its_TbVuOrdN); // (the VU meter)
+its_TbVuOrd[0] = 24; its_TbVuOrd[1] = 95; its_TbVuOrd[2] = 97; its_TbVuOrd[3] = 99; // mode time thresh autoclear
+its_TbVuOrd[4] = 98; its_TbVuOrd[5] = 96; // color highlight
 i__ii = its_TbFMod; loop(its_TbFMINb, its_TbFKey[i__ii] = its_TK_mod; its_TbFNam[i__ii] = "mod"; i__ii += 1;);
 // a word may name several keys, for different types (each one with its own slot, range or kind of value : the key of the
 // type is chosen when the block is read, see its_Tb_FxKey) : its_TbFAlt[k] the next key of the same word (0 : none)
@@ -11854,6 +11958,7 @@ its_TbFTyN[0] = "Undefined"; its_TbFTyN[1] = "None"; its_TbFTyN[2] = "Mixer"; it
 its_TbFTyN[4] = "Mover"; its_TbFTyN[5] = "Action"; its_TbFTyN[6] = "Script"; its_TbFTyN[7] = "LFO";
 its_TbFTyN[8] = "Filter"; its_TbFTyN[9] = "Saturation"; its_TbFTyN[10] = "Matrix"; its_TbFTyN[11] = "Flanger";
 its_TbFTyN[12] = "Chorus"; its_TbFTyN[13] = "Phaser"; its_TbFTyN[14] = "Shimmer"; its_TbFTyN[15] = "Noise"; its_TbFTyN[16] = "Random"; its_TbFTyN[17] = "Math"; its_TbFTyN[18] = "Ring";
+its_TbFTyN[19] = "VUMeter"; its_TbFTyN[20] = "Limiter";
 i__ii = 0; loop(its_Efx_TyCnt, its_TbFTy[i__ii] = its_TK(its_TbFTyN[i__ii]); i__ii += 1;);
 its_TbFStN = make_array(4); its_TbFSt = make_array(4);
 its_TbFStN[0] = "Off"; its_TbFStN[1] = "On"; its_TbFStN[2] = "Bypass"; its_TbFStN[3] = "Undefined";
@@ -11877,6 +11982,14 @@ i__ii = 0; loop(its_SatModeCnt, its_TbSMd[i__ii] = mSL_symbol(its_TbSMdN[i__ii])
 its_TbMxMdN = make_array(its_MxTypeCnt); its_TbMxMd = make_array(its_MxTypeCnt); // the matrices (mode of a Matrix)
 its_TbMxMdN[its_MxHouse] = "Householder"; its_TbMxMdN[its_MxHadam] = "Hadamard"; its_TbMxMdN[its_MxRing] = "Ring";
 i__ii = 0; loop(its_MxTypeCnt, its_TbMxMd[i__ii] = mSL_symbol(its_TbMxMdN[i__ii]); i__ii += 1;);
+// the VU meter : the GUI modes (mode : HFixed, HFit, VFixed, VFit), the colors (color)
+its_TbVuMdN = make_array(4); its_TbVuMd = make_array(4);
+its_TbVuMdN[0] = "HFixed"; its_TbVuMdN[1] = "HFit"; its_TbVuMdN[2] = "VFixed"; its_TbVuMdN[3] = "VFit";
+i__ii = 0; loop(4, its_TbVuMd[i__ii] = mSL_symbol(its_TbVuMdN[i__ii]); i__ii += 1;);
+its_TbVuClN = make_array(6); its_TbVuCl = make_array(6);
+its_TbVuClN[0] = "Green"; its_TbVuClN[1] = "Orange"; its_TbVuClN[2] = "Blue"; its_TbVuClN[3] = "Yellow";
+its_TbVuClN[4] = "Cyan"; its_TbVuClN[5] = "Violet";
+i__ii = 0; loop(6, its_TbVuCl[i__ii] = mSL_symbol(its_TbVuClN[i__ii]); i__ii += 1;);
 // the loops, the spreads of the delays, the inputs of a Matrix (the names of the menus of the pad)
 its_TbMxLp = make_array(its_MxLpCnt); i__ii = 0; loop(its_MxLpCnt, its_TbMxLp[i__ii] = mSL_symbol(menu_Efx_MxLoop_N[i__ii]); i__ii += 1;);
 its_TbMxSp = make_array(its_MxSpCnt); i__ii = 0; loop(its_MxSpCnt, its_TbMxSp[i__ii] = mSL_symbol(menu_Efx_MxSpread_N[i__ii]); i__ii += 1;);
@@ -13594,11 +13707,24 @@ function its_Tb_ModSet(p, ki, d0)
     (its_TbK6[ki] !== 0) ? (p[its_Mod_Flags] = p[its_Mod_Flags] - (p[its_Mod_Flags] & its_TbK6[ki]) + its_TbK5[ki]);
 );
 
+// VU meter : the index of a saturation threshold (dB : -20, -6, -2, -1, 0, 1, 2, 6, 20), of an auto clear (minutes : 0, 1,
+// 3, 5) ; -1 : not one of them
+function its_Tb_VuThrIdx(v) local(k, r)
+(
+    r = -1; k = 0; loop(9, (vu_ThrDb(k) == v) ? (r = k); k += 1;);
+    r;
+);
+function its_Tb_VuHoldIdx(v) local(k, r)
+(
+    r = -1; k = 0; loop(4, (vu_HoldS(k) == v * 60) ? (r = k); k += 1;);
+    r;
+);
+
 // the key "ki" has a meaning for the effect type "ty"
 function its_Tb_FxOk(ty, ki)
 (
     (ki <= 4) ? 1 :
-    (ki === 5) ? !its_Fx_Ctl(ty) :
+    (ki === 5) ? (!its_Fx_Ctl(ty) && !its_Fx_Meter(ty)) :
     (ki >= its_TbFMod) ? ((its_TbFMIt[ki - its_TbFMod] & (1 << ty)) !== 0) :
     ((ty === its_Efx_TyMixer) || (ty === its_Efx_TyAutoMix)) ? ((ki < 14) || ((ki < 22) && (ty === its_Efx_TyMixer))) :
     (ty === its_Efx_TyFilter) ? ((ki === 6) || (ki === 14) || ((ki >= 22) && (ki <= 25))) :
@@ -13616,6 +13742,8 @@ function its_Tb_FxOk(ty, ki)
         || ((ki >= 85) && (ki <= 88))) :
     (ty === its_Efx_TyRing) ? ((ki === 6) || (ki === 7) || (ki === 14) || (ki === 15) || (ki === 22) || (ki === 24) || (ki === 28)
         || (ki === 31) || (ki === 36) || (ki === 38) || (ki === 57) || (ki === 87) || (ki === 89)) :
+    (ty === its_Efx_TyVU) ? ((ki === 6) || (ki === 14) || (ki === 24) || ((ki >= 95) && (ki <= 99))) :
+    (ty === its_Efx_TyLimiter) ? ((ki === 6) || (ki === 14) || (ki === 33) || (ki === 85) || (ki === 88) || ((ki >= 90) && (ki <= 94))) :
     (ty === its_Efx_TyLFO) ? ((ki === 22) || (ki === 24) || ((ki >= 26) && (ki <= 28)) || (ki === 38)) : 0;
 );
 
@@ -13771,6 +13899,28 @@ function its_Tb_FxKey(w) local(ki, i, nm, n, sk)
         (ki === 87) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbMtBc, 2); ) : // bchan
         (ki === 88) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 10000); ) : // attack (ms)
         (ki === 89) ? ( its_Tb_v1 = its_Tb_Num(nm, -10000, 10000); ) : // Ring : detune (Hz)
+        (ki === 90) ? ( its_Tb_v1 = its_Tb_Num(nm, -40, 0); ) : // Limiter : limit (dB)
+        (ki === 91) ? ( its_Tb_v1 = its_Tb_Int(nm, 1, lm_NDMax); ) : // shown (the channels displayed)
+        (ki === 92) ? ( its_Tb_v1 = its_Tb_Num(nm, 0.1, 10); ) : // zoom
+        (ki === 93) ? ( its_Tb_v1 = its_Tb_Num(nm, 0, 100); ) : // distortion (%)
+        (ki === 94) ? ( its_Tb_v1 = its_Tb_Num(nm, -12, 24); ) : // pregain (dB)
+        (ki === 95) ? ( its_Tb_v1 = its_Tb_Num(nm, 25, 1000); ) : // VU meter : time (ms)
+        (ki === 96) ? ( its_Tb_v1 = its_Tb_Int(nm, 0, 128); ) : // highlight (0 : none)
+        (ki === 97) ? (
+            its_Tb_v1 = its_Tb_Num(nm, -20, 20); // thresh (dB)
+            ((its_Tb_error === 0) && (its_Tb_VuThrIdx(its_Tb_v1) < 0)) ? (
+                sprintf(#its_TbW, "thresh : %.10g is not -20, -6, -2, -1, 0, 1, 2, 6 or 20 (dB)", its_Tb_v1);
+                its_Tb_Err(2754, #its_TbW);
+            );
+        ) :
+        (ki === 98) ? ( its_Tb_v1 = its_Tb_Enum(nm, its_TbVuCl, 6); ) : // color
+        (ki === 99) ? (
+            its_Tb_v1 = its_Tb_Int(nm, 0, 5); // autoclear (minutes)
+            ((its_Tb_error === 0) && (its_Tb_VuHoldIdx(its_Tb_v1) < 0)) ? (
+                sprintf(#its_TbW, "autoclear : %d is not 0, 1, 3 or 5 (minutes)", its_Tb_v1);
+                its_Tb_Err(2754, #its_TbW);
+            );
+        ) :
         (
             // mod : the input, its source, then "depth" and "att" (optional)
             w = its_Tb_Next();
@@ -14256,7 +14406,8 @@ function its_Tb_FxMode(ty, w) local(syms, n, k, i)
     (ty === its_Efx_TyPhaser) ? ( syms = its_TbPhMd; n = its_PhModeCnt; ) :
     (ty === its_Efx_TyRandom) ? ( syms = its_TbRnMd; n = its_RnModeCnt; ) :
     (ty === its_Efx_TyMath) ? ( syms = its_TbMtOp; n = its_MtCnt; ) :
-    (ty === its_Efx_TyRing) ? ( syms = its_TbRgMd; n = its_RgModeCnt; ) : ( syms = its_TbLSh; n = its_LfoCnt; );
+    (ty === its_Efx_TyRing) ? ( syms = its_TbRgMd; n = its_RgModeCnt; ) :
+    (ty === its_Efx_TyVU) ? ( syms = its_TbVuMd; n = 4; ) : ( syms = its_TbLSh; n = its_LfoCnt; );
     k = -1; i = 0; while ((k < 0) && (i < n)) ( (syms[i] === w) ? (k = i); i += 1; );
     (k < 0) ? (
         sprintf(#its_TbW, "mode : %s is not a mode of a %s", mSL_edit_value(#its_TbV, w), its_TbFTyN[ty]);
@@ -14388,10 +14539,16 @@ function its_Tb_FxGet(ki, fx) local(p)
     (ki === 77) ? fx[its_Efx_Par1] * 100 :
     (ki === 78) ? fx[its_Efx_Par1 + 9] :
     ((ki >= 79) && (ki <= 84)) ? fx[its_Efx_Par1 + ki - 73] : // Random : dist Par7, clock Par8, steps Par9, walk Par10, thresh Par11,
-    (ki === 85) ? fx[(fx[its_Efx_Type] === its_Efx_TyMath) ? its_Efx_Par1 + 7 : its_Efx_MxX + 5] : // detect Par12 ; release MxX + 5 (Math : Par8)
+    (ki === 85) ? fx[((fx[its_Efx_Type] === its_Efx_TyMath) || (fx[its_Efx_Type] === its_Efx_TyLimiter)) ? its_Efx_Par1 + 7 : its_Efx_MxX + 5] : // detect Par12 ; release MxX + 5 (Math, Limiter : Par8)
     (ki === 87) ? fx[its_Fx_BcIdx(fx)] : // bchan (Math Par6, Ring Par10)
     ((ki >= 86) && (ki <= 88)) ? fx[its_Efx_Par1 + ki - 82] : // Math : value Par5, attack Par7
     (ki === 89) ? fx[its_Efx_Par1 + 6] : // Ring : detune Par7
+    ((ki >= 90) && (ki <= 94)) ? fx[its_Efx_Par1 + ki - 90] : // Limiter : limit Par1, shown Par2, zoom Par3, distortion Par4, pregain Par5
+    (ki === 95) ? fx[its_Efx_Par1] : // VU meter : time Par1, highlight Par3, thresh Par4 (its dB), color Par5, autoclear Par6 (minutes)
+    (ki === 96) ? fx[its_Efx_Par1 + 2] :
+    (ki === 97) ? vu_ThrDb(fx[its_Efx_Par1 + 3]) :
+    (ki === 98) ? fx[its_Efx_Par1 + 4] :
+    (ki === 99) ? vu_HoldS(fx[its_Efx_Par1 + 5]) / 60 :
     (ki < its_TbFMod) ? fx[its_Efx_Par1 + ki - 28] : // bias Par3, output Par6 (the Noise too), order Par7, stretch Par8, amount Par9
     its_Tb_ModGet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist);
 );
@@ -14411,6 +14568,7 @@ function its_Tb_FxText(str, ki, ty, v1, v2, v3, v4, v5)
     (ki === 80) ? strcpy(str, its_TbRnCkN[max(0, min(1, v1))]) :
     (ki === 84) ? strcpy(str, its_TbRnDtN[max(0, min(1, v1))]) :
     (ki === 87) ? strcpy(str, its_TbMtBcN[max(0, min(1, v1))]) :
+    (ki === 98) ? strcpy(str, its_TbVuClN[max(0, min(5, v1))]) :
     (ki === 2) ? strcpy(str, its_TbFPhN[max(0, min(2, v1))]) :
     ((ki === 3) || (ki === 25) || (ki === 32)) ? sprintf(str, "%d", v1) :
     (ki === 4) ? ((v1 === 0) ? strcpy(str, "Own") : its_Tb_SrcText(str, v1, v2)) :
@@ -14422,7 +14580,8 @@ function its_Tb_FxText(str, ki, ty, v1, v2, v3, v4, v5)
         (ty === its_Efx_TyPhaser) ? its_TbPhMdN[max(0, min(its_PhModeCnt - 1, v1))] :
         (ty === its_Efx_TyRandom) ? its_TbRnMdN[max(0, min(its_RnModeCnt - 1, v1))] :
         (ty === its_Efx_TyMath) ? its_TbMtOpN[max(0, min(its_MtCnt - 1, v1))] :
-        (ty === its_Efx_TyRing) ? its_TbRgMdN[max(0, min(its_RgModeCnt - 1, v1))] : its_TbLShN[max(0, min(its_LfoCnt - 1, v1))]) :
+        (ty === its_Efx_TyRing) ? its_TbRgMdN[max(0, min(its_RgModeCnt - 1, v1))] :
+        (ty === its_Efx_TyVU) ? its_TbVuMdN[max(0, min(3, v1))] : its_TbLShN[max(0, min(its_LfoCnt - 1, v1))]) :
     (ki === 38) ? (((v1 >= 0) && (v1 < its_CrvMx)) ? its_Crv_TbName(str, v1) : sprintf(str, "%d", v1 + 1)) :
     (ki < its_TbFMod) ? sprintf(str, "%.10g", v1) :
     its_Tb_ModText(str, its_TbFMIN[ki - its_TbFMod], v1, v2, v3, v4, v5); // mod : the input, the source, depth, att, the law
@@ -14464,7 +14623,9 @@ function its_Tb_DumpFx(k) local(fx, ty, ki, p, j)
                 ((ty === its_Efx_TyNoise) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbNzOrdN) ? its_TbNzOrd[ki - 22] : 23) :
                 ((ty === its_Efx_TyRandom) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbRnOrdN) ? its_TbRnOrd[ki - 22] : 23) :
                 ((ty === its_Efx_TyMath) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbMtOrdN) ? its_TbMtOrd[ki - 22] : 23) :
-                ((ty === its_Efx_TyRing) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbRgOrdN) ? its_TbRgOrd[ki - 22] : 23) : ki;
+                ((ty === its_Efx_TyRing) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbRgOrdN) ? its_TbRgOrd[ki - 22] : 23) :
+                ((ty === its_Efx_TyLimiter) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbLmOrdN) ? its_TbLmOrd[ki - 22] : 23) :
+                ((ty === its_Efx_TyVU) && (ki >= 22) && (ki < its_TbFMod)) ? ((ki - 22 < its_TbVuOrdN) ? its_TbVuOrd[ki - 22] : 23) : ki;
             its_Tb_FxShown(fx, ty, p) ? (
                 its_Tb_FxGet(p, fx);
                 ((p < its_TbFMod) || (its_Tb_g1 !== 0)) ? (
@@ -14566,11 +14727,23 @@ function its_Tb_SetFx(k) local(fx, ty, j, p, ki)
         its_TbKS[77] ? ( fx[its_Efx_Par1] = its_TbK1[77] / 100; ); // rumble
         its_TbKS[78] ? ( fx[its_Efx_Par1 + 9] = its_TbK1[78]; ); // rfreq
         ki = 79; loop(6, its_TbKS[ki] ? ( fx[its_Efx_Par1 + ki - 73] = its_TbK1[ki]; ); ki += 1;); // Random : dist, clock, steps, walk, thresh, detect
-        its_TbKS[85] ? ( fx[(ty === its_Efx_TyMath) ? its_Efx_Par1 + 7 : its_Efx_MxX + 5] = its_TbK1[85]; ); // release (Math : Par8)
+        its_TbKS[85] ? ( fx[((ty === its_Efx_TyMath) || (ty === its_Efx_TyLimiter)) ? its_Efx_Par1 + 7 : its_Efx_MxX + 5] = its_TbK1[85]; ); // release (Math, Limiter : Par8)
         its_TbKS[86] ? ( fx[its_Efx_Par1 + 4] = its_TbK1[86]; ); // Math : value
         its_TbKS[87] ? ( fx[its_Fx_BcIdx(fx)] = its_TbK1[87]; ); // bchan (Math, Ring)
         its_TbKS[88] ? ( fx[its_Efx_Par1 + 6] = its_TbK1[88]; ); // attack
         its_TbKS[89] ? ( fx[its_Efx_Par1 + 6] = its_TbK1[89]; ); // Ring : detune
+        ki = 90; loop(5, its_TbKS[ki] ? ( fx[its_Efx_Par1 + ki - 90] = its_TbK1[ki]; ); ki += 1;); // Limiter : limit, shown, zoom, distortion, pregain
+        (ty === its_Efx_TyLimiter) ? (
+            // output, attack, release : the ranges of the plugin (a Check tells the values changed)
+            fx[its_Efx_Par1 + 5] = max(-12, min(24, fx[its_Efx_Par1 + 5]));
+            fx[its_Efx_Par1 + 6] = max(0.1, min(lm_MaxAtt, fx[its_Efx_Par1 + 6]));
+            fx[its_Efx_Par1 + 7] = max(1, min(1000, fx[its_Efx_Par1 + 7]));
+        );
+        its_TbKS[95] ? ( fx[its_Efx_Par1] = its_TbK1[95]; ); // VU meter : time
+        its_TbKS[96] ? ( fx[its_Efx_Par1 + 2] = its_TbK1[96]; ); // highlight
+        its_TbKS[97] ? ( fx[its_Efx_Par1 + 3] = max(0, its_Tb_VuThrIdx(its_TbK1[97])); ); // thresh (dB : its index)
+        its_TbKS[98] ? ( fx[its_Efx_Par1 + 4] = its_TbK1[98]; ); // color
+        its_TbKS[99] ? ( fx[its_Efx_Par1 + 5] = max(0, its_Tb_VuHoldIdx(its_TbK1[99])); ); // autoclear (minutes : its index)
         // the modulations : a new connection gets the attenuverter 1 and the default depth (as in the pad)
         ki = its_TbFMod; loop(its_TbFMINb,
             its_TbKS[ki] ? its_Tb_ModSet(fx + its_Efx_Mod1 + its_TbFMIj[ki - its_TbFMod] * its_ModDist, ki, its_TbFMId[ki - its_TbFMod]);
@@ -15434,7 +15607,7 @@ its_XpPfx = make_array(its_Efx_TyCnt); // the start of the name of an effect in 
 i__ii = 0; loop(its_Efx_TyCnt, its_XpPfx[i__ii] = "fx"; i__ii += 1;);
 its_XpPfx[2] = "mix"; its_XpPfx[3] = "amx"; its_XpPfx[7] = "lfo"; its_XpPfx[8] = "flt"; its_XpPfx[9] = "sat"; its_XpPfx[10] = "mtx";
 its_XpPfx[11] = "fla"; its_XpPfx[12] = "cho"; its_XpPfx[13] = "pha"; its_XpPfx[14] = "shi"; its_XpPfx[15] = "noi"; its_XpPfx[16] = "rnd";
-its_XpPfx[17] = "mth"; its_XpPfx[18] = "rng";
+its_XpPfx[17] = "mth"; its_XpPfx[18] = "rng"; its_XpPfx[19] = "vu"; its_XpPfx[20] = "lim";
 its_XpApp = "its"; // the short name of the application, in the names of the files
 its_XpTy = its_TK_Effect; its_XpK = 0; // the module designated
 #its_XpName = ""; // the name chosen by the user
@@ -21497,6 +21670,171 @@ local (r, k, xx, md, sh, hb, p, ok)
     );
 );
 
+// the cell of the source of a meter (VU meter, Limiter : cell 8) : its label ; a clic (right : the menu of the sources ;
+// left : its first channel)
+function FX_Meter_Src(fx, what, ev) local(p, k)
+(
+    p = fx + its_Efx_Src1;
+    (what === FXP_Fill) ? (
+        (p[0] !== 0) ? (
+            its_Src_Label(pad_Efx_Labs[8], p[0], p[its_Efx_Off1 - its_Efx_Src1]);
+            pad_Efx_Colrs[8] = Col_P3;
+        ) : (
+            strcpy(pad_Efx_Labs[8], "Source");
+            pad_Efx_Colrs[8] = Col_P1;
+        );
+    ) :
+    (ev & ui_jpad_ev_rmc) ? (
+        ((k = its_Src_Choose(p[0], p[its_Efx_Off1 - its_Efx_Src1])) >= 0) ? (
+            p[0] = k;
+            p[its_Efx_Off1 - its_Efx_Src1] = its_Src_ChOff;
+            fx[its_Efx_Check] = 0;
+        );
+    ) :
+    (ev & ui_jpad_ev_lmc) ? (
+        ((k = its_Off_Choose(p[its_Efx_Off1 - its_Efx_Src1])) >= 0) ? (
+            p[its_Efx_Off1 - its_Efx_Src1] = k;
+            fx[its_Efx_Check] = 0;
+        );
+    );
+);
+
+// the engine of a meter (VU meter, Limiter) : after the header of its work area, when it is in place and made (0 : none)
+function FX_Meter_Eng(fx) local(wk)
+(
+    wk = fx[its_Efx_Work];
+    ((wk > BASE_MEMORY) && (wk[its_FxW_Size] === its_Fx_WorkSize(fx)) && (wk[its_FxW_Md] === 1)) ? wk + its_FxW_Hdr : 0;
+);
+
+/*
+    VU meter (2026-11-11 : the plugin Multichannel_VU_meter, see GM-Meters) : line 1, cell 8 = the source (right clic :
+    menu ; left clic : its first channel), 9 = the GUI mode, 10 = the saturation threshold, 11 = the meter color, 12 = the
+    saturation auto clear (left clic : the next one, Shift : the previous one ; right clic : menu), 13 = clear the peaks ;
+    sliders : the sample time, the highlighted channel, the gain of the source ; the graphic area (all the height left) :
+    the meters of the plugin (left clic : clear the peaks ; right clic : the menu of the plugin) ; the source goes
+    unchanged to the output (the settings : Par1 ... Par6, see GM-Meters)
+*/
+function FX_VU_Pad(RDBL, fx, fxn, what, cell, ev)
+local (p, k, m, d, r, st, e)
+(
+    st = fx + its_Efx_Par1;
+    (what === FXP_Dims) ? (
+        RDBL[3] = 2;
+        RDBL[5] = 3;
+        RDBL[6] = -its_VuGraphH; // (negative : all the height left, see show_Effect_Pad)
+    ) :
+    (what === FXP_Fill) ? (
+        FX_Meter_Src(fx, what, 0);
+        vu_Nth(vu_ModeList, max(0, min(3, 0|st[1])), pad_Efx_Labs[9]);
+        sprintf(pad_Efx_Labs[10], "Over %s", vu_Nth(vu_ThrList, max(0, min(8, 0|st[3])), #its_VuS));
+        vu_Nth(vu_ColList, max(0, min(5, 0|st[4])), pad_Efx_Labs[11]);
+        sprintf(pad_Efx_Labs[12], "Clear: %s", vu_Nth(vu_HoldList, max(0, min(3, 0|st[5])), #its_VuS));
+        strcpy(pad_Efx_Labs[13], "Clear peaks");
+        pad_Efx_Colrs[9] = pad_Efx_Colrs[10] = pad_Efx_Colrs[11] = pad_Efx_Colrs[12] = Col_P3;
+        pad_Efx_Colrs[13] = Col_InfoA;
+    ) :
+    (what === FXP_Click) ? (
+        (cell === 8) ? (
+            FX_Meter_Src(fx, what, ev);
+        ) :
+        ((cell >= 9) && (cell <= 12)) ? (
+            k = (cell === 9) ? 1 : (cell === 10) ? 3 : (cell === 11) ? 4 : 5; // the setting
+            m = (cell === 9) ? 4 : (cell === 10) ? 9 : (cell === 11) ? 6 : 4; // its count of values
+            d = (its_PadJmc & shfCap) ? -1 : 1;
+            (ev & ui_jpad_ev_rmc) ? (
+                r = vu_ListMenu((cell === 9) ? vu_ModeLong : (cell === 10) ? vu_ThrList : (cell === 11) ? vu_ColList : vu_HoldLong,
+                    m, 0|st[k]);
+                (r >= 0) ? (st[k] = r);
+            ) :
+            (ev & ui_jpad_ev_lmc) ? (
+                st[k] = ((0|st[k]) + d + m) % m;
+            );
+        ) :
+        ((cell === 13) && (ev & (ui_jpad_ev_lmc | ui_jpad_ev_rmc))) ? (
+            ((e = FX_Meter_Eng(fx)) > 0) ? (e[vu_Clr] = 1);
+        );
+    ) :
+    (what === FXP_Sliders) ? (
+        // read by the engine at each sample
+        paramValues[p_fxVuTime] = st[0];
+        r = parCtl(p_fxVuTime);
+        (r != 0) ? (st[0] = (r === 8) ? 45 : max(25, min(1000, parV(p_fxVuTime))));
+        paramValues[p_fxVuHl] = st[2];
+        r = parCtl(p_fxVuHl);
+        (r != 0) ? (st[2] = (r === 8) ? 0 : max(0, min(128, floor(parV(p_fxVuHl) + 0.5))));
+        // the gain of the source : its linear value is computed by the check
+        p = fx + its_Efx_Src1;
+        paramValues[p_fxGain1] = p[its_Efx_VoldB1 - its_Efx_Src1];
+        r = parCtl(p_fxGain1);
+        (r != 0) ? (
+            p[its_Efx_VoldB1 - its_Efx_Src1] = (r === 8) ? 0 : parV(p_fxGain1);
+            fx[its_Efx_Check] = 0;
+        );
+    ) :
+    (what === FXP_Graph) ? (
+        e = FX_Meter_Eng(fx);
+        ui_push();
+            ui_pad(2, 2, 2, 2);
+            !(mouse_cap & 8) ? vu_Mouse(st, e); // (Shift + right clic : the Studio menu)
+            vu_Draw(st, e, max(1, min(128, floor(fx[its_Efx_CCnt]))), 0);
+        ui_pop();
+        (fx[its_Efx_Status] === its_EfxStat_On) ? (ui_GFXdoNow |= 4); // (the meters move)
+    );
+);
+
+/*
+    Limiter (2026-11-11 : the plugin SmoothMultiLimiter, see GM-Meters) : line 1, cell 8 = the source (right clic : menu ;
+    left clic : its first channel), 9 = the gain reduction (its max since the last frame), 10 = the latency (the
+    anticipation : the source is delayed by it) ; sliders : the 8 sliders of the plugin (limit, pre-gain, volume out,
+    attack = the anticipation, release, distortion, zoom, channels displayed) ; the graphic area (all the height left) : the
+    response of the soft clipper, the history of the loudest channels and of the peak envelope (the settings : Par1 ...
+    Par8, see GM-Meters)
+*/
+function FX_Limiter_Pad(RDBL, fx, fxn, what, cell, ev)
+local (k, j, r, v, st, e)
+(
+    st = fx + its_Efx_Par1;
+    (what === FXP_Dims) ? (
+        RDBL[3] = 2;
+        RDBL[5] = 8;
+        RDBL[6] = -its_VuGraphH; // (negative : all the height left, see show_Effect_Pad)
+    ) :
+    (what === FXP_Fill) ? (
+        FX_Meter_Src(fx, what, 0);
+        v = lm_Reduction(FX_Meter_Eng(fx));
+        sprintf(pad_Efx_Labs[9], "Reduction %.1f dB", v);
+        pad_Efx_Colrs[9] = (v > 0.1) ? Color_Goldenrod : Color_Limegreen;
+        sprintf(pad_Efx_Labs[10], "Latency %.1f ms", lm_Latency(st));
+        pad_Efx_Colrs[10] = Col_P1;
+    ) :
+    (what === FXP_Click) ? (
+        (cell === 8) ? FX_Meter_Src(fx, what, ev);
+    ) :
+    (what === FXP_Sliders) ? (
+        // read by the engine at each sample ; the order of the sliders of the plugin : limit, pre-gain, volume, attack,
+        // release, distortion, zoom, display (right clic : their default value)
+        k = 0;
+        loop(8,
+            j = (k === 0) ? 0 : (k === 1) ? 4 : (k === 2) ? 5 : (k === 3) ? 6 : (k === 4) ? 7 : (k === 5) ? 3 : (k === 6) ? 2 : 1;
+            paramValues[p_fxLmLimit + k] = st[j];
+            r = parCtl(p_fxLmLimit + k);
+            (r != 0) ? (
+                st[j] = (r === 8) ? ((j === 0) ? -3 : (j === 1) ? 4 : (j === 2) ? 1 : (j === 6) ? 10 : (j === 7) ? 100 : 0) :
+                    parV(p_fxLmLimit + k);
+                (j === 1) ? (st[1] = max(1, min(lm_NDMax, floor(st[1] + 0.5))));
+            );
+            k += 1;
+        );
+    ) :
+    (what === FXP_Graph) ? (
+        ui_push();
+            ui_pad(2, 2, 2, 2);
+            lm_Draw(FX_Meter_Eng(fx), 0);
+        ui_pop();
+        (fx[its_Efx_Status] === its_EfxStat_On) ? (ui_GFXdoNow |= 4); // (the history moves)
+    );
+);
+
 // the dispatcher : calls the function of the type of the effect (a type without function : the common line only)
 function FX_Type_Pad(RDBL, fx, fxn, what, cell, ev)
 local (ty)
@@ -21534,6 +21872,12 @@ local (ty)
     ) :
     (ty === its_Efx_TyRing) ? (
         FX_Ring_Pad(RDBL, fx, fxn, what, cell, ev);
+    ) :
+    (ty === its_Efx_TyVU) ? (
+        FX_VU_Pad(RDBL, fx, fxn, what, cell, ev);
+    ) :
+    (ty === its_Efx_TyLimiter) ? (
+        FX_Limiter_Pad(RDBL, fx, fxn, what, cell, ev);
     ) : (
         (what === FXP_Dims) ? (RDBL[3] = 1; RDBL[5] = 0;);
     );
@@ -21568,6 +21912,7 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, 
     h1 = uix_jpadHeight(RDBL[3]);
     h2 = (RDBL[5] > 0) ? ui_jd_slidh * RDBL[5] + 6 : 0;
     h3 = RDBL[6];
+    (h3 < 0) ? (h3 = max(-h3, ui_height() - h1 - h2 - ui_jd_ctgr)); // (negative : all the height left, at least -h3)
     uix_jneed = h1+h2+h3+ui_jd_ctgr;
     (ui_height() >= uix_jneed) ? (
         ui_split_top(uix_jneed);

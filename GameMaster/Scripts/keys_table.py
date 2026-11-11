@@ -105,7 +105,7 @@ HANDLERS = {
     ('Diffusion-3.jsfx-inc', 'mouse_hover'): ('module', 'écran Live : boîte sous la souris'),
     ('Diffusion-3.jsfx-inc', 'do_Plugin_Keys'): ('plugin', 'commandes de Diffusion-3'),
     ('Diffusion-3.jsfx-inc', 'show_SysLog'): ('module', 'log système'),
-    ('Diffusion-3-Space3D.jsfx-inc', 'show_Space3D_Pad'): ('module', 'Space 3D (la vue)'),
+    ('Diffusion-3-Space3D.jsfx-inc', 'show_Space_Pad'): ('module', 'Space A ... D (la vue)'),
     ('Diffusion-3-Edit.jsfx-inc', 'show_Edit_Pad'): ('module', 'Edit A ... D (éditeurs de points)'),
     ('mSL_Dbg_Memory.jsfx-inc', 'show_Memory'): ('module', 'mémoire (débogueur)'),
     ('mSL_Panes.jsfx-inc', 'genericItemsPos'): ('pane', 'largeur des colonnes'),

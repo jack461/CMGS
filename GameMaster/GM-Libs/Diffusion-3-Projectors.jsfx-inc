@@ -5,7 +5,10 @@
     The settings of Diffusion that the native sliders give, shown as pads in modules of the Studio menu :
         - "Projector A" ... "Projector H" (the views ; until 2026-11-09 : "Projector view 1" ... "8") : the settings of
           one projector (status, operating mode, scene, group, item, morphing time, blur, random delay, Hyper Slider and
-          its ambitus, new random configuration, volume) ; each view chooses the projector it shows (cell 1 ; by default,
+          its ambitus, new random configuration, volume, the diffusions of its inputs and outputs, indiff and outdiff
+          : cells 8 and 17, saved with the project in serialBlock[Pr7_PrjInD / Pr7_PrjOutD + p - 1], see confload ; 2 lines
+          of 9 cells since 2026-11-10 ; cell 16 since 2026-11-11 : its source, serialBlock[Pr7_PrjSpace + p - 1], a spatial
+          projector, see Diffusion-3-Spatial) ; each view chooses the projector it shows (cell 1 ; by default,
           the view N shows the projector N), saved with the project (serialBlock[Pr7_PrjView + N - 1], 0 : the default) ;
         - "Projectors" : the summary of all the projectors (projucnt = PRJ_CNT : 16), one cell each (show_Projectors_Pad) ;
         - "Global" (until 2026-11-09 : "Diffusion", same module number) : the global settings (input and output channels,
@@ -40,7 +43,8 @@ prv_rDelay = 8; prv_rHyper = 9; prv_rAmbit = 10; prv_rChange = 11; prv_rCurrent 
 prv_rVol = 13; prv_rVadj = 14; prv_rResp = 15; prv_rInp = 16; prv_rOut = 17; prv_rClear = 18; prv_rFile = 19;
 prv_rFreeze = 20;
 prv_rPVol = 21;             // (the volume of a projector : not a request, see prv_Request)
-PRV_NREQ = 22;
+prv_rConf = 22;             // a configuration chosen in the cell Config (prv_Apply : its scene / group / item, or as it is)
+PRV_NREQ = 23;
 prv_prj = make_array(PRV_NREQ);     // the projector (1 ... ; 0 : a global setting)
 prv_val = make_array(PRV_NREQ);     // the value
 prv_seq = make_array(PRV_NREQ);     // incremented by @gfx when the request is posted
@@ -62,7 +66,9 @@ prv_Morphs = "0.1|0.25|0.5|1|2|4|8|15|30|60";
 prv_Blurs = "0|10|25|50|75|100";
 prv_Delays = "1|5|10|20|30|60|120|300|600|900";
 prv_Hypers = "0|0.1|0.25|0.5|0.75|0.9|1";
-prv_Ambits = "2|3|4|5|6|7|8";
+prv_Ambits = "2|3|4|5|6|8|10|12|16|24|32";
+prv_HypModes = "Linear|Circular|Infinite"; // (the modes of the Hyper Slider : serialBlock[Pr7_HypMode + p - 1])
+prv_HypShort = "Lin|Circ|Inf";
 prv_PVols = "12|6|3|0|-3|-6|-10|-20|-40|-60|-120";
 prv_Resps = "0.1|0.5|1|2|3|5|10|30|60";
 prv_Chans = "2|4|6|8|10|12|16|24|32|48|64|96|128";
@@ -73,11 +79,13 @@ prv_FrzMenu = "Run : random changes and morphings|Hold : no random change, the m
 prv_PVolMin = -120; prv_PVolMax = 12;
 prv_VolK = 1 - exp(-1 / (0.05 * srate));
 
-// The pads : 2 lines of 8 cells (one pad for the 8 views : they are drawn one after the other), 1 line (Global)
-pad_PRV_Siz = 16;
+// The pads : 2 lines of 9 cells (one pad for the 8 views : they are drawn one after the other), 1 line (Global)
+pad_PRV_Siz = 18;
 pad_PRV = make_jpad(
     ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
-    2, 8, pad_PRV_Siz);
+    2, 9, pad_PRV_Siz);
+prv_dmap = make_array(4200);        // the menu of the diffusions (prv_DiffMenu) : the configuration of each item
+prv_ingrp = make_array(4200);       // (prv_ConfMenu) : 1 for the configurations placed in a group
 pad_PRV_Labs = pad_PRV + pad_PRV[ui_jpad_labs];
 pad_PRV_Colrs = pad_PRV + pad_PRV[ui_jpad_clrs];
 pad_GLB_Siz = 8;
@@ -174,7 +182,7 @@ function prv_Range(r)
     (r === prv_rBlur) ? (prv_lo = 0; prv_hi = 100; prv_int = 1; prv_def = 0;) :
     (r === prv_rDelay) ? (prv_lo = sldrndchmin; prv_hi = sldrndchmax; prv_lg = 1; prv_px = 400; prv_def = sldrndchdef;) :
     (r === prv_rHyper) ? (prv_lo = 0; prv_hi = 1; prv_def = 0.5;) :
-    (r === prv_rAmbit) ? (prv_lo = 2; prv_hi = sldhypamax; prv_int = 1; prv_px = 120; prv_def = 2;) :
+    (r === prv_rAmbit) ? (prv_lo = 2; prv_hi = HYP_AMAX; prv_int = 1; prv_px = 240; prv_def = 2;) :
     (r === prv_rVol) ? (prv_lo = sldvolmin; prv_hi = sldvolmax; prv_px = 480; prv_def = 0;) :
     (r === prv_rVadj) ? (prv_lo = sldvadmin; prv_hi = sldvadmax; prv_px = 400; prv_def = 0;) :
     (r === prv_rResp) ? (prv_lo = 0.01; prv_hi = 60; prv_lg = 1; prv_def = 3;) :
@@ -204,6 +212,7 @@ function prv_MenuEnd()
     uix_click_block();
     uix_mouseblock_until = time_precise() + 0.25;
     uix_mousecap_prev = 0;
+    uix_mghost = 67; // (2026-11-11) a button released in the menu may stay pressed in mouse_cap : ignored (see ui-lib)
 );
 
 // A menu from a list "a|b|c" of n items, the item chk (0 ...) checked : returns the item chosen (0 ...) or -1
@@ -257,11 +266,11 @@ local(d)
 );
 
 
-// The numeric settings of the cells of a view (8 ... 12, 14), 0 for the others
+// The numeric settings of the cells of a view (9 ... 13, 15), 0 for the others
 function prv_CellReq(c)
 (
-    (c === 8) ? prv_rMorph : (c === 9) ? prv_rBlur : (c === 10) ? prv_rDelay :
-    (c === 11) ? prv_rHyper : (c === 12) ? prv_rAmbit : (c === 14) ? prv_rPVol : 0;
+    (c === 9) ? prv_rMorph : (c === 10) ? prv_rBlur : (c === 11) ? prv_rDelay :
+    (c === 12) ? prv_rHyper : (c === 13) ? prv_rAmbit : (c === 15) ? prv_rPVol : 0;
 );
 
 // A numeric cell clicked : right = menu, Shift + left = default value (the left clic alone : nothing, see prv_Drag)
@@ -274,14 +283,127 @@ local(v)
     (v != prv_Value(r, p)) ? prv_Request(r, p, v);
 );
 
-// A clic on the cell c of the view n, showing the projector p
-function prv_Cell(n, p, c, ev)
+// The configuration of the projector p (its number ; 0 : none)
+function prv_ConfOf(p)
+local(v)
+(
+    v = projectors[(p - 1) * projsize + prx_numconf];
+    ((v === Undef) || (v <= 0) || (v >= conflsize - 1)) ? 0 : v;
+);
+
+// The configuration defined after (d = 1) or before (d = -1) the configuration c (around the list ; the default one,
+// conflsize - 1, excluded) ; c itself if there is no other one
+function prv_ConfNext(c, d)
+local(k, r)
+(
+    r = c; k = c;
+    loop(conflsize - 1,
+        k = (k + d + conflsize - 1) % (conflsize - 1);
+        ((r === c) && (k > 0) && (k !== c) && (conflist[k] > 0)) ? (r = k);
+    );
+    r;
+);
+
+// The menu of the configurations defined (by hundreds in sub-menus when there are more than 40 ; those in no group :
+// "(no group)" ; cur checked) : the configuration chosen, or -1
+function prv_ConfMenu(cur)
+local(n, k, b, e, i, c, m, sub)
+(
+    memset(prv_ingrp, 0, conflsize);
+    k = 0; loop(groupdefsize - 1, ((groupdefs[k] > 0) && (groupdefs[k] < conflsize)) ? (prv_ingrp[groupdefs[k]] = 1); k += 1;);
+    n = 0; k = 1; loop(conflsize - 2, (conflist[k] > 0) ? n += 1; k += 1;);
+    sub = (n > 40);
+    i = 0;
+    strcpy(#prv_mnu, "#Configuration (in no group : loaded as it is)");
+    prv_dmap[i] = -1; i += 1;
+    (n === 0) ? (
+        strcat(#prv_mnu, "|#No configuration defined"); prv_dmap[i] = -1; i += 1;
+    ) : (
+        b = 0;
+        while ((b < conflsize - 1) && (strlen(#prv_mnu) < 14000)) (
+            e = min(conflsize - 2, b + 99);
+            c = 0; k = max(1, b); loop(e - max(1, b) + 1, (conflist[k] > 0) ? c += 1; k += 1;);
+            (c > 0) ? (
+                sub ? (sprintf(#prv_it, "|>%d ... %d", max(1, b), e); strcat(#prv_mnu, #prv_it););
+                k = max(1, b); m = 0;
+                loop(e - max(1, b) + 1,
+                    (conflist[k] > 0) ? (
+                        m += 1;
+                        sprintf(#prv_it, "|%s%sConfiguration %d%s", (sub && (m === c)) ? "<" : "", (k === cur) ? "!" : "", k,
+                            prv_ingrp[k] ? "" : "  (no group)");
+                        strcat(#prv_mnu, #prv_it); prv_dmap[i] = k; i += 1;
+                    );
+                    k += 1;
+                );
+            );
+            b += 100;
+        );
+    );
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#prv_mnu);
+    prv_MenuEnd();
+    ((m >= 1) && (m <= i)) ? prv_dmap[m - 1] : -1;
+);
+
+// The cell Config of the projector p : right = the menu of the configurations, left = the next one defined, Shift +
+// left = the previous one ; prv_Apply sets its scene / group / item (or loads it as it is : in no group)
+function prv_ConfCell(p, rc)
+local(c, m)
+(
+    c = prv_ConfOf(p);
+    m = rc ? prv_ConfMenu(c) : prv_ConfNext(c, (mouse_cap & 8) ? -1 : 1);
+    ((m > 0) && (conflist[m] > 0)) ? prv_Request(prv_rConf, p, m);
+);
+
+// The cell Ambitus of the projector p : right = a menu (the mode of the Hyper Slider : Linear, Circular, Infinite,
+// written where it is saved, serialBlock[Pr7_HypMode + p - 1] ; then the ambitus), Shift + left = 2 (the left clic
+// alone : nothing, a drag : the potentiometer)
+function prv_AmbCell(p, rc)
+local(md, v, m, k)
+(
+    md = max(0, min(2, 0|serialBlock[Pr7_HypMode + p - 1]));
+    prv_Range(prv_rAmbit);
+    v = prv_Value(prv_rAmbit, p);
+    rc ? (
+        strcpy(#prv_mnu, "");
+        k = 0;
+        loop(3,
+            sx_Nth(prv_HypModes, k, #prv_it);
+            sprintf(#prv_t2, "%s%s%s", (k > 0) ? "|" : "", (k === md) ? "!" : "", #prv_it);
+            strcat(#prv_mnu, #prv_t2);
+            k += 1;
+        );
+        strcat(#prv_mnu, "||#Ambitus (configurations)");
+        k = 0;
+        loop(11,
+            sx_Nth(prv_Ambits, k, #prv_it);
+            sprintf(#prv_t2, "|%s%s", (s3d_atof(#prv_it, 0, strlen(#prv_it)) == v) ? "!" : "", #prv_it);
+            strcat(#prv_mnu, #prv_t2);
+            k += 1;
+        );
+        gfx_x = mouse_x; gfx_y = mouse_y;
+        m = gfx_showmenu(#prv_mnu);
+        prv_MenuEnd();
+        ((m >= 1) && (m <= 3)) ? (serialBlock[Pr7_HypMode + p - 1] = m - 1) :
+        (m >= 5) ? (
+            sx_Nth(prv_Ambits, m - 5, #prv_it);
+            v = prv_Limit(s3d_atof(#prv_it, 0, strlen(#prv_it)));
+            (v != prv_Value(prv_rAmbit, p)) ? prv_Request(prv_rAmbit, p, v);
+        );
+    ) : (mouse_cap & 8) ? (
+        (prv_def != v) ? prv_Request(prv_rAmbit, p, prv_def);
+    );
+);
+
+// A clic on the cell c of the view n, showing the projector p (the cells of the line 2 numbered as before the column
+// Indiff / Outdiff : 8 ... 14 ; see prv_Cell)
+function prv_Cell1(n, p, c, ev)
 local(rc, m, v)
 (
     rc = ev & ui_jpad_ev_rmc; // right clic : a menu ; left clic : a default value or a simple action
     (c === 0) ? (
-        // the projector shown
-        m = rc ? prv_Menu(prv_Projs, projucnt, p - 1) : p % projucnt;
+        // the projector shown : left = the next one, Shift + left = the previous one
+        m = rc ? prv_Menu(prv_Projs, projucnt, p - 1) : (mouse_cap & 8) ? (p + projucnt - 2) % projucnt : p % projucnt;
         (m >= 0) ? serialBlock[Pr7_PrjView + n] = m + 1;
     ) :
     (c === 1) ? (
@@ -295,9 +417,10 @@ local(rc, m, v)
         (m >= 0) ? prv_Request(prv_rMode, p, m);
     ) :
     ((c >= 3) && (c <= 5)) ? (
+        // scene, group, item : right = a menu, left = the next one, Shift + left = the previous one
         v = (c === 3) ? prv_Get(p, prx_svscene, sldconfscn) : (c === 4) ? prv_Get(p, prx_svgroup, sldconfgrp) :
                         prv_Get(p, prx_savitem, sldconfitm);
-        m = prv_Menu(prv_N16, 16, v - 1);
+        m = rc ? prv_Menu(prv_N16, 16, v - 1) : (mouse_cap & 8) ? (v + 14) % 16 : v % 16;
         (m >= 0) ? prv_Request((c === 3) ? prv_rScene : (c === 4) ? prv_rGroup : prv_rItem, p, m + 1);
     ) :
     (c === 6) ? (
@@ -310,8 +433,90 @@ local(rc, m, v)
     (c === 9) ? prv_NumCell(prv_rBlur, p, rc, prv_Blurs, 6) :
     (c === 10) ? prv_NumCell(prv_rDelay, p, rc, prv_Delays, 10) :
     (c === 11) ? prv_NumCell(prv_rHyper, p, rc, prv_Hypers, 7) :
-    (c === 12) ? prv_NumCell(prv_rAmbit, p, rc, prv_Ambits, 7) :
+    (c === 12) ? prv_AmbCell(p, rc) :
+    (c === 13) ? prv_ConfCell(p, rc) :
     (c === 14) ? prv_NumCell(prv_rPVol, p, rc, prv_PVols, 11);
+);
+
+// The menu of the diffusions (indiff, outdiff) : None, then the configurations defined (by hundreds in sub-menus when
+// there are more than 40), cur checked ; returns the configuration chosen (0 : none), or -1
+function prv_DiffMenu(cur)
+local(n, k, b, e, i, c, m, sub)
+(
+    n = 0; k = 1; loop(conflsize - 2, (conflist[k] > 0) ? n += 1; k += 1;);
+    sub = (n > 40);
+    i = 0;
+    strcpy(#prv_mnu, (cur <= 0) ? "!None : the channels as they are" : "None : the channels as they are");
+    prv_dmap[i] = 0; i += 1;
+    (n === 0) ? (
+        strcat(#prv_mnu, "||#No configuration defined"); prv_dmap[i] = -1; i += 1;
+    ) : (
+        strcat(#prv_mnu, "|");
+        b = 0;
+        while ((b < conflsize - 1) && (strlen(#prv_mnu) < 14000)) (
+            // the configurations b ... e (a sub-menu when there are many)
+            e = min(conflsize - 2, b + 99);
+            c = 0; k = max(1, b); loop(e - max(1, b) + 1, (conflist[k] > 0) ? c += 1; k += 1;);
+            (c > 0) ? (
+                sub ? (sprintf(#prv_it, "|>%d ... %d", max(1, b), e); strcat(#prv_mnu, #prv_it););
+                k = max(1, b); m = 0;
+                loop(e - max(1, b) + 1,
+                    (conflist[k] > 0) ? (
+                        m += 1;
+                        sprintf(#prv_it, "|%s%sConfiguration %d", (sub && (m === c)) ? "<" : "", (k === cur) ? "!" : "", k);
+                        strcat(#prv_mnu, #prv_it); prv_dmap[i] = k; i += 1;
+                    );
+                    k += 1;
+                );
+            );
+            b += 100;
+        );
+    );
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#prv_mnu);
+    prv_MenuEnd();
+    ((m >= 1) && (m <= i)) ? prv_dmap[m - 1] : -1;
+);
+
+// A clic on the cell c of the view n, showing the projector p : 8 and 17, the diffusions of the inputs and of the outputs
+// (a menu, both clics : written where they are saved, cf_IOBlock gives them to the projector in @block ; the projector
+// does not become the current one) ; 16, its source (spatial projector, Diffusion-3-Spatial : a menu, both clics, as in
+// the cell 2 of the views "Space A" ... "D", sx_SrcMenu) ; the others (line 2 : one more than before), prv_Cell1
+function prv_Cell(n, p, c, ev)
+local(k, m)
+(
+    ((c === 8) || (c === 17)) ? (
+        k = ((c === 8) ? Pr7_PrjInD : Pr7_PrjOutD) + p - 1;
+        m = prv_DiffMenu(0|serialBlock[k]);
+        (m >= 0) ? serialBlock[k] = m;
+    ) :
+    (c === 16) ? (
+        k = Pr7_PrjSpace + p - 1;
+        m = sx_SrcMenu(0|serialBlock[k]);
+        prv_MenuEnd();
+        (m >= 0) ? serialBlock[k] = m;
+    ) :
+    prv_Cell1(n, p, (c > 8) ? c - 1 : c, ev);
+);
+
+// The label of the source of the projector p (spatial : Diffusion-3-Spatial), in str ; its color
+function prv_SpaceLab(str, p)
+local(v)
+(
+    v = 0|serialBlock[Pr7_PrjSpace + p - 1];
+    (v <= 0) ? strcpy(str, "Space none") :
+    ((v < SP_NSRC) && (sp_srcN[v] > 0)) ? sprintf(str, "Space %d (%d)", v, sp_srcN[v]) : sprintf(str, "Space %d ?", v);
+    (v <= 0) ? Col_P1 : ((v < SP_NSRC) && (sp_srcN[v] > 0)) ? Col_P2 : Col_P6;
+);
+
+// The label of the diffusion of the inputs (out = 0) or of the outputs (out = 1) of the projector p, in str ; its color
+function prv_DiffLab(str, p, out)
+local(v)
+(
+    v = 0|serialBlock[((out) ? Pr7_PrjOutD : Pr7_PrjInD) + p - 1];
+    (v <= 0) ? sprintf(str, "%s none", out ? "Outdiff" : "Indiff") :
+        sprintf(str, "%s %d%s", out ? "Outdiff" : "Indiff", v, cf_Blk(v) ? "" : " ?");
+    (v <= 0) ? Col_P1 : cf_Blk(v) ? Col_P2 : Col_P6;
 );
 
 /*
@@ -350,18 +555,22 @@ local(h1, hneed, zz, zzmi, p, v, cur, c, dr)
             sprintf(pad_PRV_Labs[5], "Item %d", prv_Get(p, prx_savitem, sldconfitm));
             strcpy(pad_PRV_Labs[6], "New config");
             strcpy(pad_PRV_Labs[7], cur ? "Current" : "Make current");
-            // line 2 : morphing, blur, random delay, Hyper Slider, ambitus, configuration loaded, volume (module "Global")
-            sprintf(pad_PRV_Labs[8], "Morph %.2f s", prv_Value(prv_rMorph, p));
-            sprintf(pad_PRV_Labs[9], "Blur %d %%", prv_Value(prv_rBlur, p));
+            pad_PRV_Colrs[8] = prv_DiffLab(pad_PRV_Labs[8], p, 0); // the diffusion of the inputs
+            // line 2 : morphing, blur, random delay, Hyper Slider, ambitus, configuration loaded, volume (module "Global"),
+            // the source (spatial projector), the diffusion of the outputs
+            sprintf(pad_PRV_Labs[9], "Morph %.2f s", prv_Value(prv_rMorph, p));
+            sprintf(pad_PRV_Labs[10], "Blur %d %%", prv_Value(prv_rBlur, p));
             v = prv_Value(prv_rDelay, p);
-            (v < 10) ? sprintf(pad_PRV_Labs[10], "Delay %.2f s", v) : sprintf(pad_PRV_Labs[10], "Delay %.0f s", v);
-            sprintf(pad_PRV_Labs[11], "Hyper %.3f", prv_Value(prv_rHyper, p));
-            sprintf(pad_PRV_Labs[12], "Ambitus %d", prv_Value(prv_rAmbit, p));
-            v = projectors[(p - 1) * projsize + prx_numconf];
-            ((v === Undef) || (v <= 0)) ? strcpy(pad_PRV_Labs[13], "No config") : sprintf(pad_PRV_Labs[13], "Config %d", v);
+            (v < 10) ? sprintf(pad_PRV_Labs[11], "Delay %.2f s", v) : sprintf(pad_PRV_Labs[11], "Delay %.0f s", v);
+            sprintf(pad_PRV_Labs[12], "Hyper %.3f", prv_Value(prv_rHyper, p));
+            sx_Nth(prv_HypShort, max(0, min(2, 0|serialBlock[Pr7_HypMode + p - 1])), #prv_it);
+            sprintf(pad_PRV_Labs[13], "Ambitus %d %s", prv_Value(prv_rAmbit, p), #prv_it);
+            v = prv_ConfOf(p);
+            (v <= 0) ? strcpy(pad_PRV_Labs[14], "No config") : sprintf(pad_PRV_Labs[14], "Config %d", v);
             v = prv_Value(prv_rPVol, p);
-            (v <= prv_PVolMin) ? strcpy(pad_PRV_Labs[14], "Vol -inf") : sprintf(pad_PRV_Labs[14], "Vol %.1f dB", v);
-            strcpy(pad_PRV_Labs[15], "");
+            (v <= prv_PVolMin) ? strcpy(pad_PRV_Labs[15], "Vol -inf") : sprintf(pad_PRV_Labs[15], "Vol %.1f dB", v);
+            pad_PRV_Colrs[16] = prv_SpaceLab(pad_PRV_Labs[16], p); // its source (spatial projector)
+            pad_PRV_Colrs[17] = prv_DiffLab(pad_PRV_Labs[17], p, 1); // the diffusion of the outputs
             // colors
             pad_PRV_Colrs[0] = cur ? Color_Limegreen : Col_P1;
             pad_PRV_Colrs[1] = prv_StatCol(prv_Get(p, prx_savprjst, slprjstat));
@@ -370,12 +579,11 @@ local(h1, hneed, zz, zzmi, p, v, cur, c, dr)
             pad_PRV_Colrs[3] = pad_PRV_Colrs[4] = pad_PRV_Colrs[5] = Col_P1;
             pad_PRV_Colrs[6] = Col_InfoA;
             pad_PRV_Colrs[7] = cur ? Color_Limegreen : Col_InfoA;
-            pad_PRV_Colrs[8] = pad_PRV_Colrs[9] = Col_P1;
-            pad_PRV_Colrs[10] = ((v >= 2) && (v <= 6)) ? Col_P1 : Col_Inactive; // random modes
-            pad_PRV_Colrs[11] = pad_PRV_Colrs[12] = (v === 7) ? Col_P1 : Col_Inactive; // Hyper Slider
-            pad_PRV_Colrs[13] = Col_InfoA;
-            pad_PRV_Colrs[14] = (prv_Value(prv_rPVol, p) <= prv_PVolMin) ? Col_P6 : Col_P1; // (v : the mode, here)
-            pad_PRV_Colrs[15] = Col_Inactive;
+            pad_PRV_Colrs[9] = pad_PRV_Colrs[10] = Col_P1;
+            pad_PRV_Colrs[11] = ((v >= 2) && (v <= 6)) ? Col_P1 : Col_Inactive; // random modes
+            pad_PRV_Colrs[12] = pad_PRV_Colrs[13] = (v === 7) ? Col_P1 : Col_Inactive; // Hyper Slider
+            pad_PRV_Colrs[14] = Col_P1; // (right : the menu of the configurations, left : the next one)
+            pad_PRV_Colrs[15] = (prv_Value(prv_rPVol, p) <= prv_PVolMin) ? Col_P6 : Col_P1; // (v : the mode, here)
             zz = control_jpad(pad_PRV);
             c = ui_jpad_cell_at();
             dr = prv_Drag(blockId, c, prv_CellReq(c), p);
@@ -415,8 +623,8 @@ local(rc, m, v)
         (m != v) ? prv_Request((c === 0) ? prv_rInp : prv_rOut, 0, m);
     ) :
     (c === 2) ? (
-        // the current projector : left = the next one
-        m = rc ? prv_Menu(prv_Projs, projucnt, slprjcur - 1) : slprjcur % projucnt;
+        // the current projector : left = the next one, Shift + left = the previous one
+        m = rc ? prv_Menu(prv_Projs, projucnt, slprjcur - 1) : (mouse_cap & 8) ? (slprjcur + projucnt - 2) % projucnt : slprjcur % projucnt;
         (m >= 0) ? prv_Request(prv_rCurrent, m + 1, 1);
     ) :
     (c === 3) ? (
@@ -783,13 +991,49 @@ local(h1, h2, h3, hneed, zzmi, jmc, nl, i, p, s, na, nm, nso, nof, nsd, zz, e, h
 <? _suppress = 0; ?>
 <? prv_part != 2 ? _suppress = 1; ?>
 
+// The place of the configuration n in the groups (0 ... groupdefsize - 2 : the scenes, groups, items), the current
+// scene first ; -1 : in no group
+function prv_ConfPos(n)
+local(i, k, s0, r)
+(
+    r = -1; s0 = max(0, sldconfscn - 1) * 256;
+    i = 0;
+    while ((r < 0) && (i < groupdefsize)) (
+        k = (s0 + i) % groupdefsize;
+        ((k < groupdefsize - 1) && (groupdefs[k] === n)) ? (r = k);
+        i += 1;
+    );
+    r;
+);
+
 // Apply a request (@block) : first the change of the current projector, then the setting, as a move of the native slider
 function prv_Apply(k, p, v)
+local(pos)
 (
     ((p > 0) && (p != slprjcur)) ? (
         slprjcurD = p - 1;
         sliderchange(slprjcurD);
         sliderevent(1);
+        projUI = currentpro; // (the projector of the AKAI APCmini : its leds, as its buttons do)
+        zzrefreshUI |= refresh_all;
+    );
+    (k === prv_rStat) ? (zzrefreshUI |= refresh_all); // (the leds : the status of the projectors)
+    (k === prv_rConf) ? (
+        // a configuration chosen in the cell Config : its first place in the groups (the current scene first) gives the
+        // scene, the group and the item (loaded even when only the scene or the group changes) ; in no group : loaded
+        // as it is (and the base of the Hyper Slider : prx_hypbase)
+        pos = prv_ConfPos(v);
+        (pos >= 0) ? (
+            sldconfscnD = floor(pos / 256); sldconfgrpD = floor(pos / 16) % 16; sldconfitmD = pos % 16;
+            sliderchange(sldconfscnD); sliderchange(sldconfgrpD); sliderchange(sldconfitmD);
+            itemchange = 1;
+            currentpro[prx_prvchoice] = -2; // (loaded again, even at the same place)
+        ) : ((v > 0) && (v < conflsize) && (conflist[v] > 0)) ? (
+            currentpro[prx_ptrconf] = conflist[v];
+            currentpro[prx_cnfupdt] = 1;
+            currentpro[prx_hypbase] = v;
+            currentpro[prx_iochg] = 1; // (the Hyper Slider : its sequence built again)
+        );
     );
     (k === prv_rStat) ? (slprjstat = v; sliderchange(slprjstat);) :
     (k === prv_rMode) ? (sldopmod = v; sliderchange(sldopmod);) :
@@ -818,14 +1062,20 @@ function prv_Apply(k, p, v)
 );
 
 // The volumes of the projectors (@block) : serialBlock[Pr7_PrjVol + p - 1] (dB, written by @gfx, saved with the project)
-// -> prx_vtgt (linear), that @sample reaches smoothly in prx_vcur ; the projectors after projucnt : 0 dB
+// -> prx_vtgt (linear), that @sample reaches smoothly in prx_vcur ; the projectors after projucnt : 0 dB.
+// Off and Mute : 0 ; Solo (2026-11-11) : while a projector is in Solo, the others are silent (their status kept) ; the
+// changes take about 50 ms (prv_VolK), the slow stop of updpstatus follows
 function prv_PVolBlock()
-local(pp, i, v)
+local(pp, i, v, solo, st)
 (
+    solo = 0; pp = projectors; i = 0;
+    loop(projucnt, (pp[prx_savprjst] === prx__statsolo) ? (solo = 1); pp += projsize; i += 1;);
     pp = projectors; i = 0;
     loop(akousmax,
         v = (i < projucnt) ? serialBlock[Pr7_PrjVol + i] : 0;
         v = (v <= prv_PVolMin) ? 0 : 10 ^ (min(prv_PVolMax, v) / 20);
+        st = pp[prx_savprjst];
+        ((st === prx__statoff) || (st === prx__statmute) || (solo && (st !== prx__statsolo))) ? (v = 0);
         pp[prx_vtgt] = v;
         (pp[prx_vcur] === Undef) ? pp[prx_vcur] = v; // (created : at once)
         pp += projsize; i += 1;

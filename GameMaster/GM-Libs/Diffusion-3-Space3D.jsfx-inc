@@ -1,73 +1,90 @@
 /*
     Diffusion-3-Space3D.jsfx-inc
 
-    The module "Space 3D" of Diffusion 3 : a 3D view of the speakers and the sources (mSL_ui_Space3D.jsfx-inc),
-    with a pad of two lines. As everywhere in CMGS : right clic = a menu, left clic = a reset or a simple action.
+    The modules "Space A" ... "Space D" of Diffusion 3 (2026-11-11 ; until then a single module "Space 3D", whose number
+    "Space A" keeps) : each one shows a projector and sets its spatialization (Diffusion-3-Spatial) : a 3D view of the
+    speakers of Diffusion, of the points of the source of the projector, of its group center and of its trajectory
+    (mSL_ui_Space3D), with a pad of two lines. The settings belong to the projector (sp_st, saved with the project) :
+    the views only show them ; a view loads them into the globals of Space 3D (sx_LoadP), the pad and the mouse change
+    them there, then sx_StoreP writes them back and counts the changes for @gfx (the path) and @block (the points and
+    the gains). The camera, the mouse and the display options are those of the view (sv_Swap). The motion is computed
+    by @block (in audio time) : the view shows the points and the group where @block placed them.
+    As everywhere in CMGS : right clic = a menu, left clic = a reset or a simple action ; in the cells of choices,
+    Shift + left clic = the previous one. The pad (2026-11-11 : 3 lines of 8 cells) :
     line 1 :                left clic                       right clic
-        0 Options           3D view (perspective)           display options and views (as the right clic in the view)
-        1 HP: speakers      next : Diffusion, the layouts   layouts of the library (greyed : more than SX_MAXSPK points),
-                            of the library, Diffusion       "Diffusion configuration"
-        2 Src: sources      next layout of the library      layouts of the library (greyed : more than SX_MAXSRC), source size
-        3 A: trajectory     next trajectory                 trajectory A, dynamics, mode, radius, reset of S R T
-        4 B: trajectory     next trajectory                 trajectory B
-        5 Mix               Shift : 0 % (trajectory A)      0 ... 100 % (effective trajectory between A and B)
-        6 View              next view                       front, side, top, perspective
-        7 Anim              Shift : 3 turns per minute      animation on / off, speed (turns per minute)
-    line 2, the group of sources :
-        8 Mouse             Scene <-> Sources               menu : the Shift / Cmd / Alt drags act on the trajectory or the sources
-        9 Frame             Absolute <-> Trajectory         menu : the sources in the frame of the room, or of the trajectory
+        0 Projector         next projector (direct : its    the projectors (and their sources)
+                            channels go to the outputs)
+        1 Options           3D view (perspective)           display options and views (as the right clic in the view)
+        2 Src: source       next source of the config.      None (the channels go to the outputs), the sources defined
+        3 View              next view                       front, side, top, perspective
+        4 Law               next law                        Equal, Radius, DBAP ; the rolloff of DBAP
+        5 Reach             Shift : 0.5                     the reach (see the laws, Diffusion-3-Spatial)
+        6 Level             Shift : 0 dB                    the level of the source (dB, -inf)
+        7 Adapt             start (or stop) the adaptation  its options : the rotations, the size (see sp_FitStart)
+    line 2, the motion :
+        8 ... 11 A, B, C, D next trajectory                 the trajectories (Space 3D, Edit A ... D, library)
+       12 Mix               Shift : 0 % (trajectory A)      the chain (A B, A B C, A B C D), 0 ... 100 % along it
+       13 Anim              Shift : 3 turns per minute      animation on / off, speed (turns per minute)
+       14 Dyn               next curve                      the dynamics : curve, mode (in, out, in-out, out-in)
+       15 Radius            Shift : 0.6                     the radius of Circle, Square, Star, Spiral
+    line 3, the group of points :
+       16 Mouse             Scene <-> Sources               menu : the Shift / Cmd / Alt drags act on the trajectory or the points
+       17 Frame             Absolute <-> Trajectory         menu : the points in the frame of the room, or of the trajectory
                                                             (the front of the group follows the direction of the motion)
-       10 Spread            Shift : 25 %                    menu
-       11 Size              Shift : x 1                     size of the group (homothety, x spread)
-       12 Yaw               Shift : 0                       rotation around the vertical
-       13 Pitch             Shift : 0                       rotation around the left-right axis
-       14 Roll              Shift : 0                       rotation around the back-front axis
-       15 Reset             sources (size, rotations)       menu : sources, trajectory (S R T), all
-    Mix, Anim, Spread, Size, Yaw, Pitch, Roll : left drag = a potentiometer (ui_jdrag, see mSL_ui_Pads : horizontal
-    for the whole range, in 300 pixels, 480 for Anim (-240 ... 240, a drag starts the animation), 400 for Size
-    (logarithmic, x 0.05 ... 10), 360 for the angles (1 pixel = 1 degree) ; vertical : fine, 1/10, up = more ;
-    in the column of the cell, only fine, in its row, only coarse) ; Shift + left clic = the reset (the left clic
-    alone does nothing).
-    "File" trajectory : the last trajectory exported by GRM Spaces (.xml) dropped on the window.
+       18 Spread            Shift : 100 %                   menu
+       19 Size              Shift : x 1                     size of the group (homothety, x spread)
+       20 Yaw               Shift : 0                       rotation around the vertical
+       21 Pitch             Shift : 0                       rotation around the left-right axis
+       22 Roll              Shift : 0                       rotation around the back-front axis
+       23 Reset             points (size, rotations)        menu : points, trajectory (S R T), all, restart, defaults
+    Reach, Level, Mix, Anim, Radius, Spread, Size, Yaw, Pitch, Roll : left drag = a potentiometer (ui_jdrag, see
+    mSL_ui_Pads : horizontal for the whole range, in 300 pixels, 480 for Anim (-240 ... 240, a drag starts the
+    animation), 400 for Size (logarithmic, x 0.05 ... 10), 360 for the angles (1 pixel = 1 degree) and the level ;
+    vertical : fine, 1/10, up = more ; in the column of the cell, only fine, in its row, only coarse) ; Shift + left clic
+    = the reset (the left clic alone does nothing).
+    A direct projector (no source) : the view shows its input channels on the speakers they feed (sx_Direct : each one
+    at the barycentre of its speakers, numbered in their order), no trajectory.
+    The trajectories (each projector has its own A, B, C, D, see Diffusion-3-Spatial) : the 6 of Space 3D (None, Circle,
+    Square, Star, Spiral, Central Point), the paths of the editors Edit A ... D (a live link), the 128 of the library
+    (T1 ... T128 : files .xml of GRM Spaces dropped on the window, copies of the editors, the configuration ; module
+    "Trajectories").
     In the view : Cmd + Shift + horizontal drag = mix (continuous), Cmd + Alt + horizontal drag = speed (-240 ... 240) ;
     (Mouse : Scene) the trajectory (as S, R, T in GRM Spaces) : Shift + drag = size, Cmd + drag = rotation,
     Alt + drag = position ; (Mouse : Sources) the group : Shift + drag = size, Cmd + drag = yaw / pitch, Alt + drag = roll
     In the view : left drag = rotate, wheel = zoom, clic = select, right clic = options ;
     key 'h' : the gains and levels as balls, or as crosses and halos (s3d_style, as in the live screen).
 
-    Layouts : drop a GRM Spaces file on the window (.lay : one layout, .ala : a library) : see sx_Drop (dropped on a
-    module "Edit A" ... "Edit D" : the library is read, the layout goes to the editor, not here).
-    Edit A ... D : the menus of the speakers and of the sources (right clic, cells 1 and 2) also list the configurations
-    of the editors (Diffusion-3-Edit) : a one-shot load (sx_edReq, done by ed_Frame ; the points fitted into [-1, 1]) ;
-    the menus of the trajectories A and B (cells 3 and 4) too : the path of the editor (its curves sampled) becomes the
-    trajectory "File".
-    Sources : position = group center (on the trajectory) + spread * position in the sources layout.
+    The speakers are always those of the configuration of Diffusion (HP_Positions, scaled into [-1, 1] : the largest
+    coordinate becomes 1) ; the gains shown : the power that the projector sends to each speaker (the largest one is 1),
+    the levels : those of the outputs (HP_Power).
+    Layouts : drop a GRM Spaces file on the window (.lay : one layout, .ala : a library) : it becomes the library of the
+    editors (Diffusion-3-Edit : "Load a layout of the library" ; dropped on a module "Edit A" ... "Edit D", the layout
+    goes to that editor).
+    The HP box of the live screen (HP_Draw_conf, sx_Update) shows the speakers with the gains of the current projector
+    (its configuration ; spatial : the power sent by its points), on a black background or that of the live screen
+    (key '/', sx_lbg) ; its camera is that of the globals (the views swap theirs in and out).
 
-    Speakers "Diffusion" (by default) : the speakers of the configuration of Diffusion (HP_Positions, scaled into
-    [-1, 1]), the gains of the configuration of the current projector (normalized : the largest one is 1) and the
-    levels of the outputs (HP_Power) ; the HP box of the live screen shows the same scene (HP_Draw_conf), only the
-    speakers (no trajectory, no sources), on a black background or that of the live screen (key '/', sx_lbg).
-    Speakers of a layout of the library : the gains shown are computed by a PROVISIONAL distance law (sx_Gains),
-    until the law of GRM Spaces 3D is measured. Nothing is saved with the project yet.
-
-    Included in @init, after the part 1 of mSL_Panes (keepBlockInfos) and while make_array allocates
-    static memory. Everything else runs in @gfx.
+    Included in @init, after mSL_ui_Space3D and Diffusion-3-Spatial, while make_array allocates static memory.
+    Everything else runs in @gfx.
 */
 
 @init
 
-SX_IMG = 90;                // offscreen image of the view, reserved in ui-lib
+SX_IMG = 90;                // offscreen image of the view "Space A", reserved in ui-lib
 ui_reserve_image(SX_IMG);
 SX_IMG2 = 91;               // offscreen image of the view in the HP box of the live screen (HP_Draw_conf)
 ui_reserve_image(SX_IMG2);
-sx_liw = sx_lih = 0;        // its size
+SV_NV = 4;                  // the views "Space A" ... "Space D"
+SV_IMG1 = 96;               // the images of the views B, C, D : 96, 97, 98 (Edit A ... D : 92 ... 95)
+i__k = 0; loop(SV_NV - 1, ui_reserve_image(SV_IMG1 + i__k); i__k += 1;);
+sx_liw = sx_lih = 0;        // the size of SX_IMG2
 sx_lgdark = 0;              // the state of s3d_gdark for this view
 sx_lbg = 0;                 // its background : 0 black, 1 that of the live screen (key '/' over the box)
 sx_spkHP = 1;               // the speakers are those of the configuration of Diffusion (sx_SpkHP)
 sx_hppos = -1;              // the HP_Positions they come from
 sx_hpcf = -1;               // the configuration of the gains (sx_ConfGains, in HP_Model)
 sx_edReq = 0;               // a load of the points of an editor "Edit A" ... "D" asked : the editor + 1 (ed_Frame)
-sx_edSrc = 0;               // 0 : as the speakers ; 1 : as the sources
+sx_edSrc = 0;               // 0 speakers, 1 sources (no more asked since the views "Space A" ... "D" : ed_Frame)
 SX_MAXSPK = 128;
 SX_MAXSRC = 128;
 SX_MAXTRJ = 1024;          // (the Spiral exported by GRM Spaces has 1000 points)
@@ -81,33 +98,47 @@ sx_libpts = make_array(SX_LIBNPT * s3d_st);
 sx_libstart = make_array(SX_LIBG);
 sx_libcnt = make_array(SX_LIBG);
 sx_libng = 0;
-sx_srclay = make_array(SX_MAXSRC * 3);  // the sources layout (x, y, z in [-1,1])
+sx_srclay = make_array(SX_MAXSRC * 3);  // (a sources layout of an editor : Diffusion-3-Edit, ed_Frame)
 sx_srcn = 0;
-sx_w = make_array(SX_MAXSPK);           // work weights of sx_Gains
 sx_ftmp = make_array(SX_MAXTRJ * s3d_st);   // a trajectory file being read
 sx_fgs = make_array(2);                     // its first point and count (s3d_load_lay)
+sx_smap = make_array(SP_NSRC + 4);          // the sources of the menu sx_SrcMenu
+sx_tmap = make_array(256);                  // the items of the menus of the trajectories (sx_TrjMenu, sx_MapList)
+sx_tmi = 0;                                 // their count
 strcpy(#sx_trjname, "");
+strcpy(#sx_srcname, "");
 
-sx_traj = 1;            // trajectory A : circle
-sx_trajB = 2;           // trajectory B : square
+// the settings of the projector shown (sx_LoadP, sx_StoreP ; with s3d_mix, s3d_speed, s3d_grel, s3d_gsc, s3d_gyaw,
+// s3d_gpitch, s3d_groll, s3d_tsc, s3d_trz, s3d_trx, s3d_ttx, s3d_tty, s3d_ttz and the option s3d_oClamp)
+sx_traj = 0;            // trajectory A : None
+sx_trajB = 1;           // trajectory B : circle
+sx_trajC = 2;           // trajectory C : square (2026-11-11 : the chain of the mix A B C D, sx_trajN trajectories)
+sx_trajD = 3;           // trajectory D : star
+sx_trajN = 2;
+sx_dacc = make_array(128 * 4); // (sx_Show, a direct projector : per input, the weight and the weighted position)
+sx_dgo = make_array(128);      // (per output, the power)
 sx_trjr = 0.6;          // radius
 sx_curve = 0;           // dynamics : linear
 sx_mode = 0;            // in
-sx_view = 3;            // perspective
 sx_anim = 1;
-sx_spread = 0.25;
-sx_size = 0.5;
+sx_spread = 1;
+sx_law = 0; sx_reach = 0.5; sx_level = 0; sx_roff = 6;
+sx_curView = 0;         // the view being drawn (0 ...), its projector (1 ...)
+sx_curPrj = 1;
+sx_view = 3;            // perspective (that of the HP box ; each view has its own, sv_Swap)
 sx_lo = sx_hi = sx_px = sx_lg = 0; // the range of a cell set by a drag (sx_DragRange)
-sx_phase = 0;
-sx_ltime = 0;
 sx_ViewNames = "Front|Side|Top|3D"; // (as the views of the menu of the view, s3d_menu)
 // turns per minute ; at high speeds, the display (gfx_hz=30) samples the motion : flickering, as in GRM Spaces
 sx_Speeds = "-240|-120|-60|-30|-20|-10|-5|-3|-1|1|3|5|10|20|30|60|120|240";
 sx_SpeedsN = 18;
+sx_Reaches = "0|0.1|0.25|0.5|0.75|1|1.5|2|3";
+sx_Levels = "12|6|3|0|-3|-6|-10|-20|-40|-60|-inf";
+sx_Roffs = "3|4.5|6|9|12|18|24";
 strcpy(#sx_liblist, "");
 strcpy(#sx_libfile, "");
+strcpy(#sx_title, "");
 
-// default layouts : 8 speakers on a circle, stereo sources
+// default layouts : 8 speakers on a circle, stereo sources (before the speakers of Diffusion, sx_SpkHP)
 i__k = 0;
 loop(8,
     i__a = (-22.5 + i__k * 45) * $pi / 180;
@@ -117,24 +148,97 @@ loop(8,
 s3d_nspk = 8;
 strcpy(#sx_spkname, "Octo");
 sx_srclay[0] = -0.8; sx_srclay[3] = 0.8; sx_srcn = 2;
-strcpy(#sx_srcname, "Stereo");
-s3d_mktraj(sx_traj, 0, 0, 0, sx_trjr);
+s3d_mktraj(1, 0, 0, 0, sx_trjr);
 
-// The pad
-pad_S3D_Siz = 16;
+// The pad : 3 lines of 8 cells (one pad for the 4 views : they are drawn one after the other ; until 2026-11-11 : 2 lines
+// of 10)
+pad_S3D_Siz = 24;
 pad_S3D = make_jpad(
     ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
-    2, 8, pad_S3D_Siz);
+    3, 8, pad_S3D_Siz);
 sx_Angles = "-180|-135|-90|-45|0|45|90|135|180";
 sx_GSizes = "0.25|0.5|0.75|1|1.5|2|3|5";
 sx_Spreads = "0 %|10 %|25 %|50 %|75 %|100 %";
-sx_SrcSizes = "10 %|25 %|50 %|75 %|100 %";
 pad_S3D_Labs = pad_S3D + pad_S3D[ui_jpad_labs]; // addresses of labels
 pad_S3D_Colrs = pad_S3D + pad_S3D[ui_jpad_clrs]; // addresses of colors
 i__k = 0; loop(pad_S3D_Siz,
             pad_S3D_Colrs[i__k] = Col_Inactive;
             pad_S3D_Labs[i__k] = "";
             i__k += 1;
+);
+
+/*
+    The state of each view (sv_m + v * SV_S) : the camera, the mouse, the display options, the image ; sv_Swap exchanges
+    it with the globals of Space 3D (before and after the view : the globals stay those of the HP box)
+*/
+SV_S = 40;
+sv_m = make_array(SV_NV * SV_S);
+
+function sv_Swap(v)
+local(m, t)
+(
+    m = sv_m + v * SV_S;
+    t = m[0]; m[0] = s3d_az; s3d_az = t;
+    t = m[1]; m[1] = s3d_el; s3d_el = t;
+    t = m[2]; m[2] = s3d_dist; s3d_dist = t;
+    t = m[3]; m[3] = s3d_cpx; s3d_cpx = t;
+    t = m[4]; m[4] = s3d_cpy; s3d_cpy = t;
+    t = m[5]; m[5] = s3d_cpz; s3d_cpz = t;
+    t = m[6]; m[6] = s3d_fwx; s3d_fwx = t;
+    t = m[7]; m[7] = s3d_fwy; s3d_fwy = t;
+    t = m[8]; m[8] = s3d_fwz; s3d_fwz = t;
+    t = m[9]; m[9] = s3d_rgx; s3d_rgx = t;
+    t = m[10]; m[10] = s3d_rgy; s3d_rgy = t;
+    t = m[11]; m[11] = s3d_rgz; s3d_rgz = t;
+    t = m[12]; m[12] = s3d_upx; s3d_upx = t;
+    t = m[13]; m[13] = s3d_upy; s3d_upy = t;
+    t = m[14]; m[14] = s3d_upz; s3d_upz = t;
+    t = m[15]; m[15] = s3d_foc; s3d_foc = t;
+    t = m[16]; m[16] = s3d_ox; s3d_ox = t;
+    t = m[17]; m[17] = s3d_oy; s3d_oy = t;
+    t = m[18]; m[18] = s3d_zmin; s3d_zmin = t;
+    t = m[19]; m[19] = s3d_zmax; s3d_zmax = t;
+    t = m[20]; m[20] = s3d_mdown; s3d_mdown = t;
+    t = m[21]; m[21] = s3d_moved; s3d_moved = t;
+    t = m[22]; m[22] = s3d_mx0; s3d_mx0 = t;
+    t = m[23]; m[23] = s3d_my0; s3d_my0 = t;
+    t = m[24]; m[24] = s3d_lmx; s3d_lmx = t;
+    t = m[25]; m[25] = s3d_lmy; s3d_lmy = t;
+    t = m[26]; m[26] = s3d_rdown; s3d_rdown = t;
+    t = m[27]; m[27] = s3d_dmode; s3d_dmode = t;
+    t = m[28]; m[28] = s3d_sel; s3d_sel = t;
+    t = m[29]; m[29] = s3d_opt; s3d_opt = t;
+    t = m[30]; m[30] = s3d_style; s3d_style = t;
+    t = m[31]; m[31] = sx_view; sx_view = t;
+    t = m[32]; m[32] = s3d_mtarget; s3d_mtarget = t;
+    t = m[33]; m[33] = s3d_img; s3d_img = t;
+    t = m[34]; m[34] = s3d_iw; s3d_iw = t;
+    t = m[35]; m[35] = s3d_ih; s3d_ih = t;
+    t = m[36]; m[36] = s3d_gdark; s3d_gdark = t;
+    t = m[37]; m[37] = s3d_changed; s3d_changed = t;
+    t = m[38]; m[38] = s3d_tchanged; s3d_tchanged = t;
+);
+
+// the state of each view at the start : the camera of the 3D view, the options of s3d_init, its own image (the other
+// values of the camera : computed by s3d_draw)
+i__k = 0;
+loop(SV_NV,
+    i__m = sv_m + i__k * SV_S;
+    i__m[0] = s3d_az; i__m[1] = s3d_el; i__m[2] = s3d_dist;
+    i__m[20] = 0; i__m[26] = 0; i__m[27] = 0; i__m[28] = -1;
+    i__m[29] = s3d_opt; i__m[30] = 0; i__m[31] = 3; i__m[32] = 0;
+    i__m[33] = (i__k === 0) ? SX_IMG : SV_IMG1 + i__k - 1;
+    i__m[34] = i__m[35] = 0; i__m[36] = 0; i__m[37] = i__m[38] = 0;
+    i__k += 1;
+);
+
+// The projector of the view v (1 ... projucnt) : serialBlock[Pr7_SpcView + v] (0 : that of its letter)
+function sv_Prj(v)
+local(p)
+(
+    p = 0|serialBlock[Pr7_SpcView + v];
+    ((p < 1) || (p > projucnt)) ? (p = min(projucnt, v + 1));
+    p;
 );
 
 
@@ -168,6 +272,20 @@ local(k)
     );
 );
 
+// The index of the item of a list of numbers nearest to v
+function sx_NearItem(list, n, v)
+local(k, b, d, bd)
+(
+    b = -1; bd = 10^30; k = 0;
+    loop(n,
+        sx_Nth(list, k, #sx_it);
+        d = abs(s3d_atof(#sx_it, 0, strlen(#sx_it)) - v);
+        (d < bd) ? (bd = d; b = k;);
+        k += 1;
+    );
+    b;
+);
+
 // Adds to #sx_mnu, after a separator, the editors "Edit A" ... "Edit D" (Diffusion-3-Edit, included later : their
 // globals ED_NV, ed_st, ed_nm ... are read at run time) : "Edit A : name  (n)", greyed with fewer than minn points or
 // more than maxn
@@ -185,99 +303,32 @@ local(g, c)
     );
 );
 
-// Menu of the library : the layouts of more than maxn points are greyed ; then the editors "Edit A" ... "Edit D" ;
-// withsize : add the submenu "Source size". Returns the layout (0 ... sx_libng - 1), sx_libng + i for the item i of
-// the submenu, 10000 + e for the editor e, or -1. (The editors are in Diffusion-3-Edit, included later : their
-// globals ED_NV, ed_st, ed_nm ... are read at run time.)
-function sx_LibMenu(maxn, curname, withsize)
-local(g, c)
+// A kind of trajectory that can be used (see Diffusion-3-Spatial) : those of Space 3D (0 ... 5), an editor Edit A ... D
+// with a path (live link), a trajectory of the library that is not empty
+function sx_TrjOk(k)
 (
-    (sx_libng === 0) ? (
-        strcpy(#sx_mnu, "#No library : drop a .lay or .ala file (GRM Spaces) on the window");
-    ) : (
-        sprintf(#sx_mnu, "#%s", #sx_libfile);
-        g = 0;
-        loop(sx_libng,
-            sx_Nth(#sx_liblist, g, #sx_nm);
-            strcat(#sx_mnu, "|");
-            (sx_libcnt[g] > maxn) ? strcat(#sx_mnu, "#") : (strcmp(#sx_nm, curname) === 0) ? strcat(#sx_mnu, "!");
-            sprintf(#sx_it, "%s  (%d)", #sx_nm, sx_libcnt[g]);
-            strcat(#sx_mnu, #sx_it);
-            g += 1;
-        );
-    );
-    // the editors (greyed : empty, or too many points)
-    sx_EdList(1, maxn);
-    withsize ? (
-        strcat(#sx_mnu, "||>Source size");
-        sx_MenuList(sx_SrcSizes, 5, -1, 1);
-    ) : (
-        // the speakers : those of Diffusion (returns sx_libng)
-        strcat(#sx_mnu, sx_spkHP ? "||!Diffusion configuration" : "||Diffusion configuration");
-    );
-    gfx_x = mouse_x; gfx_y = mouse_y;
-    c = gfx_showmenu(#sx_mnu);
-    // (the items : 1 the title ; 2 ... the layouts ; then the editors ; then the end of the menu)
-    ((c >= sx_libng + 2) && (c < sx_libng + 2 + ED_NV)) ? 10000 + c - sx_libng - 2 :
-    (c >= sx_libng + 2 + ED_NV) ? c - 2 - ED_NV :
-    (c >= 2) ? c - 2 : -1;
+    (k < 0) ? 0 :
+    (k < SP_KED) ? 1 :
+    (k < SP_KLIB) ? (sp_edN[k - SP_KED] > 0) :
+    (k < SP_KLIB + SP_NTRJ) ? (sp_trN[k - SP_KLIB] > 0) : 0;
 );
 
-// The next trajectory after k ("File" skipped if no file was read)
-function sx_TrjNext(k)
+// The next trajectory after k (d = 1), or the previous one (d = -1) (the kinds that can be used)
+function sx_TrjNext(k, d)
+local(n, c)
 (
-    k = (k + 1) % s3d_TrjCount;
-    ((k === s3d_TrjFile) && (s3d_nftrj === 0)) ? k = (k + 1) % s3d_TrjCount;
+    n = SP_KLIB + SP_NTRJ; c = 0;
+    while (
+        k = (k + d + n) % n;
+        c += 1;
+        !sx_TrjOk(k) && (c < n);
+    );
     k;
 );
 
-// Use the layout g of the library for the speakers (dsrc = 0) or the sources (dsrc = 1)
-function sx_LibTake(g, dsrc)
-local(n, k, e)
-(
-    sx_Nth(#sx_liblist, g, #sx_nm);
-    dsrc ? (
-        sx_srcn = n = min(SX_MAXSRC, sx_libcnt[g]);
-        k = 0;
-        loop(n,
-            e = sx_libpts + (sx_libstart[g] + k) * s3d_st;
-            sx_srclay[3*k] = e[s3d_fx]; sx_srclay[3*k+1] = e[s3d_fy]; sx_srclay[3*k+2] = e[s3d_fz];
-            k += 1;
-        );
-        strcpy(#sx_srcname, #sx_nm);
-    ) : (
-        s3d_nspk = n = min(SX_MAXSPK, sx_libcnt[g]);
-        memcpy(s3d_spk, sx_libpts + sx_libstart[g] * s3d_st, n * s3d_st);
-        strcpy(#sx_spkname, #sx_nm);
-        sx_spkHP = 0;
-    );
-    s3d_sel = -1;
-);
-
-// The next layout of the library (not greyed) for the speakers (dsrc = 0) or the sources (dsrc = 1)
-function sx_LibNext(dsrc)
-local(g, k, maxn)
-(
-    (sx_libng > 0) ? (
-        maxn = dsrc ? SX_MAXSRC : SX_MAXSPK;
-        g = -1; k = 0;
-        loop(sx_libng,
-            sx_Nth(#sx_liblist, k, #sx_nm);
-            (strcmp(#sx_nm, dsrc ? #sx_srcname : #sx_spkname) === 0) ? g = k;
-            k += 1;
-        );
-        k = 0;
-        while (
-            g = (g + 1) % sx_libng;
-            k += 1;
-            (sx_libcnt[g] > maxn) && (k < sx_libng);
-        );
-        (sx_libcnt[g] <= maxn) ? sx_LibTake(g, dsrc);
-    );
-);
-
-// A GRM Spaces file dropped on the window : it becomes the library ; take : a single layout is used at once (0 : the
-// file was dropped on a module "Edit", that takes the layout) ; returns the count of layouts read (<= 0 : none)
+// A GRM Spaces file dropped on the window : it becomes the library (of the editors : Diffusion-3-Edit) ; "take" is no
+// more used (the speakers are always those of Diffusion, the sources those of the configuration) ; returns the count
+// of layouts read (<= 0 : none)
 function sx_Drop(fn, take)
 local(n, k)
 (
@@ -289,11 +340,9 @@ local(n, k)
         k = strlen(fn);
         while ((k > 0) && (str_getchar(fn, k - 1) !== '/') && (str_getchar(fn, k - 1) !== '\\')) (k -= 1;);
         strcpy_substr(#sx_libfile, fn, k);
-        // a single layout : used at once
-        (take && (n === 1)) ? sx_LibTake(0, matchi("*source*", #s3d_laytag));
-        sprintf(#sx_it, "Space 3D : \"%s\", %d layout(s)", #sx_libfile, n);
+        sprintf(#sx_it, "Space : \"%s\", %d layout(s) (the library of the editors Edit A ... D)", #sx_libfile, n);
     ) : (
-        sprintf(#sx_it, "Space 3D : \"%s\", no layout read (%d)", fn, n);
+        sprintf(#sx_it, "Space : \"%s\", no layout read (%d)", fn, n);
     );
     mSL_log(SysLogBox, #sx_it);
     n; // (the count of layouts read)
@@ -307,41 +356,112 @@ function sx_ViewOf()
     ((s3d_el === 0) && (abs(s3d_az - $pi / 2) < 0.0001)) ? 1 : 3;
 );
 
-// A file .xml dropped on the window : if it is a trajectory exported by GRM Spaces, it becomes
-// the trajectory "File". Returns 1 if it was a trajectory
+// A file .xml dropped on the window : if it is a trajectory exported by GRM Spaces, it goes into the library of
+// trajectories (Diffusion-3-Spatial : that of the same name, else the first one empty ; its name : that of the file
+// when the trajectory has none). Returns 1 if it was a trajectory
 function sx_DropTraj(fn)
-local(n)
+local(n, i, k)
 (
     n = s3d_load_lay(fn, sx_ftmp, SX_MAXTRJ, sx_fgs, sx_fgs + 1, 1);
     ((n > 0) && matchi("Trajectory*", #s3d_laytag)) ? (
-        s3d_settraj(sx_ftmp, sx_fgs[1], s3d_layclosed);
         strcpy(#sx_trjname, #s3d_laylist);
-        sx_traj = s3d_TrjFile;
-        sprintf(#sx_it, "Space 3D : trajectory \"%s\", %d points, %s", #sx_trjname, s3d_nftrj, s3d_ftclosed ? "closed" : "open");
+        (strlen(#sx_trjname) === 0) ? (
+            // the name of the file, without the path and the extension
+            k = strlen(fn);
+            while ((k > 0) && (str_getchar(fn, k - 1) !== '/') && (str_getchar(fn, k - 1) !== '\\')) (k -= 1;);
+            strcpy_substr(#sx_trjname, fn, k);
+            k = strlen(#sx_trjname);
+            while ((k > 0) && (str_getchar(#sx_trjname, k - 1) !== '.')) (k -= 1;);
+            (k > 1) ? str_setlen(#sx_trjname, k - 1);
+        );
+        i = sp_TrjFind(#sx_trjname);
+        (i < 0) ? (
+            sprintf(#sx_it, "ERR: 2474    Space : the library of trajectories is full (128) : \"%s\" not kept", #sx_trjname);
+        ) : (
+            n = sp_TrjPut(i, sx_ftmp + sx_fgs[0] * s3d_st, sx_fgs[1], s3d_st, s3d_layclosed, #sx_trjname);
+            sprintf(#sx_it, "Space : trajectory \"%s\", %d points, %s : T%d of the library", #sx_trjname, n,
+                s3d_layclosed ? "closed" : "open", i + 1);
+        );
         mSL_log(SysLogBox, #sx_it);
         1;
     ) : 0;
 );
 
-// Add the trajectories to #sx_mnu, "cur" checked ; the trajectory "File" is greyed if no file was read
-function sx_TrjList(cur)
+// The name of the trajectory of kind k, in dst : "Circle", "Edit B : name", "T12 name" ("T12 ?" : empty)
+function sx_TrjName(k, dst)
+local(e, i)
+(
+    (k < SP_KED) ? sx_Nth(s3d_TrjNames, max(0, k), dst) :
+    (k < SP_KLIB) ? (
+        e = k - SP_KED;
+        (strlen(ed_nm[e]) > 0) ? sprintf(dst, "Edit %c : %s", 'A' + e, ed_nm[e]) : sprintf(dst, "Edit %c", 'A' + e);
+    ) : (
+        i = k - SP_KLIB;
+        sp_NmGet(i, #sx_tn);
+        (sp_trN[i] <= 0) ? sprintf(dst, "T%d ?", i + 1) :
+        (strlen(#sx_tn) > 0) ? sprintf(dst, "T%d %s", i + 1, #sx_tn) : sprintf(dst, "T%d", i + 1);
+    );
+    dst;
+);
+
+// Add to #sx_mnu the items of a list (chk checked, "last" : the end of a submenu), mapped to code + k (sx_tmap)
+function sx_MapList(list, n, chk, last, code)
 local(k)
 (
     k = 0;
-    loop(s3d_TrjCount,
-        sx_Nth(s3d_TrjNames, k, #sx_it);
-        (k > 0) ? strcat(#sx_mnu, "|");
-        ((k === s3d_TrjFile) && (s3d_nftrj === 0)) ? strcat(#sx_mnu, "#") : (k === cur) ? strcat(#sx_mnu, "!");
-        ((k === s3d_TrjFile) && (s3d_nftrj > 0)) ? sprintf(#sx_it, "File : %s", #sx_trjname);
+    loop(n,
+        sx_Nth(list, k, #sx_it);
+        strcat(#sx_mnu, "|");
+        ((k === n - 1) && last) ? strcat(#sx_mnu, "<");
+        (k === chk) ? strcat(#sx_mnu, "!");
         strcat(#sx_mnu, #sx_it);
+        sx_tmap[sx_tmi] = code + k; sx_tmi += 1;
         k += 1;
     );
 );
 
-// the name of the trajectory k, in dst
-function sx_TrjName(k, dst)
+// Add to #sx_mnu the trajectories, cur checked (sx_tmap : the kind of each item, sx_tmi : the count of items) : those
+// of Space 3D ; the editors Edit A ... D (a live link ; greyed without a path) ; the library T1 ... T128, by 16
+// (greyed : empty)
+function sx_TrjMenu(cur)
+local(k, e, g, i, n)
 (
-    (k === s3d_TrjFile) ? strcpy(dst, #sx_trjname) : sx_Nth(s3d_TrjNames, k, dst);
+    k = 0;
+    loop(SP_KED,
+        sx_Nth(s3d_TrjNames, k, #sx_it);
+        sprintf(#sx_tw, "%s%s%s", (sx_tmi > 0) ? "|" : "", (k === cur) ? "!" : "", #sx_it);
+        strcat(#sx_mnu, #sx_tw); sx_tmap[sx_tmi] = k; sx_tmi += 1;
+        k += 1;
+    );
+    strcat(#sx_mnu, "||>Editors (live link)");
+    e = 0;
+    loop(4,
+        k = SP_KED + e;
+        sx_TrjName(k, #sx_it);
+        sprintf(#sx_tw, "|%s%s%s%s  (%d)", (e === 3) ? "<" : "", (sp_edN[e] < 1) ? "#" : "", (k === cur) ? "!" : "", #sx_it, sp_edN[e]);
+        strcat(#sx_mnu, #sx_tw); sx_tmap[sx_tmi] = k; sx_tmi += 1;
+        e += 1;
+    );
+    g = 0;
+    loop(SP_NTRJ / 16,
+        n = 0; i = g * 16; loop(16, (sp_trN[i] > 0) ? (n += 1); i += 1;);
+        sprintf(#sx_tw, "|>Library T%d ... T%d  (%d)", g * 16 + 1, g * 16 + 16, n);
+        strcat(#sx_mnu, #sx_tw);
+        i = 0;
+        loop(16,
+            k = SP_KLIB + g * 16 + i;
+            sx_TrjName(k, #sx_it);
+            (sp_trN[g * 16 + i] > 0) ? (
+                sprintf(#sx_tw, "|%s%s%s  (%d%s)", (i === 15) ? "<" : "", (k === cur) ? "!" : "", #sx_it, sp_trN[g * 16 + i],
+                    sp_trC[g * 16 + i] ? ", closed" : "");
+            ) : (
+                sprintf(#sx_tw, "|%s#T%d", (i === 15) ? "<" : "", g * 16 + i + 1);
+            );
+            strcat(#sx_mnu, #sx_tw); sx_tmap[sx_tmi] = k; sx_tmi += 1;
+            i += 1;
+        );
+        g += 1;
+    );
 );
 
 function sx_SetView(v)
@@ -387,34 +507,27 @@ local(c, i, n, m, e)
     s3d_sel = -1;
 );
 
-// the speakers come from the last layout of the library that can be used (or from none of them)
-function sx_SpkLast()
-local(g, k, last)
-(
-    g = last = -1; k = 0;
-    loop(sx_libng,
-        sx_Nth(#sx_liblist, k, #sx_nm);
-        (strcmp(#sx_nm, #sx_spkname) === 0) ? g = k;
-        (sx_libcnt[k] <= SX_MAXSPK) ? last = k;
-        k += 1;
-    );
-    g >= last;
-);
-
 // the gains of the configuration of the current projector (the sum of the weights of its sources on each speaker,
-// in HP_Model, computed again when the configuration changes), the largest one is 1
+// in HP_Model, computed again when the configuration or the diffusion of the outputs changes ; through its diffusion of
+// the outputs, outdiff : see confload), the largest one is 1
+sx_hpod = -1;
 function sx_ConfGains()
-local(pcf, w, d, k, m)
+local(pcf, oud, w, d, k, m, q)
 (
     pcf = currentpro[prx_ptrconf];
-    (pcf !== sx_hpcf) ? (
-        sx_hpcf = pcf;
+    oud = cf_Blk(currentpro[prx_outdiff]);
+    ((pcf !== sx_hpcf) || (oud !== sx_hpod)) ? (
+        sx_hpcf = pcf; sx_hpod = oud;
         memset(HP_Model, 0, 129);
         (pcf > 16) ? (
             pcf += 1;
             while ((w = pcf[0]) != endmark) (
                 pcf += 1; // w is a source
                 while ((d = pcf[0]) > 0) (
+                    (oud > 0) ? (
+                        q = cf_Src(oud, d);
+                        while ((q > 0) && (q[0] > 0)) ( (q[0] <= 128) ? HP_Model[q[0]-1] += pcf[1] * q[1]; q += 2; );
+                    ) :
                     (d <= 128) ? HP_Model[d-1] += pcf[1];
                     pcf += 2;
                 );
@@ -426,59 +539,23 @@ local(pcf, w, d, k, m)
     k = 0; loop(s3d_nspk, s3d_spk[k * s3d_st + s3d_fg] = (m > 0) ? HP_Model[k] / m : 0; k += 1;);
 );
 
-// PROVISIONAL gain law : each source lights the speakers nearer than rad (cosine weight),
-// normalized in power ; no speaker in reach : the nearest one
-function sx_Gains(rad)
-local(i, k, e, f, d, w, sw, best, bd)
+// the gains of the spatial projector pk (0 ...) : the power it sends to each output (sp_Gains, @block), the largest is 1
+function sx_SpGains(pk)
+local(hp, k, m)
 (
-    k = 0; loop(s3d_nspk, s3d_spk[k * s3d_st + s3d_fg] = 0; k += 1;);
-    i = 0;
-    loop(s3d_nsrc,
-        f = s3d_src + i * s3d_st;
-        sw = 0; best = 0; bd = 100;
-        k = 0;
-        loop(s3d_nspk,
-            e = s3d_spk + k * s3d_st;
-            d = sqrt(sqr(e[s3d_fx] - f[s3d_fx]) + sqr(e[s3d_fy] - f[s3d_fy]) + sqr(e[s3d_fz] - f[s3d_fz]));
-            (d < bd) ? (bd = d; best = k;);
-            sx_w[k] = w = (d < rad) ? cos(0.5 * $pi * d / rad) : 0;
-            sw += w * w;
-            k += 1;
-        );
-        (sw <= 0) ? (sx_w[best] = 1; sw = 1;);
-        k = 0;
-        loop(s3d_nspk, e = s3d_spk + k * s3d_st; e[s3d_fg] += sqr(sx_w[k]) / sw; k += 1;);
-        i += 1;
-    );
-    k = 0; loop(s3d_nspk, e = s3d_spk + k * s3d_st; e[s3d_fg] = sqrt(e[s3d_fg] / max(1, s3d_nsrc)); k += 1;);
+    hp = sp_hpg + pk * 128;
+    m = 0; k = 0; loop(s3d_nspk, m = max(m, hp[k]); k += 1;);
+    k = 0; loop(s3d_nspk, s3d_spk[k * s3d_st + s3d_fg] = (m > 0) ? sqrt(hp[k] / m) : 0; k += 1;);
 );
 
-// Move the group, place the sources, compute the gains
+// The HP box of the live screen (HP_Draw_conf) : the speakers of Diffusion, the gains of the current projector (its
+// configuration, or, spatial, the power of its points), the levels of the outputs
 function sx_Update()
-local(t, k, e)
+local(k)
 (
-    t = time_precise();
-    sx_anim ? (
-        sx_phase += s3d_speed / 60 * min(0.2, max(0, t - sx_ltime));
-        sx_phase -= floor(sx_phase);
-    );
-    sx_ltime = t;
-    s3d_mkmorph(sx_traj, sx_trajB, s3d_mix, 0, 0, 0, sx_trjr);
-    (s3d_ntrj > 0) ? (
-        s3d_trjpos(s3d_ease(sx_curve, sx_mode, sx_phase));
-    ) : (
-        s3d_gx = s3d_gy = s3d_gz = 0;
-    );
-    s3d_gon = 1;
-    s3d_place_sources(sx_srclay, sx_srcn, sx_spread);
-    (sx_spkHP && (HP_Positions !== sx_hppos)) ? sx_SpkHP(); // a new configuration
-    sx_spkHP ? (
-        // the gains of the current configuration, the levels of the outputs
-        sx_ConfGains();
-        k = 0; loop(s3d_nspk, s3d_spk[k * s3d_st + s3d_fl] = max(0, min(1, HP_Power[k] / 15)); k += 1;);
-    ) : (
-        sx_Gains(1.2 * sx_size);
-    );
+    (HP_Positions !== sx_hppos) ? sx_SpkHP(); // a new configuration
+    (currentpro[prx_spv] > 0) ? sx_SpGains(currentpro[prx_fident] - 1) : sx_ConfGains();
+    k = 0; loop(s3d_nspk, s3d_spk[k * s3d_st + s3d_fl] = max(0, min(1, HP_Power[k] / 15)); k += 1;);
 );
 
 // the spread of the item i of sx_Spreads (0, 0.1, 0.25, 0.5, 0.75, 1)
@@ -492,29 +569,221 @@ function sx_ResetSources()
     s3d_gsc = 1; s3d_gyaw = s3d_gpitch = s3d_groll = 0;
 );
 
-// The cells set by a drag : 5 Mix, 7 Anim (speed), 10 Spread, 11 Size, 12 Yaw, 13 Pitch, 14 Roll ; sx_lo, sx_hi, sx_px (the pixels of a
-// horizontal drag for the whole range), sx_lg (the flags of ui_jdrag_start : 1 logarithmic) ; returns 0 for the other cells
+function sx_ResetTraj()
+(
+    s3d_tsc = 1; s3d_trz = s3d_trx = 0; s3d_ttx = s3d_tty = s3d_ttz = 0;
+);
+
+/*
+    The settings of the projector pk (0 ...) : loaded into the globals of the view, written back after it
+*/
+function sx_LoadP(pk)
+local(st)
+(
+    st = sp_st + pk * SP_SS;
+    sx_law = st[sp_fLaw]; sx_reach = st[sp_fReach]; sx_level = st[sp_fLevel]; sx_roff = st[sp_fRoff];
+    sx_traj = st[sp_fTrA]; sx_trajB = st[sp_fTrB]; s3d_mix = st[sp_fMix]; sx_trjr = st[sp_fRad];
+    sx_trajC = st[sp_fTrC]; sx_trajD = st[sp_fTrD]; sx_trajN = max(2, min(4, st[sp_fTrN]));
+    sx_curve = st[sp_fCurve]; sx_mode = st[sp_fMode]; s3d_speed = st[sp_fSpeed]; sx_anim = st[sp_fAnim];
+    s3d_grel = st[sp_fFrame]; sx_spread = st[sp_fSpread]; s3d_gsc = st[sp_fGsc];
+    s3d_gyaw = st[sp_fYaw]; s3d_gpitch = st[sp_fPitch]; s3d_groll = st[sp_fRoll];
+    s3d_tsc = st[sp_fTsc]; s3d_trz = st[sp_fTrz]; s3d_trx = st[sp_fTrx];
+    s3d_ttx = st[sp_fTtx]; s3d_tty = st[sp_fTty]; s3d_ttz = st[sp_fTtz];
+    s3d_opt = st[sp_fClamp] ? (s3d_opt | s3d_oClamp) : (s3d_opt & (0x7FFFFFFF - s3d_oClamp));
+);
+
+// (the changes : sp_pSeq, the path to build again ; sp_stSeq, the points and the gains)
+function sx_StoreP(pk)
+local(st, cl, a, b)
+(
+    st = sp_st + pk * SP_SS;
+    cl = (s3d_opt & s3d_oClamp) ? 1 : 0;
+    a = (st[sp_fTrA] != sx_traj) || (st[sp_fTrB] != sx_trajB) || (st[sp_fMix] != s3d_mix) || (st[sp_fRad] != sx_trjr) ||
+        (st[sp_fTrC] != sx_trajC) || (st[sp_fTrD] != sx_trajD) || (st[sp_fTrN] != sx_trajN) ||
+        (st[sp_fTsc] != s3d_tsc) || (st[sp_fTrz] != s3d_trz) || (st[sp_fTrx] != s3d_trx) ||
+        (st[sp_fTtx] != s3d_ttx) || (st[sp_fTty] != s3d_tty) || (st[sp_fTtz] != s3d_ttz) || (st[sp_fClamp] != cl);
+    b = a || (st[sp_fLaw] != sx_law) || (st[sp_fReach] != sx_reach) || (st[sp_fLevel] != sx_level) ||
+        (st[sp_fRoff] != sx_roff) || (st[sp_fCurve] != sx_curve) || (st[sp_fMode] != sx_mode) ||
+        (st[sp_fSpeed] != s3d_speed) || (st[sp_fAnim] != sx_anim) || (st[sp_fFrame] != s3d_grel) ||
+        (st[sp_fSpread] != sx_spread) || (st[sp_fGsc] != s3d_gsc) || (st[sp_fYaw] != s3d_gyaw) ||
+        (st[sp_fPitch] != s3d_gpitch) || (st[sp_fRoll] != s3d_groll);
+    b ? (
+        st[sp_fLaw] = sx_law; st[sp_fReach] = sx_reach; st[sp_fLevel] = sx_level; st[sp_fRoff] = sx_roff;
+        st[sp_fTrA] = sx_traj; st[sp_fTrB] = sx_trajB; st[sp_fMix] = s3d_mix; st[sp_fRad] = sx_trjr;
+        st[sp_fTrC] = sx_trajC; st[sp_fTrD] = sx_trajD; st[sp_fTrN] = sx_trajN;
+        st[sp_fCurve] = sx_curve; st[sp_fMode] = sx_mode; st[sp_fSpeed] = s3d_speed; st[sp_fAnim] = sx_anim;
+        st[sp_fFrame] = s3d_grel; st[sp_fSpread] = sx_spread; st[sp_fGsc] = s3d_gsc;
+        st[sp_fYaw] = s3d_gyaw; st[sp_fPitch] = s3d_gpitch; st[sp_fRoll] = s3d_groll;
+        st[sp_fTsc] = s3d_tsc; st[sp_fTrz] = s3d_trz; st[sp_fTrx] = s3d_trx;
+        st[sp_fTtx] = s3d_ttx; st[sp_fTty] = s3d_tty; st[sp_fTtz] = s3d_ttz;
+        st[sp_fClamp] = cl;
+        a ? sp_pSeq[pk] += 1;
+        sp_stSeq[pk] += 1;
+    );
+);
+
+// A direct projector (no source : its channels go to the outputs) : its input channels as points, each one at the
+// barycentre (weights : the squared gains) of the speakers it feeds (on the speaker when it feeds only one), in their
+// order ; the power sent to each speaker ; from its current matrix (the active list prx_pactl, the gains prx_poutp :
+// read while @block may rebuild them, display only, the loop is bounded)
+function sx_Direct(pp)
+local(lst, g, u, i, o, w, k, n, m, e, q, c)
+(
+    memset(sx_dacc, 0, 128 * 4); memset(sx_dgo, 0, 128);
+    lst = pp[prx_pactl]; g = pp[prx_poutp];
+    c = 0;
+    ((lst > 0) && (g > 0)) ? (
+        while (((u = lst[0]) >= 0) && (u < matrsiz) && (c < matrsiz)) (
+            w = sqr(g[u]);
+            (w > 0) ? (
+                i = u >> 7; o = u & 0x7f;
+                e = s3d_spk + o * s3d_st;
+                q = sx_dacc + 4 * i;
+                q[0] += w; q[1] += w * e[s3d_fx]; q[2] += w * e[s3d_fy]; q[3] += w * e[s3d_fz];
+                sx_dgo[o] += w;
+            );
+            lst += 1; c += 1;
+        );
+    );
+    n = 0; i = 0;
+    loop(128,
+        q = sx_dacc + 4 * i;
+        ((q[0] > 0) && (n < SX_MAXSRC)) ? (
+            e = s3d_src + n * s3d_st;
+            e[s3d_fx] = q[1] / q[0]; e[s3d_fy] = q[2] / q[0]; e[s3d_fz] = q[3] / q[0];
+            n += 1;
+        );
+        i += 1;
+    );
+    s3d_nsrc = n; s3d_gon = 0;
+    m = 0; k = 0; loop(s3d_nspk, m = max(m, sx_dgo[k]); k += 1;);
+    k = 0; loop(s3d_nspk, s3d_spk[k * s3d_st + s3d_fg] = (m > 0) ? sqrt(sx_dgo[k] / m) : 0; k += 1;);
+);
+
+// The scene of the view of the projector pk : the speakers of Diffusion and the power the projector sends them, the
+// levels of the outputs ; spatial : its trajectory, its points and its group center, where @block placed them ;
+// direct (2026-11-11) : its input channels on the speakers they feed (sx_Direct), no trajectory
+function sx_Show(pk)
+local(pp, w, n, k, e, pos)
+(
+    (HP_Positions !== sx_hppos) ? sx_SpkHP();
+    pp = projectors + pk * projsize;
+    (pp[prx_spv] > 0) ? sx_SpGains(pk) : sx_Direct(pp);
+    k = 0; loop(s3d_nspk, s3d_spk[k * s3d_st + s3d_fl] = max(0, min(1, HP_Power[k] / 15)); k += 1;);
+    (pp[prx_spv] > 0) ? sp_MkChain(sx_traj, sx_trajB, sx_trajC, sx_trajD, sx_trajN, s3d_mix, sx_trjr) : (s3d_ntrj = 0);
+    w = sp_wk + pk * SP_WS;
+    (pp[prx_spv] > 0) ? (
+        n = min(SX_MAXSRC, w[sp_wN]);
+        pos = sp_pos + pk * SP_MAXP * 3;
+        k = 0;
+        loop(n,
+            e = s3d_src + k * s3d_st;
+            e[s3d_fx] = pos[3*k]; e[s3d_fy] = pos[3*k+1]; e[s3d_fz] = pos[3*k+2];
+            k += 1;
+        );
+        s3d_nsrc = n;
+        s3d_gx = w[sp_wGx]; s3d_gy = w[sp_wGy]; s3d_gz = w[sp_wGz]; s3d_gon = 1;
+    );
+);
+
+// The menu of the projectors (with their sources) ; returns the projector chosen (0 ...) or -1
+function sx_PrjMenu(cur)
+local(p, s)
+(
+    strcpy(#sx_mnu, "");
+    p = 0;
+    loop(projucnt,
+        s = 0|serialBlock[Pr7_PrjSpace + p];
+        (s > 0) ? sprintf(#sx_it, "%s%sProjector %d  : source %d", (p > 0) ? "|" : "", (p === cur) ? "!" : "", p + 1, s) :
+                  sprintf(#sx_it, "%s%sProjector %d", (p > 0) ? "|" : "", (p === cur) ? "!" : "", p + 1);
+        strcat(#sx_mnu, #sx_it);
+        p += 1;
+    );
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    p = gfx_showmenu(#sx_mnu);
+    (p >= 1) ? p - 1 : -1;
+);
+
+// The menu of the sources : None, then the sources defined by the configuration ; returns the source chosen (0 : none)
+// or -1
+function sx_SrcMenu(cur)
+local(s, i, m)
+(
+    strcpy(#sx_mnu, (cur <= 0) ? "!None : the channels go to the outputs" : "None : the channels go to the outputs");
+    sx_smap[0] = 0; i = 1;
+    strcat(#sx_mnu, "|");
+    s = 1;
+    loop(SP_NSRC - 1,
+        (sp_srcN[s] > 0) ? (
+            sprintf(#sx_it, "|%sSource %d  (%d points)", (s === cur) ? "!" : "", s, sp_srcN[s]);
+            strcat(#sx_mnu, #sx_it); sx_smap[i] = s; i += 1;
+        );
+        s += 1;
+    );
+    (i === 1) ? (strcat(#sx_mnu, "|#No source defined (source n : k < x y z, ... ; in the configuration)"); sx_smap[i] = -1; i += 1;);
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#sx_mnu);
+    ((m >= 1) && (m <= i)) ? sx_smap[m - 1] : -1;
+);
+
+// The next source defined after cur (after the last one : none)
+function sx_SrcNext(cur)
+local(s)
+(
+    s = max(0, cur) + 1;
+    while ((s < SP_NSRC) && (sp_srcN[s] <= 0)) (s += 1;);
+    (s < SP_NSRC) ? s : 0;
+);
+
+
+// The source defined before cur (before the first one : none ; from none : the last one)
+function sx_SrcPrev(cur)
+local(s)
+(
+    s = (cur <= 0) ? SP_NSRC - 1 : cur - 1;
+    while ((s > 0) && (sp_srcN[s] <= 0)) (s -= 1;);
+    s;
+);
+
+// The trajectory of the cell 8 ... 11 (A, B, C, D), and its change
+function sx_TrjGet(c)
+(
+    (c === 8) ? sx_traj : (c === 9) ? sx_trajB : (c === 10) ? sx_trajC : sx_trajD;
+);
+function sx_TrjSet(c, k)
+(
+    (c === 8) ? (sx_traj = k) : (c === 9) ? (sx_trajB = k) : (c === 10) ? (sx_trajC = k) : (sx_trajD = k);
+);
+
+// The cells set by a drag : 5 Reach, 6 Level, 12 Mix, 13 Anim (speed), 15 Radius, 18 Spread, 19 Size, 20 Yaw, 21 Pitch,
+// 22 Roll ; sx_lo, sx_hi, sx_px (the pixels of a horizontal drag for the whole range), sx_lg (the flags of
+// ui_jdrag_start : 1 logarithmic) ; returns 0 for the other cells
 function sx_DragRange(c)
 (
     sx_lg = 0;
-    ((c === 5) || (c === 10)) ? (sx_lo = 0; sx_hi = 1; sx_px = 300; 1) :
-    (c === 11) ? (sx_lo = 0.05; sx_hi = 10; sx_px = 400; sx_lg = 1; 1) : // (as the Shift drag in the view)
-    ((c >= 12) && (c <= 14)) ? (sx_lo = -$pi; sx_hi = $pi; sx_px = 360; 1) : // 1 pixel = 1 degree
-    (c === 7) ? (sx_lo = -240; sx_hi = 240; sx_px = 480; 1) : // the speed : 1 pixel = 1 turn per minute
+    ((c === 12) || (c === 18)) ? (sx_lo = 0; sx_hi = 1; sx_px = 300; 1) :
+    (c === 5) ? (sx_lo = 0; sx_hi = 3; sx_px = 300; 1) :
+    (c === 15) ? (sx_lo = 0.05; sx_hi = 1.5; sx_px = 290; 1) :
+    (c === 19) ? (sx_lo = 0.05; sx_hi = 10; sx_px = 400; sx_lg = 1; 1) : // (as the Shift drag in the view)
+    ((c >= 20) && (c <= 22)) ? (sx_lo = -$pi; sx_hi = $pi; sx_px = 360; 1) : // 1 pixel = 1 degree
+    (c === 13) ? (sx_lo = -240; sx_hi = 240; sx_px = 480; 1) : // the speed : 1 pixel = 1 turn per minute
+    (c === 6) ? (sx_lo = -60; sx_hi = 12; sx_px = 360; 1) : // the level : 5 pixels per dB
     0;
 );
 
 function sx_DragGet(c)
 (
-    (c === 5) ? s3d_mix : (c === 7) ? s3d_speed : (c === 10) ? sx_spread : (c === 11) ? s3d_gsc :
-    (c === 12) ? s3d_gyaw : (c === 13) ? s3d_gpitch : s3d_groll;
+    (c === 12) ? s3d_mix : (c === 13) ? s3d_speed : (c === 5) ? sx_reach : (c === 18) ? sx_spread :
+    (c === 15) ? sx_trjr : (c === 19) ? s3d_gsc : (c === 20) ? s3d_gyaw : (c === 21) ? s3d_gpitch :
+    (c === 22) ? s3d_groll : max(-60, sx_level);
 );
 
 function sx_DragSet(c, v)
 (
-    (c === 5) ? (s3d_mix = v) : (c === 7) ? (s3d_speed = v; sx_anim = 1;) : // (a drag of the speed starts the animation)
-    (c === 10) ? (sx_spread = v) : (c === 11) ? (s3d_gsc = v) :
-    (c === 12) ? (s3d_gyaw = v) : (c === 13) ? (s3d_gpitch = v) : (c === 14) ? (s3d_groll = v);
+    (c === 12) ? (s3d_mix = v) : (c === 13) ? (s3d_speed = v; sx_anim = 1;) : // (a drag of the speed starts the animation)
+    (c === 5) ? (sx_reach = v) : (c === 18) ? (sx_spread = v) : (c === 15) ? (sx_trjr = v) : (c === 19) ? (s3d_gsc = v) :
+    (c === 20) ? (s3d_gyaw = v) : (c === 21) ? (s3d_gpitch = v) : (c === 22) ? (s3d_groll = v) :
+    (c === 6) ? (sx_level = v);
 );
 
 // The drag of a cell of the pad : a potentiometer of the library (ui_jdrag, see mSL_ui_Pads), owner blockId
@@ -524,17 +793,12 @@ local(c, v, d)
     c = ui_jpad_cell_at();
     (ui_jdrag_can_start() && sx_DragRange(c)) ? (
         v = sx_DragGet(c);
-        (c === 12) ? (v = atan2(sin(v), cos(v))); // (the yaw set by the view is not limited)
+        (c === 20) ? (v = atan2(sin(v), cos(v))); // (the yaw set by the view is not limited)
         ui_jdrag_start(blockId, c, v, sx_lo, sx_hi, sx_px, sx_lg);
     );
     d = ui_jdrag(blockId);
     (d & 1) ? sx_DragSet(ui_jdrag_cell, ui_jdrag_v);
     d;
-);
-
-function sx_ResetTraj()
-(
-    s3d_tsc = 1; s3d_trz = s3d_trx = 0; s3d_ttx = s3d_tty = s3d_ttz = 0;
 );
 
 // a menu of angles (degrees) ; returns the angle in radians, or "cur" when nothing is chosen
@@ -547,83 +811,32 @@ local(m)
     (m >= 2) ? (m - 6) * $pi / 4 : cur;
 );
 
-// Clic on the cell c of the pad (ev : ui_jpad_ev_lmc / ui_jpad_ev_rmc)
+// Clic on the cell c of the pad (ev : ui_jpad_ev_lmc / ui_jpad_ev_rmc) of the view sx_curView, projector sx_curPrj
+// (2026-11-11 : 3 lines of 8 cells ; left = the next one, Shift + left = the previous one, in the cells of choices)
 function sx_Cell(c, ev)
-local(m, k, rc, sh)
+local(m, k, rc, sh, pk, s, d)
 (
     rc = ev & ui_jpad_ev_rmc; // right clic : a menu ; left clic : a reset or a simple action
     sh = mouse_cap & 8; // the cells set by a drag (see sx_Drag) : Shift + left clic = the reset, left clic alone : nothing
+    d = sh ? -1 : 1;    // the cells of choices : Shift + left clic = the previous one
+    pk = sx_curPrj - 1;
     gfx_x = mouse_x; gfx_y = mouse_y;
+    // line 1 : the projector, the view, the source and its projection on the speakers
     (c === 0) ? (
-        rc ? s3d_menu() : sx_SetView(3);
+        // the projector of the view
+        m = rc ? sx_PrjMenu(pk) : (pk + d + projucnt) % projucnt;
+        (m >= 0) ? serialBlock[Pr7_SpcView + sx_curView] = m + 1;
     ) :
     (c === 1) ? (
-        rc ? (
-            k = sx_LibMenu(SX_MAXSPK, #sx_spkname, 0);
-            (k >= 10000) ? (sx_edReq = k - 10000 + 1; sx_edSrc = 0; ui_GFXdoNow |= 4;) :
-            (k === sx_libng) ? sx_SpkHP() : (k >= 0) ? sx_LibTake(k, 0);
-        ) : (
-            // the next : Diffusion, the layouts of the library, Diffusion
-            (!sx_spkHP && sx_SpkLast()) ? sx_SpkHP() : sx_LibNext(0);
-        );
+        rc ? s3d_menu() : sx_SetView(3);
     ) :
     (c === 2) ? (
-        rc ? (
-            k = sx_LibMenu(SX_MAXSRC, #sx_srcname, 1);
-            (k >= 10000) ? (sx_edReq = k - 10000 + 1; sx_edSrc = 1; ui_GFXdoNow |= 4;) :
-            ((k >= 0) && (k < sx_libng)) ? sx_LibTake(k, 1) :
-            (k >= sx_libng) ? (sx_Nth(sx_SrcSizes, k - sx_libng, #sx_it); sx_size = s3d_atof(#sx_it, 0, strlen(#sx_it)) / 100;);
-        ) : sx_LibNext(1);
+        // the source of the projector (as the cell 16 of its views "Projector A" ... "H")
+        s = 0|serialBlock[Pr7_PrjSpace + pk];
+        m = rc ? sx_SrcMenu(s) : sh ? sx_SrcPrev(s) : sx_SrcNext(s);
+        (m >= 0) ? serialBlock[Pr7_PrjSpace + pk] = m;
     ) :
     (c === 3) ? (
-        rc ? (
-            // trajectory A (1-T), dynamics (T+1 - T+10), mode (T+11 - T+14), radius (T+15 - T+19), reset S R T (T+20),
-            // the editors Edit A ... D (T+21 ... : their trajectory becomes "File", loaded by ed_Frame), with T = s3d_TrjCount
-            strcpy(#sx_mnu, "");
-            sx_TrjList(sx_traj);
-            strcat(#sx_mnu, "||>Dynamics");
-            sx_MenuList(s3d_EaseNames, s3d_EaseCount, sx_curve, 1);
-            strcat(#sx_mnu, "|>Mode");
-            sx_MenuList(s3d_EaseModes, 4, sx_mode, 1);
-            strcat(#sx_mnu, "|>Radius");
-            sx_MenuList("0.2|0.4|0.6|0.8|1.0", 5, floor(sx_trjr * 5 + 0.5) - 1, 1);
-            strcat(#sx_mnu, "||Reset size, rotation, position");
-            sx_EdList(2, SX_MAXTRJ);
-            m = gfx_showmenu(#sx_mnu);
-            k = s3d_TrjCount;
-            ((m >= k + 21) && (m < k + 21 + ED_NV)) ? (sx_edReq = m - k - 20; sx_edSrc = 2; ui_GFXdoNow |= 4;) :
-            ((m >= 1) && (m <= k)) ? (sx_traj = m - 1;) :
-            ((m >= k + 1) && (m <= k + 10)) ? (sx_curve = m - k - 1;) :
-            ((m >= k + 11) && (m <= k + 14)) ? (sx_mode = m - k - 11;) :
-            ((m >= k + 15) && (m <= k + 19)) ? (sx_trjr = (m - k - 14) * 0.2;) :
-            (m === k + 20) ? sx_ResetTraj();
-        ) : (
-            sx_traj = sx_TrjNext(sx_traj);
-        );
-    ) :
-    (c === 4) ? (
-        rc ? (
-            strcpy(#sx_mnu, "");
-            sx_TrjList(sx_trajB);
-            sx_EdList(2, SX_MAXTRJ); // (the editors : T+1 ...)
-            m = gfx_showmenu(#sx_mnu);
-            ((m > s3d_TrjCount) && (m <= s3d_TrjCount + ED_NV)) ? (sx_edReq = m - s3d_TrjCount; sx_edSrc = 3; ui_GFXdoNow |= 4;) :
-            (m >= 1) ? sx_trajB = m - 1;
-        ) : (
-            sx_trajB = sx_TrjNext(sx_trajB);
-        );
-    ) :
-    (c === 5) ? (
-        rc ? (
-            strcpy(#sx_mnu, "#A ... B");
-            sx_MenuList("0 %|10 %|20 %|30 %|40 %|50 %|60 %|70 %|80 %|90 %|100 %", 11, floor(s3d_mix * 10 + 0.5), 0);
-            m = gfx_showmenu(#sx_mnu);
-            (m >= 2) ? s3d_mix = (m - 2) / 10;
-        ) : sh ? (
-            s3d_mix = 0;
-        );
-    ) :
-    (c === 6) ? (
         rc ? (
             strcpy(#sx_mnu, "");
             sx_MenuList(sx_ViewNames, 4, sx_view, 0);
@@ -631,10 +844,82 @@ local(m, k, rc, sh)
             m = gfx_showmenu(#sx_it);
             (m >= 1) ? sx_SetView(m - 1);
         ) : (
-            sx_SetView((sx_view + 1) % 4);
+            sx_SetView((sx_view + d + 4) % 4);
+        );
+    ) :
+    (c === 4) ? (
+        rc ? (
+            // 1 ... 3 : the laws ; 4 ... 10 : the rolloff of DBAP
+            sprintf(#sx_mnu, "%sEqual : all the energy, to the nearest speaker and to those less than the reach beyond it|%sRadius : the speakers nearer than the reach (projective : far, weak, then silent)|%sDBAP : all the speakers, 1 / d^a (projective : weaker beyond the reach)||>Rolloff of DBAP (dB per doubling of the distance)",
+                (sx_law === 0) ? "!" : "", (sx_law === 1) ? "!" : "", (sx_law === 2) ? "!" : "");
+            sx_MenuList(sx_Roffs, 7, sx_NearItem(sx_Roffs, 7, sx_roff), 1);
+            m = gfx_showmenu(#sx_mnu);
+            ((m >= 1) && (m <= 3)) ? (sx_law = m - 1) :
+            ((m >= 4) && (m <= 10)) ? (sx_Nth(sx_Roffs, m - 4, #sx_it); sx_roff = s3d_atof(#sx_it, 0, strlen(#sx_it)););
+        ) : (
+            sx_law = (sx_law + d + 3) % 3;
+        );
+    ) :
+    (c === 5) ? (
+        rc ? (
+            strcpy(#sx_mnu, "#Reach");
+            sx_MenuList(sx_Reaches, 9, sx_NearItem(sx_Reaches, 9, sx_reach), 0);
+            m = gfx_showmenu(#sx_mnu);
+            (m >= 2) ? (sx_Nth(sx_Reaches, m - 2, #sx_it); sx_reach = s3d_atof(#sx_it, 0, strlen(#sx_it)););
+        ) : sh ? (
+            sx_reach = 0.5;
+        );
+    ) :
+    (c === 6) ? (
+        rc ? (
+            strcpy(#sx_mnu, "#Level (dB)");
+            sx_MenuList(sx_Levels, 11, (sx_level <= -120) ? 10 : sx_NearItem(sx_Levels, 10, sx_level), 0);
+            m = gfx_showmenu(#sx_mnu);
+            (m === 12) ? (sx_level = -120) :
+            (m >= 2) ? (sx_Nth(sx_Levels, m - 2, #sx_it); sx_level = s3d_atof(#sx_it, 0, strlen(#sx_it)););
+        ) : sh ? (
+            sx_level = 0;
         );
     ) :
     (c === 7) ? (
+        // the adaptation of the source to the speakers (Diffusion-3-Spatial : sp_FitStart ... sp_FitEnd)
+        rc ? (
+            sprintf(#sx_mnu, "#Adapt the source to the speakers : each point on its own speaker|%s||%sRotation : the yaw only|%sRotation : yaw, pitch and roll||%sSize : free (else kept)",
+                (sp_fitP >= 0) ? sprintf(#sx_it, "Stop (projector %d, %d %%)", sp_fitP + 1, sp_fitPct) : "Start",
+                sp_fitRot ? "" : "!", sp_fitRot ? "!" : "", sp_fitScl ? "!" : "");
+            m = gfx_showmenu(#sx_mnu);
+            (m === 2) ? ((sp_fitP >= 0) ? (sp_fitP = -1; mSL_log(SysLogBox, "Space : adaptation stopped");) : sp_FitStart(pk)) :
+            (m === 3) ? (sp_fitRot = 0) : (m === 4) ? (sp_fitRot = 1) : (m === 5) ? (sp_fitScl = !sp_fitScl);
+        ) : (
+            (sp_fitP >= 0) ? (sp_fitP = -1; mSL_log(SysLogBox, "Space : adaptation stopped");) : sp_FitStart(pk);
+        );
+    ) :
+    // line 2 : the motion
+    ((c >= 8) && (c <= 11)) ? (
+        // the trajectories A, B, C, D (sx_TrjMenu : the kinds ; C and D : in the chain of the mix, cell 12)
+        rc ? (
+            strcpy(#sx_mnu, ""); sx_tmi = 0;
+            sx_TrjMenu(sx_TrjGet(c));
+            m = gfx_showmenu(#sx_mnu);
+            ((m >= 1) && (m <= sx_tmi)) ? sx_TrjSet(c, sx_tmap[m - 1]);
+        ) : (
+            sx_TrjSet(c, sx_TrjNext(sx_TrjGet(c), d));
+        );
+    ) :
+    (c === 12) ? (
+        rc ? (
+            // 1 ... 3 : the chain (2, 3 or 4 trajectories) ; 5 ... 15 : the mix (4 : the title)
+            sprintf(#sx_mnu, "%sChain : A B|%sChain : A B C|%sChain : A B C D||#Mix (along the chain)",
+                (sx_trajN === 2) ? "!" : "", (sx_trajN === 3) ? "!" : "", (sx_trajN === 4) ? "!" : "");
+            sx_MenuList("0 %|10 %|20 %|30 %|40 %|50 %|60 %|70 %|80 %|90 %|100 %", 11, floor(s3d_mix * 10 + 0.5), 0);
+            m = gfx_showmenu(#sx_mnu);
+            ((m >= 1) && (m <= 3)) ? (sx_trajN = m + 1) :
+            (m >= 5) ? (s3d_mix = (m - 5) / 10);
+        ) : sh ? (
+            s3d_mix = 0;
+        );
+    ) :
+    (c === 13) ? (
         rc ? (
             // 1 : the animation on / off ; 3 ... : the speeds (2 : the title)
             strcpy(#sx_mnu, sx_anim ? "!Animation||#Speed (turns / minute)" : "Animation||#Speed (turns / minute)");
@@ -650,20 +935,48 @@ local(m, k, rc, sh)
             s3d_speed = 3; // (the default speed of s3d_init)
         );
     ) :
-    // line 2 : the group of sources
-    (c === 8) ? (
+    (c === 14) ? (
+        // the dynamics of the motion (its curve and its mode) : left = the next curve, Shift + left = the previous one
+        rc ? (
+            strcpy(#sx_mnu, ""); sx_tmi = 0;
+            sx_MapList(s3d_EaseNames, s3d_EaseCount, sx_curve, 0, 1000);
+            strcpy_substr(#sx_it, #sx_mnu, 1); strcpy(#sx_mnu, #sx_it); // (without the first "|")
+            strcat(#sx_mnu, "||>Mode");
+            sx_MapList(s3d_EaseModes, 4, sx_mode, 1, 2000);
+            m = gfx_showmenu(#sx_mnu);
+            ((m >= 1) && (m <= sx_tmi)) ? (
+                k = sx_tmap[m - 1];
+                (k < 2000) ? (sx_curve = k - 1000) : (sx_mode = k - 2000);
+            );
+        ) : (
+            sx_curve = (sx_curve + d + s3d_EaseCount) % s3d_EaseCount;
+        );
+    ) :
+    (c === 15) ? (
+        // the radius of the trajectories of Space 3D (Circle, Square, Star, Spiral)
+        rc ? (
+            strcpy(#sx_mnu, "#Radius (Circle, Square, Star, Spiral)");
+            sx_MenuList("0.2|0.4|0.6|0.8|1.0", 5, floor(sx_trjr * 5 + 0.5) - 1, 0);
+            m = gfx_showmenu(#sx_mnu);
+            (m >= 2) ? (sx_trjr = (m - 1) * 0.2);
+        ) : sh ? (
+            sx_trjr = 0.6;
+        );
+    ) :
+    // line 3 : the group of points
+    (c === 16) ? (
         rc ? (
             strcpy(#sx_mnu, "#Shift / Cmd / Alt + drag in the view act on");
-            sx_MenuList("the scene (trajectory)|the sources", 2, s3d_mtarget, 0);
+            sx_MenuList("the scene (trajectory)|the points of the source", 2, s3d_mtarget, 0);
             m = gfx_showmenu(#sx_mnu);
             (m >= 2) ? s3d_mtarget = m - 2;
         ) : (
             s3d_mtarget = !s3d_mtarget;
         );
     ) :
-    (c === 9) ? (
+    (c === 17) ? (
         rc ? (
-            strcpy(#sx_mnu, "#Frame of the sources");
+            strcpy(#sx_mnu, "#Frame of the points");
             sx_MenuList("Absolute (the room)|Trajectory (front = direction of the motion)", 2, s3d_grel, 0);
             m = gfx_showmenu(#sx_mnu);
             (m >= 2) ? s3d_grel = m - 2;
@@ -671,17 +984,17 @@ local(m, k, rc, sh)
             s3d_grel = !s3d_grel;
         );
     ) :
-    (c === 10) ? (
+    (c === 18) ? (
         rc ? (
             strcpy(#sx_mnu, "#Spread");
             sx_MenuList(sx_Spreads, 6, -1, 0);
             m = gfx_showmenu(#sx_mnu);
             (m >= 2) ? (sx_spread = sx_SpreadOf(m - 2););
         ) : sh ? (
-            sx_spread = 0.25;
+            sx_spread = 1;
         );
     ) :
-    (c === 11) ? (
+    (c === 19) ? (
         rc ? (
             strcpy(#sx_mnu, "#Size of the group");
             sx_MenuList(sx_GSizes, 8, -1, 0);
@@ -691,22 +1004,24 @@ local(m, k, rc, sh)
             s3d_gsc = 1;
         );
     ) :
-    (c === 12) ? (
+    (c === 20) ? (
         rc ? (s3d_gyaw = sx_AngleMenu(s3d_gyaw)) : sh ? (s3d_gyaw = 0);
     ) :
-    (c === 13) ? (
+    (c === 21) ? (
         rc ? (s3d_gpitch = sx_AngleMenu(s3d_gpitch)) : sh ? (s3d_gpitch = 0);
     ) :
-    (c === 14) ? (
+    (c === 22) ? (
         rc ? (s3d_groll = sx_AngleMenu(s3d_groll)) : sh ? (s3d_groll = 0);
     ) :
-    (c === 15) ? (
+    (c === 23) ? (
         rc ? (
-            strcpy(#sx_mnu, "Reset the sources (size, rotations)|Reset the trajectory (size, rotation, position)|Reset all (sources, trajectory, mix, view)");
+            strcpy(#sx_mnu, "Reset the points (size, rotations)|Reset the trajectory (size, rotation, position)|Reset all (points, trajectory, mix, view)||Restart the motion||Default settings of the projector");
             m = gfx_showmenu(#sx_mnu);
             ((m === 1) || (m === 3)) ? sx_ResetSources();
             ((m === 2) || (m === 3)) ? sx_ResetTraj();
             (m === 3) ? (s3d_mix = 0; sx_SetView(3););
+            (m === 4) ? (sp_rstSeq[pk] += 1);
+            (m === 5) ? (sp_Default(pk); sx_LoadP(pk););
         ) : (
             sx_ResetSources();
         );
@@ -714,12 +1029,12 @@ local(m, k, rc, sh)
 );
 
 /*
-    The module "Space 3D"
+    The module "Space A" ... "Space D" : the view v (0 ... SV_NV - 1)
 */
-function show_Space3D_Pad(blockId)
-local(h1, hv, hneed, zz, zzmi, x, y, w, h, dr)
+function show_Space_Pad(blockId, v)
+local(h1, hv, hneed, zz, zzmi, x, y, w, h, dr, p, pk, s, pp, sp)
 (
-    h1 = uix_jpadHeight(2);
+    h1 = uix_jpadHeight(3);
     hv = max(120, min(ui_width() * 0.75, ui_height() - h1 - ui_jd_ctgr - 8));
     hneed = h1 + hv + ui_jd_ctgr + 8;
     (ui_height() >= hneed) ? (
@@ -732,44 +1047,76 @@ local(h1, hv, hneed, zz, zzmi, x, y, w, h, dr)
                     ui_border();
                 ui_pop();
             );
-            control_group("Space 3D");
+            p = sv_Prj(v); pk = p - 1;
+            sx_curView = v; sx_curPrj = p; sp_lastPrj = pk;
+            pp = projectors + pk * projsize;
+            sp = (pp[prx_spv] > 0); // (spatial : else direct)
+            sprintf(#sx_title, "Space %c", 'A' + v);
+            control_group(#sx_title);
             ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+            sv_Swap(v);         // the camera, the mouse and the display options of the view
+            sx_LoadP(pk);       // the settings of its projector
 
             ui_split_top(h1);
                 ui_pad(1,2,2,2);
                 mSL_setStrArray(pad_S3D_Labs, pad_S3D_Siz);
-                strcpy(pad_S3D_Labs[0], "Options");
-                sprintf(pad_S3D_Labs[1], "HP: %s", #sx_spkname);
-                sprintf(pad_S3D_Labs[2], "Src: %s", #sx_srcname);
-                sx_TrjName(sx_traj, #sx_it);
-                sx_Nth(s3d_EaseNames, sx_curve, #sx_nm);
-                (sx_curve > 0) ? sprintf(pad_S3D_Labs[3], "A: %s (%s)", #sx_it, #sx_nm) : sprintf(pad_S3D_Labs[3], "A: %s", #sx_it);
-                sx_TrjName(sx_trajB, #sx_it);
-                sprintf(pad_S3D_Labs[4], "B: %s", #sx_it);
-                sprintf(pad_S3D_Labs[5], "Mix %d %%", floor(s3d_mix * 100 + 0.5));
-                sx_Nth(sx_ViewNames, sx_view, pad_S3D_Labs[6]);
-                sx_anim ? sprintf(pad_S3D_Labs[7], "Anim %.1f/m", s3d_speed) : strcpy(pad_S3D_Labs[7], "Anim off");
-                pad_S3D_Colrs[0] = Col_InfoA;
-                pad_S3D_Colrs[1] = pad_S3D_Colrs[2] = pad_S3D_Colrs[3] = pad_S3D_Colrs[6] = Col_P1;
-                pad_S3D_Colrs[4] = pad_S3D_Colrs[5] = (s3d_mix > 0) ? Col_P1 : Col_Inactive;
-                pad_S3D_Colrs[7] = sx_anim ? Color_Limegreen : Col_P2;
-                // line 2 : the group of sources
-                strcpy(pad_S3D_Labs[8], s3d_mtarget ? "Mouse: Sources" : "Mouse: Scene");
-                strcpy(pad_S3D_Labs[9], s3d_grel ? "Frame: Trajectory" : "Frame: Absolute");
-                sprintf(pad_S3D_Labs[10], "Spread %d %%", floor(sx_spread * 100 + 0.5));
-                sprintf(pad_S3D_Labs[11], "Size x %.2f", s3d_gsc);
-                sprintf(pad_S3D_Labs[12], "Yaw %d°", floor(s3d_gyaw * 180 / $pi + 0.5));
-                sprintf(pad_S3D_Labs[13], "Pitch %d°", floor(s3d_gpitch * 180 / $pi + 0.5));
-                sprintf(pad_S3D_Labs[14], "Roll %d°", floor(s3d_groll * 180 / $pi + 0.5));
-                strcpy(pad_S3D_Labs[15], "Reset sources");
-                pad_S3D_Colrs[8] = s3d_mtarget ? Color_Limegreen : Col_P1;
-                pad_S3D_Colrs[9] = s3d_grel ? Color_Limegreen : Col_P1;
-                pad_S3D_Colrs[10] = Col_P1;
-                pad_S3D_Colrs[11] = (s3d_gsc != 1) ? Col_P2 : Col_P1;
-                pad_S3D_Colrs[12] = (s3d_gyaw != 0) ? Col_P2 : Col_P1;
-                pad_S3D_Colrs[13] = (s3d_gpitch != 0) ? Col_P2 : Col_P1;
-                pad_S3D_Colrs[14] = (s3d_groll != 0) ? Col_P2 : Col_P1;
-                pad_S3D_Colrs[15] = Col_InfoA;
+                // line 1 : the projector, the view, the source and its projection on the speakers
+                s = 0|serialBlock[Pr7_PrjSpace + pk];
+                sprintf(pad_S3D_Labs[0], sp ? "Projector %d" : "Projector %d (direct)", p);
+                strcpy(pad_S3D_Labs[1], "Options");
+                (s <= 0) ? strcpy(pad_S3D_Labs[2], "Src: none") :
+                ((s < SP_NSRC) && (sp_srcN[s] > 0)) ? sprintf(pad_S3D_Labs[2], "Src: %d (%d)", s, sp_srcN[s]) :
+                sprintf(pad_S3D_Labs[2], "Src: %d ?", s);
+                sx_Nth(sx_ViewNames, sx_view, pad_S3D_Labs[3]);
+                sx_Nth(SP_LawNames, max(0, min(2, sx_law)), #sx_nm);
+                (sx_law === 2) ? sprintf(pad_S3D_Labs[4], "%s %.1f dB", #sx_nm, sx_roff) : strcpy(pad_S3D_Labs[4], #sx_nm);
+                sprintf(pad_S3D_Labs[5], "Reach %.2f", sx_reach);
+                (sx_level <= -120) ? strcpy(pad_S3D_Labs[6], "Level -inf") : sprintf(pad_S3D_Labs[6], "Level %.1f dB", sx_level);
+                (sp_fitP === pk) ? sprintf(pad_S3D_Labs[7], "Adapt %d %%", sp_fitPct) : strcpy(pad_S3D_Labs[7], "Adapt");
+                // line 2 : the motion
+                sx_TrjName(sx_traj, #sx_it); sprintf(pad_S3D_Labs[8], "A: %s", #sx_it);
+                sx_TrjName(sx_trajB, #sx_it); sprintf(pad_S3D_Labs[9], "B: %s", #sx_it);
+                sx_TrjName(sx_trajC, #sx_it); sprintf(pad_S3D_Labs[10], "C: %s", #sx_it);
+                sx_TrjName(sx_trajD, #sx_it); sprintf(pad_S3D_Labs[11], "D: %s", #sx_it);
+                sprintf(pad_S3D_Labs[12], "Mix %d %% /%d", floor(s3d_mix * 100 + 0.5), sx_trajN);
+                sx_anim ? sprintf(pad_S3D_Labs[13], "Anim %.1f/m", s3d_speed) : strcpy(pad_S3D_Labs[13], "Anim off");
+                sx_Nth(s3d_EaseNames, max(0, min(s3d_EaseCount - 1, sx_curve)), #sx_nm);
+                sx_Nth(s3d_EaseModes, max(0, min(3, sx_mode)), #sx_it);
+                sprintf(pad_S3D_Labs[14], "Dyn: %s %s", #sx_nm, #sx_it);
+                sprintf(pad_S3D_Labs[15], "Radius %.2f", sx_trjr);
+                // line 3 : the group of points
+                strcpy(pad_S3D_Labs[16], s3d_mtarget ? "Mouse: Sources" : "Mouse: Scene");
+                strcpy(pad_S3D_Labs[17], s3d_grel ? "Frame: Trajectory" : "Frame: Absolute");
+                sprintf(pad_S3D_Labs[18], "Spread %d %%", floor(sx_spread * 100 + 0.5));
+                sprintf(pad_S3D_Labs[19], "Size x %.2f", s3d_gsc);
+                sprintf(pad_S3D_Labs[20], "Yaw %d°", floor(s3d_gyaw * 180 / $pi + 0.5));
+                sprintf(pad_S3D_Labs[21], "Pitch %d°", floor(s3d_gpitch * 180 / $pi + 0.5));
+                sprintf(pad_S3D_Labs[22], "Roll %d°", floor(s3d_groll * 180 / $pi + 0.5));
+                strcpy(pad_S3D_Labs[23], "Reset");
+                // colors
+                pad_S3D_Colrs[0] = sp ? Color_Limegreen : Col_P1;
+                pad_S3D_Colrs[1] = Col_InfoA;
+                pad_S3D_Colrs[2] = (s <= 0) ? Col_P1 : ((s < SP_NSRC) && (sp_srcN[s] > 0)) ? Col_P2 : Col_P6;
+                pad_S3D_Colrs[3] = Col_P1;
+                pad_S3D_Colrs[4] = Col_P2;
+                pad_S3D_Colrs[5] = Col_P1;
+                pad_S3D_Colrs[6] = (sx_level <= -120) ? Col_P6 : (sx_level != 0) ? Col_P2 : Col_P1;
+                pad_S3D_Colrs[7] = (sp_fitP === pk) ? Color_Limegreen : Col_InfoA;
+                pad_S3D_Colrs[8] = pad_S3D_Colrs[9] = Col_P1;
+                pad_S3D_Colrs[10] = (sx_trajN >= 3) ? Col_P1 : Col_Inactive;
+                pad_S3D_Colrs[11] = (sx_trajN >= 4) ? Col_P1 : Col_Inactive;
+                pad_S3D_Colrs[12] = (s3d_mix > 0) ? Col_P2 : Col_P1;
+                pad_S3D_Colrs[13] = sx_anim ? Color_Limegreen : Col_P2;
+                pad_S3D_Colrs[14] = (sx_curve > 0) ? Col_P2 : Col_P1;
+                pad_S3D_Colrs[15] = Col_P1;
+                pad_S3D_Colrs[16] = s3d_mtarget ? Color_Limegreen : Col_P1;
+                pad_S3D_Colrs[17] = s3d_grel ? Color_Limegreen : Col_P1;
+                pad_S3D_Colrs[18] = (sx_spread != 1) ? Col_P2 : Col_P1;
+                pad_S3D_Colrs[19] = (s3d_gsc != 1) ? Col_P2 : Col_P1;
+                pad_S3D_Colrs[20] = (s3d_gyaw != 0) ? Col_P2 : Col_P1;
+                pad_S3D_Colrs[21] = (s3d_gpitch != 0) ? Col_P2 : Col_P1;
+                pad_S3D_Colrs[22] = (s3d_groll != 0) ? Col_P2 : Col_P1;
+                pad_S3D_Colrs[23] = Col_InfoA;
                 zz = control_jpad(pad_S3D);
                 dr = sx_Drag(blockId); // the cells of values : a drag (see sx_Drag)
                 (zz > 0) ? (
@@ -783,12 +1130,14 @@ local(h1, hv, hneed, zz, zzmi, x, y, w, h, dr)
             // the view
             ui_pad(2, 3, 2, 2);
             x = ui_left_retina(); y = ui_top_retina(); w = ui_width_retina(); h = ui_height_retina(); // (screen pixels)
-            sx_Update();
             GM_key_take_in('h') ? (s3d_style = !s3d_style; ui_GFXdoNow |= 4;); // balls, or crosses and halos
             s3d_mouse(x, y, w, h, uix_scroll_y) ? (uix_scroll_y = 0; ui_GFXdoNow |= 4;);
             s3d_changed ? (s3d_changed = 0; sx_view = sx_ViewOf(););
+            sx_StoreP(pk);      // the settings, back to the projector
+            sx_Show(pk);
             s3d_draw(x, y, w, h);
-            sx_anim ? ui_GFXdoNow |= 4; // keep the animation going
+            (sx_anim || (sp_fitP >= 0) || !sp) ? ui_GFXdoNow |= 4; // keep the animation going (direct : the morphings)
+            sv_Swap(v);
         ui_pop();
     );
 );

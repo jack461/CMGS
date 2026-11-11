@@ -1,0 +1,352 @@
+/*
+    Diffusion-3-Trajectories.jsfx-inc
+
+    =================================== The library of trajectories ===================================
+
+    (2026-11-11) The trajectories of the spatial projectors (Diffusion-3-Spatial : each projector has its own A and B,
+    chosen in the views "Space A" ... "D") : the 6 of Space 3D, the paths of the editors Edit A ... D (a live link) and
+    the 128 trajectories T1 ... T128 of the library (sp_trN, sp_trC, sp_trNm, sp_trP : saved with the project by
+    sp_Serialize). The library is filled by :
+        - the files .xml of GRM Spaces (Trajectory) dropped on the window (sx_DropTraj : the trajectory of the same name,
+          else the first one empty) ;
+        - the editors : Action "Copy the path into the library" (ed_ToLib : the same name, or the first one empty), or the
+          menu of a trajectory here ("Copy from Edit X") ;
+        - the configuration : trajectory n "name" closed|open : x y z, x y z, ... ; (Diffusion-3-Set-Table).
+    The module "Trajectories" (show_Trajectories_Pad ; in the sub-menu "Edit" of the Studio menu) : one cell per
+    trajectory (16 lines of 8), its number and its name ; colors : grey empty, normal defined, green used by a spatial
+    projector, [ ] the one selected ; the text below : the trajectory under the mouse (or the one selected), its points,
+    the projectors that use it. Left clic : select ; right clic : its menu (rename, clear, closed / open, copy from an
+    editor, copy into an editor to change it (128 points at most : resampled), use as the trajectory A or B of the
+    projector of the last view "Space", export as a trajectory of GRM Spaces (.xml) or as a configuration (.mSL :
+    D3_config(data( trajectory n ... ))) in Data/ (GMAuxiliary.eel, mSL_Export ; ed_Frame logs the file written)).
+    tr_EdSync (each run of @gfx, before sp_Gfx) : the live links, the paths of the editors copied (sp_edP, fitted into
+    the room as their exports) when their configurations change.
+
+    Included in @init after Diffusion-3-Edit (ed_Path, ed_Load, ed_Fmt ...) and mSL_Export (xpt_*), while make_array
+    allocates static memory. Everything runs in @gfx.
+*/
+
+@init
+
+tr_sel = 0;                 // the trajectory selected (0 ...)
+tr_pend = -1;               // the trajectory being renamed (tr_Prompt), -1 : none
+tr_buf = make_array(ED_MAXP * 3 + 6);   // a trajectory resampled for an editor (tr_ToEdit)
+strcpy(#tr_prm, ""); strcpy(#tr_nm, ""); strcpy(#tr_txt, ""); strcpy(#tr_t2, ""); strcpy(#tr_mnu, "");
+
+// The pad : 16 lines of 8 cells, one per trajectory
+pad_TRJ_NL = SP_NTRJ / 8;
+pad_TRJ_Siz = SP_NTRJ;
+pad_TRJ = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    pad_TRJ_NL, 8, pad_TRJ_Siz);
+pad_TRJ_Labs = pad_TRJ + pad_TRJ[ui_jpad_labs];
+pad_TRJ_Colrs = pad_TRJ + pad_TRJ[ui_jpad_clrs];
+i__k = 0; loop(pad_TRJ_Siz, pad_TRJ_Colrs[i__k] = Col_Inactive; pad_TRJ_Labs[i__k] = ""; i__k += 1;);
+
+
+// Each run of @gfx (before sp_Gfx) : the paths of the editors Edit A ... D for the live links (sp_edP : x y z, fitted
+// into the room as their exports ; sp_libSeq : the paths of the projectors built again), when the sum of their
+// configuration changes (count, closed, smooth, free, the points and their bends ; not the selection)
+function tr_EdSync()
+local(e, st, s, k, p, n)
+(
+    e = 0;
+    loop(ED_NV,
+        st = ed_St(e);
+        s = 1 + st[ed_sN] * 7 + st[ed_sClosed] * 3 + st[ed_sSmooth] * 5 + st[ed_sFree] * 11;
+        k = 0;
+        loop(st[ed_sN],
+            p = ed_P(e, k);
+            s += (k + 1) * (p[0] * 1.31 + p[1] * 1.73 + p[2] * 2.11 + p[4] * 2.53 + p[5] * 2.97 + p[6] * 3.37);
+            k += 1;
+        );
+        (s !== sp_edSum[e]) ? (
+            sp_edSum[e] = s;
+            n = (st[ed_sN] > 0) ? ed_Path(e, ed_pth, SP_MAXTRJ) : 0;
+            (n > 0) ? ed_FitBuf(ed_pth, n, 1);
+            memcpy(sp_edP + e * SP_MAXTRJ * 3, ed_pth, 3 * n);
+            sp_edN[e] = n; sp_edC[e] = st[ed_sClosed];
+            sp_libSeq += 1;
+        );
+        e += 1;
+    );
+);
+
+// The projectors that use the trajectory i (as A, or as B when they mix it) : their count ; the list in dst (" P3 A,
+// P5 B") ; spatial only : only those that have a source
+function tr_Used(i, dst, spatial)
+local(p, st, c, a, b)
+(
+    strcpy(dst, ""); c = 0;
+    p = 0;
+    loop(SP_NP,
+        st = sp_st + p * SP_SS;
+        (!spatial || ((0|serialBlock[Pr7_PrjSpace + p]) > 0)) ? (
+            a = (st[sp_fTrA] === SP_KLIB + i) && (st[sp_fMix] < 1);
+            b = (st[sp_fTrB] === SP_KLIB + i) && (st[sp_fMix] > 0);
+            (a || b) ? (
+                sprintf(#tr_w, "%s P%d %s%s", (c > 0) ? "," : "", p + 1, a ? "A" : "", b ? (a ? "+B" : "B") : "");
+                strcat(dst, #tr_w);
+                c += 1;
+            );
+        );
+        p += 1;
+    );
+    c;
+);
+
+// The text of the trajectory i, in #tr_txt
+function tr_Text(i)
+local(n)
+(
+    n = sp_trN[i];
+    (n <= 0) ? sprintf(#tr_txt, "T%d : empty (drop a trajectory of GRM Spaces, copy an editor, or the configuration)", i + 1) : (
+        sp_NmGet(i, #tr_nm);
+        tr_Used(i, #tr_t2, 0);
+        sprintf(#tr_txt, "T%d \"%s\" : %d points, %s ; used by%s", i + 1, #tr_nm, n, sp_trC[i] ? "closed" : "open",
+            (strlen(#tr_t2) > 0) ? #tr_t2 : " no projector");
+    );
+    #tr_txt;
+);
+
+// Rename the trajectory i (the prompt of ui-lib ; tr_Prompted takes the answer)
+function tr_Prompt(i)
+(
+    tr_pend = i;
+    sp_NmGet(i, #tr_prm);
+    ui_screen_open("control.prompt");
+    ui_screen_arg(0, #tr_prm);
+    ui_screen_arg(1, "The name of the trajectory");
+);
+function tr_Prompted()
+(
+    ((tr_pend >= 0) && !(ui_screen() == "control.prompt")) ? (
+        sp_NmSet(tr_pend, #tr_prm);
+        sp_libSeq += 1;
+        tr_pend = -1;
+    );
+);
+
+// The trajectory i copied into the editor e (to change it ; kind Trajectory ; more than ED_MAXP points : resampled
+// along its length ; beyond the room : the editor goes Free)
+function tr_ToEdit(i, e)
+local(n, m, st, k, f, src)
+(
+    n = sp_trN[i]; src = sp_trP + i * SP_MAXTRJ * 3;
+    m = min(n, ED_MAXP);
+    (n > ED_MAXP) ? s3d_resample(src, n, sp_trC[i], tr_buf, m) : memcpy(tr_buf, src, 3 * n);
+    f = 0; k = 0; loop(3 * m, (abs(tr_buf[k]) > 1) ? (f = 1); k += 1;);
+    st = ed_St(e);
+    ed_Keep(e);
+    f ? (st[ed_sFree] = 1);
+    ed_Load(e, tr_buf, m, 3, 2);
+    st[ed_sClosed] = sp_trC[i]; st[ed_sSmooth] = 0;
+    sp_NmGet(i, #tr_nm); strcpy(ed_nm[e], #tr_nm);
+    sprintf(#tr_w, "Trajectories : T%d copied into Edit %c (%d points%s%s)", i + 1, 'A' + e, m,
+        (n > ED_MAXP) ? sprintf(#tr_t2, ", resampled from %d", n) : "", f ? ", Free" : "");
+    mSL_log(SysLogBox, #tr_w);
+);
+
+function tr_Err(code, msg)
+(
+    sprintf(#tr_w, "ERR: %04d    Trajectories : %s", code, msg);
+    mSL_log(SysLogBox, #tr_w);
+    code;
+);
+
+// Export the trajectory i : kd 0, a trajectory of GRM Spaces (.xml : Trajectory closed, P x y z end 0) ; kd 1, a
+// configuration for Diffusion 3 (.mSL : D3_config(data( trajectory n "name" closed : x y z, ... ; ))) ; the file :
+// Data/name-d3-Tn-YYYY-MM-DD-HH-MM-SS.xml|mSL, written by GMAuxiliary.eel (ed_Frame logs when it is written)
+function tr_Export(i, kd)
+local(n, k, q, c)
+(
+    n = sp_trN[i];
+    ((c = xpt_Ready()) !== 0) ? (
+        tr_Err(2477, (c === 1) ? "no auxiliary script (GMAuxiliary.eel) : nothing is written" :
+            (c === 2) ? "the auxiliary script GMAuxiliary.eel must be started again (an old version)" :
+            "the auxiliary script is busy : try again");
+    ) : (
+        sp_NmGet(i, #tr_nm);
+        strcpy(#tr_xn, #tr_nm); xpt_Clean(#tr_xn);
+        (strlen(#tr_xn) === 0) ? sprintf(#tr_xn, "T%d", i + 1);
+        sprintf(#ed_xf, "%s/%s-d3-T%d-%s.%s", #xpt_Folder, #tr_xn, i + 1, xpt_Date(#tr_xd, 0), kd ? "mSL" : "xml");
+        xpt_Date(#tr_xd, 1);
+        xpt_Begin();
+        kd ? (
+            sprintf(#tr_xt, "print(\"%s : trajectoire T%d de Diffusion 3, exportee le %s.\");", #tr_xn, i + 1, #tr_xd);
+            xpt_Line(#tr_xt);
+            xpt_Line("");
+            xpt_Line(sprintf(#tr_xt, "%c*", '/'));
+            sprintf(#tr_xt, "  La trajectoire T%d \"%s\" de la bibliotheque de Diffusion 3 : %d points, %s. Deposee dans Diffusion 3,",
+                i + 1, ed_MslName(#tr_xx, #tr_nm), n, sp_trC[i] ? "fermee" : "ouverte");
+            xpt_Line(#tr_xt);
+            xpt_Line("  elle remplace la trajectoire de meme numero (changer le numero pour la mettre ailleurs) ; ou copier la");
+            xpt_Line("  declaration dans un fichier de configuration (Diffusion-1.mSL ...). Les points : x y z, dans leur ordre.");
+            xpt_Line(sprintf(#tr_xt, "*%c", '/'));
+            xpt_Line("");
+            xpt_Line("D3_config(data(");
+            sprintf(#tr_xt, "    trajectory %d \"%s\" %s :", i + 1, ed_MslName(#tr_xx, #tr_nm), sp_trC[i] ? "closed" : "open");
+            xpt_Line(#tr_xt);
+            k = 0;
+            loop(n,
+                q = sp_trP + i * SP_MAXTRJ * 3 + 3 * k;
+                sprintf(#tr_xt, "        %s %s %s%s", ed_Fmt(#ed_f1, q[0]), ed_Fmt(#ed_f2, q[1]), ed_Fmt(#ed_f3, q[2]),
+                    (k < n - 1) ? "," : " ;");
+                xpt_Line(#tr_xt);
+                k += 1;
+            );
+            xpt_Line("));");
+        ) : (
+            // (the XML declaration built with %c : written literally, its marks would be taken by the preprocessor)
+            sprintf(#tr_xt, "%c?xml version=\"1.0\" encoding=\"UTF-8\"?%c", '<', '>');
+            xpt_Line(#tr_xt);
+            xpt_Line("");
+            (strlen(#tr_nm) > 0) ? strcpy(#tr_xx, #tr_nm) : sprintf(#tr_xx, "T%d", i + 1);
+            sprintf(#tr_xt, "<Trajectory name=\"%s\" closed=\"%s\" order=\"0.0\">", ed_XmlName(#tr_xa, #tr_xx), sp_trC[i] ? "true" : "false");
+            xpt_Line(#tr_xt);
+            k = 0;
+            loop(n,
+                q = sp_trP + i * SP_MAXTRJ * 3 + 3 * k;
+                sprintf(#tr_xt, "  <P x=\"%.4f\" y=\"%.4f\" z=\"%.4f\" end=\"0.0\"/>", q[0], q[1], q[2]);
+                xpt_Line(#tr_xt);
+                k += 1;
+            );
+            xpt_Line("</Trajectory>");
+        );
+        xpt_Ov ? (
+            tr_Err(2478, "the text is too long (xpt_Sz) : nothing is written");
+        ) : (
+            xpt_Send(#ed_xf);
+            ed_xe = 0;
+            sprintf(#tr_w, "Trajectories : export of T%d : %s : %d points", i + 1, #ed_xf, n);
+            mSL_log(SysLogBox, #tr_w);
+            0;
+        );
+    );
+);
+
+// The menu of the trajectory i
+function tr_Menu(i)
+local(n, e, m, p, st)
+(
+    n = sp_trN[i];
+    p = sp_lastPrj;
+    tr_Text(i);
+    (n > 0) ? (sp_NmGet(i, #tr_nm); sprintf(#tr_mnu, "#T%d \"%s\"  (%d points)", i + 1, #tr_nm, n)) : sprintf(#tr_mnu, "#T%d  (empty)", i + 1);
+    // 2 rename, 3 clear, 4 closed ; 5 ... 8 copy from Edit A ... D ; 9 ... 12 copy into Edit A ... D ; 13, 14 use as A, B ;
+    // 15, 16 export .xml, .mSL
+    sprintf(#tr_t2, "|%sRename...|%sClear|%s%sClosed", (n > 0) ? "" : "#", (n > 0) ? "" : "#", (n > 0) ? "" : "#", sp_trC[i] ? "!" : "");
+    strcat(#tr_mnu, #tr_t2);
+    strcat(#tr_mnu, "||>Copy from an editor (its path)");
+    e = 0;
+    loop(ED_NV,
+        st = ed_St(e);
+        ed_LName(e, #tr_nm);
+        sprintf(#tr_t2, "|%s%s%s  (%d points)", (e === ED_NV - 1) ? "<" : "", (st[ed_sN] < 2) ? "#" : "", #tr_nm, st[ed_sN]);
+        strcat(#tr_mnu, #tr_t2);
+        e += 1;
+    );
+    sprintf(#tr_t2, "|>Copy into an editor (to change it ; %d points at most)", ED_MAXP);
+    strcat(#tr_mnu, #tr_t2);
+    e = 0;
+    loop(ED_NV,
+        sprintf(#tr_t2, "|%s%sEdit %c", (e === ED_NV - 1) ? "<" : "", (n > 0) ? "" : "#", 'A' + e);
+        strcat(#tr_mnu, #tr_t2);
+        e += 1;
+    );
+    sprintf(#tr_t2, "||%sUse as the trajectory A of the projector %d (the last view Space)|%sUse as its trajectory B",
+        (n > 0) ? "" : "#", p + 1, (n > 0) ? "" : "#");
+    strcat(#tr_mnu, #tr_t2);
+    sprintf(#tr_t2, "||%sExport : trajectory of GRM Spaces (.xml)|%sExport : configuration (.mSL, trajectory %d ...)",
+        (n > 0) ? "" : "#", (n > 0) ? "" : "#", i + 1);
+    strcat(#tr_mnu, #tr_t2);
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#tr_mnu);
+    prv_MenuEnd();
+    (m === 2) ? tr_Prompt(i) :
+    (m === 3) ? (
+        sprintf(#tr_w, "Trajectories : T%d cleared", i + 1); mSL_log(SysLogBox, #tr_w);
+        sp_TrjClear(i);
+    ) :
+    (m === 4) ? (sp_trC[i] = !sp_trC[i]; sp_libSeq += 1;) :
+    ((m >= 5) && (m < 5 + ED_NV)) ? ed_ToLib(m - 5, i) :
+    ((m >= 9) && (m < 9 + ED_NV)) ? tr_ToEdit(i, m - 9) :
+    ((m === 13) || (m === 14)) ? (
+        sp_SetTrj(p, m === 14, SP_KLIB + i);
+        // (B : it is heard only with a mix above 0, cell Mix of the view)
+        sprintf(#tr_w, "Trajectories : T%d is the trajectory %s of the projector %d", i + 1, (m === 14) ? "B" : "A", p + 1);
+        mSL_log(SysLogBox, #tr_w);
+    ) :
+    (m === 15) ? tr_Export(i, 0) :
+    (m === 16) ? tr_Export(i, 1);
+);
+
+/*
+    The module "Trajectories"
+*/
+function show_Trajectories_Pad(blockId)
+local(h2, h3, hneed, zzmi, i, n, zz, e, hk, c)
+(
+    tr_Prompted();
+    h2 = uix_jpadHeight(pad_TRJ_NL);
+    h3 = uix_jBoxHeight(2);
+    hneed = h2 + h3 + ui_jd_ctgr;
+    (ui_height() >= hneed) ? (
+        ui_split_top(hneed);
+            zzmi = ui_hover();
+            keepBlockInfos(blockId);
+            (zzmi) ? (
+                ui_push();
+                    ui_color(Col_Frame);
+                    ui_border();
+                ui_pop();
+            );
+            n = 0; i = 0; loop(SP_NTRJ, (sp_trN[i] > 0) ? (n += 1); i += 1;);
+            sprintf(#tr_t2, "Trajectories  (%d / %d)", n, SP_NTRJ);
+            control_group(#tr_t2);
+            ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+
+            // the grid of the trajectories
+            ui_split_top(h2);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_TRJ_Labs, pad_TRJ_Siz);
+                i = 0;
+                loop(SP_NTRJ,
+                    (sp_trN[i] > 0) ? (
+                        sp_NmGet(i, #tr_nm);
+                        sprintf(pad_TRJ_Labs[i], (i === tr_sel) ? "[T%d %s]" : "T%d %s", i + 1, #tr_nm);
+                        pad_TRJ_Colrs[i] = tr_Used(i, #tr_t2, 1) ? Color_Limegreen : (i === tr_sel) ? Col_P2 : Col_P1;
+                    ) : (
+                        sprintf(pad_TRJ_Labs[i], (i === tr_sel) ? "[T%d]" : "T%d", i + 1);
+                        pad_TRJ_Colrs[i] = Col_Inactive;
+                    );
+                    i += 1;
+                );
+                zz = control_jpad(pad_TRJ, pad_TRJ_NL, -1, 1);
+                e = ui_jpad_cell_at(); // (the trajectory under the mouse, for the text)
+                hk = ((e >= 0) && (e < SP_NTRJ)) ? e : -1;
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4;
+                    c = pad_TRJ[ui_jpad_last] - 1;
+                    ((c >= 0) && (c < SP_NTRJ)) ? (
+                        (zz & ui_jpad_ev_rmc) ? (tr_sel = c; tr_Menu(c);) :
+                        (zz & ui_jpad_ev_lmc) ? (tr_sel = c);
+                    );
+                );
+            ui_pop();
+
+            // the text : the trajectory under the mouse, or the one selected
+            ui_split_top(h3);
+                ui_pad(4,2,4,2);
+                ui_pcolor(ui_jcolor_text);
+                ui_align(0, 0);
+                tr_Text((hk >= 0) ? hk : tr_sel);
+                ui_split_top(ui_texth()); ui_text(#tr_txt); ui_pop();
+                ui_split_top(ui_texth());
+                    ui_text("Clic : select ; right clic : its menu (rename, clear, copy from / into an editor, use, export)");
+                ui_pop();
+            ui_pop();
+
+        ui_pop();
+    );
+);

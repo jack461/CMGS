@@ -1,0 +1,393 @@
+/*
+    GM-Meters-Modules.jsfx-inc : the modules "VU meter A" ... "D" and "Limiter A" ... "D" of Diffusion-3 and of the File
+    Player (2026-11-11), in the sub-menu "Effects" of the Studio menu : the engines of GM-Meters (the code of the plugins
+    Multichannel_VU_meter and SmoothMultiLimiter) on channels of the host (prefix fm_).
+
+    Each module : On / Off, its source (the inputs or the outputs of the host : fm_HasIn ; the File Player : its outputs
+    only), its first channel and its count of channels (the channels that exist only), the settings of its engine. The
+    limiters run first (A ... D, in place), then the VU meters (they show what goes on) ; a limiter delays its channels by
+    its anticipation (no plugin delay compensation is declared).
+
+    The host : sets fm_HasIn (1 : the inputs can be chosen), includes GM-Meters then this file in @init, and calls
+        @init (static memory, after ui_setup) : fm_Init() ; then protects fm_ptr from the garbage collector (mm_usr_prot)
+        @block : fm_Block() (puts in place the work areas prepared by @gfx)
+        @sample : fm_Sample(0, inputs, count) and / or fm_Sample(1, outputs, count) (arrays of samples, changed in place)
+        @serialize : fm_Serialize() (the settings, 'fxm1')
+        @gfx (every run, even when the window is closed) : fm_Gfx(inputs count, outputs count) (the work areas : allocated
+            when a module is turned on or its channels change, the old ones freed) ; show_FxMeter_Pad(blockId, k) for the
+            module k (0 ... 3 : VU meter A ... D ; 4 ... 7 : Limiter A ... D)
+    The work areas (fm_ptr : current, new, old) are dynamic blocks (mSL_Dyn_Alloc) : allocated and made by @gfx, put in
+    place by @block between two audio blocks, freed by @gfx at its next run (as the work areas of the effects of Interstys).
+*/
+FM_NV = 4; // the modules of each kind : A ... D
+FM_NM = 2 * FM_NV; // all of them (0 ... 3 : the VU meters, 4 ... 7 : the limiters)
+FM_SW = 16; // words of the settings of a module (fm_st)
+fm_sOn = 0; fm_sSrc = 1; fm_sFirst = 2; fm_sCnt = 3; // On, the source (0 the inputs, 1 the outputs), the first channel, the count
+fm_sEng = 4; // the settings of the engine (VU meter : 6 words, Limiter : 8 words, see GM-Meters)
+fm_ain = fm_aout = 0; // the counts of channels of the host (fm_Gfx)
+fm_act = 0; // a module has a work area (fm_Block)
+fm_lo = fm_hi = fm_px = fm_lg = 0; // the range of a drag (fm_DragRange)
+
+// the default settings : VU meter A on, the others off ; all on the outputs, from the first one, all the channels
+function fm_Defaults() local(k, st)
+(
+    k = 0;
+    loop(FM_NM,
+        st = fm_st + k * FM_SW;
+        memset(st, 0, FM_SW);
+        st[fm_sOn] = (k === 0);
+        st[fm_sSrc] = 1;
+        st[fm_sFirst] = 0; st[fm_sCnt] = 128;
+        (k < FM_NV) ? vu_Default(st + fm_sEng) : lm_Default(st + fm_sEng);
+        k += 1;
+    );
+);
+
+// the static memory : the settings, the work areas, the table of the limiter, the image of the meters, the pad
+function fm_Init()
+(
+    fm_st = make_array(FM_NM * FM_SW);
+    fm_ptr = make_array(3 * FM_NM); // [k] the current area, [FM_NM + k] the new one (-1 : none), [2 FM_NM + k] the old one
+    fm_fail = make_array(FM_NM); // the count of channels of an allocation that failed (not tried again)
+    lm_hctab = make_array(lm_TabSize); lm_InitTab(lm_hctab);
+    ui_reserve_image(VU_IMG);
+    fm_padSiz = 16;
+    fm_pad = make_jpad(ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values, 2, 8, fm_padSiz);
+    fm_padLabs = fm_pad + fm_pad[ui_jpad_labs];
+    fm_padColrs = fm_pad + fm_pad[ui_jpad_clrs];
+    fm_Defaults();
+);
+
+// the settings in their ranges (after a load)
+function fm_Check() local(k, st, e)
+(
+    k = 0;
+    loop(FM_NM,
+        st = fm_st + k * FM_SW; e = st + fm_sEng;
+        st[fm_sOn] = (st[fm_sOn] !== 0);
+        st[fm_sSrc] = fm_HasIn ? (st[fm_sSrc] !== 0) : 1;
+        st[fm_sFirst] = max(0, min(127, 0|st[fm_sFirst]));
+        st[fm_sCnt] = max(1, min(128, 0|st[fm_sCnt]));
+        (k < FM_NV) ? (
+            e[0] = max(25, min(1000, e[0])); e[1] = max(0, min(3, 0|e[1])); e[2] = max(0, min(128, 0|e[2]));
+            e[3] = max(0, min(8, 0|e[3])); e[4] = max(0, min(5, 0|e[4])); e[5] = max(0, min(3, 0|e[5]));
+        ) : (
+            e[0] = max(-40, min(0, e[0])); e[1] = max(1, min(lm_NDMax, 0|e[1])); e[2] = max(0.1, min(10, e[2]));
+            e[3] = max(0, min(100, e[3])); e[4] = max(-12, min(24, e[4])); e[5] = max(-12, min(24, e[5]));
+            e[6] = max(0.1, min(lm_MaxAtt, e[6])); e[7] = max(1, min(1000, e[7]));
+        );
+        k += 1;
+    );
+    memset(fm_fail, 0, FM_NM);
+);
+
+// the count of channels of the module k : those of its range that exist (0 : off, or none)
+function fm_Chans(k) local(st, av)
+(
+    st = fm_st + k * FM_SW;
+    av = (st[fm_sSrc] === 0) ? fm_ain : fm_aout;
+    st[fm_sOn] ? max(0, min(st[fm_sCnt], av - st[fm_sFirst])) : 0;
+);
+
+// @gfx, at each run : the old areas freed (put aside by @block), the new ones allocated and made
+function fm_Gfx(ain, aout) local(k, n, cur, wk)
+(
+    fm_ain = ain; fm_aout = aout;
+    k = 0;
+    loop(FM_NM,
+        (fm_ptr[2 * FM_NM + k] > 0) ? (
+            mSL_Dyn_Free(fm_ptr[2 * FM_NM + k]); // replaced by @block before the current audio block
+            fm_ptr[2 * FM_NM + k] = 0;
+        ) :
+        (fm_ptr[FM_NM + k] === 0) ? (
+            n = fm_Chans(k);
+            cur = fm_ptr[k];
+            (n !== ((cur > 0) ? cur[0] : 0)) ? ( // (the count of channels : the word 0 of an engine, vu_N or lm_N)
+                (n === 0) ? (
+                    fm_ptr[FM_NM + k] = -1; // no more area
+                    fm_fail[k] = 0;
+                ) :
+                (n !== fm_fail[k]) ? (
+                    wk = mSL_Dyn_Alloc((k < FM_NV) ? vu_Size(n) : lm_Size(n), (k < FM_NV) ? 'vumt' : 'lmtr', mSL_StM_FlClear);
+                    (wk > 0) ? (
+                        (k < FM_NV) ? vu_Reset(wk, n) : lm_Reset(wk, n);
+                        fm_ptr[FM_NM + k] = wk;
+                        fm_fail[k] = 0;
+                    ) : (
+                        fm_fail[k] = n; // not enough memory : tried again when its channels change
+                    );
+                );
+            );
+        );
+        k += 1;
+    );
+);
+
+// @block : the new areas put in place (the old ones freed by @gfx)
+function fm_Block() local(k, wn, a)
+(
+    a = 0;
+    k = 0;
+    loop(FM_NM,
+        ((wn = fm_ptr[FM_NM + k]) !== 0) ? (
+            fm_ptr[2 * FM_NM + k] = fm_ptr[k];
+            fm_ptr[k] = max(0, wn);
+            fm_ptr[FM_NM + k] = 0;
+        );
+        (fm_ptr[k] > 0) ? (a = 1);
+        k += 1;
+    );
+    fm_act = a;
+);
+
+// @sample : the modules on the source "kind" (0 the inputs, 1 the outputs), the samples buf[0 ... avail-1] : the
+// limiters (changed in place), then the VU meters
+function fm_Sample(kind, buf, avail) local(k, st, e, f, n)
+(
+    k = FM_NV;
+    loop(FM_NV,
+        st = fm_st + k * FM_SW;
+        (((e = fm_ptr[k]) > 0) && (st[fm_sSrc] === kind) && st[fm_sOn]) ? (
+            f = st[fm_sFirst]; n = min(e[lm_N], avail - f);
+            (n > 0) ? lm_Sample(st + fm_sEng, e, buf + f, 1, buf + f, n, 0);
+        );
+        k += 1;
+    );
+    k = 0;
+    loop(FM_NV,
+        st = fm_st + k * FM_SW;
+        (((e = fm_ptr[k]) > 0) && (st[fm_sSrc] === kind) && st[fm_sOn]) ? (
+            f = st[fm_sFirst]; n = min(e[vu_N], avail - f);
+            (n > 0) ? vu_Sample(st + fm_sEng, e, buf + f, 1, n);
+        );
+        k += 1;
+    );
+);
+
+// @serialize : the settings of the modules
+function fm_Serialize()
+(
+    (file_avail(0) >= 0) ? (
+        // reading
+        (file_avail(0) > 0) ? (
+            memset(ser_hdr, 0, 4);
+            load_mem(0, ser_hdr, 4);
+            ((ser_hdr[0] === 'fxm1') && (ser_hdr[1] === FM_NM) && (ser_hdr[2] === FM_SW)) ? (
+                load_mem(0, fm_st, FM_NM * FM_SW);
+                fm_Check();
+            );
+        );
+    ) : (
+        // writing
+        ser_hdr[0] = 'fxm1'; ser_hdr[1] = FM_NM; ser_hdr[2] = FM_SW; ser_hdr[3] = 0;
+        save_mem(0, ser_hdr, 4);
+        save_mem(0, fm_st, FM_NM * FM_SW);
+    );
+);
+
+// the work area of the module k, when it is the one of its settings (0 : none)
+function fm_Eng(k) local(e)
+(
+    e = fm_ptr[k];
+    ((e > 0) && fm_Chans(k)) ? e : 0;
+);
+
+/*
+    the cells set by a drag (a potentiometer of mSL_ui_Pads, ui_jdrag) of the module k : 2 the first channel, 3 the count ;
+    VU meter : 8 the sample time, 9 the highlighted channel ; Limiter : 8 ... 15 its settings (in the order of the sliders
+    of the plugin) ; fm_lo, fm_hi, fm_px (the pixels of a horizontal drag for the whole range), fm_lg (the flags of
+    ui_jdrag_start : 1 logarithmic, 2 integer) ; the index of the setting in fm_st (-1 : not a cell of values)
+*/
+function fm_DragRange(k, c)
+(
+    fm_lg = 0;
+    (c === 2) ? (fm_lo = 1; fm_hi = 128; fm_px = 256; fm_lg = 2; fm_sFirst) :
+    (c === 3) ? (fm_lo = 1; fm_hi = 128; fm_px = 256; fm_lg = 2; fm_sCnt) :
+    (k < FM_NV) ? (
+        (c === 8) ? (fm_lo = 25; fm_hi = 1000; fm_px = 300; fm_lg = 1; fm_sEng) :
+        (c === 9) ? (fm_lo = 0; fm_hi = 128; fm_px = 256; fm_lg = 2; fm_sEng + 2) : -1;
+    ) : (
+        (c === 8) ? (fm_lo = -40; fm_hi = 0; fm_px = 400; fm_sEng) : // limit
+        (c === 9) ? (fm_lo = -12; fm_hi = 24; fm_px = 360; fm_sEng + 4) : // pre-gain
+        (c === 10) ? (fm_lo = -12; fm_hi = 24; fm_px = 360; fm_sEng + 5) : // volume out
+        (c === 11) ? (fm_lo = 0.1; fm_hi = lm_MaxAtt; fm_px = 400; fm_lg = 1; fm_sEng + 6) : // attack (the anticipation)
+        (c === 12) ? (fm_lo = 1; fm_hi = 1000; fm_px = 400; fm_lg = 1; fm_sEng + 7) : // release
+        (c === 13) ? (fm_lo = 0; fm_hi = 100; fm_px = 300; fm_lg = 2; fm_sEng + 3) : // distortion
+        (c === 14) ? (fm_lo = 0.1; fm_hi = 10; fm_px = 300; fm_lg = 1; fm_sEng + 2) : // zoom
+        (c === 15) ? (fm_lo = 1; fm_hi = lm_NDMax; fm_px = 140; fm_lg = 2; fm_sEng + 1) : -1; // channels displayed
+    );
+);
+
+// the default value of the setting j of the module k (Shift + left clic on its cell)
+function fm_DefVal(k, j)
+(
+    (j === fm_sFirst) ? 0 : (j === fm_sCnt) ? 128 :
+    (k < FM_NV) ? ((j === fm_sEng) ? 45 : 0) :
+    (j === fm_sEng) ? -3 : (j === fm_sEng + 1) ? 4 : (j === fm_sEng + 2) ? 1 : (j === fm_sEng + 6) ? 10 :
+    (j === fm_sEng + 7) ? 100 : 0;
+);
+
+// the drag of a cell of values of the module k (owner blockId) ; returns the flags of ui_jdrag (2 : it has moved)
+function fm_Drag(blockId, k) local(c, j, st, d, v)
+(
+    st = fm_st + k * FM_SW;
+    c = ui_jpad_cell_at();
+    (ui_jdrag_can_start() && !(mouse_cap & 8) && ((j = fm_DragRange(k, c)) >= 0)) ? (
+        v = st[j] + (j === fm_sFirst); // (the first channel : shown from 1)
+        ui_jdrag_start(blockId, c, v, fm_lo, fm_hi, fm_px, fm_lg);
+    );
+    d = ui_jdrag(blockId);
+    ((d & 1) && ((j = fm_DragRange(k, ui_jdrag_cell)) >= 0)) ? (
+        st[j] = (j === fm_sFirst) ? ui_jdrag_v - 1 : ui_jdrag_v;
+    );
+    d;
+);
+
+// a clic on the cell c of the pad of the module k (ev : ui_jpad_ev_lmc / ui_jpad_ev_rmc ; left : a simple action, the next
+// value, Shift : the previous one, or the reset of a cell of values ; right : a menu)
+function fm_Cell(k, c, ev) local(st, e, rc, sh, d, j, m, n, r)
+(
+    st = fm_st + k * FM_SW; e = st + fm_sEng;
+    rc = ev & ui_jpad_ev_rmc;
+    sh = mouse_cap & 8;
+    d = sh ? -1 : 1;
+    (c === 0) ? (
+        st[fm_sOn] = !st[fm_sOn];
+    ) :
+    ((c === 1) && fm_HasIn) ? (
+        rc ? (
+            r = vu_ListMenu("Inputs|Outputs", 2, st[fm_sSrc]);
+            (r >= 0) ? (st[fm_sSrc] = r);
+        ) : (
+            st[fm_sSrc] = !st[fm_sSrc];
+        );
+    ) :
+    ((k < FM_NV) && (c >= 4) && (c <= 7)) ? (
+        j = (c === 4) ? 1 : (c === 5) ? 3 : (c === 6) ? 4 : 5; // the setting
+        m = (c === 4) ? 4 : (c === 5) ? 9 : (c === 6) ? 6 : 4; // its count of values
+        rc ? (
+            r = vu_ListMenu((c === 4) ? vu_ModeLong : (c === 5) ? vu_ThrList : (c === 6) ? vu_ColList : vu_HoldLong, m, 0|e[j]);
+            (r >= 0) ? (e[j] = r);
+        ) : (
+            e[j] = ((0|e[j]) + d + m) % m;
+        );
+    ) :
+    ((k < FM_NV) && (c === 10)) ? (
+        ((n = fm_Eng(k)) > 0) ? (n[vu_Clr] = 1);
+    ) :
+    (((j = fm_DragRange(k, c)) >= 0) && sh && !rc) ? (
+        st[j] = fm_DefVal(k, j); // (a cell of values : Shift + left clic = its default value)
+    );
+);
+
+/*
+    The module k : 0 ... 3 "VU meter A" ... "D", 4 ... 7 "Limiter A" ... "D" ; the pad (2 lines of 8 cells), then the display
+    of the plugin (all the height left)
+        0 On / Off (clic), 1 the source (Inputs / Outputs : left clic, the other one ; right clic, menu ; the File Player :
+        its outputs only), 2 the first channel, 3 the count of channels (drags ; Shift + left clic : 1, 128)
+        VU meter : 4 the GUI mode, 5 the saturation threshold, 6 the meter color, 7 the saturation auto clear (left clic :
+            the next one, Shift : the previous one ; right clic : menu), 8 the sample time, 9 the highlighted channel
+            (drags), 10 clear the peaks, 11 the state (channels, memory) ; the display : left clic, clear the peaks ; right
+            clic, the menu of the plugin
+        Limiter : 4 the gain reduction (its max since the last frame), 5 the latency (the anticipation), 6 the state ; 8 ...
+            15 its settings (drags ; Shift + left clic : the default value) : limit, pre-gain, volume out, attack (the
+            anticipation), release, distortion, zoom, channels displayed ; the display : the response of the soft
+            clipper, the history of the loudest channels and of the peak envelope
+*/
+function show_FxMeter_Pad(blockId, k)
+local(h1, hv, hneed, zz, zzmi, dr, st, e, n, i, vu, nm, v)
+(
+    vu = (k < FM_NV);
+    st = fm_st + k * FM_SW; e = st + fm_sEng;
+    h1 = uix_jpadHeight(2);
+    hv = max(120, ui_height() - h1 - ui_jd_ctgr - 8);
+    hneed = h1 + hv + ui_jd_ctgr + 8;
+    (ui_height() >= hneed) ? (
+        ui_split_top(hneed);
+            zzmi = ui_hover();
+            keepBlockInfos(blockId);
+            (zzmi) ? (
+                ui_push();
+                    ui_color(Col_Frame);
+                    ui_border();
+                ui_pop();
+            );
+            sprintf(#fm_title, vu ? "VU meter %c" : "Limiter %c", 'A' + (k % FM_NV));
+            control_group(#fm_title);
+            ui_pad(0, ui_cg_pad_top, 0, ui_cg_pad_bottom);
+            n = fm_Chans(k);
+
+            ui_split_top(h1);
+                ui_pad(1, 2, 2, 2);
+                mSL_setStrArray(fm_padLabs, fm_padSiz);
+                i = 0; loop(fm_padSiz, strcpy(fm_padLabs[i], ""); fm_padColrs[i] = Col_Inactive; i += 1;);
+                // the common cells
+                strcpy(fm_padLabs[0], st[fm_sOn] ? "On" : "Off");
+                fm_padColrs[0] = st[fm_sOn] ? Color_Limegreen : Color_Dark_Orange;
+                strcpy(fm_padLabs[1], (st[fm_sSrc] === 0) ? "Inputs" : "Outputs");
+                fm_padColrs[1] = fm_HasIn ? Col_P3 : Col_Inactive;
+                sprintf(fm_padLabs[2], "First %d", st[fm_sFirst] + 1);
+                fm_padColrs[2] = Col_P1;
+                (n > 0) ? sprintf(fm_padLabs[3], "Ch. %d-%d", st[fm_sFirst] + 1, st[fm_sFirst] + n) :
+                    sprintf(fm_padLabs[3], "Count %d", st[fm_sCnt]);
+                fm_padColrs[3] = Col_P1;
+                // the state
+                nm = vu ? 11 : 6;
+                !st[fm_sOn] ? strcpy(fm_padLabs[nm], "---") :
+                (n === 0) ? (strcpy(fm_padLabs[nm], "No channel"); fm_padColrs[nm] = Col_P6;) :
+                (fm_fail[k] === n) ? (strcpy(fm_padLabs[nm], "No memory"); fm_padColrs[nm] = Col_P6;) :
+                (fm_Eng(k) > 0) ? (sprintf(fm_padLabs[nm], "%d channels", n); fm_padColrs[nm] = Color_Limegreen;) :
+                strcpy(fm_padLabs[nm], "...");
+                vu ? (
+                    vu_Nth(vu_ModeList, max(0, min(3, 0|e[1])), fm_padLabs[4]);
+                    sprintf(fm_padLabs[5], "Over %s", vu_Nth(vu_ThrList, max(0, min(8, 0|e[3])), #fm_s));
+                    vu_Nth(vu_ColList, max(0, min(5, 0|e[4])), fm_padLabs[6]);
+                    sprintf(fm_padLabs[7], "Clear: %s", vu_Nth(vu_HoldList, max(0, min(3, 0|e[5])), #fm_s));
+                    fm_padColrs[4] = fm_padColrs[5] = fm_padColrs[6] = fm_padColrs[7] = Col_P3;
+                    sprintf(fm_padLabs[8], "Time %d ms", e[0]);
+                    (e[2] > 0) ? sprintf(fm_padLabs[9], "Highlight %d", e[2]) : strcpy(fm_padLabs[9], "Highlight -");
+                    fm_padColrs[8] = fm_padColrs[9] = Col_P1;
+                    strcpy(fm_padLabs[10], "Clear peaks");
+                    fm_padColrs[10] = Col_InfoA;
+                ) : (
+                    v = lm_Reduction(fm_Eng(k));
+                    sprintf(fm_padLabs[4], "Reduction %.1f dB", v);
+                    fm_padColrs[4] = (v > 0.1) ? Color_Goldenrod : Color_Limegreen;
+                    sprintf(fm_padLabs[5], "Latency %.1f ms", lm_Latency(e));
+                    fm_padColrs[5] = Col_P1;
+                    sprintf(fm_padLabs[8], "Limit %.1f dB", e[0]);
+                    sprintf(fm_padLabs[9], "Pre-gain %.1f dB", e[4]);
+                    sprintf(fm_padLabs[10], "Volume %.1f dB", e[5]);
+                    sprintf(fm_padLabs[11], "Attack %.1f ms", e[6]);
+                    sprintf(fm_padLabs[12], "Release %d ms", e[7]);
+                    sprintf(fm_padLabs[13], "Distortion %d %%", e[3]);
+                    sprintf(fm_padLabs[14], "Zoom %.2f", e[2]);
+                    sprintf(fm_padLabs[15], "Display %d ch.", e[1]);
+                    i = 8; loop(8, fm_padColrs[i] = Col_P1; i += 1;);
+                    (e[0] !== -3) ? (fm_padColrs[8] = Col_P2);
+                    (e[4] !== 0) ? (fm_padColrs[9] = Col_P2);
+                    (e[5] !== 0) ? (fm_padColrs[10] = Col_P2);
+                    (e[3] !== 0) ? (fm_padColrs[13] = Col_P2);
+                );
+                zz = control_jpad(fm_pad);
+                dr = fm_Drag(blockId, k); // the cells of values : a drag (see fm_Drag)
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4;
+                    ((zz & (ui_jpad_ev_lmc | ui_jpad_ev_rmc)) && !((zz & ui_jpad_ev_lmc) && (dr & 2))) ? (
+                        fm_Cell(k, fm_pad[ui_jpad_last] - 1, zz);
+                    );
+                );
+            ui_pop();
+
+            // the display of the plugin
+            ui_pad(2, 3, 2, 2);
+            vu ? (
+                !(mouse_cap & 8) ? vu_Mouse(e, fm_Eng(k)); // (Shift + right clic : the Studio menu)
+                vu_Draw(e, fm_Eng(k), n, st[fm_sFirst]);
+            ) : (
+                lm_Draw(fm_Eng(k), st[fm_sFirst]);
+            );
+            st[fm_sOn] ? (ui_GFXdoNow |= 4); // (the meters move)
+        ui_pop();
+    );
+);

@@ -1,0 +1,67 @@
+print("Ex-1055. Interstys table : les effets VU meter et Limiter (les plugins Multichannel_VU_meter, SmoothMultiLimiter).");
+
+/*
+  Un nouveau VU meter prend les valeurs du plugin : mode HFixed (horizontal, hauteur fixe), time 45 ms, thresh 0 dB,
+  autoclear 0 (permanent), color Green, highlight 0 ; sa source passe telle quelle a sa sortie. Un nouveau Limiter :
+  limit -3 dB, pregain 0, output 0 (le volume de sortie), attack 10 ms (l'anticipation), release 100 ms, distortion 0 %,
+  zoom 1, shown 4 (les canaux affiches) ; ni l'un ni l'autre n'a le limiteur automatique (cle limiter). Les mots thresh et
+  color sont aussi ceux du Random et du Noise : la cle du type est choisie. Un Limiter ramene output, attack, release dans
+  les bornes du plugin (output 30 -> 24, attack 500 -> 200 : le Check donne les valeurs gardees).
+  Erreurs (rien n'est cree) : e1 thresh 3 (2754 : pas un seuil du menu) ; e2 autoclear 2 (2754 : 0, 1, 3 ou 5 minutes) ;
+  e3 color Red (2754) ; e4 limit 5 (2754) ; e5 shown 9 (2754) ; e6 time pour un Limiter (2767) ; e7 limit pour un VU
+  meter (2767) ; e8 limiter pour un VU meter (2767) ; e9 mode pour un Limiter (2767). Les numeros des effets dependent du
+  projet (%d).
+*/
+
+var r = table(data(
+    Interstys
+    Effect vu  type VUMeter  chan 2  source In:0
+    Dump Effect vu
+    Check Effect vu  mode HFixed  time 45  thresh 0  autoclear 0  color Green  highlight 0
+    Effect vu  mode VFit  time 100  thresh -6  autoclear 3  color Cyan  highlight 2  gain -6
+    Dump Effect vu
+    Check Effect vu  mode VFit  time 100  thresh -6  autoclear 3  color Cyan  highlight 2  gain -6
+    Effect lm  type Limiter  chan 2  source Effect vu
+    Dump Effect lm
+    Check Effect lm  limit -3  pregain 0  output 0  attack 10  release 100  distortion 0  zoom 1  shown 4
+    Effect lm  limit -1.5  pregain 6  output -2  attack 5  release 250  distortion 30  zoom 2  shown 2
+    Dump Effect lm
+    Check Effect lm  limit -1.5  pregain 6  output -2  attack 5  release 250  distortion 30  zoom 2  shown 2
+    Effect lm  output 30  attack 500
+    Check Effect lm  output 24  attack 200
+    Free Effect lm
+    Free Effect vu
+));
+print(sprintf(0, "Ex-1055. resultat : %d", r));
+
+var e1 = table(data( Interstys  Effect x  type VUMeter  thresh 3 ));
+var e2 = table(data( Interstys  Effect x  type VUMeter  autoclear 2 ));
+var e3 = table(data( Interstys  Effect x  type VUMeter  color Red ));
+var e4 = table(data( Interstys  Effect x  type Limiter  limit 5 ));
+var e5 = table(data( Interstys  Effect x  type Limiter  shown 9 ));
+var e6 = table(data( Interstys  Effect x  type Limiter  time 50 ));
+var e7 = table(data( Interstys  Effect x  type VUMeter  limit -3 ));
+var e8 = table(data( Interstys  Effect x  type VUMeter  limiter On ));
+var e9 = table(data( Interstys  Effect x  type Limiter  mode HFit ));
+print(sprintf(0, "Ex-1055. erreurs : %d %d %d %d %d %d %d %d %d", e1, e2, e3, e4, e5, e6, e7, e8, e9));
+
+// Expected "Effect %d status On type VUMeter phase Std chan 2 out Own source In:0 gain 0 mode HFixed time 45 thresh 0 autoclear 0 color Green highlight 0"
+// Expected "Check Effect %d OK"
+// Expected "Effect %d status On type VUMeter phase Std chan 2 out Own source In:0 gain -6 mode VFit time 100 thresh -6 autoclear 3 color Cyan highlight 2"
+// Expected "Check Effect %d OK"
+// Expected "Effect %d status On type Limiter phase Std chan 2 out Own source Effect %d gain 0 limit -3 pregain 0 output 0 attack 10 release 100 distortion 0 zoom 1 shown 4"
+// Expected "Check Effect %d OK"
+// Expected "Effect %d status On type Limiter phase Std chan 2 out Own source Effect %d gain 0 limit -1.5 pregain 6 output -2 attack 5 release 250 distortion 30 zoom 2 shown 2"
+// Expected "Check Effect %d OK"
+// Expected "Check Effect %d OK"
+// Expected "Ex-1055. resultat : 0"
+// Expected error 2754
+// Expected error 2754
+// Expected error 2754
+// Expected error 2754
+// Expected error 2754
+// Expected error 2767
+// Expected error 2767
+// Expected error 2767
+// Expected error 2767
+// Expected "Ex-1055. erreurs : 2754 2754 2754 2754 2754 2767 2767 2767 2767"

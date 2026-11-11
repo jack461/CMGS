@@ -614,14 +614,15 @@ local (n, u, v, w, ppro, disp_1, disp_2, cnt, bit, donow, bk)
 function APCinit()
 local ()
 (
-    // Declare associations controllers # and sliders names
+    // Declare associations controllers # and sliders names (the 9 faders 0x30 ... 0x38, from the left ; 2026-11-11 :
+    // the volume responsivity is no more on a fader ; 0x36 : the volume of the current projector, apc_PVol ; 0x37 and
+    // 0x38 : the volume adjustment, ctlV2 ctlV1)
     zzzz_morph = midipairctlsl(0x30, "Morph.Dur."); //  morphing time
     midipairctlsl(0x31, "Rand.Delay"); //  random delay
-    midipairctlsl(0x32, "Vol.Resp."); //   volume responsivity
-    midipairctlsl(0x33, "Scene"); //   scene
-    midipairctlsl(0x34, "Hyperslider"); //   hyper slider
-    midipairctlsl(0x35, "Ambitus"); //   hyper slider ambitus
-    midipairctlsl(0x36, "Blur"); //   hyper slider ambitus
+    midipairctlsl(0x32, "Scene"); //   scene
+    midipairctlsl(0x33, "Hyperslider"); //   hyper slider
+    midipairctlsl(0x34, "Ambitus"); //   hyper slider ambitus
+    midipairctlsl(0x35, "Blur"); //   blur
     //
     oldopmod = sldopmod;
     zzrefreshUI = zzrefreshNxt = refresh_all;
@@ -662,6 +663,30 @@ local (st)
     reledCtime = 1;
     apc_bankPrj[floor(n / 8)] = n % 8;
     st;
+);
+
+// The fader 0x36 (2026-11-11) : the volume of the current projector, as its fader in the module "Global"
+// (serialBlock[Pr7_PrjVol + p - 1], dB ; see prv_PVolBlock) : 0 = silence, 0 dB at about 2/3 of the course, + 12 dB at
+// the top. It takes the volume over (soft takeover) when it comes within 3 dB of it ; then it follows it, until the
+// current projector changes or the volume is changed elsewhere (module "Global")
+apc_pvPrj = 0; apc_pvLast = 0;
+function apc_PVol(v)
+local(p, db, cur)
+(
+    p = slprjcur;
+    db = (v <= 0) ? prv_PVolMin : max(prv_PVolMin, min(prv_PVolMax, 12 + 60 * log10(v / 127)));
+    cur = serialBlock[Pr7_PrjVol + p - 1];
+    (((apc_pvPrj === p) && (abs(cur - apc_pvLast) < 0.001)) || (abs(db - cur) < 3) ||
+        ((db <= prv_PVolMin) && (cur <= prv_PVolMin))) ? (
+        serialBlock[Pr7_PrjVol + p - 1] = apc_pvLast = db;
+        apc_pvPrj = p;
+        MIDIshowflags = ctrlsync;
+    ) : (
+        MIDIshowflags = 0;
+    );
+    MIDIshowpos = v >> 3;
+    MIDIshowtime = timez + showdelay;
+    MIDIshowforce = 1;
 );
 
 // mbu is for "MIDI buffer"
@@ -1207,11 +1232,16 @@ local (km, p1, p2, ppro, fvol, fpro, mpro, MIDIdate, pstat)
                 (p1 === ctlV2) ? (
                     vols2 = p2; fvol = 1;
                 ) :
-                ((p1 >= 0x30) && (p1 <= 0x36)) ? (
+                ((p1 >= 0x30) && (p1 <= 0x35)) ? (
                     midictlchange(projUI, p1, p2);
                     // midisend(0, NoteOn, Btctl, (MIDIshowflags & ctrlsync) ? 1 : 0);
                     fvol = 0;
                     signal_change(32, p1); // a change relative to this continuous control
+                    zzrefreshUI |= refresh_01; // immediate
+                ) :
+                (p1 === 0x36) ? (
+                    apc_PVol(p2); // the volume of the current projector
+                    fvol = 0;
                     zzrefreshUI |= refresh_01; // immediate
                 );
             );

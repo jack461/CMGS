@@ -1,0 +1,751 @@
+/*
+    Diffusion-3-Configurations.jsfx-inc
+
+    =============================== The configuration of Diffusion, saved with the project ===============================
+
+    (2026-11-11) The project is self-contained : cg_Serialize saves with it the whole state that the configuration file
+    (D3_config) builds : the configurations (conf), the presets of projectors (prop), the actions, the positions of the
+    speakers (hppos), the sources of the spatial projectors (source), the scenes and groups (groupdefs), the default
+    configuration, the colors of the background, and the settings of each projector (status, mode, scene / group /
+    item, morphing, blur, random delay, Hyper Slider, color, preset, pad). When the project is opened, this state is
+    restored and the configuration file is NOT loaded (doreload) : a file is loaded only on request (module "Global" :
+    File 1 ... 9, or a .mSL dropped), and it adds or replaces (its "clear" clears everything first). An old project
+    (without this block) loads the file as before.
+    Threads : @serialize reads the records into a static area (cg_stg) ; @gfx (cg_Gfx, before sp_Gfx) builds the blocks
+    again (mSL_Dyn_Alloc, as the configuration does) ; @block then makes the projectors choose their configurations
+    again (cg_rsDone, as after a load of the file).
+    Records (in the project and in cg_stg) : kind, index, size, then size words ; kind 1 conf (index : its number ; the
+    block), 2 prop (its number), 3 action (its slot), 4 hppos (HP_Positions), 5 source (its number ; count, points),
+    6 groupdefs, 7 globals (defaultconf, background set, its two colors), 8 projector (its index ; the fields cg_pf) ;
+    0 : the end.
+
+    The module "Configurations" (show_Configurations_Pad) : the configurations defined, or the sources (cell 0), by pages
+    of 128 (cell 1) ; one cell each : its number, its sources > its outputs (or its points) ; colors : green used by a
+    projector, orange in no group, [ ] selected ; the text : the item under the mouse (or selected) : its contents, its
+    places in the groups, the projectors that use it. Left clic : select ; right clic : its menu : load it into a
+    projector (as its cell Config) / use the source for a projector, copy it under another number, renumber it (the
+    groups or the projectors follow), delete it. Cell 3 : export the whole configuration as a configuration file (.mSL,
+    D3_config ; Data/d3-config-date.mSL) ; cell 4 : load a configuration file (as the module "Global").
+
+    Included in @init after Diffusion-3-Trajectories (xpt_*, ed_Fmt, prv_*), while make_array allocates static memory.
+*/
+
+@init
+
+CG_STGMAX = 524288;             // the records read from the project (cg_Serialize), built again by cg_Restore
+cg_stg = make_array(CG_STGMAX);
+cg_stgN = 0; cg_stgReady = 0; cg_rsDone = 0; cg_lost = 0;
+cg_tmp = make_array(4096);      // work (@serialize ; the records too large are read here and dropped)
+cg_rh = make_array(4);
+cg_dst = make_array(130);       // (@gfx : cg_Counts, the outputs of a configuration)
+cg_bgSet = 0; cg_bg1 = cg_bg2 = 0;  // the colors of the background (bgcolor : Diffusion-3-Set-Table)
+// the settings of a projector saved with the project : 0 status, 1 mode, 2 blur (applied by their functions), then
+// copied as they are
+CG_NPF = 16;
+cg_pf = make_array(CG_NPF);
+cg_pf[0] = prx_savprjst; cg_pf[1] = prx_savopmod; cg_pf[2] = prx_blurval; cg_pf[3] = prx_svscene;
+cg_pf[4] = prx_svgroup; cg_pf[5] = prx_savitem; cg_pf[6] = prx_svmorph; cg_pf[7] = prx_svrdlay;
+cg_pf[8] = prx_svhypsl; cg_pf[9] = prx_svhypam; cg_pf[10] = prx_pcolor; cg_pf[11] = prx_presetid;
+cg_pf[12] = prx_cpadadd; cg_pf[13] = prx_cpadval; cg_pf[14] = prx_citmval; cg_pf[15] = prx_cgrpval;
+cg_pv = make_array(CG_NPF);
+// the module
+cg_view = 0;                    // 0 the configurations, 1 the sources
+cg_page = 0;
+cg_sel = 0;                     // the item selected (its number)
+cg_pend = 0;                    // the prompt : 1 copy, 2 renumber (cg_pnum : the item)
+cg_pnum = 0;
+cg_items = make_array(4200);    // the items of the view (their numbers)
+cg_nit = 0;
+strcpy(#cg_prm, ""); strcpy(#cg_txt, ""); strcpy(#cg_t2, ""); strcpy(#cg_w, ""); strcpy(#cg_mnu, "");
+pad_CGT_Siz = 8;
+pad_CGT = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    1, 8, pad_CGT_Siz);
+pad_CGT_Labs = pad_CGT + pad_CGT[ui_jpad_labs];
+pad_CGT_Colrs = pad_CGT + pad_CGT[ui_jpad_clrs];
+pad_CGG_NL = 16;
+pad_CGG_Siz = 128;
+pad_CGG = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    pad_CGG_NL, 8, pad_CGG_Siz);
+pad_CGG_Labs = pad_CGG + pad_CGG[ui_jpad_labs];
+pad_CGG_Colrs = pad_CGG + pad_CGG[ui_jpad_clrs];
+i__k = 0; loop(pad_CGT_Siz, pad_CGT_Colrs[i__k] = Col_Inactive; pad_CGT_Labs[i__k] = ""; i__k += 1;);
+i__k = 0; loop(pad_CGG_Siz, pad_CGG_Colrs[i__k] = Col_Inactive; pad_CGG_Labs[i__k] = ""; i__k += 1;);
+
+
+/*
+    Saved with the project
+*/
+
+// A record : kind, index, size, then the words
+function cg_Rec(kind, idx, buf, sz)
+(
+    cg_rh[0] = kind; cg_rh[1] = idx; cg_rh[2] = sz;
+    save_mem(0, cg_rh, 3);
+    (sz > 0) ? save_mem(0, buf, sz);
+);
+
+function cg_Serialize()
+local(i, b, n, k, p, pp, ok)
+(
+    (file_avail(0) >= 0) ? (
+        // reading : the records into cg_stg (cg_Restore, @gfx) ; the configuration file is not loaded
+        (file_avail(0) > 0) ? (
+            memset(ser_hdr, 0, 4);
+            load_mem(0, ser_hdr, 4);
+            (ser_hdr[0] === 'cfg1') ? (
+                cg_stgN = 0; cg_lost = 0; ok = 1;
+                while (ok) (
+                    memset(cg_rh, 0, 3);
+                    load_mem(0, cg_rh, 3);
+                    k = cg_rh[0]; n = max(0, cg_rh[2]);
+                    (k <= 0) ? (ok = 0) : (
+                        (cg_stgN + 3 + n <= CG_STGMAX) ? (
+                            cg_stg[cg_stgN] = k; cg_stg[cg_stgN + 1] = cg_rh[1]; cg_stg[cg_stgN + 2] = n;
+                            (n > 0) ? load_mem(0, cg_stg + cg_stgN + 3, n);
+                            cg_stgN += 3 + n;
+                        ) : (
+                            while (n > 0) ( load_mem(0, cg_tmp, min(n, 4096)); n -= 4096; );
+                            cg_lost += 1;
+                        );
+                        (file_avail(0) <= 0) ? (ok = 0);
+                    );
+                );
+                cg_stgReady = 1;
+                doreload = 0; // (the project has its own configuration : the file is not loaded at the start)
+            );
+        );
+    ) : (
+        // writing
+        ser_hdr[0] = 'cfg1'; ser_hdr[1] = 1; ser_hdr[2] = 0; ser_hdr[3] = 0;
+        save_mem(0, ser_hdr, 4);
+        i = 1; loop(conflsize - 2, ((b = conflist[i]) > 0) ? cg_Rec(1, i, b, b[-1]); i += 1;);
+        i = 0; loop(proprescnt, ((b = proprerefs[i]) > 0) ? cg_Rec(2, i, b, b[-1]); i += 1;);
+        i = 0; loop(actlsize, ((b = actlist[i]) > 0) ? cg_Rec(3, i, b, b[-1]); i += 1;);
+        (HP_Positions > 0) ? cg_Rec(4, 0, HP_Positions, HP_Positions[-1]);
+        i = 1;
+        loop(SP_NSRC - 1,
+            (sp_srcN[i] > 0) ? (
+                cg_tmp[0] = sp_srcN[i];
+                memcpy(cg_tmp + 1, sp_srcP + i * SP_MAXP * 3, 3 * sp_srcN[i]);
+                cg_Rec(5, i, cg_tmp, 1 + 3 * sp_srcN[i]);
+            );
+            i += 1;
+        );
+        cg_Rec(6, 0, groupdefs, groupdefsize);
+        cg_tmp[0] = defaultconf; cg_tmp[1] = cg_bgSet; cg_tmp[2] = cg_bg1; cg_tmp[3] = cg_bg2;
+        cg_Rec(7, 0, cg_tmp, 4);
+        p = 0;
+        loop(projucnt,
+            pp = projectors + p * projsize;
+            k = 0; loop(CG_NPF, cg_pv[k] = pp[cg_pf[k]]; k += 1;);
+            cg_Rec(8, p, cg_pv, CG_NPF);
+            p += 1;
+        );
+        cg_Rec(0, 0, 0, 0);
+    );
+);
+
+// The configuration of the project built again from cg_stg (@gfx : the blocks are allocated as by the configuration)
+function cg_Restore()
+local(pos, kd, idx, n, body, b, pp, j, v, nc, np, ns)
+(
+    cg_stgReady = 0;
+    clearArea(); // (the configurations, the presets, the groups, the sources)
+    mSL_mfree_all(actlist, actlsize);
+    nc = np = ns = 0;
+    pos = 0;
+    while (pos < cg_stgN) (
+        kd = cg_stg[pos]; idx = cg_stg[pos + 1]; n = cg_stg[pos + 2]; body = cg_stg + pos + 3;
+        ((kd === 1) && (idx >= 1) && (idx < conflsize - 1) && (n > 0)) ? (
+            b = mSL_Dyn_Alloc(n, 'conf', 0);
+            (b > 0) ? (memcpy(b, body, n); conflist[idx] = b; nc += 1;);
+        ) :
+        ((kd === 2) && (idx >= 0) && (idx < proprescnt) && (n > 0)) ? (
+            b = mSL_Dyn_Alloc(n, 'prop', 0);
+            (b > 0) ? (memcpy(b, body, n); proprerefs[idx] = b; np += 1;);
+        ) :
+        ((kd === 3) && (idx >= 0) && (idx < actlsize) && (n > 0)) ? (
+            b = mSL_Dyn_Alloc(n, 'actn', 0);
+            (b > 0) ? (memcpy(b, body, n); actlist[idx] = b;);
+        ) :
+        ((kd === 4) && (n > 0)) ? (
+            b = mSL_Dyn_Alloc(n, 'hpps', mSL_StM_FlClear);
+            (b > 0) ? (
+                memcpy(b, body, n);
+                HP_Positions = b;
+                (mm_usr_prot_hpps > 0) ? mm_usr_prot[mm_usr_prot_hpps] = b;
+            );
+        ) :
+        ((kd === 5) && (idx >= 1) && (idx < SP_NSRC) && (n >= 4)) ? (
+            memset(sp_srcP + idx * SP_MAXP * 3, 0, SP_MAXP * 3);
+            memcpy(sp_srcP + idx * SP_MAXP * 3, body + 1, min(n - 1, SP_MAXP * 3));
+            sp_srcN[idx] = min(SP_MAXP, body[0]);
+            ns += 1;
+        ) :
+        (kd === 6) ? (
+            memcpy(groupdefs, body, min(n, groupdefsize));
+        ) :
+        ((kd === 7) && (n >= 4)) ? (
+            defaultconf = body[0];
+            (cg_bgSet = body[1]) ? (cg_bg1 = body[2]; cg_bg2 = body[3]; colorlimits(cg_bg1, cg_bg2););
+        ) :
+        ((kd === 8) && (idx >= 0) && (idx < projucnt) && (n >= CG_NPF)) ? (
+            pp = projectors + idx * projsize;
+            j = 3; loop(CG_NPF - 3, ((v = body[j]) !== Undef) ? (pp[cg_pf[j]] = v); j += 1;);
+            ((v = body[2]) !== Undef) ? (pp[prx_blurval] = -1; changblur(pp, v, 0););
+            ((v = body[0]) !== Undef) ? updpstatus(pp, v, 0);
+            ((v = body[1]) !== Undef) ? updtopmod(pp, v, 0);
+            // its configuration : that of its scene / group / item, chosen again by @block (prx_sgi)
+            ((pp[prx_svscene] >= 1) && (pp[prx_svscene] <= 16) && (pp[prx_svgroup] >= 1) && (pp[prx_svgroup] <= 16) &&
+                (pp[prx_savitem] >= 1) && (pp[prx_savitem] <= 16)) ? (
+                pp[prx_sgi] = (pp[prx_svscene] - 1) * 256 + (pp[prx_svgroup] - 1) * 16 + (pp[prx_savitem] - 1);
+            );
+        );
+        pos += 3 + n;
+    );
+    groupdefs[groupdefsize - 1] = conflsize - 1; // (the default entry, as loadConfFile)
+    sp_defSeq += 1;
+    cg_rsDone = 1; // (@block : the projectors choose their configurations again)
+    sprintf(#cg_w, "Configurations : restored from the project : %d configurations, %d presets, %d sources%s", nc, np, ns,
+        cg_lost ? sprintf(#cg_t2, " (%d records too large, lost : ERR 2460)", cg_lost) : "");
+    mSL_log(SysLogBox, #cg_w);
+);
+
+// Each run of @gfx (before sp_Gfx) : a configuration read from the project
+function cg_Gfx()
+(
+    cg_stgReady ? cg_Restore();
+);
+
+
+/*
+    The module "Configurations"
+*/
+
+function cg_Err(code, msg)
+(
+    sprintf(#cg_w, "ERR: %04d    Configurations : %s", code, msg);
+    mSL_log(SysLogBox, #cg_w);
+    code;
+);
+
+// The items of the view (the configurations defined, or the sources) in cg_items, their count cg_nit
+function cg_Items()
+local(i)
+(
+    cg_nit = 0;
+    cg_view ? (
+        i = 1; loop(SP_NSRC - 1, (sp_srcN[i] > 0) ? (cg_items[cg_nit] = i; cg_nit += 1;); i += 1;);
+    ) : (
+        i = 1; loop(conflsize - 2, (conflist[i] > 0) ? (cg_items[cg_nit] = i; cg_nit += 1;); i += 1;);
+    );
+    cg_nit;
+);
+
+// The places of the configuration n in the groups : their count ; the first one in cg_fs, cg_fg, cg_fi (1 ...)
+function cg_Places(n)
+local(k, c)
+(
+    c = 0; cg_fs = cg_fg = cg_fi = 0;
+    k = 0;
+    loop(groupdefsize - 1,
+        (groupdefs[k] === n) ? (
+            (c === 0) ? (cg_fs = floor(k / 256) + 1; cg_fg = floor(k / 16) % 16 + 1; cg_fi = k % 16 + 1;);
+            c += 1;
+        );
+        k += 1;
+    );
+    c;
+);
+
+// The projectors that use the configuration n (cfg) or the source n (src) : their count ; the list in dst
+function cg_Users(n, src, dst)
+local(p, c, pp)
+(
+    strcpy(dst, ""); c = 0; p = 0;
+    loop(projucnt,
+        pp = projectors + p * projsize;
+        (src ? ((0|serialBlock[Pr7_PrjSpace + p]) === n) : (pp[prx_numconf] === n)) ? (
+            sprintf(#cg_t4, " P%d", p + 1); strcat(dst, #cg_t4); c += 1;
+        );
+        p += 1;
+    );
+    c;
+);
+
+// The sources of the configuration n (its block), and its outputs (distinct) : cg_ns, cg_nd
+function cg_Counts(n)
+local(b, q)
+(
+    cg_ns = cg_nd = 0;
+    b = conflist[n];
+    (b > 0) ? (
+        memset(cg_dst, 0, 129);
+        q = b + 1;
+        while (q[0] > 0) (
+            cg_ns += 1; q += 1;
+            while (q[0] > 0) ( ((q[0] <= 128) && !cg_dst[q[0]]) ? (cg_dst[q[0]] = 1; cg_nd += 1;); q += 2; );
+            q += 1;
+        );
+    );
+);
+
+// The text of the item n of the view (#cg_txt, #cg_t2)
+function cg_Text(n)
+local(b, q, s, g0, eq, k)
+(
+    strcpy(#cg_txt, ""); strcpy(#cg_t2, "");
+    cg_view ? (
+        (sp_srcN[n] > 0) ? (
+            sprintf(#cg_txt, "Source %d : %d points :", n, sp_srcN[n]);
+            k = 0;
+            while ((k < sp_srcN[n]) && (strlen(#cg_txt) < 150)) (
+                q = sp_srcP + n * SP_MAXP * 3 + 3 * k;
+                sprintf(#cg_w, " %d < %.2f %.2f %.2f ;", k + 1, q[0], q[1], q[2]); strcat(#cg_txt, #cg_w);
+                k += 1;
+            );
+            (k < sp_srcN[n]) ? strcat(#cg_txt, " ...");
+            cg_Users(n, 1, #cg_t3);
+            sprintf(#cg_t2, "Used by the projectors :%s", (strlen(#cg_t3) > 0) ? #cg_t3 : " none");
+        ) : sprintf(#cg_txt, "Source %d : not defined", n);
+    ) : (
+        ((b = conflist[n]) > 0) ? (
+            sprintf(#cg_txt, "Configuration %d :", n);
+            q = b + 1;
+            while ((q[0] > 0) && (strlen(#cg_txt) < 150)) (
+                s = q[0]; q += 1;
+                // its outputs ; the gains when they differ
+                g0 = q[1]; eq = 1; k = q; while (k[0] > 0) ( (abs(k[1] - g0) > 0.0001) ? (eq = 0); k += 2; );
+                sprintf(#cg_w, " %d >", s); strcat(#cg_txt, #cg_w);
+                k = 0;
+                while (q[0] > 0) (
+                    eq ? sprintf(#cg_w, "%s %d", k ? "," : "", q[0]) : sprintf(#cg_w, "%s %d (%.2f)", k ? "," : "", q[0], q[1]);
+                    strcat(#cg_txt, #cg_w); q += 2; k += 1;
+                );
+                strcat(#cg_txt, " ;");
+                q += 1;
+            );
+            (q[0] > 0) ? strcat(#cg_txt, " ...");
+            k = cg_Places(n);
+            cg_Users(n, 0, #cg_t3);
+            (k > 0) ? sprintf(#cg_t2, "In %d place(s) of the groups (the first : scene %d, group %d, item %d) ; projectors :%s",
+                    k, cg_fs, cg_fg, cg_fi, (strlen(#cg_t3) > 0) ? #cg_t3 : " none") :
+                sprintf(#cg_t2, "In no group (loaded as it is) ; projectors :%s", (strlen(#cg_t3) > 0) ? #cg_t3 : " none");
+        ) : sprintf(#cg_txt, "Configuration %d : not defined", n);
+    );
+);
+
+// The number asked for a copy or a renumbering (the prompt of ui-lib ; cg_Prompted takes the answer : empty, nothing)
+function cg_Prompt(kind, n)
+(
+    cg_pend = kind; cg_pnum = n;
+    strcpy(#cg_prm, "");
+    ui_screen_open("control.prompt");
+    ui_screen_arg(0, #cg_prm);
+    sprintf(#cg_w, "%s the %s %d : its new number", (kind === 1) ? "Copy" : "Renumber", cg_view ? "source" : "configuration", n);
+    ui_screen_arg(1, #cg_w);
+);
+
+// The configuration n copied as m (its block : its first word is its number) ; renumber : n removed, the groups (or the
+// projectors that use the source) follow
+function cg_Copy(n, m, ren)
+local(b, c, sz, k, p, pp, cnt)
+(
+    cg_view ? (
+        ((m < 1) || (m >= SP_NSRC)) ? cg_Err(2461, "a source number in [1, 255] is expected") :
+        (sp_srcN[m] > 0) ? cg_Err(2462, sprintf(#cg_t3, "the source %d is already defined : delete it first", m)) : (
+            memcpy(sp_srcP + m * SP_MAXP * 3, sp_srcP + n * SP_MAXP * 3, SP_MAXP * 3);
+            sp_srcN[m] = sp_srcN[n];
+            ren ? (
+                sp_srcN[n] = 0; cnt = 0;
+                p = 0; loop(SP_NP, ((0|serialBlock[Pr7_PrjSpace + p]) === n) ? (serialBlock[Pr7_PrjSpace + p] = m; cnt += 1;); p += 1;);
+                sprintf(#cg_w, "Configurations : the source %d renumbered %d (%d projector(s) follow)", n, m, cnt);
+            ) : sprintf(#cg_w, "Configurations : the source %d copied as %d", n, m);
+            sp_defSeq += 1;
+            mSL_log(SysLogBox, #cg_w);
+            cg_sel = m;
+        );
+    ) : (
+        ((m < 1) || (m >= conflsize - 1)) ? cg_Err(2463, "a configuration number in [1, 4094] is expected") :
+        (conflist[m] > 0) ? cg_Err(2464, sprintf(#cg_t3, "the configuration %d is already defined : delete it first", m)) :
+        ((b = conflist[n]) <= 0) ? cg_Err(2465, "this configuration is no more defined") : (
+            sz = b[-1];
+            c = mSL_Dyn_Alloc(sz, 'conf', 0);
+            (c <= 0) ? cg_Err(2466, "no memory for the copy") : (
+                memcpy(c, b, sz); c[0] = m;
+                conflist[m] = c;
+                ren ? (
+                    conflist[n] = 0;
+                    cnt = 0; k = 0;
+                    loop(groupdefsize - 1, (groupdefs[k] === n) ? (groupdefs[k] = m; cnt += 1;); k += 1;);
+                    // the projectors that use it : the new block
+                    p = 0;
+                    loop(akousmax,
+                        pp = projectors + p * projsize;
+                        (pp[prx_ptrconf] === b) ? (pp[prx_ptrconf] = c; pp[prx_numconf] = m;);
+                        (pp[prx_hypbase] === n) ? (pp[prx_hypbase] = m);
+                        p += 1;
+                    );
+                    hypchange = 1;
+                    sprintf(#cg_w, "Configurations : the configuration %d renumbered %d (%d place(s) of the groups follow)", n, m, cnt);
+                ) : sprintf(#cg_w, "Configurations : the configuration %d copied as %d", n, m);
+                mSL_log(SysLogBox, #cg_w);
+                cg_sel = m;
+            );
+        );
+    );
+);
+
+function cg_Prompted()
+local(m)
+(
+    ((cg_pend > 0) && !(ui_screen() == "control.prompt")) ? (
+        (strlen(#cg_prm) > 0) ? (
+            m = floor(s3d_atof(#cg_prm, 0, strlen(#cg_prm)) + 0.5);
+            cg_Copy(cg_pnum, m, cg_pend === 2);
+        );
+        cg_pend = 0;
+    );
+);
+
+// Delete the item n : a configuration (the projectors that use it keep their matrix ; its places in the groups : a
+// configuration not defined, see getconfux), or a source (the projectors that use it : not spatial, "Space n ?")
+function cg_Delete(n)
+local(b, p, pp, k)
+(
+    cg_view ? (
+        sp_srcN[n] = 0; sp_defSeq += 1;
+        sprintf(#cg_w, "Configurations : the source %d deleted", n);
+    ) : (
+        b = conflist[n];
+        conflist[n] = 0;
+        p = 0;
+        loop(akousmax,
+            pp = projectors + p * projsize;
+            (pp[prx_ptrconf] === b) ? (pp[prx_ptrconf] = -3); // (its matrix stays until the next change)
+            (pp[prx_hypbase] === n) ? (pp[prx_hypbase] = 0);
+            p += 1;
+        );
+        hypchange = 1;
+        k = cg_Places(n);
+        sprintf(#cg_w, "Configurations : the configuration %d deleted%s", n,
+            k ? sprintf(#cg_t3, " (it was in %d place(s) of the groups)", k) : "");
+    );
+    mSL_log(SysLogBox, #cg_w);
+);
+
+// The menu of the item n
+function cg_Menu(n)
+local(m, p, k)
+(
+    cg_view ? (
+        sprintf(#cg_mnu, "#Source %d  (%d points)|Use for the current projector (P%d)|>Use for the projector", n, sp_srcN[n], slprjcur);
+    ) : (
+        cg_Counts(n);
+        sprintf(#cg_mnu, "#Configuration %d  (%d > %d)|Load into the current projector (P%d)|>Load into the projector", n, cg_ns, cg_nd, slprjcur);
+    );
+    p = 0;
+    loop(projucnt,
+        sprintf(#cg_w, "|%sP%d", (p === projucnt - 1) ? "<" : "", p + 1); strcat(#cg_mnu, #cg_w);
+        p += 1;
+    );
+    strcat(#cg_mnu, cg_view ? "||Copy as...|Renumber... (the projectors follow)||Delete" :
+                              "||Copy as...|Renumber... (the groups follow)||Delete");
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#cg_mnu);
+    prv_MenuEnd();
+    k = 3 + projucnt; // (the item "Copy as...")
+    (m === 2) ? (p = slprjcur) : ((m >= 3) && (m < k)) ? (p = m - 2) : (p = 0);
+    (p > 0) ? (
+        cg_view ? (
+            serialBlock[Pr7_PrjSpace + p - 1] = n;
+            sprintf(#cg_w, "Configurations : the source %d for the projector %d", n, p); mSL_log(SysLogBox, #cg_w);
+        ) : prv_Request(prv_rConf, p, n);
+    ) :
+    (m === k) ? cg_Prompt(1, n) :
+    (m === k + 1) ? cg_Prompt(2, n) :
+    (m === k + 2) ? cg_Delete(n);
+);
+
+// Export the whole configuration as a configuration file (.mSL : D3_config(data( clear ... )) ; Data/d3-config-date.mSL,
+// written by GMAuxiliary.eel ; ed_Frame logs when it is written). The gains of a configuration : weights (their squares,
+// normalized again when it is read) and a global volume (dB) ; a configuration whose sources have different volumes
+// (invert) is approximated (a comment says so). Not exported : the actions.
+function cg_Export()
+local(c, i, b, q, k, s, v, vs, ap, eq, g, sc, gr, first, n, w)
+(
+    ((c = xpt_Ready()) !== 0) ? (
+        cg_Err(2467, (c === 1) ? "no auxiliary script (GMAuxiliary.eel) : nothing is written" :
+            (c === 2) ? "the auxiliary script GMAuxiliary.eel must be started again (an old version)" :
+            "the auxiliary script is busy : try again");
+    ) : (
+        sprintf(#ed_xf, "%s/d3-config-%s.mSL", #xpt_Folder, xpt_Date(#cg_xd, 0));
+        xpt_Date(#cg_xd, 1);
+        xpt_Begin();
+        sprintf(#cg_xt, "print(\"Configuration de Diffusion 3, exportee le %s.\");", #cg_xd); xpt_Line(#cg_xt);
+        xpt_Line("");
+        xpt_Line(sprintf(#cg_xt, "%c*", '/'));
+        xpt_Line("  La configuration complete de Diffusion 3 (module Configurations) : positions des haut-parleurs, sources,");
+        xpt_Line("  configurations, configuration par defaut, scenes et groupes, presets des projecteurs. Deposee dans Diffusion 3,");
+        xpt_Line("  ou chargee comme fichier de configuration (Diffusion-1.mSL ...) : elle remplace tout (clear). Non exportees :");
+        xpt_Line("  les actions.");
+        xpt_Line(sprintf(#cg_xt, "*%c", '/'));
+        xpt_Line("");
+        xpt_Line("var cfg = data(");
+        xpt_Line("clear");
+        cg_bgSet ? (sprintf(#cg_xt, "bgcolor 0x%06X 0x%06X ;", cg_bg1, cg_bg2); xpt_Line(#cg_xt););
+        // the speakers
+        (HP_Positions > 0) ? (
+            n = 0; i = 0; while (i < HP_Positions[-1]) ( (HP_Positions[i] >= 1) ? (n += 1); i += 4; );
+            k = 0; i = 0;
+            while (i < HP_Positions[-1]) (
+                (HP_Positions[i] >= 1) ? (
+                    k += 1;
+                    sprintf(#cg_xt, "%s%d < %s %s %s%s", (k === 1) ? "hppos   " : "        ", HP_Positions[i],
+                        ed_Fmt(#ed_f1, HP_Positions[i+1]), ed_Fmt(#ed_f2, HP_Positions[i+2]), ed_Fmt(#ed_f3, HP_Positions[i+3]),
+                        (k < n) ? "," : " ;");
+                    xpt_Line(#cg_xt);
+                );
+                i += 4;
+            );
+        );
+        // the sources
+        s = 1;
+        loop(SP_NSRC - 1,
+            (sp_srcN[s] > 0) ? (
+                sprintf(#cg_xt, "source %d :", s); xpt_Line(#cg_xt);
+                k = 0;
+                loop(sp_srcN[s],
+                    q = sp_srcP + s * SP_MAXP * 3 + 3 * k;
+                    sprintf(#cg_xt, "    %d < %s %s %s%s", k + 1, ed_Fmt(#ed_f1, q[0]), ed_Fmt(#ed_f2, q[1]), ed_Fmt(#ed_f3, q[2]),
+                        (k < sp_srcN[s] - 1) ? "," : " ;");
+                    xpt_Line(#cg_xt);
+                    k += 1;
+                );
+            );
+            s += 1;
+        );
+        // the configurations
+        i = 1;
+        loop(conflsize - 2,
+            ((b = conflist[i]) > 0) ? (
+                // the volume : that of the first source ; the others different : approximated
+                v = -1; ap = 0;
+                q = b + 1;
+                while (q[0] > 0) (
+                    q += 1; vs = 0;
+                    while (q[0] > 0) ( vs += sqr(q[1]); q += 2; );
+                    vs = sqrt(vs);
+                    (v < 0) ? (v = vs) : (abs(vs - v) > 0.000001) ? (ap = 1);
+                    q += 1;
+                );
+                (v <= 0) ? (v = 1);
+                ap ? (sprintf(#cg_xt, "// (the configuration %d : its sources have different volumes, approximated)", i); xpt_Line(#cg_xt););
+                (abs(v - 1) > 0.000001) ? sprintf(#cg_xt, "conf %d dB %s :", i, ed_Fmt(#ed_f1, 20 * log10(v))) : sprintf(#cg_xt, "conf %d :", i);
+                q = b + 1;
+                while (q[0] > 0) (
+                    sprintf(#cg_w, " %d >", q[0]); strcat(#cg_xt, #cg_w);
+                    q += 1;
+                    g = q[1]; eq = 1; k = q; while (k[0] > 0) ( (abs(k[1] - g) > 0.000001) ? (eq = 0); k += 2; );
+                    first = 1;
+                    while (q[0] > 0) (
+                        w = sqr(q[1] / v);
+                        eq ? sprintf(#cg_w, "%s %d", first ? "" : ",", q[0]) :
+                             sprintf(#cg_w, "%s %d %s", first ? "" : ",", q[0], ed_Fmt(#ed_f2, w));
+                        strcat(#cg_xt, #cg_w); first = 0;
+                        q += 2;
+                    );
+                    strcat(#cg_xt, " ;");
+                    q += 1;
+                    (strlen(#cg_xt) > 100) ? (xpt_Line(#cg_xt); strcpy(#cg_xt, "   "););
+                );
+                (strlen(#cg_xt) > 3) ? xpt_Line(#cg_xt);
+            );
+            i += 1;
+        );
+        sprintf(#cg_xt, "defaultconf %d ;", defaultconf); xpt_Line(#cg_xt);
+        // the scenes and the groups (the items of a group : up to the first empty one)
+        sc = 0;
+        loop(16,
+            first = 1;
+            gr = 0;
+            loop(16,
+                k = sc * 256 + gr * 16;
+                ((groupdefs[k] > 0) && (k < groupdefsize - 1)) ? (
+                    first ? (sprintf(#cg_xt, "scene %d", sc + 1); xpt_Line(#cg_xt); first = 0;);
+                    sprintf(#cg_xt, "    group %d", gr + 1);
+                    n = 0;
+                    while ((n < 16) && (groupdefs[k + n] > 0) && (k + n < groupdefsize - 1)) (
+                        sprintf(#cg_w, " %d", groupdefs[k + n]); strcat(#cg_xt, #cg_w); n += 1;
+                    );
+                    xpt_Line(#cg_xt);
+                );
+                gr += 1;
+            );
+            sc += 1;
+        );
+        xpt_Line("end ;");
+        // the presets of projectors (their fields defined ; "default" when the preset began with it)
+        i = 0;
+        loop(proprescnt,
+            ((b = proprerefs[i]) > 0) ? (
+                sprintf(#cg_xt, "prop %d (", i);
+                q = b + 1; n = b[-1] - 1; // (the fields : q[f], f < n)
+                ((prx_activity < n) && (q[prx_activity] !== Undef) && (q[prx_activity] !== endmark)) ? strcat(#cg_xt, " default,");
+                ((prx_savprjst < n) && ((v = q[prx_savprjst]) !== Undef) && (v !== endmark)) ? (
+                    sx_Nth(prv_StatNames, max(0, min(3, v)), #cg_w); strcat(#cg_xt, " "); strcat(#cg_xt, #cg_w); strcat(#cg_xt, ",");
+                );
+                ((prx_savopmod < n) && ((v = q[prx_savopmod]) !== Undef) && (v !== endmark)) ? (
+                    strcat(#cg_xt, (v === 1) ? " Manual," : (v === 2) ? " Random1," : (v === 3) ? " Random2," : (v === 4) ? " Random4," :
+                        (v === 5) ? " Random8," : (v === 6) ? " Random16," : (v === 7) ? " HyperSlider," : "");
+                );
+                ((prx_svmorph < n) && ((v = q[prx_svmorph]) !== Undef) && (v !== endmark)) ? (sprintf(#cg_w, " morpht %s,", ed_Fmt(#ed_f1, v)); strcat(#cg_xt, #cg_w););
+                ((prx_svrdlay < n) && ((v = q[prx_svrdlay]) !== Undef) && (v !== endmark)) ? (sprintf(#cg_w, " rdelay %s,", ed_Fmt(#ed_f1, v)); strcat(#cg_xt, #cg_w););
+                ((prx_pcolor < n) && ((v = q[prx_pcolor]) !== Undef) && (v !== endmark)) ? (sprintf(#cg_w, " color %d,", v); strcat(#cg_xt, #cg_w););
+                ((prx_indiff < n) && ((v = q[prx_indiff]) !== Undef) && (v !== endmark) && (v > 0)) ? (sprintf(#cg_w, " indiff %d,", v); strcat(#cg_xt, #cg_w););
+                ((prx_outdiff < n) && ((v = q[prx_outdiff]) !== Undef) && (v !== endmark) && (v > 0)) ? (sprintf(#cg_w, " outdiff %d,", v); strcat(#cg_xt, #cg_w););
+                ((prx_space < n) && ((v = q[prx_space]) !== Undef) && (v !== endmark) && (v > 0)) ? (sprintf(#cg_w, " space %d,", v); strcat(#cg_xt, #cg_w););
+                ((prx_cpadadd < n) && ((v = q[prx_cpadadd]) !== Undef) && (v !== endmark) && (v >= 0)) ? (
+                    sprintf(#cg_w, " pad %d %d %d,", floor(v / 256) + 1, floor(v / 16) % 16 + 1, v % 16 + 1); strcat(#cg_xt, #cg_w);
+                );
+                ((prx_sgi < n) && ((v = q[prx_sgi]) !== Undef) && (v !== endmark) && (v >= 0)) ? (
+                    sprintf(#cg_w, " sgi %d %d %d,", floor(v / 256) + 1, floor(v / 16) % 16 + 1, v % 16 + 1); strcat(#cg_xt, #cg_w);
+                );
+                // (the last comma removed)
+                k = strlen(#cg_xt); (str_getchar(#cg_xt, k - 1) === ',') ? str_setlen(#cg_xt, k - 1);
+                strcat(#cg_xt, " ) ;");
+                xpt_Line(#cg_xt);
+            );
+            i += 1;
+        );
+        xpt_Line(");");
+        xpt_Line("var r = D3_config(cfg);");
+        xpt_Line("mfree(cfg);");
+        xpt_Ov ? (
+            cg_Err(2468, "the text is too long (xpt_Sz) : nothing is written");
+        ) : (
+            xpt_Send(#ed_xf);
+            ed_xe = 0;
+            sprintf(#cg_w, "Configurations : export of the whole configuration : %s", #ed_xf); mSL_log(SysLogBox, #cg_w);
+        );
+    );
+);
+
+function show_Configurations_Pad(blockId)
+local(h1, h2, h3, hneed, zzmi, i, n, np, zz, e, hk, c, it, us)
+(
+    cg_Prompted();
+    cg_Items();
+    // the configurations placed in a group (prv_ingrp, as prv_ConfMenu)
+    memset(prv_ingrp, 0, conflsize);
+    i = 0; loop(groupdefsize - 1, ((groupdefs[i] > 0) && (groupdefs[i] < conflsize)) ? (prv_ingrp[groupdefs[i]] = 1); i += 1;);
+    np = max(1, ceil(cg_nit / 128));
+    cg_page = max(0, min(np - 1, cg_page));
+    h1 = uix_jpadHeight(1);
+    h2 = uix_jpadHeight(pad_CGG_NL);
+    h3 = uix_jBoxHeight(2);
+    hneed = h1 + h2 + h3 + ui_jd_ctgr;
+    (ui_height() >= hneed) ? (
+        ui_split_top(hneed);
+            zzmi = ui_hover();
+            keepBlockInfos(blockId);
+            (zzmi) ? (
+                ui_push();
+                    ui_color(Col_Frame);
+                    ui_border();
+                ui_pop();
+            );
+            control_group("Configurations");
+            ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+
+            // the commands
+            ui_split_top(h1);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_CGT_Labs, pad_CGT_Siz);
+                strcpy(pad_CGT_Labs[0], cg_view ? "View: Sources" : "View: Configurations");
+                sprintf(pad_CGT_Labs[1], "Page %d / %d", cg_page + 1, np);
+                sprintf(pad_CGT_Labs[2], cg_view ? "%d sources" : "%d configurations", cg_nit);
+                strcpy(pad_CGT_Labs[3], "Export (.mSL)");
+                strcpy(pad_CGT_Labs[4], "Load a file");
+                strcpy(pad_CGT_Labs[5], "Saved with the project");
+                strcpy(pad_CGT_Labs[6], ""); strcpy(pad_CGT_Labs[7], "");
+                pad_CGT_Colrs[0] = Col_P1; pad_CGT_Colrs[1] = (np > 1) ? Col_P1 : Col_Inactive;
+                pad_CGT_Colrs[2] = Col_InfoA; pad_CGT_Colrs[3] = pad_CGT_Colrs[4] = Col_P2;
+                pad_CGT_Colrs[5] = Col_InfoA; pad_CGT_Colrs[6] = pad_CGT_Colrs[7] = Col_Inactive;
+                zz = control_jpad(pad_CGT);
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4;
+                    c = pad_CGT[ui_jpad_last] - 1;
+                    (c === 0) ? (cg_view = !cg_view; cg_page = 0;) :
+                    (c === 1) ? (
+                        (zz & ui_jpad_ev_rmc) ? (
+                            strcpy(#cg_mnu, ""); i = 0;
+                            loop(np, sprintf(#cg_w, "%s%sPage %d", i ? "|" : "", (i === cg_page) ? "!" : "", i + 1); strcat(#cg_mnu, #cg_w); i += 1;);
+                            gfx_x = mouse_x; gfx_y = mouse_y;
+                            i = gfx_showmenu(#cg_mnu); prv_MenuEnd();
+                            (i >= 1) ? (cg_page = i - 1);
+                        ) : (
+                            cg_page = (cg_page + ((mouse_cap & 8) ? np - 1 : 1)) % np;
+                        );
+                    ) :
+                    (c === 3) ? cg_Export() :
+                    (c === 4) ? (
+                        i = prv_Menu(prv_Files, 9, cconf - 1);
+                        (i >= 0) ? prv_Request(prv_rFile, 0, i + 1);
+                    );
+                );
+            ui_pop();
+
+            // the grid of the items
+            ui_split_top(h2);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_CGG_Labs, pad_CGG_Siz);
+                i = 0;
+                loop(128,
+                    it = cg_page * 128 + i;
+                    (it < cg_nit) ? (
+                        n = cg_items[it];
+                        cg_view ? (
+                            sprintf(pad_CGG_Labs[i], (n === cg_sel) ? "[S%d  %d]" : "S%d  %d", n, sp_srcN[n]);
+                            us = cg_Users(n, 1, #cg_t3);
+                            pad_CGG_Colrs[i] = us ? Color_Limegreen : (n === cg_sel) ? Col_P2 : Col_P1;
+                        ) : (
+                            cg_Counts(n);
+                            sprintf(pad_CGG_Labs[i], (n === cg_sel) ? "[%d  %d>%d]" : "%d  %d>%d", n, cg_ns, cg_nd);
+                            us = cg_Users(n, 0, #cg_t3);
+                            pad_CGG_Colrs[i] = us ? Color_Limegreen : !prv_ingrp[n] ? Col_P6 : (n === cg_sel) ? Col_P2 : Col_P1;
+                        );
+                    ) : (
+                        strcpy(pad_CGG_Labs[i], "");
+                        pad_CGG_Colrs[i] = Col_Inactive;
+                    );
+                    i += 1;
+                );
+                zz = control_jpad(pad_CGG, pad_CGG_NL, -1, 1);
+                e = ui_jpad_cell_at(); // (the item under the mouse, for the text)
+                hk = ((e >= 0) && (cg_page * 128 + e < cg_nit)) ? cg_items[cg_page * 128 + e] : -1;
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4;
+                    c = pad_CGG[ui_jpad_last] - 1;
+                    ((c >= 0) && (cg_page * 128 + c < cg_nit)) ? (
+                        n = cg_items[cg_page * 128 + c];
+                        (zz & ui_jpad_ev_rmc) ? (cg_sel = n; cg_Menu(n);) : (zz & ui_jpad_ev_lmc) ? (cg_sel = n);
+                    );
+                );
+            ui_pop();
+
+            // the text : the item under the mouse, or the one selected
+            ui_split_top(h3);
+                ui_pad(4,2,4,2);
+                ui_pcolor(ui_jcolor_text);
+                ui_align(0, 0);
+                cg_Text((hk > 0) ? hk : cg_sel);
+                ui_split_top(ui_texth()); ui_text(#cg_txt); ui_pop();
+                ui_split_top(ui_texth()); ui_text(#cg_t2); ui_pop();
+            ui_pop();
+
+        ui_pop();
+    );
+);
