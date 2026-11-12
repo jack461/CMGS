@@ -666,15 +666,17 @@ local (st)
 );
 
 // The fader 0x36 (2026-11-11) : the volume of the current projector, as its fader in the module "Global"
-// (serialBlock[Pr7_PrjVol + p - 1], dB ; see prv_PVolBlock) : 0 = silence, 0 dB at about 2/3 of the course, + 12 dB at
-// the top. It takes the volume over (soft takeover) when it comes within 3 dB of it ; then it follows it, until the
-// current projector changes or the volume is changed elsewhere (module "Global")
-apc_pvPrj = 0; apc_pvLast = 0;
+// (serialBlock[Pr7_PrjVol + p - 1], dB ; see prv_PVolBlock) : 0 = silence, 0 dB at the top (2026-11-12 : was + 12 dB),
+// - 18 dB at mid-course (60 dB per decade of the course). It takes the volume over (soft takeover) when it comes within 3 dB of it ; then it follows it, until the
+// current projector changes or the volume is changed elsewhere (module "Global") ; shown in the Live screen (2026-11-12 :
+// signal_change 21, see live_signal_change : the volume, and the position of the fader while it has not taken it over :
+// apc_pvFader, apc_pvSync)
+apc_pvPrj = 0; apc_pvLast = 0; apc_pvFader = 0; apc_pvSync = 1;
 function apc_PVol(v)
 local(p, db, cur)
 (
     p = slprjcur;
-    db = (v <= 0) ? prv_PVolMin : max(prv_PVolMin, min(prv_PVolMax, 12 + 60 * log10(v / 127)));
+    db = (v <= 0) ? prv_PVolMin : max(prv_PVolMin, min(prv_PVolMax, 60 * log10(v / 127)));
     cur = serialBlock[Pr7_PrjVol + p - 1];
     (((apc_pvPrj === p) && (abs(cur - apc_pvLast) < 0.001)) || (abs(db - cur) < 3) ||
         ((db <= prv_PVolMin) && (cur <= prv_PVolMin))) ? (
@@ -687,6 +689,8 @@ local(p, db, cur)
     MIDIshowpos = v >> 3;
     MIDIshowtime = timez + showdelay;
     MIDIshowforce = 1;
+    apc_pvFader = db; apc_pvSync = (MIDIshowflags != 0);
+    signal_change(21, p); // the box of the volume in the Live screen
 );
 
 // mbu is for "MIDI buffer"

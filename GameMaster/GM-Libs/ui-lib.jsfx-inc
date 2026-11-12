@@ -56,6 +56,9 @@ uix_mouseblock_until = 0; // (JJG) clicks stay blocked at least until this time 
 // menus : control_jmenu, prv_MenuEnd, vu_MenuEnd) : ignored until seen released ; uix_mcap : mouse_cap without them
 uix_mghost = 0;
 uix_mcap = 0;
+// (JJG 2026-11-12) after a menu, until a real left clic : macOS may report the left button with each press of the right
+// one (mouse_cap 3 : seen in the Live screen of Diffusion-3) ; while uix_mgleft is set, that left button is a ghost too
+uix_mgleft = 0;
 uix_doubleclicktime = 0.2;
 uix_draglimit = 10;
 uix_click1count = uix_click2count = uix_click64count = 0;
@@ -137,6 +140,11 @@ function uix_setgfxfont() (
 			);
 		);
 	);
+);
+// (JJG 2026-11-12) the buttons of mouse_cap without the "ghost" ones (uix_mghost, uix_mgleft : see ui_start) : for the
+// code that reads the buttons itself (before or after ui_start)
+function uix_mouse_cap() (
+	mouse_cap - (mouse_cap & (uix_mghost | ((uix_mgleft && (mouse_cap & 2)) ? 1 : 0)) & 67);
 );
 function uix_click_block() (
 	uix_mouseblocked = 1;
@@ -316,7 +324,10 @@ function ui_start(defaultScreen) local(i, click, clickdelta, imgW, imgH, retina_
 		// an entry chosen with a left clic leaves the left button "down" until the next left clic, and the block of the
 		// clics, which waits for all the buttons released, never ended : the right clics were lost) ; such a button
 		// (uix_mghost) is ignored by the clics and by the block until it is seen released : uix_mcap
+		(uix_mghost === 67) ? uix_mgleft = 1; // (a menu has just ended)
 		uix_mghost &= mouse_cap;
+		(((mouse_cap & 3) === 1) && !(uix_mghost & 1)) ? uix_mgleft = 0; // a real left clic
+		(uix_mgleft && (mouse_cap & 2)) ? uix_mghost |= mouse_cap & 1; // the left button that comes with the right one
 		uix_mcap = mouse_cap - (mouse_cap & uix_mghost & 67);
 		uix_interacted = (!!uix_mcap) || (uix_mcap != uix_mousecap_prev);
 		uix_undo_pending ? (
@@ -1264,7 +1275,7 @@ function ui_click_clear() (
 
 function ui_drag(i) local(dragtime) (
 	!i ? i = 1;
-	mouse_cap&i && uix_clickwasinside(i) ? (
+	uix_mcap&i && uix_clickwasinside(i) ? ( // (JJG : uix_mcap, without the ghost buttons)
 		dragtime = time_precise() - uix_click_t(i);
 		dragtime >= uix_doubleclicktime || abs(uix_click_x(i) - uix_mouse_x) >= uix_draglimit || abs(uix_click_y(i) - uix_mouse_y) >= uix_draglimit ? (
 			dragtime;
@@ -1284,14 +1295,14 @@ function ui_drag_up(i) local(dragtime) (
 
 function ui_drag_x(i) (
 	!i ? i = 1;
-	mouse_cap&i && uix_clickwasinside(i) ? (
+	uix_mcap&i && uix_clickwasinside(i) ? (
 		uix_mouse_x - uix_click_x(i);
 	) : 0;
 );
 
 function ui_drag_y(i) (
 	!i ? i = 1;
-	mouse_cap&i && uix_clickwasinside(i) ? (
+	uix_mcap&i && uix_clickwasinside(i) ? (
 		uix_mouse_y - uix_click_y(i);
 	) : 0;
 );
@@ -1315,7 +1326,7 @@ function ui_scroll_x() (
 
 function ui_press(i) (
 	!i ? i = 1;
-	ui_hover() && mouse_cap&i && uix_clickwasinside(i) ? (
+	ui_hover() && uix_mcap&i && uix_clickwasinside(i) ? (
 		time_precise() - uix_click_t(i);
 	) : 0;
 );
@@ -2344,7 +2355,15 @@ function uix_slider_soft(screenratio, handlesize, state, linkToLeft) local(rs, x
 	!linkToLeft ? gfx_rect(floor(xc - hw / 2), floor(yc - hh / 2), hw, hh);
 );
 
-function uix_control_slider_h(value, range_low, range_high, curve_bias, hasDefault, defaultValue, linkToLeft) local(valueratio, screenratio, state, barwidth, handlesize) (
+// (JJG) The mouse on a horizontal slider, as on the cells holding a value (ui_jdrag in mSL_ui_Pads) : a press on the
+// handle keeps the value (to adjust it), a press elsewhere on the bar puts the value there ; then the drag is relative
+// and accumulated (no jump between the zones) : in the band of the slider, the horizontal moves (coarse : the handle
+// follows them) ; above or below it, the vertical moves (fine : 1/10, up = more), and in the column where the mouse left
+// the band (the width of the handle) only them, elsewhere the horizontal moves too. The state of the drag (one at a
+// time : ui_drag() is true only in the slider where the press was) : the ratio, the last mouse position, the column
+uix_sld_r = uix_sld_lx = uix_sld_ly = uix_sld_xc = 0;
+
+function uix_control_slider_h(value, range_low, range_high, curve_bias, hasDefault, defaultValue, linkToLeft) local(valueratio, screenratio, state, barwidth, handlesize, hx, pxw, inr, inc) (
 	// We calculate screenratio first (before updating value) because then any rounding/limiting applied to the value is reflected in the UI
 	screenratio = uix_slider_value_to_ratio(value, range_low, range_high, curve_bias);
 
@@ -2399,13 +2418,35 @@ function uix_control_slider_h(value, range_low, range_high, curve_bias, hasDefau
 		); // (JJG) classic / soft look
 	ui_pop();
 
-	ui_mouse_down() || ui_drag() ? (
-		screenratio = linkToLeft ? (
-			ui_mouse_xratio()
-		) : (
-			(ui_mouse_x() - handlesize*0.5)/(ui_width() - handlesize);
+	// (JJG) the press, then the drag (see uix_sld_r) ; pxw : the pixels of the whole range
+	pxw = max(1, linkToLeft ? ui_width() : ui_width() - handlesize);
+	ui_mouse_down() ? (
+		// the handle (or the end of the bar) under the mouse : the value is kept ; else it goes to the mouse
+		hx = ui_left() + (linkToLeft ? 0 : handlesize*0.5) + screenratio*pxw;
+		abs(uix_mouse_x - hx) > handlesize*0.5 ? (
+			screenratio = linkToLeft ? (
+				ui_mouse_xratio()
+			) : (
+				(ui_mouse_x() - handlesize*0.5)/(ui_width() - handlesize);
+			);
+			value = uix_slider_ratio_to_value(screenratio, range_low, range_high, curve_bias);
 		);
-		value = uix_slider_ratio_to_value(screenratio, range_low, range_high, curve_bias);
+		uix_sld_r = max(0, min(1, screenratio));
+		uix_sld_lx = uix_sld_xc = uix_mouse_x; uix_sld_ly = uix_mouse_y;
+	) :
+	ui_drag() ? (
+		inr = (uix_mouse_y >= ui_top()) && (uix_mouse_y < ui_bottom()); // in the band of the slider
+		inr ? (
+			uix_sld_r += (uix_mouse_x - uix_sld_lx)/pxw; // coarse
+			uix_sld_xc = uix_mouse_x; // (the column : where the mouse leaves the band)
+		) : (
+			inc = abs(uix_mouse_x - uix_sld_xc) < handlesize*0.5; // in the column
+			!inc ? (uix_sld_r += (uix_mouse_x - uix_sld_lx)/pxw); // coarse
+			uix_sld_r += 0.1*(uix_sld_ly - uix_mouse_y)/pxw; // fine
+		);
+		uix_sld_r = max(0, min(1, uix_sld_r)); // (at an end : no dead travel when coming back)
+		uix_sld_lx = uix_mouse_x; uix_sld_ly = uix_mouse_y;
+		value = uix_slider_ratio_to_value(uix_sld_r, range_low, range_high, curve_bias);
 	);
 	ui_scroll_y() ? (
 		valueratio = uix_slider_value_to_ratio(value, range_low, range_high, curve_bias);

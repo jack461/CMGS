@@ -320,6 +320,11 @@ its_Rdr_GrDir = idx; idx += 1; // le sens [-1 ... 1] : en avant avec la probabil
 its_Rdr_GrDens = idx; idx += 1; // la densité (grains par seconde, en moyenne) [0.01 ... 100]
 its_Rdr_GrRand = idx; idx += 1; // les instants des grains [0 ... 1] : 0 périodiques (la densité est leur fréquence), 1 aléatoires
 its_Rdr_LoopCross = idx; idx += 1; // la boucle libre au bout de la ligne : 0 elle saute à l'autre bout, 1 elle le traverse (its_Rd_Cross)
+// le segment de la ligne lu (modes sur une ligne) : ses limites, en échantillons depuis le début de la ligne ; SegB = 0 :
+// la ligne entière ; le reader le lit comme sa ligne (its_Rdr_Start, its_Rdr_Last, its_Rdr_SmplCnt : its_Rd_BindAB),
+// demandé par @gfx (its_Rd_SegSet), appliqué par @block (its_Rd_SegCheck) ; (les deux derniers mots libres avant l'arrondi)
+its_Rdr_SegA = idx; idx += 1;
+its_Rdr_SegB = idx; idx += 1;
 idx |= 3; // for rounding to a multiple of 4 minus 1
 its_Rdr_Unuz2 = idx; idx += 1; //  Securité : mot inutilisé
 its_Rdr_BlkSize = idx; // actual size
@@ -404,6 +409,7 @@ its_RdrLf_Frame = 2; // the positions of the reader are in a frame (types catch,
 its_RdrLf_Move = 4; // the writer writes : the loop moves at 1 (a sample of the line per sample)
 its_RdrLf_Cross = 8; // the free loop crosses the end of the line (the option its_Rdr_LoopCross) : the line is circular
 its_RdrLfGuard = 4; // the end of the loop, so many samples before the head of the writer (the 4 points of inter_cube are written)
+its_RdSegMin = 64; // the segment of a reader (its_Rdr_SegA, its_Rdr_SegB) : at least so many samples
 
 
 //==========================================================
@@ -692,7 +698,10 @@ its_MxH = 24; // words of its header (after the one of the work area)
 its_MxLW = 10; // words per line
 its_SatHarm = 16; // count of the weights of the mode Cheb. sum (its_Efx_Harm1)
 its_HarmH = 90; // height of the editor of the weights (pixels)
-its_VuGraphH = 160; // VU meter, Limiter : the least height of their graphic area (they take all the height left)
+its_VuGraphH = 200; // VU meter, Limiter : the default height of their graphic area (keys '+' and '-' : its_FxGraph_Keys)
+its_FxGraphHMin = 60; // the heights of a resizable graphic area of an effect (keys '+' and '-')
+its_FxGraphHMax = 1200;
+its_FxGraphHStep = 20;
 its_SatOSCnt = 4; // oversampling (its_Efx_Par5) : 1, 2, 4 or 8 times
 // words per channel in the work area : previous input, DC blocker (2), anti-aliasing biquads (4 x 2), ADAA : the previous
 // input of the shape and its primitive (see its_Sat_Adaa)
@@ -1557,6 +1566,13 @@ its_LinWaveMax = 4; // max channels shown (the loudest ones)
 // The waveform of a module (Line, Reader, Writer) : its height and flags are kept in the display block of the module
 its_WaveHide = 1; // flag : the waveform is not shown
 its_WaveOver = 2; // flag : the channels are superposed (else one band per channel)
+// the waveform of a reader : the zoom (its slider "Zoom") goes to the loop (0, the default), or it is centered on the start
+// (its_WaveZoomLo) or on the end (its_WaveZoomHi) of the loop, or on the read head (its_WaveZoomHead : the view follows it ;
+// not in mode Grains) (the menu of the segment, its_Rd_SegMenu ; its_wave_reader)
+its_WaveZoomK = 12; // (the bits of the choice)
+its_WaveZoomLo = 4;
+its_WaveZoomHi = 8;
+its_WaveZoomHead = 12;
 its_WaveHMin = 40; // heights (keys '+' and '-')
 its_WaveHMax = 600;
 its_WaveHStep = 20;
@@ -3842,7 +3858,7 @@ local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_
     );
     flagShowMemory = 1;
     mSL_errX ? (
-        sprintf(#gfxu, "ERR: %d    can't compile \"%s\".", mSL_errX, fname);
+        sprintf(#gfxu, "ERR: %04d    can't compile \"%s\".", mSL_errX, fname);
         mSL_log(SysLogBox, #gfxu);
     );
     ent;
@@ -4114,6 +4130,48 @@ local (pp)
 //  Readers_set[RD_CNT]
 
 
+/*
+    The segment of a reader : a part of its line [SegA, SegB) (its_Rdr_SegA, its_Rdr_SegB : samples from the start of the
+    line ; SegB = 0 : the whole line), in the modes on a line (Read, Stretch, Brage, Grains ; the delay mode reads the whole
+    line, the segment is kept, unused). The reader reads it as its line : its start, its end and its size (its_Rdr_Start,
+    its_Rdr_Last, its_Rdr_SmplCnt, see its_Rd_BindAB) are those of the segment, so that all its functions apply to it (the
+    loop and its types, the move of the loop, the loop that crosses the end, the positions, the waveform, the sliders : the
+    times are from the start of the segment). @gfx asks for a segment (its_Rd_SegSet : the menu of the segment,
+    its_Rd_SegMenu), @block applies it (its_Rd_SegCheck). The loop does not follow a writer while there is a segment
+    (its_Rdr_LoopFollow). The reads stay in the line (its_Rdr_Low, its_Rdr_High) : the cross fades at the ends of a
+    segment read the line beyond them.
+*/
+// 1 if the reader "r" asks for a segment of its line (a mode on a line)
+function its_Rd_HasSeg(r)
+(
+    (r[its_Rdr_SegB] > 0) && its_Rd_Lined(r[its_Rdr_Mode]);
+);
+
+// 1 if the segment [a, b) of the reader "r" applies in a line of "n" samples (a segment asked, that fits in the line, a
+// mode on a line) ; else 0 (the whole line), and a segment that does not fit in the line (a shorter line) is forgotten
+function its_Rd_SegIn(r, a, b, n)
+(
+    ((b > 0) && ((a < 0) || (b > n) || (b - a < its_RdSegMin))) ? (
+        r[its_Rdr_SegA] = r[its_Rdr_SegB] = 0;
+        0;
+    ) : (
+        (b > 0) && its_Rd_Lined(r[its_Rdr_Mode]);
+    );
+);
+
+// the reader "r" reads the samples [a, b) of the line "lcbl" (its segment, or the whole line) as its line : its start, its
+// end, its size ; its reads stay in the line and its guard samples (Low, High : beyond the ends of a segment, the line)
+function its_Rd_BindAB(r, lcbl, a, b)
+(
+    r[its_Rdr_Start] = lcbl[its_Lin_Start] + a;
+    r[its_Rdr_Last] = lcbl[its_Lin_Start] + b;
+    r[its_Rdr_SmplCnt] = b - a;
+    r[its_Rdr_SmplCntSec] = floor(1000 * (b - a) / max(1, lcbl[its_Lin_RecFreq])) / 1000; // (as the line, Ln_Make)
+    r[its_Rdr_Low] = lcbl[its_Lin_Start] - B_FADESIZ;
+    r[its_Rdr_High] = lcbl[its_Lin_Last] + B_FADESIZ;
+);
+
+
 // the free loop of the reader "r" crosses the end of its line : the option (its_Rdr_LoopCross), a mode on a line, not the
 // type "once" of the modes Brage and Grains (the loop stops at the end of the line), a loop shorter than the line by two
 // cross fades and two audio blocks (its frame, centered on it, holds its margins : its_Rd_FrLo)
@@ -4277,7 +4335,8 @@ local (A1, B1)
     the loop of the reader "r" that follows a writer (its_Rdr_LoopWr), during an audio block (@block) : its end, its
     margin included, is just before the head of the writer (its_RdrLfGuard), its length is the size of the region (at
     most the line, minus a margin and an audio block : its oldest samples are not written again while they are read) ;
-    the writer must write forward in the line of the reader, not in mode W-Mix (else the loop is free, see
+    the writer must write forward in the line of the reader, not in mode W-Mix, and the reader must read the whole line,
+    not a segment of it (its_Rd_HasSeg) (else the loop is free, see
     its_Rdr_LoopMove).
     The line is circular : the loop can straddle its end and its start. In the types that use the loop (catch, loop,
     exit, stop) of the modes Reader and Stretch, the positions of the reader are kept in the frame of the writer,
@@ -4296,6 +4355,7 @@ local (md, ty, wn, w, wp, st, n, s, X, L, B1, cs, ln)
     w = ((wn > 0) && (wn <= WR_CNT)) ? Writers_set[wn - 1] : 0;
     st = r[its_Rdr_Start]; n = r[its_Rdr_SmplCnt];
     ((w > BASE_MEMORY) && (w[-2] === KW_writ) && its_Rd_Lined(md) && (r[its_Rdr_Lcbl] > BASE_MEMORY)
+        && !its_Rd_HasSeg(r) // (a segment of the line : the loop is free, see its_Rd_SegCheck)
         && (w[its_Wrt_Lcbl] === r[its_Rdr_Lcbl]) && (w[its_Wrt_Mode] !== its_WrtMode_WMix)
         && (w[its_Wrt_Dir] === its_WrtDir_Fwd) && (n > 0)
         && ((wp = w[its_Wrt_Abspos]) >= st) && (wp < st + n)) ? (
@@ -4405,6 +4465,69 @@ local (d)
         r[its_Rdr_Start] + floor(((d >= 0) ? r[its_Rdr_LowPosSec] : r[its_Rdr_HighPosSec]) * srate);
     ) :
     (its_Rd_Dir(r) >= 0) ? r[its_Rdr_Start] : r[its_Rdr_Last];
+);
+
+/*
+    the segment of the reader "r" (its_Rdr_SegA, its_Rdr_SegB, asked by @gfx : its_Rd_SegSet), applied in the audio thread
+    (@block, and exec_reader when it checks the reader again) : when the part of the line read changes, the reader reads
+    the new one as its line (its_Rd_BindAB) ;
+    - its loop keeps its place in the line, bounded to the new part (restricted to the loop : the loop is the whole
+      segment ; back to the whole line : the loop is the former segment) ; a loop out of the new part : the whole part ;
+    - its read position stays where it is in the line if it is in the new part, or in the margin of a cross fade around
+      it (the reads may go beyond the ends : its_Rdr_Low, its_Rdr_High), else it jumps (with a cross fade, as the slider
+      "Position") to the start of the part, or to its end if the reading goes backward ; modes Brage and Grains : their
+      reads are drawn in the loop ;
+    - the state of the loop (it follows a writer, it crosses the end, the frame of the positions) is computed again by
+      @block (its_Rdr_LoopFollow, its_Rd_Cross), from the positions in the line ;
+    the delay mode reads the whole line (its segment is kept, unused, see Rd_Set_Writer). Returns 1 if the part changed
+*/
+function its_Rd_SegCheck(r)
+local (lcbl, n, a, b, st0, d, lo, hi, cs, mn, md, X, p, t, ch)
+(
+    ch = 0;
+    ((r > BASE_MEMORY) && (r[-2] === KW_read) && its_Rd_Lined(md = r[its_Rdr_Mode])
+        && ((lcbl = r[its_Rdr_Lcbl]) > BASE_MEMORY) && (lcbl[-2] === KW_lcbl) && ((n = lcbl[its_Lin_SmplCnt]) > 0)) ? (
+        a = r[its_Rdr_SegA]; b = r[its_Rdr_SegB]; // (read once : @gfx may write them, see its_Rd_SegSet)
+        !its_Rd_SegIn(r, a, b, n) ? ( a = 0; b = n; );
+        st0 = r[its_Rdr_Start];
+        ((st0 !== lcbl[its_Lin_Start] + a) || (r[its_Rdr_SmplCnt] !== b - a)) ? (
+            ch = 1;
+            // in the former part : the positions back in it (out of the frame of a loop that followed a writer or that
+            // crossed its end), the loop too (a loop that straddled its end and its start)
+            ((r[its_Rdr_LfSt] & its_RdrLf_Frame) && (r[its_Rdr_SmplCnt] > 0)) ? its_Rd_LfShift(r, st0);
+            ((r[its_Rdr_LowPosSec] < 0) && (r[its_Rdr_SmplCnt] > 0)) ? its_Rd_Uncross(r);
+            r[its_Rdr_LfSt] = 0; // (computed again by @block)
+            // the new part
+            its_Rd_BindAB(r, lcbl, a, b);
+            // the loop keeps its place in the line, in the new part ; at least two cross fades (as with the mouse), else
+            // the whole part
+            d = (r[its_Rdr_Start] - st0) / srate; // (the shift of the origin of the times, s)
+            cs = (b - a) / srate;
+            mn = min(cs, max(0.002, 2 * r[its_Rdr_XFade_mSec] / 1000));
+            lo = max(0, min(cs, r[its_Rdr_LowPosSec] - d));
+            hi = max(lo, min(cs, r[its_Rdr_HighPosSec] - d));
+            (hi - lo < mn) ? ( lo = 0; hi = cs; );
+            r[its_Rdr_LowPosSec] = lo; r[its_Rdr_HighPosSec] = hi;
+            r[its_Rdr_LowPosSecPrv] = r[its_Rdr_HighPosSecPrv] = -1; // (Rd_Update : the region, its margins)
+            r[its_Rdr_StFlgs] |= its_RdrFlg_Mod;
+            r[its_Rdr_BrEnd] = 0;
+            // the read position (modes Read and Stretch) : stays in the line if it is in the new part (a cross fade around)
+            !its_Rd_Rand(md) ? (
+                X = max(3, floor(0.5 + r[its_Rdr_XFade_mSec] * srate / 1000));
+                p = (its_Rd_Blocks(md) && (r[its_Rdr_StJ] >= 0)) ? r[its_Rdr_StNNom] : r[its_Rdr_Abspos];
+                ((p > MIN_VALUE) && ((p < r[its_Rdr_Start] - X) || (p >= r[its_Rdr_Last] + X))) ? (
+                    ((r[its_Rdr_Status] === its_RdrStat_Reading) || (r[its_Rdr_Status] === its_RdrStat_Paused)) ? (
+                        t = (its_Rd_Dir(r) >= 0) ? 0 : max(0, (b - a - 1) / srate);
+                        r[its_Rdr_NxtPosSec] = t; // (a jump with a cross fade, as the slider "Position")
+                        (r[its_Rdr_Status] === its_RdrStat_Paused) ? (r[its_Rdr_Abspos] = r[its_Rdr_Start] + floor(t * srate));
+                    ) : (
+                        r[its_Rdr_Abspos] = its_Rd_Home(r);
+                    );
+                );
+            );
+        );
+    );
+    ch;
 );
 
 // the default settings of the mode Grains of the reader block "r"
@@ -4749,6 +4872,22 @@ menu_Rdr_LoopF_N[10] = "Free loop";
 menu_Rdr_LoopF = make_jmenu(
     ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "reader-loopf", <? printf("%d", wr_mnc + 11); ?>, menu_Rdr_LoopF_N);
+
+// Menu of the segment of a reader and of the zoom of its waveform (cell 4 of the pad, right clic in the waveform : see
+// its_Rd_SegMenu) : 1 the part read (gray, its text set by its_Rd_SegMenu), 2 restrict to the loop, 3 the whole line,
+// 4 ... 7 the zoom on the loop, on its start, on its end, on the read head
+menu_Rdr_Seg_N = make_array(8);
+menu_Rdr_Seg_N[0] = "Whole line";
+menu_Rdr_Seg_N[1] = "Restrict to the loop";
+menu_Rdr_Seg_N[2] = "Back to the whole line";
+menu_Rdr_Seg_N[3] = "";
+menu_Rdr_Seg_N[4] = "Zoom on the loop";
+menu_Rdr_Seg_N[5] = "Zoom on the loop start";
+menu_Rdr_Seg_N[6] = "Zoom on the loop end";
+menu_Rdr_Seg_N[7] = "Zoom on the read head";
+menu_Rdr_Seg = make_jmenu(
+    ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "reader-segment", 8, menu_Rdr_Seg_N);
 
 // Menu 3 for Writer : the status
 menu_Wrt_Status_N = make_array(5);
@@ -6057,10 +6196,10 @@ local (reader, L, P, S, X, Q, V, T, W, u, flg, A1, B1, A2, B2, S_In, S_Out, E_In
 (
     flg = err = 0;
     ((rdrn < 0) || (rdrn >= RD_CNT)) ? (
-        err = 132; // erreur
+        err = 2832; // erreur
     ) :
     (((reader = Readers_set[rdrn]) <= BASE_MEMORY) || (reader[-2] !== KW_read)) ? (
-        err = 133; // erreur
+        err = 2833; // erreur
     ) :
     (
         // Some modifications in the play parameters ?
@@ -6185,20 +6324,20 @@ local(reader, lcbl, err, w)
     err = 0;
     // The reader must be defined
     ((rdrn < 0) || (rdrn >= RD_CNT)) ? (
-        err = 102; // erreur
+        err = 2802; // erreur
     ) :
     ((lnbr < 0) || (lnbr > LN_CNT)) ? ( // in [0 ... LN_CNT]
-        err = 105; // erreur
+        err = 2805; // erreur
     ) :
     (((reader = Readers_set[rdrn]) <= BASE_MEMORY) || (reader[-2] !== KW_read)) ? (
         (reader === 0) ? (
             // Try to create the reader
             reader = Rd_Create(rdrn);
             (reader === 0) ? (
-                err = 104; // erreur : reader undefined - should not arrive
+                err = 2804; // erreur : reader undefined - should not arrive
             );
         ) : (
-            err = 103;
+            err = 2803;
         );
     );
     // Is the line set to zero ?
@@ -6213,21 +6352,19 @@ local(reader, lcbl, err, w)
             reader[its_Rdr_Lcbl] = 0;
         ) :
         (((lcbl = Lines_Set[lnbr-1]) <= BASE_MEMORY) || (lcbl[-2] !== KW_lcbl)) ?(
-            err = 107; // erreur : lcbl undefined - should not arrive
+            err = 2807; // erreur : lcbl undefined - should not arrive
         ) : (
             // what if the same line is chosen ? choose to reinitialize
             reader[its_Rdr_Lcbl] = lcbl;
             reader[its_Rdr_LineNb] = lnbr-1; // in [0 LN_CNT-1]
-            reader[its_Rdr_SmplCnt] = lcbl[its_Lin_SmplCnt];
+            // the whole line (no segment : a new one is asked from the menu of the segment, its_Rd_SegMenu)
+            reader[its_Rdr_SegA] = reader[its_Rdr_SegB] = 0;
+            its_Rd_BindAB(reader, lcbl, 0, lcbl[its_Lin_SmplCnt]);
             // Set region to the size of buffer
             reader[its_Rdr_RegSizeSec] = reader[its_Rdr_SmplCntSec] = w = lcbl[its_Lin_SmplCntSec];
             // Set in the center the region pointer
             reader[its_Rdr_RegPosSec] = w/2;
             reader[its_Rdr_ChNbr] = reader[its_Rdr_BfChanUsed] = lcbl[its_Lin_ChCnt];
-            reader[its_Rdr_Start] = lcbl[its_Lin_Start];
-            reader[its_Rdr_Low] = reader[its_Rdr_Start] - B_FADESIZ;
-            reader[its_Rdr_Last] = lcbl[its_Lin_Last];
-            reader[its_Rdr_High] = reader[its_Rdr_Last] + B_FADESIZ;
             reader[its_Rdr_Abspos] = lcbl[its_Lin_Start];
             reader[its_Rdr_LinSfreq] = lcbl[its_Lin_RecFreq];
             reader[its_Rdr_AdjInc] = lcbl[its_Lin_RecFreq] / srate;
@@ -6453,17 +6590,17 @@ local (reader, md, rdst, err, lcbl, wcbl, ns)
     err = 0;
     // The reader must be defined
     ((rdrn < 0) || (rdrn >= RD_CNT)) ? (
-        err = 101; // erreur
+        err = 2801; // erreur
     ) :
     (((reader = Readers_set[rdrn]) <= BASE_MEMORY) || (reader[-2] !== KW_read)) ? (
         (reader === 0) ? (
             // Try to create the reader
             reader = Rd_Create(rdrn);
             (reader === 0) ? (
-                err = 109; // erreur : reader undefined - should not arrive
+                err = 2809; // erreur : reader undefined - should not arrive
             );
         ) : (
-            err = 110;
+            err = 2810;
         );
     );
     (err === 0) ? (
@@ -6476,7 +6613,7 @@ local (reader, md, rdst, err, lcbl, wcbl, ns)
         );
     );
     ((nstat < 0) || (nstat > its_RdrStat_Reading)) ? (
-        err = 108; // erreur
+        err = 2808; // erreur
     ) :
     (err === 0) ? (
         md = reader[its_Rdr_Mode];
@@ -6538,10 +6675,10 @@ local (reader, err)
     nspeed = max(-SPDMAX, min(SPDMAX, nspeed));
     // The reader must be defined
     ((rdrn < 0) || (rdrn >= RD_CNT)) ? (
-        err = 112; // erreur
+        err = 2812; // erreur
     ) :
     (((reader = Readers_set[rdrn]) <= BASE_MEMORY) || (reader[-2] !== KW_read)) ? (
-        err = 103;
+        err = 2813;
     );
     (err === 0) ? (
         reader[its_Rdr_Speed] = nspeed;
@@ -6609,7 +6746,7 @@ local (reader, err)
 (
     err = 0;
     ((rdrn < 0) || (rdrn >= RD_CNT)) ? (
-        err = 122; // erreur
+        err = 2822; // erreur
     ) :
     (((reader = Readers_set[rdrn]) <= BASE_MEMORY) || (reader[-2] !== KW_read)) ? (
         (reader === 0) ? (
@@ -6629,7 +6766,7 @@ local (reader, err)
                 );
             );
         ) : (
-            err = 123;
+            err = 2823;
         );
     ) :
     (act === its_RdrAct_Copy) ? (
@@ -6683,7 +6820,7 @@ local (reader, err)
         Rd_Delete(rdrn);
     ) :
     (
-        err = 127;
+        err = 2827;
     );
     err;
 );
@@ -8146,30 +8283,27 @@ local (FFrRate, FlCC, Fhandle, Fformat, FFSize, cbfsiz, bread, ptbuf, bcnt, addb
     Fhandle = file_open(fname);
     Fformat = 1;
     (Fhandle < 0) ? (
-        its_FilErr = 400;
+        its_FilErr = 0400;
     ) :
     (
         file_riff(Fhandle, FlCC, FFrRate);
         (FlCC < 1) ? (
-            its_FilErr = 401;
+            its_FilErr = 0401;
         ) :
         (FlCC > 128) ? (
-            its_FilErr = 402;
+            its_FilErr = 0402;
         ) :
         ((FFrRate < 2400) || (FFrRate > 384000)) ? (
-            its_FilErr = 403;
+            its_FilErr = 0403;
         ) :
         (
             FAdjRate = FFrRate / srate;
             FFSize = file_avail(Fhandle); // Size for all samples
             (FFSize <= 480) ? (
-                its_FilErr = 408;
+                its_FilErr = 0408;
             ); // File too short
         );
     );
-
-    sprintf(#s, "File-1  %d  %d=[%d  / %d]  %.5f  %d", its_FilErr, Fhandle, FlCC, FFrRate, FAdjRate, FFSize);
-    mSL_log(SysLogBox, #s);
 
     (its_FilErr === 0) ? (
         // channels buffer sizes
@@ -8185,11 +8319,11 @@ local (FFrRate, FlCC, Fhandle, Fformat, FFSize, cbfsiz, bread, ptbuf, bcnt, addb
             // Create the appropriate buffer
             lnb = Ln_New();
             (lnb < 0) ? (
-                its_FilErr = 411;
+                its_FilErr = 0411;
             ) : (
                 lcbl = Ln_Make(lnb, srate, bflen/srate, FlCC);
                 (lcbl === 0) ? (
-                    its_FilErr = 412;
+                    its_FilErr = 0412;
                 );
             );
         );
@@ -8205,7 +8339,7 @@ local (FFrRate, FlCC, Fhandle, Fformat, FFSize, cbfsiz, bread, ptbuf, bcnt, addb
             rdcnt = min(bcnt, FFSize - bread);
             rc = file_mem(Fhandle, savwrk, rdcnt);
             (rc != rdcnt) ? (
-                its_FilErr = 416;
+                its_FilErr = 0416;
                 bread = FFSize;
             ) : (
                 // Update buffers
@@ -8236,7 +8370,20 @@ local (FFrRate, FlCC, Fhandle, Fformat, FFSize, cbfsiz, bread, ptbuf, bcnt, addb
     );
 
     (lnb >= 0) ? strcpy(its_LnFile[lnb], fname); // the file of the line
-    sprintf(#s, "File-2  %d  %d; lin=%d  %f  ptb=%d", its_FilErr, Fhandle, lnb, ends, ptbuf);
+    // the result in the log : the line read, or the error
+    (its_FilErr === 0) ? (
+        sprintf(#s, "Line %d : file \"%s\" (%.3f s, %d chan., %d Hz)", lnb + 1, fname, ends / FFrRate, FlCC, FFrRate);
+    ) : (
+        sprintf(#s, "ERR: %04d    file \"%s\" : %s", its_FilErr, fname,
+            (its_FilErr === 0400) ? "cannot be opened" :
+            (its_FilErr === 0401) ? "no channel" :
+            (its_FilErr === 0402) ? "more than 128 channels" :
+            (its_FilErr === 0403) ? "sample rate out of [2400, 384000]" :
+            (its_FilErr === 0408) ? "too short" :
+            (its_FilErr === 0411) ? "no free line" :
+            (its_FilErr === 0412) ? "not enough memory for the line" :
+            (its_FilErr === 0416) ? "read error" : "error");
+    );
     mSL_log(SysLogBox, #s);
 
     file_close(Fhandle);
@@ -8700,32 +8847,29 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
         L__104 += 10000;
         // recheck all structure
         ((reader <= BASE_MEMORY) || (reader[-2] !== KW_read)) ? (
-            its_RdrErrXe = 260; // erreur - reader is not a block
+            its_RdrErrXe = 2960; // erreur - reader is not a block
         ) :
         its_Rd_Lined(reader[its_Rdr_Mode]) ? (
             (((lcbl = reader[its_Rdr_Lcbl]) <= BASE_MEMORY) || (lcbl[-2] !== KW_lcbl)) ? (
-                its_RdrErrXe = 264; // erreur - line is not a block
+                its_RdrErrXe = 2964; // erreur - line is not a block
             ) :
             ((reader[its_Rdr_Unuz1] != SECURE_BL) || (reader[its_Rdr_Unuz2] != SECURE_BL)) ? (
-                its_RdrErrXe = 265; // erreur - reader block damaged
+                its_RdrErrXe = 2965; // erreur - reader block damaged
             ) :
             ((Lines_Set[reader[its_Rdr_LineNb]] != lcbl) || (reader[its_Rdr_ChNbr] != lcbl[its_Lin_ChCnt])) ? (
-                its_RdrErrXe = 266; // erreur - line mismatched
+                its_RdrErrXe = 2966; // erreur - line mismatched
             ) : (
                 (lcbl[its_Lin_Check] !== BLOCK_CHECK) ? (
                     Ln_Check(reader[its_Rdr_LineNb]);
                 );
-                ((reader[its_Rdr_Start] != lcbl[its_Lin_Start])
-                    || (reader[its_Rdr_Last] != lcbl[its_Lin_Last])) ? (
-                    reader[its_Rdr_Start] = lcbl[its_Lin_Start];
-                    reader[its_Rdr_Last] = lcbl[its_Lin_Last];
-                    reader[its_Rdr_SmplCnt] = lcbl[its_Lin_SmplCnt];
-                );
-                reader[its_Rdr_Low] = reader[its_Rdr_Start] - B_FADESIZ; // (the limits of the reads, see exec_reader)
-                reader[its_Rdr_High] = reader[its_Rdr_Last] + B_FADESIZ;
-                // (in the frame of a writer that the loop follows, the positions may be outside the line : its_Rdr_LoopFollow)
-                (!(reader[its_Rdr_LfSt] & its_RdrLf_Frame) && ((reader[its_Rdr_Abspos] < reader[its_Rdr_Start])
-                    || (reader[its_Rdr_Abspos] > reader[its_Rdr_Last]))) ? (
+                // the part of the line read : the line, or the segment of the reader (its_Rd_SegCheck)
+                its_Rd_SegCheck(reader);
+                reader[its_Rdr_Low] = lcbl[its_Lin_Start] - B_FADESIZ; // (the limits of the reads : the line, see its_Rd_BindAB)
+                reader[its_Rdr_High] = lcbl[its_Lin_Last] + B_FADESIZ;
+                // (in the frame of a writer that the loop follows, the positions may be outside the line : its_Rdr_LoopFollow ;
+                // around a segment, they may be outside it, in the line : the cross fades at its ends, a jump asked)
+                (!(reader[its_Rdr_LfSt] & its_RdrLf_Frame) && ((reader[its_Rdr_Abspos] < lcbl[its_Lin_Start])
+                    || (reader[its_Rdr_Abspos] > lcbl[its_Lin_Last]))) ? (
                     reader[its_Rdr_Abspos] = reader[its_Rdr_Start];
                 );
                 reader[its_Rdr_Check] = BLOCK_CHECK;
@@ -8735,10 +8879,10 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
         (reader[its_Rdr_Mode] === its_RdrMode_Delay) ? (
             L__104 += 100;
             (((wcbl = reader[its_Rdr_WrBPtr]) <= BASE_MEMORY) || (wcbl[-2] !== KW_writ)) ? (
-                its_RdrErrXe = 150; // writer referenced is not a block
+                its_RdrErrXe = 2950; // writer referenced is not a block
             ) :
             (((lcbl = wcbl[its_Wrt_Lcbl]) <= BASE_MEMORY) || (lcbl[-2] !== KW_lcbl)) ? (
-                its_RdrErrXe = 154; // line is not a block
+                its_RdrErrXe = 2954; // line is not a block
             ) : (
                 reader[its_Rdr_Lcbl] = lcbl;
                 reader[its_Rdr_LineNb] = wcbl[its_Wrt_LineNb]; // the line of the writer may have changed
@@ -8759,7 +8903,7 @@ local (lcbl, wcbl, k, act, ty, w, s, d, f, it, lcn, vol, val, val_aux, mdr, loc,
                     L__104 += 1;
             );
         ) : (
-            its_RdrErrXe = 130; // erreur - unknown exec mode
+            its_RdrErrXe = 2930; // erreur - unknown exec mode
         );
         (its_RdrErrXe === 0) ? (
             // the output : own cable, or a bus ; an error is not fatal (the samples go to the trash cells)
@@ -9285,16 +9429,16 @@ local (lcbl, k, s, x, bp, val, vol, f, n, md, ic, mp, lg, d)
     (its_WrtErrXe) ? (
         // recheck all struct
         ((writer <= BASE_MEMORY) || (writer[-2] !== KW_writ)) ? (
-            its_WrtErrXe = 310; // erreur - invalid writer block
+            its_WrtErrXe = 2910; // erreur - invalid writer block
         ) :
         (((lcbl = writer[its_Wrt_Lcbl]) <= BASE_MEMORY) || (lcbl[-2] !== KW_lcbl)) ?(
-            its_WrtErrXe = 312; // erreur - invalid line reference
+            its_WrtErrXe = 2912; // erreur - invalid line reference
         ) :
         ((writer[its_Wrt_Unuz1] != SECURE_BL) || (writer[its_Wrt_Unuz2] != SECURE_BL)) ? (
-            its_WrtErrXe = 317; // erreur - writer block damaged
+            its_WrtErrXe = 2917; // erreur - writer block damaged
         ) :
         ((writer[its_Wrt_SmplCnt] != lcbl[its_Lin_SmplCnt]) || (writer[its_Wrt_ChNbr] != lcbl[its_Lin_ChCnt])) ? (
-            its_WrtErrXe = 318; // erreur - line information mismatched
+            its_WrtErrXe = 2918; // erreur - line information mismatched
             Trace_Z_001 = writer[its_Wrt_SmplCnt];
             Trace_Z_002 = lcbl[its_Lin_SmplCnt];
             Trace_Z_003 = writer[its_Wrt_ChNbr];
@@ -12364,7 +12508,7 @@ function its_Tb_ChUser(k, nch) local(i, r, u)
 
 // the line "lnum" was replaced by Ln_Make : its writers and readers take the new line and keep their settings
 function Ln_Rebind(lnum)
-local (lcbl, i, j, r, w, d)
+local (lcbl, i, j, r, w, d, a, b, n)
 (
     lcbl = Lines_Set[lnum];
     i = 0; loop(WR_CNT,
@@ -12378,13 +12522,12 @@ local (lcbl, i, j, r, w, d)
             && its_Rd_Lined(r[its_Rdr_Mode])) ? (
             r[its_Rdr_Check] = 0; // first : @sample checks the reader again (exec_reader)
             r[its_Rdr_Lcbl] = lcbl;
-            r[its_Rdr_SmplCnt] = lcbl[its_Lin_SmplCnt];
-            r[its_Rdr_SmplCntSec] = d = lcbl[its_Lin_SmplCntSec];
+            // the part read : its segment if it still fits in the line (the same file reloaded), else the whole line
+            a = r[its_Rdr_SegA]; b = r[its_Rdr_SegB]; n = lcbl[its_Lin_SmplCnt];
+            !its_Rd_SegIn(r, a, b, n) ? ( a = 0; b = n; );
+            its_Rd_BindAB(r, lcbl, a, b);
+            d = r[its_Rdr_SmplCntSec];
             r[its_Rdr_ChNbr] = lcbl[its_Lin_ChCnt];
-            r[its_Rdr_Start] = lcbl[its_Lin_Start];
-            r[its_Rdr_Low] = r[its_Rdr_Start] - B_FADESIZ;
-            r[its_Rdr_Last] = lcbl[its_Lin_Last];
-            r[its_Rdr_High] = r[its_Rdr_Last] + B_FADESIZ;
             r[its_Rdr_LinSfreq] = lcbl[its_Lin_RecFreq];
             r[its_Rdr_AdjInc] = lcbl[its_Lin_RecFreq] / srate;
             j = 0; loop(its_RdrMaxMulti,
@@ -17123,23 +17266,23 @@ loadMode ? (
             sbsz = savtmp[3];
             ((z__si < 0) || (z__si >= StaticWASize)) ? (
                 ldok = 0;
-                lderr = 180
+                lderr = 2880
             ) : (
                 // Create a memory area for the block
                 z__sbl = mSL_Dyn_Alloc(sbsz, sbty, 0); // allocate memory
                 (z__sbl === 0) ? (
                     ldok = 0; // can't allocate
-                    lderr = 170;
+                    lderr = 2870;
                 ) : (
                     rdsz = load_mem(0, z__sbl, sbsz); // Read the block
                     ldtotal += rdsz;
                     (rdsz !== sbsz) ? (
                         ldok = 0;
-                        lderr = 160;
+                        lderr = 2860;
                     ) :
                     (check_its_block(z__sbl)) ? (
                         ldok = 0;
-                        lderr = 156;
+                        lderr = 2856;
                     ) : (
                         (sbty === KW_effx) ? (z__sbl[its_Efx_Work] = z__sbl[its_Efx_WkNew] = z__sbl[its_Efx_WkOld] = 0);
                         (sbty === KW_read) ? (z__sbl[its_Rdr_Work] = z__sbl[its_Rdr_WkNew] = z__sbl[its_Rdr_WkOld] = 0; z__sbl[its_Rdr_StJ] = -1);
@@ -17160,7 +17303,7 @@ loadMode ? (
                 ui_jzoom_set(ui_jzoom_find(serialBlock[Pr7_UiSize], ui_jzoomDef)); // display size (0 : the default)
             ) : (
                 ldok = 0;
-                lderr = 140; // studio block too large
+                lderr = 2840; // studio block too large
             );
         ) :
         (savtmp[0] === 'disp') ? (
@@ -17188,7 +17331,7 @@ loadMode ? (
                 ldtotal += load_mem(0, z__sbl, savtmp[2]);
                 its_AlgSym[z__sp] = savtmp[1]; its_AlgBlk[z__sp] = z__sbl; its_AlgLen[z__sp] = savtmp[2];
             ) : (
-                ldok = 0; lderr = 171; // no room or no memory for the template
+                ldok = 0; lderr = 2871; // no room or no memory for the template
             );
         ) :
         (savtmp[0] === 'ains') ? (
@@ -17207,10 +17350,10 @@ loadMode ? (
                     ldtotal += load_mem(0, its_InsNam[z__si], 3 * its_InsNCnt[z__si]);
                 ) : (
                     its_Al_InsDrop(z__si);
-                    ldok = 0; lderr = 172; // no memory for the instance
+                    ldok = 0; lderr = 2872; // no memory for the instance
                 );
             ) : (
-                ldok = 0; lderr = 173; // bad instance number
+                ldok = 0; lderr = 2873; // bad instance number
             );
         ) :
         ((savtmp[0] === 'crvc') || (savtmp[0] === 'crvb')) ? (
@@ -17232,10 +17375,10 @@ loadMode ? (
                     (savtmp[2] === -1) ? file_string(0, its_CrvNm[z__si]) :
                     (savtmp[2] !== 0) ? mSL_edit_value(its_CrvNm[z__si], savtmp[2]) : strcpy(its_CrvNm[z__si], "");
                 ) : (
-                    ldok = 0; lderr = 175; // no memory for the curve
+                    ldok = 0; lderr = 2875; // no memory for the curve
                 );
             ) : (
-                ldok = 0; lderr = 174; // bad curve number or count of points
+                ldok = 0; lderr = 2874; // bad curve number or count of points
             );
         ) :
         (savtmp[0] === 'crvu') ? (
@@ -17267,14 +17410,14 @@ loadMode ? (
             zzz_sastwa = 'stwa';
             zzz_sequal = zzz_savtmp == zzz_sastwa;
             ldok = 0;
-            lderr = 150;
+            lderr = 2850;
         );
 
     );
     (
         // load is ok
         str_mess = str_mess_slot(); // a string in [16 .. 32]
-        sprintf(str_mess, "Load (%d / %d), %d items, %d tab names, studio %d.", ldok, lderr, lditmc, ldtnam, ldstud);
+        sprintf(str_mess, "Load (%d / %04d), %d items, %d tab names, studio %d.", ldok, lderr, lditmc, ldtnam, ldstud);
     );
 
     (lderr === 0) ? (
@@ -17422,6 +17565,8 @@ b__i = b__j = 0;
 loop(RD_CNT,
     ((b__r = Readers_set[b__i]) !== 0)  ? (
         (b__r[its_Rdr_StFlgs] & its_RdrFlg_solo) ? b__j += 1;
+        // the part of the line read : the line, or a segment asked by @gfx (its_Rd_SegCheck), first
+        its_Rd_SegCheck(b__r);
         // the loop : it follows a writer (its_Rdr_LoopFollow), else it moves at its own speed (its_Rdr_LoopMove), and it
         // may cross the end of the line (its_Rd_Cross)
         (((b__r[its_Rdr_LoopWr] > 0) || (b__r[its_Rdr_LfSt] & its_RdrLf_On)) && its_Rdr_LoopFollow(b__r)) ? 0 : (
@@ -17567,7 +17712,7 @@ function do_Generic_Commands()
 
 function do_GenericTabStart() local(studio_pad_active)
 (
-    ui_jmouse_cap |= mouse_cap;
+    ui_jmouse_cap |= uix_mouse_cap(); // (without the "ghost" buttons, see uix_mghost in ui-lib)
     studio_pad_active = 0;
 );
 
@@ -17653,7 +17798,8 @@ while (g__efi) (
         //sprintf(#s, "*  Compile: %s  (%d)  *", efs, strlen(#efs)); mSL_log(SysLogBox, #s);
         doMslCompile(g__efs); // add to compile list
     ) :
-    (match ("*wav", g__efs) || match ("*aif", g__efs) || match ("*flac", g__efs) || match ("*mp3", g__efs) || match ("*aiff", g__efs) || match ("*ogg", g__efs) || match ("*wmv", g__efs)) ? (
+    // (the extension in any case : .wav, .WAV ... : matchi)
+    (matchi ("*.wav", g__efs) || matchi ("*.aif", g__efs) || matchi ("*.flac", g__efs) || matchi ("*.mp3", g__efs) || matchi ("*.aiff", g__efs) || matchi ("*.ogg", g__efs) || matchi ("*.wmv", g__efs)) ? (
         strcpy(#efs, g__efs); // save in #efs
         g__dpa = 1; // an audio file is available
         /*
@@ -17700,7 +17846,7 @@ mSL_loc_tim = max(mSL_loc_tim - 1, 0);
             mSL_gc_end = time_precise() + timeD;
             mSL_errX = max(mSL_errX, max(mSL_errC, mSL_errM));
             ((FlagsTbVals[Flgs_GC] & 1) && mSL_errX) ? (
-                sprintf(#gfxu, "GC Err: %d - Dur %.2f ms", mSL_errX,
+                sprintf(#gfxu, "GC Err: %04d - Dur %.2f ms", mSL_errX,
                         1000 * (mSL_gc_end - mSL_gc_start));
                 mSL_log(SysLogBox, #gfxu);
             );
@@ -17746,7 +17892,7 @@ mSL_loc_tim = max(mSL_loc_tim - 1, 0);
                     // ready to introduce in the queue
                     sprintf(#s, "Loaded %s", uuuMslFname);
                 ) : (
-                    sprintf(#s, "File %s: err %d", uuuMslFname, mSL_errX);
+                    sprintf(#s, "File %s: err %04d", uuuMslFname, mSL_errX);
                 );
                 mSL_log(SysLogBox, #s);
             );
@@ -18408,7 +18554,8 @@ function its_Rd_Near(x, ref, cs)
       paused, the position is moved at once) ;
     - a left drag from a limit of the loop (its margin included, at its_WvDTol pixels) moves this limit (past the other
       limit, they are exchanged, as with the sliders ; the loop keeps at least two cross fades) ;
-    - Alt + a left drag in the loop moves the loop, its length kept ; Shift + left clic : the loop on the whole line ;
+    - Alt + a left drag in the loop moves the loop, its length kept ; Shift + left clic : the loop on the whole line (on
+      the whole segment of the reader, see its_Rd_SegCheck : the line is then the segment, here and below) ;
     - the limits do not move when the loop follows a writer (its_Rdr_LoopFollow), a clic moves the read position ;
     - the loop crosses the end of the line (its_Rd_Cross) : its limits and the loop move across the end (the line is
       circular) ;
@@ -18512,15 +18659,19 @@ local (za, zb, s, t, st, cs, mn, lo, ln, px, d1, d2, md, cx, n, tf, sf, tu, lmax
     );
 );
 
-// Waveform of the channels read by reader "rcbl" (number "rdr") in line "lcbl", zoom in [1, 100]
-// The region (if it does not cover the whole line) and the zoom work in all the reading modes, so that the
-// limits can be set before switching to a loop mode : the zoom goes from the whole line to [its_Rdr_RegSOut, its_Rdr_RegEOut) ;
-// the mouse moves the limits of the loop and the read position (its_wave_mouse)
-function its_wave_reader(lcbl, rcbl, rdr, zoom, flags)
-local (fa, fb, ra, rb, nch, ch0, a, b, n, dr)
+// Waveform of the channels read by reader "rcbl" (number "rdr") in line "lcbl" ; "vp" : the display block of the reader
+// (RDBL : vp[9] the zoom in [1, 100], vp[10] the flags)
+// The part read : the line, or the segment of the reader (its_Rd_SegCheck). The region (if it does not cover the whole
+// part) and the zoom work in all the reading modes, so that the limits can be set before switching to a loop mode : the
+// zoom goes from the whole part to [its_Rdr_RegSOut, its_Rdr_RegEOut), or to a few cross fades centered on the start or
+// on the end of the loop (to set a limit finely), or on the read head (the view follows it ; mode Grains : no read head,
+// the zoom on the loop) (its_WaveZoomK : the menu of the segment, its_Rd_SegMenu) ; the mouse moves the limits of the
+// loop and the read position (its_wave_mouse)
+function its_wave_reader(lcbl, rcbl, rdr, vp)
+local (fa, fb, ra, rb, nch, ch0, a, b, n, dr, zk, c, X, p)
 (
     its_wave_colors();
-    fa = lcbl[its_Lin_Start]; fb = lcbl[its_Lin_Last];
+    fa = rcbl[its_Rdr_Start]; fb = rcbl[its_Rdr_Last]; // (the part read)
     ra = rcbl[its_Rdr_RegSOut]; rb = rcbl[its_Rdr_RegEOut];
     (rcbl[its_Rdr_LfSt] & (its_RdrLf_On | its_RdrLf_Cross)) ? (
         // the loop follows a writer (its_Rdr_LoopFollow) or it crosses the end of the line (its_Rd_Cross) : it may
@@ -18542,7 +18693,26 @@ local (fa, fb, ra, rb, nch, ch0, a, b, n, dr)
         ui_audio_mark(ra, its_WaveColRegLim);
         ui_audio_mark(rb, its_WaveColRegLim);
     );
-    ui_audio_zoom(fa, fb, ra, rb, zoom); // the whole line if the region covers it (or is not defined)
+    zk = vp[10] & its_WaveZoomK;
+    ((zk === its_WaveZoomHead) && (rcbl[its_Rdr_Mode] === its_RdrMode_Grains)) ? (zk = 0); // (no read head)
+    (zk === 0) ? (
+        ui_audio_zoom(fa, fb, ra, rb, vp[9]); // the whole part if the region covers it (or is not defined)
+    ) : (
+        // centered on a limit of the loop (in the part : a loop that crosses its end may have its start below it), or on
+        // the read head (in the part, as its mark ; during the last fade, silence : the position that fades out) ; at
+        // zoom 100, four cross fades (the margins of the limit, and around)
+        n = fb - fa;
+        (zk === its_WaveZoomHead) ? (
+            p = (rcbl[its_Rdr_Abspos] > MIN_VALUE) ? rcbl[its_Rdr_Abspos] :
+                (rcbl[its_Rdr_AbsAuxpos] > MIN_VALUE) ? rcbl[its_Rdr_AbsAuxpos] : fa;
+            c = its_Rd_Wrap(rcbl, p);
+        ) : (
+            c = fa + floor(0.5 + ((zk === its_WaveZoomLo) ? rcbl[its_Rdr_LowPosSec] : rcbl[its_Rdr_HighPosSec]) * srate);
+            (c < fa) ? (c += n) : (c > fb) ? (c -= n);
+        );
+        X = max(3, floor(0.5 + rcbl[its_Rdr_XFade_mSec] * srate / 1000));
+        ui_audio_zoomc(fa, fb, c, max(256, 4 * X), vp[9]);
+    );
     // a drag of the mouse : the range shown does not move (the zoom follows the loop)
     dr = (its_WvDR === rcbl) && (its_WvDK > 0) && (mouse_cap & 1) && !uix_click(1) && uix_clickwasinside(1); // (a press : a new catch)
     dr ? ( ui_aud_za = its_WvDZa; ui_aud_zb = its_WvDZb; );
@@ -18554,7 +18724,7 @@ local (fa, fb, ra, rb, nch, ch0, a, b, n, dr)
     nch = max(0, min(rcbl[its_Rdr_BfChanUsed], lcbl[its_Lin_ChCnt] - ch0)); // only the channels read
     ui_aud_chan0 = ch0; // each channel keeps the color of its number in the line
     ui_audio_wave(0, nch, lcbl + its_Lin_BF1ST + ch0, lcbl[its_Lin_ActBSize],
-        ui_aud_za, ui_aud_zb, flags, its_LinWaveMax);
+        ui_aud_za, ui_aud_zb, its_Wave_Flags(vp + 10), its_LinWaveMax);
 );
 
 
@@ -18879,6 +19049,74 @@ local (j, p, r, a, pg)
     );
 );
 
+// asks for the segment [a, b) of the line of the reader "r" (samples from the start of the line ; b = 0 : the whole line),
+// applied by @block (its_Rd_SegCheck) ; @block reads the two words at any time : they are written so that it never sees a
+// segment that does not hold the one asked (from the whole line : its start first, SegB still 0 ; a smaller segment in
+// the current one : its end first ; the whole line : SegB = 0 first)
+function its_Rd_SegSet(r, a, b)
+(
+    (b <= 0) ? ( r[its_Rdr_SegB] = 0; r[its_Rdr_SegA] = 0; ) :
+    (r[its_Rdr_SegB] <= 0) ? ( r[its_Rdr_SegA] = a; r[its_Rdr_SegB] = b; ) :
+    ( r[its_Rdr_SegB] = b; r[its_Rdr_SegA] = a; );
+);
+
+/*
+    the menu of the segment of the reader "r" and of the zoom of its waveform ("vp" : the display block of the reader,
+    RDBL) : the cell 4 of its pad (the clic "ev" of the pad, right or left clic), or a right clic in its waveform (ev = 0 :
+    the current rectangle is the waveform ; Shift + right clic is the Studio menu) ; items : 1 the part read (gray : the
+    whole line, or the segment and its limits in the line), 2 restrict to the loop (the loop becomes the segment : a mode on
+    a line, a free loop that does not straddle the end and the start, smaller than the part read ; gray : the reason),
+    3 back to the whole line, 4 ... 7 the zoom of the waveform : on the loop, centered on its start, on its end, on the
+    read head (gray in mode Grains : no read head) (vp[10], its_WaveZoomK : see its_wave_reader)
+*/
+function its_Rd_SegMenu(r, vp, ev)
+local (m, lcbl, n, a, sz, A1, B1, ok, zk, xx)
+(
+    m = menu_Rdr_Seg;
+    lcbl = r[its_Rdr_Lcbl];
+    (((ev !== 0) || ui_click(2)) && (lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl) && ((n = lcbl[its_Lin_SmplCnt]) > 0)) ? (
+        a = r[its_Rdr_Start] - lcbl[its_Lin_Start]; sz = r[its_Rdr_SmplCnt]; // the part read : [a, a + sz) in the line
+        ((a > 0) || (sz < n)) ? (
+            sprintf(#its_SgTx, "Segment %.3f - %.3f s (line %.3f s)", a / srate, (a + sz) / srate, n / srate);
+        ) : (
+            sprintf(#its_SgTx, "Whole line %.3f s", n / srate);
+        );
+        its_Menu_Item(m, 0, 0, 1, #its_SgTx);
+        A1 = max(0, floor(0.5 + r[its_Rdr_LowPosSec] * srate));
+        B1 = min(sz, floor(0.5 + r[its_Rdr_HighPosSec] * srate));
+        ok = !its_Rd_Lined(r[its_Rdr_Mode]) ? 1 :
+            (r[its_Rdr_LfSt] & its_RdrLf_On) ? 2 :
+            (r[its_Rdr_LowPosSec] < 0) ? 3 :
+            ((A1 <= 0) && (B1 >= sz)) ? 4 :
+            (B1 - A1 < its_RdSegMin) ? 5 : 0;
+        strcpy(#its_SgT2, "Restrict to the loop");
+        (ok === 1) ? strcat(#its_SgT2, " (mode Delay)") :
+        (ok === 2) ? strcat(#its_SgT2, " (it follows a writer)") :
+        (ok === 3) ? strcat(#its_SgT2, " (it crosses the end)") :
+        (ok === 4) ? strcat(#its_SgT2, " (it is the whole part)") :
+        (ok === 5) ? strcat(#its_SgT2, " (too short)");
+        its_Menu_Item(m, 1, 0, ok !== 0, #its_SgT2);
+        its_Menu_Item(m, 2, 0, !its_Rd_HasSeg(r), 0);
+        zk = vp[10] & its_WaveZoomK;
+        its_Menu_Item(m, 4, zk === 0, 0, 0);
+        its_Menu_Item(m, 5, zk === its_WaveZoomLo, 0, 0);
+        its_Menu_Item(m, 6, zk === its_WaveZoomHi, 0, 0);
+        its_Menu_Item(m, 7, zk === its_WaveZoomHead, r[its_Rdr_Mode] === its_RdrMode_Grains, 0);
+        xx = (ev !== 0) ? its_Menu_Clic(m, ev) : control_jmenu_clicks(m, ui_jmenu_opt_rclick);
+        ((xx === 2) && (ok === 0)) ? (
+            its_Rd_SegSet(r, a + A1, a + B1);
+        ) :
+        ((xx === 3) && its_Rd_HasSeg(r)) ? (
+            its_Rd_SegSet(r, 0, 0);
+        ) :
+        ((xx >= 4) && (xx <= 7)) ? (
+            vp[10] = vp[10] - zk + ((xx === 5) ? its_WaveZoomLo : (xx === 6) ? its_WaveZoomHi :
+                (xx === 7) ? its_WaveZoomHead : 0);
+        );
+        (xx !== 0) ? ( ui_GFXdoNow |= 4; ui_GFXReason = 34; );
+    );
+);
+
 /*
    RDBL[0] = reader to display
    RDBL[1] = reader type
@@ -19066,9 +19304,7 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                     ui_border(); // draws in purple
                 ui_pop();
                 (g__dpa != 0) ? (
-                    // audio file droped here
-                    sprintf(#s, "Reader::drop file : \"%s\" - %d, %d, %d", g__efs, g__msx, g__msy, g__msc);
-                    mSL_log(SysLogBox, #s);
+                    // audio file droped here (File_Handle logs the line read, or the error)
                     g__dpa = 0;
                     // should we create the reader ?
                     (!rok) ? (
@@ -19119,7 +19355,10 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                         (k === its_RdrStat_Reading) ? Color_Limegreen : dfCol;
                     (rcbl[its_Rdr_LineNb] >= 0) ? (
                         sprintf(pad_Rdr_Labs[3], "Line %d", rcbl[its_Rdr_LineNb]+1);
-                        sprintf(pad_Rdr_Labs[4], "Size %.3f s", floor(1000*rcbl[its_Rdr_SmplCnt]/srate)/1000);
+                        // the size of the part read : the line, or its segment (its_Rd_SegCheck ; a clic : the menu of
+                        // the segment and of the zoom, its_Rd_SegMenu)
+                        sprintf(pad_Rdr_Labs[4], its_Rd_HasSeg(rcbl) ? "Seg %.3f s" : "Size %.3f s",
+                            floor(1000*rcbl[its_Rdr_SmplCnt]/srate)/1000);
                         sprintf(pad_Rdr_Labs[5], "Channels %d", rcbl[its_Rdr_ChNbr]);
                         sprintf(pad_Rdr_Labs[6], "First %d", rcbl[its_Rdr_Bf1stChan]);
                         sprintf(pad_Rdr_Labs[7], "Used %d", rcbl[its_Rdr_BfChanUsed]);
@@ -19128,6 +19367,7 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                         (rcbl[its_Rdr_Mode] !== its_RdrMode_Delay) ? sprintf(pad_Rdr_Labs[13], "Speed %.3f", rcbl[its_Rdr_Speed]);
                         pad_Rdr_Colrs[3] = pad_Rdr_Colrs[4] = pad_Rdr_Colrs[5] =
                         pad_Rdr_Colrs[6] = pad_Rdr_Colrs[7] = Color_Heliotrope;
+                        its_Rd_HasSeg(rcbl) ? (pad_Rdr_Colrs[4] = Color_Goldenrod);
                         its_Out_Label(pad_Rdr_Labs[10], rcbl[its_Rdr_OutK], rcbl[its_Rdr_OutOff]);
                     ) : (
                         strcpy(pad_Rdr_Labs[3], "Line: None"); // (a reader just created : no line yet)
@@ -19257,7 +19497,7 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                     sprintf(pad_Rdr_Labs[0],"Reader %d", rdr+1);
                 (rok) ? (
                     (rerr) ? (
-                        sprintf(pad_Rdr_Labs[14],"Err: %d", rerr);
+                        sprintf(pad_Rdr_Labs[14],"Err: %04d", rerr);
                         pad_Rdr_Colrs[14] = Col_P6;
                     );
                 );
@@ -19311,8 +19551,8 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                             mSL_log(SysLogBox, #itm);
                     */
                     //==============================================
-                    // right mouse clic (the cells "mode", "Line", "first", "used" and "Action" : left clic too)
-                    ((zz & ui_jpad_ev_rmc) || ((zz & ui_jpad_ev_lmc) && ((zzmcl === 2) || (zzmcl === 3) || (zzmcl === 6) || (zzmcl === 7) || (zzmcl === 15)))) ? (
+                    // right mouse clic (the cells "mode", "Line", "Size" (the segment), "first", "used" and "Action" : left clic too)
+                    ((zz & ui_jpad_ev_rmc) || ((zz & ui_jpad_ev_lmc) && ((zzmcl === 2) || (zzmcl === 3) || (zzmcl === 4) || (zzmcl === 6) || (zzmcl === 7) || (zzmcl === 15)))) ? (
                         (zzmcl === 0) ? (
                             k = rdr+1;
                             ui_menu_tick(menu_Rdr_Ids, k, 1);
@@ -19346,11 +19586,7 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                                 k = rcbl[its_Rdr_Status]+1;
                                 ui_menu_tick(menu_Rdr_Status, k, 1);
                                 xx = control_jmenu(menu_Rdr_Status);
-                                (xx != 0) ? (
-                                    x = Rd_Set_Status(rdr, xx - 1);
-                                    sprintf(#itm, "Menu 1 : %d -> %d -> %d", rdr, xx, x);
-                                    mSL_log(SysLogBox, #itm);
-                                );
+                                (xx != 0) ? Rd_Set_Status(rdr, xx - 1);
                                 ui_menu_tick(menu_Rdr_Status, -1, 0);
                             );
                         ) :
@@ -19365,13 +19601,15 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                             );
                             xx = its_Menu_Clic(menu_Lin_SIds, zz); // select a line (right or left clic)
                             (xx != 0) ? (
-                                x = Rd_Set_Line(rdr, xx - 1); // 0 for "none"
+                                Rd_Set_Line(rdr, xx - 1); // 0 for "none"
                                 // no reader yet, the mode Stretch or Brage chosen in cell 2 (RDBL[1]) : the reader is made in this mode
                                 ((!rok) && (xx > 1) && its_Rd_Sets(RDBL[1])) ? Rd_Set_Mode(rdr, RDBL[1]);
-                                sprintf(#itm, "Menu 3 : %d -> %d -> %d", rdr, xx, x);
-                                mSL_log(SysLogBox, #itm);
                             );
                             ui_menu_tick(menu_Lin_SIds, -1, 0);
+                        ) :
+                        (zzmcl === 4) ? (
+                            // the segment of the line read, the zoom of the waveform (as a right clic in the waveform)
+                            (rok && (rcbl[its_Rdr_LineNb] >= 0)) ? its_Rd_SegMenu(rcbl, RDBL, zz);
                         ) :
                         (zzmcl === 6) ? (
                             (rok) ? (
@@ -19531,17 +19769,20 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                                     rgh = menu_Rdr_LoopF[ui_jmenu_items + 11 + (0|((w - 1) / menu_Wrt_Grp)) * (menu_Wrt_Grp + 1)];
                                     str_setchar(rgh, 1, '!');
                                 );
-                                // a writer that can't be chosen is gray, with the reason (its line, W-Mix, its direction)
+                                // a writer that can't be chosen is gray, with the reason (its line, W-Mix, its direction ;
+                                // the reader reads a segment of the line, see its_Rd_SegCheck)
                                 i = 0; loop(WR_CNT,
                                     x = Writers_set[i];
                                     wy = ((x > BASE_MEMORY) && (x[-2] === KW_writ)) ? (
                                         (x[its_Wrt_Lcbl] !== rcbl[its_Rdr_Lcbl]) ? ((x[its_Wrt_LineNb] < 0) ? 2 : 3) :
+                                        its_Rd_HasSeg(rcbl) ? 6 :
                                         (x[its_Wrt_Mode] === its_WrtMode_WMix) ? 4 :
                                         (x[its_Wrt_Dir] !== its_WrtDir_Fwd) ? 5 : 0
                                     ) : 1;
                                     (wy === 2) ? sprintf(#its_LfTx, "Writer %d (no line)", i+1) :
                                     (wy === 3) ? sprintf(#its_LfTx, "Writer %d (line %d)", i+1, x[its_Wrt_LineNb]+1) :
                                     (wy === 4) ? sprintf(#its_LfTx, "Writer %d (W-Mix)", i+1) :
+                                    (wy === 6) ? sprintf(#its_LfTx, "Writer %d (segment)", i+1) :
                                     (wy === 5) ? sprintf(#its_LfTx, "Writer %d (%s)", i+1,
                                         menu_Wrt_Dir_N[max(0, min(its_WrtDirCnt - 1, 0|x[its_Wrt_Dir]))]) :
                                     sprintf(#its_LfTx, "Writer %d", i+1);
@@ -19758,7 +19999,9 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                 (((lcbl > BASE_MEMORY) && (lcbl[-2] === KW_lcbl)) && (w >= its_RdrWaveMin)) ? (
                     ui_split_top(w);
                         ui_pad(1,2,1,2);
-                        its_wave_reader(lcbl, rcbl, rdr, RDBL[9], its_Wave_Flags(RDBL + 10));
+                        // a right clic in the waveform : the menu of the segment and of the zoom (as the cell 4)
+                        its_Rd_SegMenu(rcbl, RDBL, 0);
+                        its_wave_reader(lcbl, rcbl, rdr, RDBL);
                     ui_pop();
                 );
             );
@@ -19782,8 +20025,6 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                     paramValues[p_playVol] = zi = rcbl[its_Rdr_OutVoldB];
                     r = parCtl(p_playVol);
                     (r != 0) ? (
-                        sprintf(#itm, "Vol -> %d %.3f", r, parV(p_playVol));
-                        mSL_log(SysLogBox, #itm);
                         (r === 8) ? (
                             // right clic to reset
                             rcbl[its_Rdr_OutVoldB] = 0;
@@ -19815,8 +20056,6 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                         paramValues[p_playSpeed] = zi = rcbl[its_Rdr_Speed];
                         r = parCtl(p_playSpeed);
                         (r != 0) ? (
-                            sprintf(#itm, "Speed -> %d %.3f", r, parV(p_playSpeed));
-                            mSL_log(SysLogBox, #itm);
                             (r === 8) ? (
                                 // right clic to reset
                                 Rd_Set_Speed(rdr, 1, 1);
@@ -19871,8 +20110,6 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                         );
                         r = parCtl(p_playPos);
                         (r != 0) ? (
-                            sprintf(#itm, "Position -> %d %.3f", r, parV(p_playPos));
-                            mSL_log(SysLogBox, #itm);
                             rcbl[its_Rdr_NxtPosSec] = parV(p_playPos); // Relative, in seconds
                             /*
                             (r === 8) ? (
@@ -20029,6 +20266,13 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
 
                     // zoom of the waveform (a display property : RDBL[9]), not in delay mode
                     ((rcbl[its_Rdr_Mode] !== its_RdrMode_Delay) && (h3 > 0)) ? (
+                        // (its label : the zoom on the loop, or centered on its start, its end, the read head (not in mode
+                        // Grains), see its_wave_reader)
+                        k = RDBL[10] & its_WaveZoomK;
+                        paramBlock[p_play_Zoom * paramEntSize + pp_MFmt] = (k === its_WaveZoomLo) ? "Zoom start : %.0f" :
+                            (k === its_WaveZoomHi) ? "Zoom end : %.0f" :
+                            ((k === its_WaveZoomHead) && (rcbl[its_Rdr_Mode] !== its_RdrMode_Grains)) ? "Zoom head : %.0f" :
+                            "Zoom : %.0f";
                         paramValues[p_play_Zoom] = RDBL[9];
                         r = parCtl(p_play_Zoom);
                         (r != 0) ? (
@@ -20254,9 +20498,7 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lc
 
             // an audio file dropped elsewhere in the module : read into this line if it fits, into a new line otherwise
             (zzmi && (g__dpa != 0)) ? (
-                sprintf(#s, "Line::drop file : \"%s\" - %d, %d, %d", g__efs, g__msx, g__msy, g__msc);
-                mSL_log(SysLogBox, #s);
-                g__dpa = 0;
+                g__dpa = 0; // (File_Handle logs the line read, or the error)
                 (!lok) ? (
                     p1 = p2 = -1;
                 ) : (
@@ -20314,7 +20556,8 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lc
         FXP_Fill : labels and colors of the cells of the lines 1 ... RDBL[3]-1 (cells 8 ...)
         FXP_Click : event "ev" (ui_jpad_ev_...) on the cell "cell" (8 ...)
         FXP_Sliders : draw and handle the sliders
-        FXP_Graph : draw and handle the graphic area (its height in RDBL[6], set by FXP_Dims ; 0 : none)
+        FXP_Graph : draw and handle the graphic area (its height in RDBL[6], set by FXP_Dims ; 0 : none ; negative : a
+            resizable area, -RDBL[6] its default height, see show_Effect_Pad)
     After a modification, the function resets fx[its_Efx_Check] (the effect is checked again by exec_fx)
 */
 FXP_Dims = 0;
@@ -21710,7 +21953,7 @@ function FX_Meter_Eng(fx) local(wk)
     VU meter (2026-11-11 : the plugin Multichannel_VU_meter, see GM-Meters) : line 1, cell 8 = the source (right clic :
     menu ; left clic : its first channel), 9 = the GUI mode, 10 = the saturation threshold, 11 = the meter color, 12 = the
     saturation auto clear (left clic : the next one, Shift : the previous one ; right clic : menu), 13 = clear the peaks ;
-    sliders : the sample time, the highlighted channel, the gain of the source ; the graphic area (all the height left) :
+    sliders : the sample time, the highlighted channel, the gain of the source ; the graphic area (keys + and - : its height) :
     the meters of the plugin (left clic : clear the peaks ; right clic : the menu of the plugin) ; the source goes
     unchanged to the output (the settings : Par1 ... Par6, see GM-Meters)
 */
@@ -21721,7 +21964,7 @@ local (p, k, m, d, r, st, e)
     (what === FXP_Dims) ? (
         RDBL[3] = 2;
         RDBL[5] = 3;
-        RDBL[6] = -its_VuGraphH; // (negative : all the height left, see show_Effect_Pad)
+        RDBL[6] = -its_VuGraphH; // (negative : resizable, keys '+' and '-', see show_Effect_Pad)
     ) :
     (what === FXP_Fill) ? (
         FX_Meter_Src(fx, what, 0);
@@ -21786,7 +22029,7 @@ local (p, k, m, d, r, st, e)
     Limiter (2026-11-11 : the plugin SmoothMultiLimiter, see GM-Meters) : line 1, cell 8 = the source (right clic : menu ;
     left clic : its first channel), 9 = the gain reduction (its max since the last frame), 10 = the latency (the
     anticipation : the source is delayed by it) ; sliders : the 8 sliders of the plugin (limit, pre-gain, volume out,
-    attack = the anticipation, release, distortion, zoom, channels displayed) ; the graphic area (all the height left) : the
+    attack = the anticipation, release, distortion, zoom, channels displayed) ; the graphic area (keys + and - : its height) : the
     response of the soft clipper, the history of the loudest channels and of the peak envelope (the settings : Par1 ...
     Par8, see GM-Meters)
 */
@@ -21797,7 +22040,7 @@ local (k, j, r, v, st, e)
     (what === FXP_Dims) ? (
         RDBL[3] = 2;
         RDBL[5] = 8;
-        RDBL[6] = -its_VuGraphH; // (negative : all the height left, see show_Effect_Pad)
+        RDBL[6] = -its_VuGraphH; // (negative : resizable, keys '+' and '-', see show_Effect_Pad)
     ) :
     (what === FXP_Fill) ? (
         FX_Meter_Src(fx, what, 0);
@@ -21887,6 +22130,8 @@ local (ty)
     RDBL[0] : number of the effect to display
     RDBL[3] : lines of the pad (set by the function of the type)
     RDBL[5] : count of sliders (set by the function of the type)
+    RDBL[6] : height of the graphic area (set by the function of the type ; negative : resizable, see its_FxGraph_Keys)
+    RDBL[7] : height of a resizable graphic area (0 : its default, -RDBL[6])
     Line 0, common to all types :
         0 effect number (left clic : next one, shift : previous one ; right clic : menu)
         1 type (right clic : menu ; creates the effect if needed)
@@ -21898,10 +22143,24 @@ local (ty)
         7 actions (right clic : menu)
     Lines 1 ... 3 and the sliders : the function of the type (FX_Type_Pad) ; cell 23 (not the LFO) : the auto-limiter
         (clic : On / Off ; On : the gain reduction in dB)
-    Key 'd' : dump of the effect in the log
+    Key 'd' : dump of the effect in the log ; keys '+' (or '=') and '-' : the height of a resizable graphic area (the meters)
 */
+// keys of a resizable graphic area of an effect (the VU meter, the Limiter), the mouse over the module : '+' (or '=') and
+// '-' change its height ("hp" : the height kept, 0 for the default "dflt" ; "hs" : the height shown, the height kept
+// reduced to the height left in the pane : '-' starts from it)
+function its_FxGraph_Keys(hp, dflt, hs)
+local (h)
+(
+    h = (hp[0] > 0) ? hp[0] : dflt;
+    (GM_key_take('+') || GM_key_take('=')) ? (
+        hp[0] = max(its_FxGraphHMin, min(its_FxGraphHMax, h + its_FxGraphHStep)); // taller
+    ) :
+    GM_key_take('-') ? (
+        hp[0] = max(its_FxGraphHMin, min(its_FxGraphHMax, min(h, hs) - its_FxGraphHStep)); // smaller
+    );
+);
 function show_Effect_Pad(RDBL, blockId)
-local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh, zz, zzmcl, act)
+local (h1, h2, h3, h3d, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh, zz, zzmcl, act)
 (
     its_FxEd_Take(); // (a value edited in the prompt, its_FxEd_Open)
     fxn = RDBL[0]; // number of the effect to be displayed
@@ -21912,7 +22171,13 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, 
     h1 = uix_jpadHeight(RDBL[3]);
     h2 = (RDBL[5] > 0) ? ui_jd_slidh * RDBL[5] + 6 : 0;
     h3 = RDBL[6];
-    (h3 < 0) ? (h3 = max(-h3, ui_height() - h1 - h2 - ui_jd_ctgr)); // (negative : all the height left, at least -h3)
+    h3d = 0; // a resizable area : its default height
+    (h3 < 0) ? (
+        // negative : resizable, the height kept in RDBL[7] (0 : -h3), reduced to the height left (at least its_FxGraphHMin)
+        h3d = -h3;
+        h3 = (RDBL[7] > 0) ? RDBL[7] : h3d;
+        h3 = max(its_FxGraphHMin, min(h3, ui_height() - h1 - h2 - ui_jd_ctgr));
+    );
     uix_jneed = h1+h2+h3+ui_jd_ctgr;
     (ui_height() >= uix_jneed) ? (
         ui_split_top(uix_jneed);
@@ -21922,6 +22187,8 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, 
             keepBlockInfos(blockId);
             // 'd' : dump of the effect in the log (taken before the pad)
             (zzmi && fok && GM_key_take('d')) ? GM_Dump(fx, its_Efx_BlkSize, sprintf(#, "Effect %d", fxn+1));
+            // '+', '-' : the height of a resizable graphic area (for the next frame)
+            (zzmi && fok && (h3d > 0)) ? its_FxGraph_Keys(RDBL + 7, h3d, h3);
             (zzmi) ? (
                 ui_push();
                     // stack is now 2 levels deep
@@ -21930,7 +22197,7 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, 
                 ui_pop();
                 (g__dpa != 0) ? (
                     // audio file droped here : ignored (but consumed)
-                    sprintf(#s, "Effect::drop file : \"%s\" - %d, %d, %d", g__efs, g__msx, g__msy, g__msc);
+                    sprintf(#s, "Effect %d : sound file ignored (drop it on a reader or a line) : \"%s\"", fxn+1, g__efs);
                     mSL_log(SysLogBox, #s);
                     g__dpa = 0;
                 );

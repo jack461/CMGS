@@ -270,6 +270,7 @@ mh_pmpos = 0;
 mh_cur_box = 0;
 mh_state = 0;
 mh_BoxAdd = 0;
+mh_lmx = mh_lmy = 0; // the camera of the box of the speakers (mh_state 5) : the last mouse position
 show_mouse = 0;
 mh_ip_x = 0;
 mh_ip_y = 0;
@@ -820,7 +821,10 @@ menu_uix_jgbox = make_jmenu(
 
 menu_uix_jgbgr = make_jmenu(
     ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_usesel | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-    "Background", ">All boxes|Select|Desselect|Lock|Unlock|Release|Remove|Reset size|Increase size|<Decrease size|>Selected boxes|Desselect|Lock|Unlock|Release|Remove|Reset size|Increase size|Decrease size|Align|<Pack|Recall boxes|Refresh display");
+    "Background", ">All boxes|Select|Desselect|Lock|Unlock|Release|Remove|Reset size|Increase size|<Decrease size|>Selected boxes|Desselect|Lock|Unlock|Release|Remove|Reset size|Increase size|Decrease size|Align|<Pack|Recall boxes|Refresh display|>Show|Clock|HP Box|<Projector");
+// the sub-menu Show of the background (2026-11-12) : its entries in the menu (ticks : the boxes shown, see mouse_hover)
+// and their numbers in the result (22, 23, 24 : the clock, the box of the speakers, the state of the projector)
+menu_uix_jgbgr_Show = 24;
 
 //================ Debugging ===================
 // Memory display boxes
@@ -2951,7 +2955,24 @@ local (Err, projnum, ctlblock, ctlname, ctlslid, box, bxid, ppro, s, w)
         //===20===//
     ):(
         //===21===//
-        Err=21;
+        // the fader 0x36 of the APCmini (2026-11-12, see apc_PVol) : the volume of the projector "par" (dB ; prv_PVolMin :
+        // silence) ; while the fader has not taken it over (soft takeover), its position too
+        ((par >= 1) && (par <= projucnt)) ? (
+            w = serialBlock[Pr7_PrjVol + par - 1];
+            bxid = (par << 8) | 69; // (65 ... 68 : the status of the projector, below)
+            sprintf(#xidt, "%d  %s", par, "Volume");
+            (w <= prv_PVolMin) ? strcpy(#xval, "-inf dB") : sprintf(#xval, "%.1f dB", w);
+            !apc_pvSync ? (
+                (apc_pvFader <= prv_PVolMin) ? strcpy(#xvf, "  (fader -inf)") : sprintf(#xvf, "  (fader %.1f)", apc_pvFader);
+                strcat(#xval, #xvf);
+            );
+            box = mk_display_box(bxid, #xval, #xidt, 135, (bx__2strings|bx__boxaround|bx__drawhfrbox|bx__drawctls), 6, 4,
+                                -1, -1, bx_extraw, 22, bx_crdate, timez, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+            (box > 0) ? (
+                strcpy(box[bx_string1], #xval);
+                strcpy(box[bx_string2], #xidt);
+            );
+        );
         //===21===//
     );););););):((obj<33)?((obj<27)?((obj<24)?((obj<23)?(
         //===22===//
@@ -5418,6 +5439,11 @@ s__wxy = timesy - timesz;
 @serialize
 // The tabs names and the tabs and panes configuration (see pns_Serialize, mSL_Panes.jsfx-inc)
 pns_Serialize();
+// the volumes of the projectors (serialBlock, read by pns_Serialize) : 0 dB at most since 2026-11-12 (older projects : up
+// to + 12 dB, see prv_PVolMax)
+(file_avail(0) >= 0) ? (
+    z__pv = 0; loop(24, serialBlock[Pr7_PrjVol + z__pv] = min(prv_PVolMax, serialBlock[Pr7_PrjVol + z__pv]); z__pv += 1;);
+);
 // The configurations of the modules "Edit A" ... "Edit D" (see Diffusion-3-Edit.jsfx-inc)
 ed_Serialize();
 // The settings of the spatial projectors (see Diffusion-3-Spatial.jsfx-inc)
@@ -5550,6 +5576,39 @@ gxworktodo ? (
 );
 
 
+// The box of the speakers (HP_Box) : par -1 toggles, 0 hides, 1 shows it (key 'i', menu of the background : Show)
+function HP_Box_Show(par)
+(
+    (HP_Box > 0) ? (
+        (par === -1) ? par = !(HP_Box[bx_activ] & bx__drawbox);
+        par ? (HP_Box[bx_activ] |= bx__drawbox) : (HP_Box[bx_activ] &= 0x7FFFFFFF - bx__drawbox);
+    );
+);
+
+// Remove a box of the Live screen at once (2026-11-12 : the menus Remove of a box, of all the boxes, of the selected ones,
+// and Show) : the end of its display without the fade out (which takes about 30 s, see display_boxes) ; the clock, the
+// state of the projector and the box of the speakers are hidden (statclock, statproj, HP_Box_Show : the menu Show)
+function live_box_remove(box)
+local (flact)
+(
+    (box > 0) ? (
+        (box[bx_type] === bx_ty_hpset) ? (
+            (box === HP_Box) ? HP_Box_Show(0) : (box[bx_activ] &= 0x7FFFFFFF - bx__drawbox);
+        ) : (
+            ((box === clockbox) && (box[bx_name] === clockid)) ? toggleclock(0);
+            ((box === projbox) && (box[bx_name] === projid)) ? toggleproj(0);
+            flact = box[bx_activ];
+            (flact & bx__used) ? (
+                // as at the end of a fade out : display_boxes then frees the box (and its place 1 s later)
+                flact |= bx__drawended;
+                flact &= 0x7FFFFFFF - bx__fading - bx__drawready - bx___keep - bx__drawhfrbox - bx__update;
+                box[bx_endshow] = timec;
+                box[bx_activ] = flact;
+            );
+        );
+    );
+);
+
 // The keys of the Live screen : after the box under the mouse (mouse_hover), before the commands of the plugin
 function do_live_actions() local(gwk, box)
 (
@@ -5624,7 +5683,7 @@ function do_live_actions() local(gwk, box)
             HP_Box[bx_crdate] = timec; // mark
         ) :
         (gwk === 'i') ? (
-            HP_Box[bx_activ] & bx__drawbox ? HP_Box[bx_activ] &= 0x7FFFFFFF - bx__drawbox : HP_Box[bx_activ] |= bx__drawbox;
+            HP_Box_Show(-1); // show / hide the box of the speakers
         ) :
         (gwk === '-') ? (
             check_graph = 1 - check_graph;
@@ -6411,13 +6470,16 @@ ed_Frame();
 //====== Handle Mouse Hover ======
 function mouse_hover()
 local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i, j, k, w, by, kl, kp, kr,
-    kcmd, kshft, xx, xy, kopt, bsel, mh_boxnb, mp_w, mp_h, mv_x, mv_y)
+    kcmd, kshft, xx, xy, kopt, bsel, mh_boxnb, mp_w, mp_h, mv_x, mv_y, dx, dy, mit)
 (
     xx = mh_cur_box = boxnb = 0;
     ms_x = mouse_x - win_Xfr;
     ms_y = mouse_y - win_Yfr;
-    kl = mouse_cap & 1; // left click
-    kr = mouse_cap & 2; // right click
+    // the buttons without the "ghost" ones (2026-11-12, uix_mouse_cap in ui-lib) : after a menu entry chosen with a left
+    // clic, macOS reports the left button with each press of the right one until a real left clic : the box under the
+    // mouse was grabbed (kl = 1, state 1) and its menu was no more offered
+    kl = uix_mouse_cap() & 1; // left click
+    kr = uix_mouse_cap() & 2; // right click
     kcmd = mouse_cap & 4; // command key
     kopt = mouse_cap & 16;
     kshft = mouse_cap & 8; // shft key
@@ -6438,6 +6500,8 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
                 bxpos = dispalloc_a[val - 2];
             );
             boxnb = bxpos >> bx__shiftn; // 1st box is #1
+            // a box no more used (removed or ended, its place not yet released) : the background (2026-11-12)
+            ((boxnb > 0) && !(dispboxes[(boxnb - 1) * dispboxsize + bx_activ] & bx__used)) ? boxnb = 0;
         );
         AAAAAA_boxnbL = boxnb;
         ((boxnb > 0) && (mh_BoxAdd === 0)) ? (
@@ -6496,6 +6560,12 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
                 GM_key_take(xx); // the key has been used
                 xx = 0;
             );
+            // the wheel on the HP box : the distance of the camera, as in the module Space 3D (2026-11-12)
+            ((mh_cur_box[bx_type] === bx_ty_hpset) && (uix_scroll_y != 0)) ? (
+                s3d_dist = max(1.8, min(12, s3d_dist * exp(- uix_scroll_y / 1000)));
+                uix_scroll_y = 0;
+                ui_GFXdoNow |= 4;
+            );
             // should we display the menu (right click)
             mh_in += 1;
             (kl === 0) ? (
@@ -6551,9 +6621,8 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
                 ) :
 
                 (xx === 5) ? (
-                    // Remove the box
-                    box_recall(mh_cur_box, 0, bx___keep);
-                    mh_cur_box[bx_endshow] = 1;
+                    // Remove the box (at once)
+                    live_box_remove(mh_cur_box);
                     xx = 0;
                 ) :
 
@@ -6640,6 +6709,11 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
 
 
     ((kl === 0) && (boxnb === 0)) ? (
+        // the sub-menu Show : the boxes shown are ticked
+        mit = menu_uix_jgbgr + ui_jmenu_items + menu_uix_jgbgr_Show;
+        str_setchar(mit[0], 1, statclock ? '!' : ui_jmenu_chSP);
+        str_setchar(mit[1], 1, ((HP_Box > 0) && (HP_Box[bx_activ] & bx__drawbox)) ? '!' : ui_jmenu_chSP);
+        str_setchar(mit[2], 1, statproj ? '!' : ui_jmenu_chSP);
         xx = control_jmenu(menu_uix_jgbgr);
         (xx != 0) ? (
             uim_trc6 ? (
@@ -6648,6 +6722,23 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
             );
 
 
+            // Show : the clock, the box of the speakers, the state of the projector (as the keys 'c', 'i', 'p' ; hidden at
+            // once, without the fade out)
+            (xx === 22) ? (
+                statclock ? (
+                    toggleclock(0);
+                    (clockbox[bx_name] === clockid) ? live_box_remove(clockbox);
+                ) : toggleclock(1);
+            ) :
+            (xx === 23) ? (
+                HP_Box_Show(-1);
+            ) :
+            (xx === 24) ? (
+                statproj ? (
+                    toggleproj(0);
+                    (projbox[bx_name] === projid) ? live_box_remove(projbox);
+                ) : toggleproj(1);
+            ) :
             (xx === 21) ? (
                 wrefresh = 1;
             ) :
@@ -6701,9 +6792,8 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
                         ((xx === 5) || (bsel && (xx === 13))) ? ( // release
                             box_recall(box, 0, bx__permlock|bx__select);
                         ) :
-                        ((xx === 6) || (bsel && (xx === 14))) ? ( // remove
-                            box_recall(box, 0, bx___keep);
-                            box[bx_endshow] = 1;
+                        ((xx === 6) || (bsel && (xx === 14))) ? ( // remove (at once)
+                            live_box_remove(box);
                         ) :
                         ((xx === 7) || (bsel && (xx === 15))) ? (
                             // reset initial size of box
@@ -6750,6 +6840,12 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
             ((kp === 0) && (mh_cur_box > 0)) ? (
                 // kl != 0, we have just clicked the left button (with cmd & shift maybe), and we are inside a box
                 // prepare drawing frame
+                (kshft && !kcmd && (mh_cur_box[bx_type] === bx_ty_hpset)) ? (
+                    // Shift + left drag on the HP box : the camera of its view (as a drag in the module Space 3D) :
+                    // orbit ; Shift + Alt : the distance (2026-11-12)
+                    mh_state = 5;
+                    mh_lmx = mouse_x; mh_lmy = mouse_y;
+                ) :
                 (kcmd && kopt) ? (
                     // release/unrealease the box
                     (mh_cur_box[bx_activ] & (bx__select | bx__permlock)) ? (
@@ -6909,6 +7005,29 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
 
 
 
+        (mh_state === 5) ? (
+            // the camera of the HP box (Shift + left drag) : orbit (horizontal : azimuth, vertical : elevation, as
+            // s3d_mouse) ; with Alt : the distance (up : closer) ; Shift and Alt may change during the drag
+            (kl === 0) ? (
+                mh_state = 0; // left button released
+            ) : (
+                dx = mouse_x - mh_lmx; dy = mouse_y - mh_lmy;
+                ((dx != 0) || (dy != 0)) ? (
+                    kopt ? (
+                        s3d_dist = max(1.8, min(12, s3d_dist * exp(dy * 0.005)));
+                    ) : (
+                        s3d_az -= dx * 0.008;
+                        s3d_el += dy * 0.008;
+                        sx_view = sx_ViewOf(); // (front, side, top or perspective : key '?' goes on from it)
+                    );
+                    ui_GFXdoNow |= 4;
+                );
+                mh_lmx = mouse_x; mh_lmy = mouse_y;
+            );
+        );
+
+
+
         (mh_state === 4) ? (
             mx = min(mh_ip_x, ms_x);
             my = min(mh_ip_y, ms_y);
@@ -6950,7 +7069,7 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
 
 
     );
-    mh_mpos = mouse_cap;
+    mh_mpos = uix_mouse_cap(); // (the previous buttons, without the "ghost" ones)
 );
 
 
@@ -7021,7 +7140,7 @@ local (lpp, pval, upp, tladd, bval, bxn, box, del)
 //====== TABS AND PANES : HOST FUNCTIONS (see mSL_Panes.jsfx-inc) ======
 function do_GenericTabStart()
 (
-    ui_jmouse_cap |= mouse_cap;
+    ui_jmouse_cap |= uix_mouse_cap(); // (without the "ghost" buttons, see uix_mghost in ui-lib)
     ui_Xtime_period = 1; // refresh screen every second
 );
 
