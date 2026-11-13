@@ -1,0 +1,113 @@
+print("Ex-1056. Interstys table : les liens MIDI (Link, Inject).");
+
+/*
+  Un lien relie une commande MIDI de la piste (cc m, note m ; chan c, tous les canaux par defaut) a un curseur generique
+  (target Ctl k, de -1 a 1 par defaut) ou a une cle d'un module (target Reader|Writer|Effect id cle) : la valeur 0 ... 127
+  va de min a max (law Lin, ou Exp : min (max / min) ^ (v / 127)). Inject simule un message de la piste : les valeurs des
+  modules sont posees tout de suite. Une note donne sa velocite, 0 quand elle finit (velocite 0). Deux liens ont ici la
+  meme commande (cc 16) : celui du Filter n'ecoute que le canal 1, celui du Flanger tous les canaux. Le mot "mix" d'un
+  Flanger est sa cle (-100 ... 100), pas celle de la Saturation. Global midilog On : le message est note dans le journal.
+  Erreurs (rien n'est cree) : e1 target Line (2730) ; e2 min avant target (2731) ; e3 sans target (2732) ; e4 sans max
+  (2733) ; e5 la cle mode (2734 : pas un nombre) ; e6 un effet qui n'existe pas (2735) ; e7 la cle freq d'une Saturation
+  (2736) ; e8 law Exp de -1 a 1 (2737) ; e9 Dump d'un lien qui n'existe pas (2738) ; e10 Inject pc (2739) ; e11 cc 128
+  (2754). Les numeros des modules dependent du projet (%d).
+*/
+
+var r = table(data(
+    Interstys
+    Free Link All
+    Line ln  length 1
+    Writer wr  line ln  source In:0
+    Reader rd  line ln
+    Effect fi  type Filter  chan 2  source In:0  freq 1000
+    Effect fl  type Flanger  chan 2  source In:0
+    Link 1  cc 19  target Ctl 1
+    Link 2  cc 16  chan 1  target Effect fi freq  min 100  max 10000  law Exp
+    Link 3  cc 16  target Effect fl mix  min -100  max 100
+    Link 4  note 1  target Reader rd vol  min -60  max 0
+    Link 5  cc 23  target Writer wr gain  min -20  max 20
+    Dump Link 1
+    Dump Link 2
+    Dump Link 3
+    Dump Link 4
+    Dump Link 5
+    Check Link 2  cc 16  chan 1  target Effect fi freq  min 100  max 10000  law Exp
+    Inject cc 19 127
+    Dump Control 1
+    Inject cc 16 127  chan 1
+    Check Effect fi  freq 10000
+    Check Effect fl  mix 100
+    Inject cc 16 0  chan 1
+    Check Effect fi  freq 100
+    Check Effect fl  mix -100
+    Inject cc 16 127  chan 2
+    Check Effect fi  freq 100
+    Check Effect fl  mix 100
+    Inject note 1 127
+    Check Reader rd  vol 0
+    Inject note 1 0
+    Check Reader rd  vol -60
+    Inject cc 23 0
+    Check Writer wr  gain -20
+    Global midilog On
+    Inject cc 19 64
+    Global midilog Off
+    Free Link 3
+    Dump Link All
+    Free Link All
+    Control 1  value 0
+    Free Effect fl
+    Free Effect fi
+    Free Reader rd
+    Free Writer wr
+    Free Line ln
+));
+print(sprintf(0, "Ex-1056. resultat : %d", r));
+
+var e1 = table(data( Interstys  Link 1  cc 1  target Line 1  min 0  max 1 ));
+var e2 = table(data( Interstys  Link 1  cc 1  min 0  target Ctl 1 ));
+var e3 = table(data( Interstys  Link 1  cc 1 ));
+var e4 = table(data( Interstys  Effect x  type Filter  chan 2  source In:0  Link 1  cc 1  target Effect x freq  min 100 ));
+var e5 = table(data( Interstys  Effect x  type Filter  chan 2  source In:0  Link 1  cc 1  target Effect x mode  min 0  max 1 ));
+var e6 = table(data( Interstys  Link 1  cc 1  target Effect 512 freq  min 100  max 1000 ));
+var e7 = table(data( Interstys  Effect x  type Saturation  chan 2  source In:0  Link 1  cc 1  target Effect x freq  min 100  max 1000 ));
+var e8 = table(data( Interstys  Link 1  cc 1  target Ctl 1  law Exp ));
+var e9 = table(data( Interstys  Free Link 7  Dump Link 7 ));
+var e10 = table(data( Interstys  Inject pc 3 0 ));
+var e11 = table(data( Interstys  Link 1  cc 128  target Ctl 1 ));
+print(sprintf(0, "Ex-1056. erreurs : %d %d %d %d %d %d %d %d %d %d %d", e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11));
+
+// Expected "Link 1 cc 19 target Ctl 1 min -1 max 1"
+// Expected "Link 2 cc 16 chan 1 target Effect %d freq min 100 max 10000 law Exp"
+// Expected "Link 3 cc 16 target Effect %d mix min -100 max 100"
+// Expected "Link 4 note 1 target Reader %d vol min -60 max 0"
+// Expected "Link 5 cc 23 target Writer %d gain min -20 max 20"
+// Expected "Check Link 2 OK"
+// Expected "Control 1 value 1"
+// Expected "Check Effect %d OK"
+// Expected "Check Effect %d OK"
+// Expected "Check Effect %d OK"
+// Expected "Check Effect %d OK"
+// Expected "Check Effect %d OK"
+// Expected "Check Effect %d OK"
+// Expected "Check Reader %d OK"
+// Expected "Check Reader %d OK"
+// Expected "Check Writer %d OK"
+// Expected "MIDI : B0 13 40 (cc 19, chan 1, 64) : 1 link"
+// Expected "Link 1 cc 19 target Ctl 1 min -1 max 1"
+// Expected "Link 2 cc 16 chan 1 target Effect %d freq min 100 max 10000 law Exp"
+// Expected "Link 4 note 1 target Reader %d vol min -60 max 0"
+// Expected "Link 5 cc 23 target Writer %d gain min -20 max 20"
+// Expected "Ex-1056. resultat : 0"
+// Expected error 2730
+// Expected error 2731
+// Expected error 2732
+// Expected error 2733
+// Expected error 2734
+// Expected error 2735
+// Expected error 2736
+// Expected error 2737
+// Expected error 2738
+// Expected error 2739
+// Expected error 2754
+// Expected "Ex-1056. erreurs : 2730 2731 2732 2733 2734 2735 2736 2737 2738 2739 2754"

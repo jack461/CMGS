@@ -7902,6 +7902,16 @@ function its_Ctl_Set(k, v)
 (
     <? i = 0; loop(NB_GSL, printf("(k === %d) ? (slCtl%d = v; slider_automate(slCtl%d);) :\n    ", i, i+1, i+1); i += 1;); ?>0;
 );
+// the generic slider Ctl k + 1 written by @block (a MIDI link, see its_Lk_Midi), without telling REAPER ; then, by @gfx,
+// REAPER told (its_Lk_Frame : as a move of the slider, for the automation)
+function its_Ctl_Put(k, v)
+(
+    <? i = 0; loop(NB_GSL, printf("(k === %d) ? (slCtl%d = v;) :\n    ", i, i+1); i += 1;); ?>0;
+);
+function its_Ctl_Notify(k)
+(
+    <? i = 0; loop(NB_GSL, printf("(k === %d) ? slider_automate(slCtl%d) :\n    ", i, i+1); i += 1;); ?>0;
+);
 
 function delete_all_struct()
 local (i)
@@ -11714,6 +11724,16 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
                                         the settings of the module "Globals" ; the action is performed last, at once ;
                                         "chan" (the channels of the track) is accepted and ignored, checked by Check
         Control n  value v              the generic slider Ctl n (v in [-1, 1]) ; Dump Control n
+        Link n  cc m|note m  [chan c]  target Ctl k | target Reader|Writer|Effect id key  min v  max v  [law Lin|Exp]
+                                        a MIDI control of the track (n : 1 ... LK_CNT ; chan : 1 ... 16, all by default)
+                                        drives a generic slider, or a key of a module (a number : see its_Lk_KeyOk) ;
+                                        min, max : the values at 0 and at 127 (in the range of the key ; Ctl : -1, 1 by
+                                        default) ; Exp : min and max of the same sign ; a note : its velocity, 0 when it
+                                        ends ; several links may have the same control ; Dump, Check, Free Link n|All
+                                        (see "Links" below)
+        Inject cc m v|note m v  [chan c]
+                                        a MIDI message simulated (as if the track had sent it : tests)
+        Global midilog On|Off           the messages received logged (not saved ; Dump : when it is On)
         Tab n  name "text"  panes p  widths w1 w2 w3 w4  live On|Off  pane1 "module" ...  pane4 "module" ...
                                         the tab n (1 ... dcbTabsCount) : its name ("" : the default one), its panes, the
                                         modules of each pane by their names (as Display "name" ; a pane key, even without a
@@ -11753,7 +11773,7 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
         2 checks everything on a simulation (lines, channels...), 3 executes.
     Algorithm, Instance, Free Instance|Algorithm, Dump Instance : see "Algorithms" below.
     Export Patch Line|Writer|Reader|Effect id ["name"], Export Session ["name"], Dump Patch ..., Dump Session : see "Exports (2)".
-    Errors 2750 ... 2775, 2780 ... 2790, 2792 ... 2799 ; the result of "table" is 0, or the first error.
+    Errors 2730 ... 2739 (the links), 2750 ... 2775, 2780 ... 2790, 2792 ... 2799 ; the result of "table" is 0, or the first error.
     It runs in @gfx (the mSL threads of Interstys) : the state of the analysis is global.
 */
 its_TK_Cnt = 0;
@@ -11820,6 +11840,13 @@ its_TK_Control = its_TK("Control");
 its_TK_Export = its_TK("Export");
 its_TK_Tab = its_TK("Tab");
 its_TK_View = its_TK("View");
+its_TK_Link = its_TK("Link"); // a MIDI control linked to a slider or to a key of a module (see its_Tb_Link)
+its_TK_Inject = its_TK("Inject"); // a MIDI message simulated (see its_Tb_Inject)
+its_TK_target = its_TK("target");
+its_TK_min = its_TK("min");
+its_TK_max = its_TK("max");
+its_TK_cc = its_TK("cc");
+its_TK_note = its_TK("note");
 its_TK_Order = mSL_symbol("Order"); // (Dump Order ; reserved : a modulation input of the Saturation)
 // markers of the expanded table (its_Al_Expand : never in a data) : the begin of an instance (followed by the index of its
 // pending record, its_IP...), its end, the begin and the end of an argument (read in the scope outside the instance)
@@ -12174,11 +12201,12 @@ its_TbRnDtN[its_RnDtWave] = "Wave"; its_TbRnDtN[its_RnDtEnv] = "Env";
 i__ii = 0; loop(2, its_TbRnDt[i__ii] = mSL_symbol(its_TbRnDtN[i__ii]); i__ii += 1;);
 its_TbHarm = make_array(its_SatHarm); // the weights of the key "harm" (its_TbK1 : their count)
 // the keys of the block Global ; track samples (its_GlSmpl), actions (index : its_GlAct_..., see its_actions)
-its_TbGNk = 6;
+its_TbGNk = 7;
 its_TbGKey = make_array(its_TbGNk); its_TbGNam = make_array(its_TbGNk);
 its_TbKey(its_TbGKey, its_TbGNam, 0, "samples"); its_TbKey(its_TbGKey, its_TbGNam, 1, "input");
 its_TbKey(its_TbGKey, its_TbGNam, 2, "output"); its_TbKey(its_TbGKey, its_TbGNam, 3, "action");
 its_TbKey(its_TbGKey, its_TbGNam, 4, "chan"); its_TbKey(its_TbGKey, its_TbGNam, 5, "display");
+its_TbKey(its_TbGKey, its_TbGNam, 6, "midilog"); // the MIDI messages received logged (its_LkLog : Off|On)
 its_TbGDsN = make_array(3); its_TbGDs = make_array(3); // display : what the patches show (its_XpShow)
 its_TbGDsN[0] = "None"; its_TbGDsN[1] = "Essential"; its_TbGDsN[2] = "All";
 i__ii = 0; loop(3, its_TbGDs[i__ii] = mSL_symbol(its_TbGDsN[i__ii]); i__ii += 1;);
@@ -12290,7 +12318,8 @@ function its_Tb_IsHead(w)
         || (w === its_TK_Effect) || (w === its_TK_Global) || (w === its_TK_Dump) || (w === its_TK_Check)
         || (w === its_TK_Free) || (w === its_TK_End) || (w === its_TK_EofMark) || (w === its_TK_Algorithm)
         || (w === its_TK_Instance) || (w === its_TK_Set) || (w === its_TK_Curve) || (w === its_TK_Display) || (w === its_TK_Remove)
-        || (w === its_TK_Control) || (w === its_TK_Export) || (w === its_TK_Tab) || (w === its_TK_View);
+        || (w === its_TK_Control) || (w === its_TK_Export) || (w === its_TK_Tab) || (w === its_TK_View)
+        || (w === its_TK_Link) || (w === its_TK_Inject);
 );
 
 // a number in [vmin, vmax] (a "-" word before it changes its sign) ; Undef and an error otherwise
@@ -12817,6 +12846,13 @@ function its_Tb_Out(str)
     (its_Xp_Sink === 2) ? xpt_Block(str, its_Xp_Ind);
 );
 
+// all the links deleted (Free Link All, Clear All ; see "Links (MIDI)" below)
+function its_Lk_FreeAll()
+(
+    its_LkN = 0; // (first : @block no longer reads them)
+    memset(its_LkTab, 0, LK_CNT * its_LkSz);
+);
+
 function its_Tb_Clear() local(k, all, p)
 (
     all = (its_Tb_Peek() === its_TK_All);
@@ -12839,6 +12875,7 @@ function its_Tb_Clear() local(k, all, p)
             its_CrvSelK = its_CrvUndoK = its_CrvPreK = -1; its_CrvDrag = 0;
             k = 0; loop(its_CrvEdN, p = its_CrvEd + k * its_CrvEdSz; p[11] = -1; p[3] = 0; k += 1;);
             k = 0; loop(NB_GSL, (its_Ctl_Get(k) !== 0) ? its_Ctl_Set(k, 0); k += 1;);
+            its_Lk_FreeAll(); // (and the links : MIDI)
         );
     ) : (
         memset(its_TbSimSp, 0, LN_CNT); memset(its_TbSimCh, 0, LN_CNT);
@@ -15010,6 +15047,7 @@ function its_Tb_GKeys() local(w, ki, i)
                 ((ki === 1) || (ki === 2)) ? its_Tb_Num(its_TbGNam[ki], -120, 40) :
                 (ki === 3) ? its_Tb_Enum("action", its_TbGAc, its_GlActTbN) :
                 (ki === 5) ? its_Tb_Enum("display", its_TbGDs, 3) :
+                (ki === 6) ? its_Tb_Enum("midilog", its_TbFSt, 2) :
                 its_Tb_Int("chan", 0, 128);
             its_TbKS[ki] = !its_Tb_setm || its_Tb_chg; // (Set : only the keys of a changed argument)
         );
@@ -15019,12 +15057,14 @@ function its_Tb_GKeys() local(w, ki, i)
 // the value of the key "ki" of the block Global
 function its_Tb_GGet(ki)
 (
-    (ki === 0) ? its_GlSmpl : (ki === 1) ? its_GlInGain : (ki === 2) ? its_GlOutVol : (ki === 3) ? 0 : (ki === 5) ? its_XpShow : chcnt;
+    (ki === 0) ? its_GlSmpl : (ki === 1) ? its_GlInGain : (ki === 2) ? its_GlOutVol : (ki === 3) ? 0 : (ki === 5) ? its_XpShow :
+    (ki === 6) ? its_LkLog : chcnt;
 );
 
 function its_Tb_GText(str, ki, v)
 (
     (ki === 0) ? strcpy(str, its_TbGSmN[max(0, min(2, v))]) : (ki === 5) ? strcpy(str, its_TbGDsN[max(0, min(2, v))]) :
+    (ki === 6) ? strcpy(str, v ? "On" : "Off") :
     (ki === 4) ? sprintf(str, "%d", v) : sprintf(str, "%.10g", v);
 );
 
@@ -15041,6 +15081,7 @@ function its_Tb_Global()
         its_TbKS[1] ? ( its_GlInGain = its_TbK1[1]; );
         its_TbKS[2] ? ( its_GlOutVol = its_TbK1[2]; );
         its_TbKS[5] ? ( its_XpShow = its_TbK1[5]; );
+        its_TbKS[6] ? ( its_LkLog = its_TbK1[6]; );
         its_Gl_Apply();
         (its_TbKS[3] && (its_TbK1[3] !== its_GlAct_None)) ? its_actions(its_TbK1[3]);
     );
@@ -15050,7 +15091,7 @@ function its_Tb_DumpGlobal() local(ki)
 (
     strcpy(#its_TbW, "Global");
     ki = 0; loop(its_TbGNk,
-        (ki !== 3) ? (
+        ((ki !== 3) && ((ki !== 6) || its_LkLog)) ? ( // (midilog : when it is On)
             strcat(#its_TbW, its_Xp_Sep()); strcat(#its_TbW, its_TbGNam[ki]); strcat(#its_TbW, " ");
             strcat(#its_TbW, its_Tb_GText(#its_TbV1, ki, its_Tb_GGet(ki)));
         );
@@ -15076,6 +15117,426 @@ function its_Tb_CheckGlobal() local(ki, bad)
             ki += 1;
         );
         (bad === 0) ? mSL_log(SysLogBox, "Check Global OK");
+    );
+);
+
+//—— Links (MIDI)
+
+/*
+    A link : a MIDI control of the track (cc m, note m ; chan c, 0 : all) drives a generic slider (Ctl k) or a key of a
+    module (Reader, Writer, Effect k : the key ki of the table, a number, see its_Lk_KeyOk) ; the value of the control
+    (0 ... 127 ; a note : its velocity, 0 when it ends) goes from min to max (law Lin ; Exp : min (max / min) ^ x).
+    LK_CNT links of its_LkSz words : [0] the kind of the control (0 : no link, 1 cc, 2 note ; written last, read first by
+    @block), [1] its number, [2] its channel (0 : all), [3] the kind of the target (its_LkT_...), [4] its number (from 0),
+    [5] its key (Ctl : -1), [6] min, [7] max, [8] the law (0 Lin, 1 Exp), [9] ... [11] free (0) ; saved by @serialize ('link').
+    @block receives the messages (its_Lk_Recv) : a slider is written at once (its_Ctl_Put ; @gfx tells REAPER), the value
+    of a key of a module is posted (its_LkVal, its_LkSeq) ; @gfx sets it (its_Lk_Pending : the last value of the frame,
+    with the functions of the table, its_Tb_SetFx, its_Tb_SetMod) and logs the messages (Global midilog On : its_LkLogQ).
+    Interstys takes the MIDI of its track : the messages are not passed on.
+*/
+LK_CNT = 256;
+its_LkSz = 12;
+its_LkTab = make_array(LK_CNT * its_LkSz);
+its_LkVal = make_array(LK_CNT); // the last value posted by @block (0 ... 1)
+its_LkSeq = make_array(LK_CNT); // counted by @block at each value posted
+its_LkDone = make_array(LK_CNT); // the count of the value set by @gfx
+its_LkN = 0; // the links scanned : 0 ... its_LkN-1 (the last one used + 1)
+its_LkT_Ctl = 1; its_LkT_Reader = 2; its_LkT_Writer = 3; its_LkT_Effect = 4; // the kinds of targets
+its_LkCtlT = make_array(NB_GSL); // the sliders written by @block, not yet told to REAPER
+its_LkLog = 0; // Global midilog : the messages received logged (not saved)
+its_LkLogMx = 64; its_LkLogQ = make_array(4 * its_LkLogMx); // the messages to log : status, data 1, data 2, count of links
+its_LkLogW = its_LkLogR = 0; // written by @block (or Inject), read by @gfx
+its_LkMBSz = 4096; its_LkMBuf = make_array(its_LkMBSz); // a message received (a larger sysex is skipped)
+its_LkMidiN = 0; // the count of messages received
+
+// the keys of the modules that a link can drive : 1 a number, 2 an integer (the value is rounded) ; 0 : not a number (a
+// mode, a source, a module...) or not a setting of the sound
+its_LkRK = make_array(its_TbRNk); its_LkWK = make_array(its_TbWNk); its_LkFK = make_array(its_TbFNk);
+function its_Lk_Ks(t, a, b, v) ( loop(b - a + 1, t[a] = v; a += 1;); );
+// the reader : delay speed vol loopspeed desync, block ... stretch, size ... fadernd, gvol ... onsetrnd, from to xfade looplen
+its_Lk_Ks(its_LkRK, 2, 3, 1); its_LkRK[6] = 1; its_Lk_Ks(its_LkRK, 10, 11, 1); its_Lk_Ks(its_LkRK, 15, 25, 1);
+its_LkRK[16] = its_LkRK[22] = its_LkRK[24] = 2; its_Lk_Ks(its_LkRK, 27, 32, 1); its_Lk_Ks(its_LkRK, 34, 37, 1);
+// the writer : gain overdub, fade plateau wait direction (W-Mix : a number) desync
+its_Lk_Ks(its_LkWK, 3, 4, 1); its_Lk_Ks(its_LkWK, 8, 12, 1);
+// the effect : gain1 ... gain8 freq q, amp ... mix, output ... amount, decay ... diffusion, hp, wow ... grain (not wave ;
+// voices and stages : integers), density ... rfreq, steps (an integer) walk thresh, release value, attack detune limit,
+// distortion pregain
+its_Lk_Ks(its_LkFK, 14, 23, 1); its_Lk_Ks(its_LkFK, 26, 31, 1); its_Lk_Ks(its_LkFK, 33, 36, 1); its_Lk_Ks(its_LkFK, 40, 44, 1);
+its_LkFK[48] = 1; its_Lk_Ks(its_LkFK, 50, 69, 1); its_LkFK[57] = 0; its_LkFK[58] = its_LkFK[63] = 2;
+its_Lk_Ks(its_LkFK, 72, 78, 1); its_LkFK[81] = 2; its_Lk_Ks(its_LkFK, 82, 83, 1); its_Lk_Ks(its_LkFK, 85, 86, 1);
+its_Lk_Ks(its_LkFK, 88, 90, 1); its_Lk_Ks(its_LkFK, 93, 94, 1);
+
+// the key "ki" of a module of the type "ty" : 1 a number, 2 an integer, 0 it can't be linked
+function its_Lk_KeyOk(ty, ki)
+(
+    (ki < 0) ? 0 : (ty === its_TK_Reader) ? its_LkRK[ki] : (ty === its_TK_Writer) ? its_LkWK[ki] : its_LkFK[ki];
+);
+
+// the word of the key "ki" of an effect (or one of the other keys of this word, its_TbFAlt) can be linked
+function its_Lk_WordOk(ty, ki) local(r)
+(
+    r = its_Lk_KeyOk(ty, ki);
+    (ty === its_TK_Effect) ? ( while (!r && (ki > 0) && (its_TbFAlt[ki] > 0)) ( ki = its_TbFAlt[ki]; r = its_Lk_KeyOk(ty, ki); ); );
+    r;
+);
+
+function its_Lk_KNam(ty, ki) ( (ty === its_TK_Reader) ? its_TbRNam[ki] : (ty === its_TK_Writer) ? its_TbWNam[ki] : its_TbFNam[ki]; );
+function its_Lk_TyTK(t) ( (t === its_LkT_Reader) ? its_TK_Reader : (t === its_LkT_Writer) ? its_TK_Writer : its_TK_Effect; );
+
+// the value of the link "L" for the control at "x" (0 ... 1)
+function its_Lk_Map(L, x)
+(
+    (L[8] === 1) ? L[6] * ((L[7] / L[6]) ^ x) : L[6] + (L[7] - L[6]) * x;
+);
+
+// its_LkN : the last link used + 1
+function its_Lk_Count() local(i)
+(
+    i = LK_CNT; while ((i > 0) && (its_LkTab[(i - 1) * its_LkSz] === 0)) ( i -= 1; );
+    its_LkN = i;
+);
+
+/*
+    a MIDI message (status "st", data "d1", "d2") : the links of its control ; "blk" : 1 called by @block (a slider : its_Ctl_Put,
+    REAPER told by @gfx), 0 by @gfx (Inject : its_Ctl_Set) ; the value of a key of a module is posted (its_Lk_Pending sets
+    it) ; logged by @gfx (its_LkLog) ; returns the count of links
+*/
+function its_Lk_Midi(st, d1, d2, blk) local(t, ch, kd, x, i, L, c, q)
+(
+    t = st & 0xF0; ch = (st & 0x0F) + 1;
+    kd = (t === 0xB0) ? 1 : ((t === 0x90) || (t === 0x80)) ? 2 : 0;
+    x = (t === 0x80) ? 0 : max(0, min(127, d2)) / 127;
+    c = 0;
+    kd ? (
+        i = 0; loop(its_LkN,
+            L = its_LkTab + i * its_LkSz;
+            ((L[0] === kd) && (L[1] === d1) && ((L[2] === 0) || (L[2] === ch))) ? (
+                c += 1;
+                (L[3] === its_LkT_Ctl) ? (
+                    blk ? ( its_Ctl_Put(L[4], its_Lk_Map(L, x)); its_LkCtlT[L[4]] = 1; ) : its_Ctl_Set(L[4], its_Lk_Map(L, x));
+                ) : (
+                    its_LkVal[i] = x; its_LkSeq[i] += 1;
+                );
+            );
+            i += 1;
+        );
+    );
+    its_LkMidiN += 1;
+    its_LkLog ? (
+        q = its_LkLogQ + 4 * (its_LkLogW % its_LkLogMx);
+        q[0] = st; q[1] = d1; q[2] = d2; q[3] = c;
+        its_LkLogW += 1;
+    );
+    c;
+);
+
+// @block : the MIDI messages of the track (Interstys takes them : they are not passed on)
+function its_Lk_Recv() local(n, ofs)
+(
+    while ((n = midirecv_buf(ofs, its_LkMBuf, its_LkMBSz)) > 0) (
+        (n <= 3) ? its_Lk_Midi(its_LkMBuf[0], its_LkMBuf[1], (n === 3) ? its_LkMBuf[2] : 0, 1);
+    );
+);
+
+/*
+    @gfx : the value "x" (0 ... 1) of the link "i" given to its target ; a module that does not exist, a key that has no meaning
+    for the type of the effect : nothing ; the functions of the table see a pass 3, outside an instance (their state is kept)
+*/
+function its_Lk_Apply(i, x) local(L, ty, k, ki, b, v, m, o, e)
+(
+    L = its_LkTab + i * its_LkSz;
+    k = L[4]; ki = L[5];
+    v = its_Lk_Map(L, x);
+    (L[3] === its_LkT_Ctl) ? its_Ctl_Set(k, v) :
+    (L[3] >= its_LkT_Reader) ? (
+        ty = its_Lk_TyTK(L[3]);
+        ((b = its_Tb_Blk(ty, k)) !== 0) ? (
+            (its_Lk_KeyOk(ty, ki) === 2) ? (v = floor(v + 0.5));
+            ((ty !== its_TK_Effect) || its_Tb_FxOk(b[its_Efx_Type], ki)) ? (
+                m = its_Tb_mode; o = its_Tb_own; e = its_Tb_error;
+                its_Tb_mode = 3; its_Tb_own = 0; its_Tb_error = 0;
+                memset(its_TbKS, 0, its_TbKSz);
+                its_TbKS[ki] = 1; its_TbK1[ki] = v; its_TbK2[ki] = 0;
+                (ty === its_TK_Effect) ? its_Tb_SetFx(k) : its_Tb_SetMod(ty, k);
+                its_Tb_mode = m; its_Tb_own = o; its_Tb_error = e;
+            );
+        );
+    );
+);
+
+// @gfx : the values posted by @block given to the modules (the last one of each link)
+function its_Lk_Pending() local(i, s)
+(
+    i = 0; loop(its_LkN,
+        ((s = its_LkSeq[i]) !== its_LkDone[i]) ? ( its_LkDone[i] = s; its_Lk_Apply(i, its_LkVal[i]); );
+        i += 1;
+    );
+);
+
+// the text of a MIDI message in "str" : "B0 10 40 (cc 16, chan 1, 64)"
+function its_Lk_MsgText(str, st, d1, d2) local(t)
+(
+    t = st & 0xF0;
+    sprintf(str, "%02X %02X %02X", st, d1, d2);
+    (t === 0xB0) ? strcat(str, sprintf(#its_LkM4, " (cc %d, chan %d, %d)", d1, (st & 15) + 1, d2)) :
+    ((t === 0x90) || (t === 0x80)) ? strcat(str, sprintf(#its_LkM4, " (note %d, chan %d, %d)", d1, (st & 15) + 1, (t === 0x80) ? 0 : d2));
+    str;
+);
+
+// @gfx : the messages received logged (Global midilog On)
+function its_Lk_LogDrain() local(q)
+(
+    (its_LkLogW - its_LkLogR > its_LkLogMx) ? (
+        sprintf(#its_LkM, "MIDI : %d messages not logged", its_LkLogW - its_LkLogR - its_LkLogMx);
+        mSL_log(SysLogBox, #its_LkM);
+        its_LkLogR = its_LkLogW - its_LkLogMx;
+    );
+    while (its_LkLogR < its_LkLogW) (
+        q = its_LkLogQ + 4 * (its_LkLogR % its_LkLogMx);
+        its_Lk_MsgText(#its_LkM, q[0], q[1], q[2]);
+        (q[3] === 0) ? strcpy(#its_LkM3, "no link") : (q[3] === 1) ? strcpy(#its_LkM3, "1 link") : sprintf(#its_LkM3, "%d links", q[3]);
+        sprintf(#its_LkM2, "MIDI : %s : %s", #its_LkM, #its_LkM3);
+        mSL_log(SysLogBox, #its_LkM2);
+        its_LkLogR += 1;
+    );
+);
+
+// @gfx, each frame : the messages logged, the sliders written by @block told to REAPER, the values posted set
+function its_Lk_Frame() local(k)
+(
+    (its_LkLogR !== its_LkLogW) ? its_Lk_LogDrain();
+    k = 0; loop(NB_GSL, its_LkCtlT[k] ? ( its_LkCtlT[k] = 0; its_Ctl_Notify(k); ); k += 1;);
+    its_Lk_Pending();
+);
+
+// the text of the link "i" in "str" : Link n  cc m  [chan c]  target ...  min v  max v  [law Exp] (a module of an instance in a
+// session : i:name, see its_Xp_Ref)
+function its_Lk_Text(str, i) local(L, ty)
+(
+    L = its_LkTab + i * its_LkSz;
+    sprintf(str, "Link %d", i + 1);
+    strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "%s %d", (L[0] === 1) ? "cc" : "note", L[1]));
+    (L[2] > 0) ? ( strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "chan %d", L[2])); );
+    strcat(str, its_Xp_Sep());
+    (L[3] === its_LkT_Ctl) ? strcat(str, sprintf(#its_LkM4, "target Ctl %d", L[4] + 1)) : (
+        ty = its_Lk_TyTK(L[3]);
+        strcat(str, sprintf(#its_LkM4, "target %s %s %s", its_Tb_TyName(ty), its_Xp_Ref(#its_LkM5, ty, L[4]), its_Lk_KNam(ty, L[5])));
+    );
+    strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "min %.10g", L[6]));
+    strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "max %.10g", L[7]));
+    (L[8] === 1) ? ( strcat(str, its_Xp_Sep()); strcat(str, "law Exp"); );
+    str;
+);
+
+// Check Link : a difference logged (error 2759)
+function its_Lk_Diff(n, what, got, exp)
+(
+    sprintf(#its_TbMsg, "ERR: 2759    Interstys table : Check Link %d : %s %s (expected %s)", n, what, got, exp);
+    mSL_log(SysLogBox, #its_TbMsg);
+    (its_Tb_res === 0) ? (its_Tb_res = 2759);
+);
+
+/*
+    Link n keys ; chk : Check Link n keys (pass 3 : the keys given compared with the link n) ; the keys : cc m | note m,
+    chan c, target Ctl k | target Reader|Writer|Effect id key, min v, max v (read by the key : its range, the key of a word
+    of several keys chosen by the type of the effect, see its_Tb_FxKey), law Lin|Exp ; passes 2 and 3 : the module exists
+    (pass 2 : in the simulation), the key can be linked and has a meaning for its type ; pass 3 : the link written (its
+    kind last : @block reads it first)
+*/
+function its_Tb_Link(chk) local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, mn, mx, lw, gk, gc, gt, gm, gx, gl, L, b, fty, ok, ks, nk)
+(
+    n = its_Tb_Int(chk ? "Check Link" : "Link", 1, LK_CNT);
+    kd = num = ch = tt = ty = lw = kw = 0; k = ki = -1; mn = -1; mx = 1;
+    gk = gc = gt = gm = gx = gl = 0; // the keys given : the control, chan, target, min, max, law
+    while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Tb_Peek())) (
+        its_Tb_Next();
+        ((w === its_TK_cc) || (w === its_TK_note)) ? (
+            kd = (w === its_TK_cc) ? 1 : 2; gk = 1;
+            num = its_Tb_Int((kd === 1) ? "cc" : "note", 0, 127);
+        ) :
+        (w === its_TK_chan) ? (
+            ch = its_Tb_Int("chan", 1, 16); gc = 1;
+        ) :
+        (w === its_TK_target) ? (
+            gt = 1;
+            ((w = its_Tb_Next()) === its_TK_Ctl) ? (
+                tt = its_LkT_Ctl; ty = 0; k = its_Tb_Int("target Ctl", 1, NB_GSL) - 1; ki = -1;
+            ) :
+            ((w === its_TK_Reader) || (w === its_TK_Writer) || (w === its_TK_Effect)) ? (
+                ty = w; tt = (w === its_TK_Reader) ? its_LkT_Reader : (w === its_TK_Writer) ? its_LkT_Writer : its_LkT_Effect;
+                k = its_Tb_Id(ty, its_Tb_Next(), 0);
+                kw = its_Tb_Next(); // the key (its values : min, max)
+                ks = (ty === its_TK_Effect) ? its_TbFKey : (ty === its_TK_Reader) ? its_TbRKey : its_TbWKey;
+                nk = (ty === its_TK_Effect) ? its_TbFMod : (ty === its_TK_Reader) ? its_TbRMod : its_TbWMod; // (not "mod")
+                kj = -1; i = 0; while ((kj < 0) && (i < nk)) ( (ks[i] === kw) ? (kj = i); i += 1; );
+                ((kj < 0) && (ty === its_TK_Effect) && (kw === its_TK_gain)) ? (kj = 14);
+                (its_Tb_error === 0) ? (
+                    (kj < 0) ? its_Tb_KeyErr(kw, sprintf(#its_LkM, "Link %d : %s", n, its_Tb_TyName(ty))) :
+                    !its_Lk_WordOk(ty, kj) ? (
+                        sprintf(#its_TbW, "Link %d : the key %s can't be linked (it is not a number)", n, its_Lk_KNam(ty, kj));
+                        its_Tb_Err(2734, #its_TbW);
+                    );
+                );
+                ki = kj;
+            ) : (
+                sprintf(#its_TbW, "Link %d : target %s : Ctl, Reader, Writer or Effect expected", n, mSL_edit_value(#its_TbV, w));
+                its_Tb_Err(2730, #its_TbW);
+            );
+        ) :
+        ((w === its_TK_min) || (w === its_TK_max)) ? (
+            (tt === 0) ? (
+                sprintf(#its_TbW, "Link %d : %s before target", n, (w === its_TK_min) ? "min" : "max");
+                its_Tb_Err(2731, #its_TbW);
+            ) : (
+                (tt === its_LkT_Ctl) ? (
+                    v = its_Tb_Num((w === its_TK_min) ? "min" : "max", -1, 1);
+                ) : (
+                    (ty === its_TK_Effect) ? (
+                        its_Tb_fxk = k; its_Tb_fxty = its_Tb_FxTyAhead(k);
+                        ki = its_Tb_FxKey(kw);
+                    ) : (
+                        ki = its_Tb_Key(ty, kw);
+                    );
+                    v = its_Tb_v1;
+                );
+                (w === its_TK_min) ? ( mn = v; gm = 1; ) : ( mx = v; gx = 1; );
+            );
+        ) :
+        (w === its_TK_law) ? (
+            lw = its_Tb_Enum("law", its_TbMShp, 2); gl = 1; // Lin, Exp
+        ) :
+        its_Tb_KeyErr(w, "Link");
+    );
+    (its_Tb_error === 0) ? (
+        (!chk && (!gk || !gt)) ? (
+            sprintf(#its_TbW, "Link %d : %s expected", n, !gk ? "cc m or note m" : "target");
+            its_Tb_Err(2732, #its_TbW);
+        ) :
+        (!chk && (tt !== its_LkT_Ctl) && (!gm || !gx)) ? (
+            sprintf(#its_TbW, "Link %d : min and max expected (the values of the key at 0 and at 127)", n);
+            its_Tb_Err(2733, #its_TbW);
+        ) :
+        (!chk && (its_Tb_mode >= 2) && (tt !== its_LkT_Ctl)) ? (
+            // the module, its key
+            b = (its_Tb_mode === 3) ? its_Tb_Blk(ty, k) : 0;
+            !((its_Tb_mode === 2) ? its_Tb_SimEx(ty, k) : (b !== 0)) ? (
+                sprintf(#its_TbW, "Link %d : %s %d does not exist", n, its_Tb_TyName(ty), k + 1);
+                its_Tb_Err(2735, #its_TbW);
+            ) :
+            !its_Lk_KeyOk(ty, ki) ? (
+                sprintf(#its_TbW, "Link %d : the key %s can't be linked (it is not a number)", n, its_Lk_KNam(ty, ki));
+                its_Tb_Err(2734, #its_TbW);
+            ) :
+            (ty === its_TK_Effect) ? (
+                fty = (its_Tb_mode === 2) ? its_TbSimFT[k] : b[its_Efx_Type];
+                !its_Tb_FxOk(fty, ki) ? (
+                    sprintf(#its_TbW, "Link %d : the key %s has no meaning for the type %s", n, its_TbFNam[ki], its_TbFTyN[fty]);
+                    its_Tb_Err(2736, #its_TbW);
+                );
+            );
+        );
+        (!chk && (its_Tb_error === 0) && (its_Tb_mode >= 2) && (lw === 1) && !(mn * mx > 0)) ? (
+            sprintf(#its_TbW, "Link %d : law Exp : min and max of the same sign, not 0 (%.10g, %.10g)", n, mn, mx);
+            its_Tb_Err(2737, #its_TbW);
+        );
+    );
+    ((its_Tb_error === 0) && (its_Tb_mode === 3)) ? (
+        L = its_LkTab + (n - 1) * its_LkSz;
+        chk ? (
+            // the keys given compared with the link
+            ok = 1;
+            (L[0] === 0) ? (
+                its_Lk_Diff(n, "link", "none", "a link"); ok = 0;
+            ) : (
+                (gk && ((L[0] !== kd) || (L[1] !== num))) ? (
+                    its_Lk_Diff(n, "control", sprintf(#its_LkM, "%s %d", (L[0] === 1) ? "cc" : "note", L[1]),
+                        sprintf(#its_LkM2, "%s %d", (kd === 1) ? "cc" : "note", num));
+                    ok = 0;
+                );
+                (gc && (L[2] !== ch)) ? (
+                    its_Lk_Diff(n, "chan", (L[2] === 0) ? "all" : sprintf(#its_LkM, "%d", L[2]), sprintf(#its_LkM2, "%d", ch));
+                    ok = 0;
+                );
+                (gt && ((L[3] !== tt) || (L[4] !== k)
+                    || ((tt !== its_LkT_Ctl) && (strcmp(its_Lk_KNam(ty, L[5]), its_Lk_KNam(ty, ki)) !== 0)))) ? (
+                    (L[3] === its_LkT_Ctl) ? sprintf(#its_LkM, "Ctl %d", L[4] + 1) :
+                        sprintf(#its_LkM, "%s %d %s", its_Tb_TyName(its_Lk_TyTK(L[3])), L[4] + 1, its_Lk_KNam(its_Lk_TyTK(L[3]), L[5]));
+                    (tt === its_LkT_Ctl) ? sprintf(#its_LkM2, "Ctl %d", k + 1) : sprintf(#its_LkM2, "%s %d %s", its_Tb_TyName(ty), k + 1, its_Lk_KNam(ty, ki));
+                    its_Lk_Diff(n, "target", #its_LkM, #its_LkM2);
+                    ok = 0;
+                );
+                (gm && (abs(L[6] - mn) >= 0.0000001)) ? (
+                    its_Lk_Diff(n, "min", sprintf(#its_LkM, "%.10g", L[6]), sprintf(#its_LkM2, "%.10g", mn)); ok = 0;
+                );
+                (gx && (abs(L[7] - mx) >= 0.0000001)) ? (
+                    its_Lk_Diff(n, "max", sprintf(#its_LkM, "%.10g", L[7]), sprintf(#its_LkM2, "%.10g", mx)); ok = 0;
+                );
+                (gl && (L[8] !== lw)) ? (
+                    its_Lk_Diff(n, "law", its_TbMShpN[L[8] ? 1 : 0], its_TbMShpN[lw]); ok = 0;
+                );
+            );
+            ok ? (
+                sprintf(#its_TbW, "Check Link %d OK", n);
+                mSL_log(SysLogBox, #its_TbW);
+            );
+        ) : (
+            L[0] = 0; // (@block : no link while it is written)
+            L[1] = num; L[2] = ch; L[3] = tt; L[4] = k; L[5] = ki; L[6] = mn; L[7] = mx; L[8] = lw;
+            L[9] = L[10] = L[11] = 0;
+            its_LkDone[n - 1] = its_LkSeq[n - 1]; // (no value pending)
+            L[0] = kd;
+            its_Lk_Count();
+        );
+    );
+);
+
+// Dump Link n|All (pass 3)
+function its_Lk_DumpTb() local(n, i)
+(
+    (its_Tb_Peek() === its_TK_All) ? (
+        its_Tb_Next();
+        (its_Tb_mode === 3) ? ( i = 0; loop(its_LkN, (its_LkTab[i * its_LkSz] !== 0) ? its_Tb_Out(its_Lk_Text(#its_LkT, i)); i += 1;); );
+    ) : (
+        n = its_Tb_Int("Dump Link", 1, LK_CNT);
+        ((its_Tb_mode === 3) && (its_Tb_error === 0)) ? (
+            (its_LkTab[(n - 1) * its_LkSz] === 0) ? (
+                sprintf(#its_TbW, "Dump Link %d : no link", n);
+                its_Tb_Err(2738, #its_TbW);
+            ) : its_Tb_Out(its_Lk_Text(#its_LkT, n - 1));
+        );
+    );
+);
+
+// Free Link n|All (pass 3)
+function its_Lk_FreeTb() local(n)
+(
+    (its_Tb_Peek() === its_TK_All) ? (
+        its_Tb_Next();
+        (its_Tb_mode === 3) ? its_Lk_FreeAll();
+    ) : (
+        n = its_Tb_Int("Free Link", 1, LK_CNT);
+        ((its_Tb_mode === 3) && (its_Tb_error === 0)) ? ( its_LkTab[(n - 1) * its_LkSz] = 0; its_Lk_Count(); );
+    );
+);
+
+// Inject cc m v|note m v [chan c] : a message as if the track had sent it (pass 3) ; the values of the modules set at once
+function its_Tb_Inject() local(w, kd, num, v, ch)
+(
+    w = its_Tb_Next();
+    ((w !== its_TK_cc) && (w !== its_TK_note)) ? (
+        sprintf(#its_TbW, "Inject : %s is not cc or note", mSL_edit_value(#its_TbV, w));
+        its_Tb_Err(2739, #its_TbW);
+    ) : (
+        kd = (w === its_TK_cc);
+        num = its_Tb_Int(kd ? "Inject cc" : "Inject note", 0, 127);
+        v = its_Tb_Int(kd ? "Inject cc" : "Inject note", 0, 127);
+        ch = 1;
+        ((its_Tb_error === 0) && (its_Tb_Peek() === its_TK_chan)) ? ( its_Tb_Next(); ch = its_Tb_Int("chan", 1, 16); );
+        ((its_Tb_mode === 3) && (its_Tb_error === 0)) ? (
+            its_Lk_Midi((kd ? 0xB0 : (v > 0) ? 0x90 : 0x80) + ch - 1, num, v, 0);
+            its_Lk_Pending();
+            (its_LkLogR !== its_LkLogW) ? its_Lk_LogDrain();
+        );
     );
 );
 
@@ -16409,7 +16870,7 @@ function its_Xp_TBreak(tp, i, n) local(w, p, q)
     ((p === its_TK_Display) || (p === its_TK_Remove) || (p === its_TK_Free) || (p === its_TK_Dump) || (p === its_TK_Check)) ? 0 :
     ((w === its_TK_input) || (w === its_TK_output) || (w === its_TK_param) || (w === its_TK_Line) || (w === its_TK_Display)
         || (w === its_TK_Remove) || (w === its_TK_Free) || (w === its_TK_Dump) || (w === its_TK_Check) || (w === its_TK_Global)
-        || (w === its_TK_Control)) ? 1 :
+        || (w === its_TK_Control) || (w === its_TK_Link) || (w === its_TK_Inject)) ? 1 :
     ((w === its_TK_Effect) || (w === its_TK_Reader) || (w === its_TK_Writer)) ? (
         q = (i + 2 < n) ? tp[i + 2] : 0;
         (q === its_XpKTyp) || (q === its_TK_status) || (q === its_TK_chan) || (q === its_TbRKey[0]) || (q === its_TbRKey[1]) || (q === its_TbWKey[1]);
@@ -16458,8 +16919,8 @@ function its_Xp_SessBody() local(i, k, b, t, m)
         xpt_Line(sprintf(#its_XpT, "%c*", '/'));
         sprintf(#its_XpT, "  Session \"%s\", exportee d'Interstys le %s.", #its_XpFN, #its_XpDt); xpt_Line(#its_XpT);
         xpt_Line("");
-        xpt_Line("  Deposer ce fichier dans Interstys : TOUT est remplace (les modules, les instances, les algorithmes, les courbes, les");
-        xpt_Line("  valeurs des curseurs, les onglets). Les lignes sont recreees vides : seul leur fichier, s'il y en a un, est relu. Les onglets et les");
+        xpt_Line("  Deposer ce fichier dans Interstys : TOUT est remplace (les modules, les instances, les algorithmes, les courbes, les liens MIDI,");
+        xpt_Line("  les valeurs des curseurs, les onglets). Les lignes sont recreees vides : seul leur fichier, s'il y en a un, est relu. Les onglets et les");
         xpt_Line("  modules affiches sont refaits a l'identique, par les blocs Tab et View, en bas du fichier.");
         xpt_Line("  Une instance (Instance) est refaite, puis les valeurs courantes de ses modules, en bas du fichier (Effect i:nom),");
         xpt_Line("  remplacent celles de son modele : pour changer un reglage, c'est la qu'il faut le modifier.");
@@ -16508,6 +16969,8 @@ function its_Xp_SessBody() local(i, k, b, t, m)
         );
         k += 1;
     );
+    // the links (MIDI : after the modules that they drive)
+    i = 0; loop(its_LkN, (its_LkTab[i * its_LkSz] !== 0) ? its_Xp_E(4, its_Lk_Text(#its_LkT, i)); i += 1;);
     its_Xp_Layout(); // (last : the views show the modules created above)
     (its_Xp_Sink === 2) ? (
         xpt_Line("));");
@@ -16649,6 +17112,9 @@ function its_Tb_Dump() local(w, ty, k, b)
         k = its_Tb_Int("Dump Control", 1, NB_GSL);
         ((its_Tb_mode === 3) && (its_Tb_error === 0)) ? its_Xp_DumpCtl(k - 1);
     ) :
+    (w === its_TK_Link) ? (
+        its_Lk_DumpTb();
+    ) :
     (w === its_TK_Tab) ? (
         k = its_Tb_Int("Dump Tab", 1, dcbTabsCount);
         ((its_Tb_mode === 3) && (its_Tb_error === 0)) ? its_Xp_DumpTab(k - 1);
@@ -16687,6 +17153,7 @@ function its_Tb_Dump() local(w, ty, k, b)
             k = 0; loop(RD_CNT, (Readers_set[k] !== 0) ? its_Tb_DumpMod(its_TK_Reader, k); k += 1;);
             k = 0; loop(FX_CNT, (Effects_set[k] !== 0) ? its_Tb_DumpFx(k); k += 1;);
             k = 0; loop(its_CrvMx, (its_CrvBlk[k] > BASE_MEMORY) ? its_Crv_Dump(k); k += 1;);
+            k = 0; loop(its_LkN, (its_LkTab[k * its_LkSz] !== 0) ? its_Tb_Out(its_Lk_Text(#its_LkT, k)); k += 1;);
         );
     ) :
     ((ty = its_Tb_Type(w, "Dump")) !== 0) ? (
@@ -16705,6 +17172,9 @@ function its_Tb_Check() local(w, ty, k)
     (w === its_TK_Curve) ? (
         its_Crv_Check();
     ) :
+    (w === its_TK_Link) ? (
+        its_Tb_Link(1);
+    ) :
     ((ty = its_Tb_Type(w, "Check")) !== 0) ? (
         k = its_Tb_Id(ty, its_Tb_Next(), 0);
         (ty === its_TK_Line) ? its_Tb_CheckLine(k) : (ty === its_TK_Effect) ? its_Tb_CheckFx(k) : its_Tb_CheckMod(ty, k);
@@ -16721,6 +17191,9 @@ function its_Tb_Free() local(w, ty, k)
     ) :
     (w === its_TK_Curve) ? (
         its_Crv_Free();
+    ) :
+    (w === its_TK_Link) ? (
+        its_Lk_FreeTb();
     ) :
     ((ty = its_Tb_Type(w, "Free")) !== 0) ? (
         k = its_Tb_Id(ty, its_Tb_Next(), 0);
@@ -17162,8 +17635,10 @@ function Set_Table(tbl) local(m, w, xb)
             (w === its_TK_Export) ? its_Tb_Export() :
             (w === its_TK_Tab) ? its_Tb_Tab() :
             (w === its_TK_View) ? its_Tb_View() :
+            (w === its_TK_Link) ? its_Tb_Link(0) :
+            (w === its_TK_Inject) ? its_Tb_Inject() :
             (w === its_TK_Curve) ? its_Tb_Curve() : (
-                sprintf(#its_TbW, "%s : a block (Line, Writer, Reader, Effect, Global, Control, Curve, Algorithm, Instance, Set, Dump, Check, Free, Display, Remove, Clear, Export, Tab, View) is expected", mSL_edit_value(#its_TbV, w));
+                sprintf(#its_TbW, "%s : a block (Line, Writer, Reader, Effect, Global, Control, Curve, Algorithm, Instance, Set, Dump, Check, Free, Display, Remove, Clear, Export, Tab, View, Link, Inject) is expected", mSL_edit_value(#its_TbV, w));
                 its_Tb_Err(2750, #its_TbW);
             );
         );
@@ -17253,6 +17728,9 @@ loadMode ? (
     );
     its_CrvSelK = its_CrvUndoK = its_CrvPreK = -1; its_CrvDrag = 0;
     z__si = 0; loop(its_CrvEdN, z__sp = its_CrvEd + z__si * its_CrvEdSz; z__sp[11] = -1; z__sp[3] = 0; z__si += 1;);
+    // the links (MIDI, a 'link' block) : those of the preset replace the current ones (no value pending)
+    its_Lk_FreeAll();
+    memcpy(its_LkDone, its_LkSeq, LK_CNT);
     // First, load the block
     slz1 = load_mem(0, lodarea, SVASIZ);
     ldtotal += slz1;
@@ -17398,6 +17876,17 @@ loadMode ? (
             // the file of a line (the lines are saved without their samples : "Reload" in the file pad of the line)
             ((savtmp[1] >= 0) && (savtmp[1] < LN_CNT)) ? file_string(0, its_LnFile[savtmp[1]]) : file_string(0, #tnam_skip);
         ) :
+        (savtmp[0] === 'link') ? (
+            // the links (MIDI) : savtmp[1] links of savtmp[2] words (another size : skipped ; more links : the first LK_CNT)
+            (savtmp[2] === its_LkSz) ? (
+                z__si = min(savtmp[1], LK_CNT);
+                ldtotal += load_mem(0, its_LkTab, z__si * its_LkSz);
+                loop(2 * (savtmp[1] - z__si) * its_LkSz, file_var(0, zzz_dskip)); // (each value in 2 words, see save_mem)
+            ) : (
+                loop(2 * savtmp[1] * savtmp[2], file_var(0, zzz_dskip));
+            );
+            its_Lk_Count();
+        ) :
         (savtmp[0] === 'tnam') ? (
             ldtnam = savtmp[1]; // alternate tabs names (see "Rename tab...")
             z__si = 0; loop(savtmp[1],
@@ -17505,6 +17994,12 @@ loadMode ? (
         );
         z__si += 1;
     );
+    // Save the links (MIDI), if there are some
+    (its_LkN > 0) ? (
+        savtmp[0] = 'link'; savtmp[1] = LK_CNT; savtmp[2] = its_LkSz; savtmp[3] = 0;
+        svtotal += save_mem(0, savtmp, TMPSIZ);
+        svtotal += save_mem(0, its_LkTab, LK_CNT * its_LkSz);
+    );
 
     // siz4 = 0;
     // Save all objects, except lines set pointers and contents
@@ -17542,6 +18037,9 @@ doingLoad = doingSave = 0;
 @block
 gm_time_keep(); // shared gmem time fields, if nobody keeps them (see mSL_clip_lib)
 chcnt = num_ch;
+
+// the MIDI messages of the track : the links (see its_Lk_Recv ; first : a slider that they move is read below)
+its_Lk_Recv();
 
 // the generic sliders (automatable by REAPER) : the control cells Ctl 1 ... NB_GSL (smoothed by the inputs that read them)
 ctl_i = 0; loop(NB_GSL, smpl_tab[CTL_P + ctl_i] = slider(GSL_FIRST + ctl_i); ctl_i += 1;);
@@ -17819,6 +18317,7 @@ while (g__efi) (
 
 its_PrjDir_Poll(); // the folder of the project, asked to GMAuxiliary.eel (relative files of the tables)
 its_Xp_Frame(); // the exports : the prompt of the name, the file written
+its_Lk_Frame(); // the MIDI links : the messages logged, the sliders moved told to REAPER, the keys of the modules set
 (perform_loading === 0) ? its_Ln_AutoReload(); // the files of the lines, after a load
 
 
