@@ -5159,7 +5159,7 @@ menu_LkAll_N[3] = "Free all links";
 menu_LkAll = make_jmenu(
     ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "links-actions", 4, menu_LkAll_N);
-menu_Lk_N = make_array(14); // a link (right clic on one of its cells ; items 6 ... 9 : ticked, texts, see show_Links_Pad)
+menu_Lk_N = make_array(15); // a link (right clic on one of its cells ; items 6 ... 10 : ticked, texts, see show_Links_Pad)
 menu_Lk_N[0] = "Dump in the log";
 menu_Lk_N[1] = "Learn its control (the next one moved)";
 menu_Lk_N[2] = "All channels";
@@ -5170,13 +5170,14 @@ menu_Lk_N[6] = "Pickup (the control acts once it meets the value)";
 menu_Lk_N[7] = "Glide...";
 menu_Lk_N[8] = "Steps...";
 menu_Lk_N[9] = "Curve...";
-menu_Lk_N[10] = "Show the target";
-menu_Lk_N[11] = "---";
-menu_Lk_N[12] = "Free";
-menu_Lk_N[13] = "Free all links";
+menu_Lk_N[10] = "Rate (incremental)...";
+menu_Lk_N[11] = "Show the target";
+menu_Lk_N[12] = "---";
+menu_Lk_N[13] = "Free";
+menu_Lk_N[14] = "Free all links";
 menu_Lk = make_jmenu(
     ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-            "link-actions", 14, menu_Lk_N);
+            "link-actions", 15, menu_Lk_N);
 menu_LkPage_N = make_array(4); // the pages (right clic on the cell 7)
 menu_LkPage_N[0] = "First page";
 menu_LkPage_N[1] = "Previous page";
@@ -15213,8 +15214,14 @@ function its_Tb_CheckGlobal() local(ki, bad)
     @block), [1] its number, [2] its channel (0 : all), [3] the kind of the target (its_LkT_...), [4] its number (from 0 ;
     an action : its_LkA_...), [5] its key (Ctl, an action : -1), [6] min, [7] max, [8] the law (0 Lin, 1 Exp), [9] the mode
     (its_LkM_...), [10] pickup (1 : On), [11] glide (seconds ; 0 : none), [12] steps (0 : none ; 2 ... 128), [13] the curve
-    (its number + 1 ; 0 : none), [14] ... [19] free (0 ; steps 3c, 3d) ; saved by @serialize ('link' ; a session of links
-    of 12 words is read too).
+    (its number + 1 ; 0 : none), [14] rate : the time of the slow zones (seconds ; 0 : no rate), [15] that of the fast zones,
+    [16] ... [19] free (0 ; step 3c) ; saved by @serialize ('link', its_LkRateOn in the header ; a session of links of 12
+    words is read too).
+    Rate (a cc, mode Abs, when its_LkRateOn : the action Rate, the cell 1 of the module) : the position p = 10 x of the
+    control chooses a speed (its_Lk_RateZone : 4 ... 6 none ; 6 ... 7 and 3 ... 4 : the whole range in [14] seconds ; then
+    faster, 9 ... 10 and 0 ... 1 : in [15] seconds) ; the value moves (its_Lk_RateBlk, its_Lk_RateGfx) until the control
+    comes back between 4 and 6, or it reaches min or max ; after a switch to the rate, the control acts once it has passed
+    between 4 and 6 ; back to the classic mode : it acts once it meets its value (pickup, its_LkForce).
     Mode Abs : the position x of the control (0 ... 1) -> steps -> curve -> u (0 ... 1) -> pickup -> glide -> the law (min,
     max) ; Toggle, Push : u = 0 or 1 -> glide -> the law. Pickup : the control drives the target once it meets its value
     (lost when something else changes the target) ; glide : the target goes to the new value in [11] seconds (on u : with
@@ -15232,9 +15239,9 @@ its_LkM_Abs = 0; its_LkM_Toggle = 1; its_LkM_Push = 2; // the modes
 its_LkModeN = make_array(3); its_LkModeS = make_array(3);
 its_LkModeN[0] = "Abs"; its_LkModeN[1] = "Toggle"; its_LkModeN[2] = "Push";
 i__ii = 0; loop(3, its_LkModeS[i__ii] = mSL_symbol(its_LkModeN[i__ii]); i__ii += 1;);
-its_LkA_LEDs = 1; // the actions (target LEDs : the states of the LEDs sent again)
-its_LkActCnt = 2; its_LkActN = make_array(its_LkActCnt); its_LkActS = make_array(its_LkActCnt);
-its_LkActN[0] = ""; its_LkActN[1] = "LEDs";
+its_LkA_LEDs = 1; its_LkA_Rate = 2; // the actions (target LEDs : the states of the LEDs sent again ; Rate : the switch)
+its_LkActCnt = 3; its_LkActN = make_array(its_LkActCnt); its_LkActS = make_array(its_LkActCnt);
+its_LkActN[0] = ""; its_LkActN[1] = "LEDs"; its_LkActN[2] = "Rate";
 i__ii = 1; loop(its_LkActCnt - 1, its_LkActS[i__ii] = mSL_symbol(its_LkActN[i__ii]); i__ii += 1;);
 its_LkSym_mode = mSL_symbol("mode"); // (not reserved : "mode" is a key of the modules, "LEDs" a value)
 its_LkNoV = -(2^60); // no value (its_Lk_TgtVal)
@@ -15249,6 +15256,13 @@ its_LkPick = make_array(LK_CNT); its_LkPrevU = make_array(LK_CNT); memset(its_Lk
 its_LkSetV = make_array(LK_CNT); memset(its_LkSetV, its_LkNoV, LK_CNT);
 its_LkGOn = make_array(LK_CNT); its_LkGu = make_array(LK_CNT); its_LkGt = make_array(LK_CNT); its_LkGr = make_array(LK_CNT);
 its_LkGfxT = 0; // the time of the last glide of @gfx (its_Lk_GlideGfx)
+its_LkW_Rate = 14; its_LkW_RateF = 15; its_LkSym_rate = mSL_symbol("rate"); // (rate : not reserved, a key of the effects)
+its_LkRateOn = 0; // the knobs with a rate are incremental (the action Rate)
+// rate : the zone of the control (-4 ... 4 ; 0 : the center), it acts (it has passed the center), its position u (-1 :
+// taken from the target), back to the classic mode : the pickup forced until the control meets its value
+its_LkRzn = make_array(LK_CNT); its_LkRarm = make_array(LK_CNT); its_LkRu = make_array(LK_CNT); memset(its_LkRu, -1, LK_CNT);
+its_LkForce = make_array(LK_CNT);
+its_LkRateT = 0; // the time of the last rate of @gfx (its_Lk_RateGfx)
 its_LkTab = make_array(LK_CNT * its_LkSz);
 its_LkVal = make_array(LK_CNT); // the last value posted by @block (0 ... 1)
 its_LkSeq = make_array(LK_CNT); // counted by @block at each value posted
@@ -15362,7 +15376,7 @@ function its_Lk_PickGate(i, L, u, v) local(uv, p)
     !its_LkPick[i] ? (
         uv = max(0, min(1, its_Lk_Unmap(L, v)));
         p = its_LkPrevU[i];
-        ((abs(u - uv) <= its_LkPkTol) || ((p >= 0) && ((p - uv) * (u - uv) <= 0))) ? (its_LkPick[i] = 1);
+        ((abs(u - uv) <= its_LkPkTol) || ((p >= 0) && ((p - uv) * (u - uv) <= 0))) ? ( its_LkPick[i] = 1; its_LkForce[i] = 0; );
     );
     its_LkPrevU[i] = u;
     its_LkPick[i];
@@ -15417,6 +15431,55 @@ function its_Lk_GlideBlk() local(i, L, dt)
             );
         );
         i += 1;
+    );
+);
+
+// rate : the zone of the position "x" (0 ... 1) of the control, p = 10 x : 1 ... 4 above 6 (6 ... 7 : 1), -1 ... -4 below 4
+// (3 ... 4 : -1), 0 between
+function its_Lk_RateZone(x) local(p)
+(
+    p = 10 * x;
+    (p > 6) ? min(4, 1 + floor(p - 6)) : (p < 4) ? -min(4, 1 + floor(4 - p)) : 0;
+);
+
+// rate : the speed (u per second) of the zone "k" of the link "L" : the whole range in [14] seconds (|k| = 1) ... [15]
+// seconds (|k| = 4), a geometric progression
+function its_Lk_RateSpd(L, k) local(t1, t2)
+(
+    (k === 0) ? 0 : (
+        t1 = max(0.01, L[its_LkW_Rate]); t2 = max(0.001, L[its_LkW_RateF]);
+        sign(k) / (t1 * ((t2 / t1) ^ ((abs(k) - 1) / 3)));
+    );
+);
+
+// rate : "dt" seconds of the link "i" (its target now : "v") : its new position u ; -1 : nothing to write (the center, an
+// end reached) ; the target changed by something else : the position taken from it
+function its_Lk_RateStep(i, L, v, dt) local(s, u)
+(
+    s = its_Lk_RateSpd(L, its_LkRzn[i]);
+    (s === 0) ? -1 : (
+        ((its_LkRu[i] < 0) || (its_LkSetV[i] === its_LkNoV) || (abs(v - its_LkSetV[i]) > 0.000001 * (1 + abs(v)))) ?
+            (its_LkRu[i] = max(0, min(1, its_Lk_Unmap(L, v))));
+        u = max(0, min(1, its_LkRu[i] + s * dt));
+        (u === its_LkRu[i]) ? -1 : (its_LkRu[i] = u);
+    );
+);
+
+// @block : the rates of the links of the sliders Ctl (a block)
+function its_Lk_RateBlk() local(i, L, u)
+(
+    its_LkRateOn ? (
+        i = 0; loop(its_LkN,
+            (its_LkRzn[i] !== 0) ? (
+                L = its_LkTab + i * its_LkSz;
+                ((L[0] !== 0) && (L[3] === its_LkT_Ctl) && (L[its_LkW_Rate] > 0)
+                    && ((u = its_Lk_RateStep(i, L, its_Ctl_Get(L[4]), samplesblock / srate)) >= 0)) ? (
+                    its_Ctl_Put(L[4], its_Lk_Map(L, u)); its_LkCtlT[L[4]] = 1;
+                    its_LkSetV[i] = its_Ctl_Get(L[4]);
+                );
+            );
+            i += 1;
+        );
     );
 );
 
@@ -15487,6 +15550,14 @@ function its_Lk_Midi(st, d1, d2, blk) local(t, ch, kd, x, y, i, L, c, q, pr, ed,
                 (!pr && ((kd === 2) || (md === its_LkM_Toggle))) ? (its_LkLed[i] = -1);
                 (L[3] === its_LkT_Action) ? (
                     ed ? (its_LkAct[i] += 1);
+                ) :
+                (its_LkRateOn && (md === its_LkM_Abs) && (L[its_LkW_Rate] > 0) && (kd === 1)) ? (
+                    // rate : the zone of the control (it acts once it has passed the center), its position kept (the pickup
+                    // after the rate)
+                    q = its_Lk_RateZone(x);
+                    (q === 0) ? (its_LkRarm[i] = 1);
+                    its_LkRzn[i] = its_LkRarm[i] ? q : 0;
+                    its_LkPrevU[i] = its_Lk_Shape(L, x);
                 ) : (
                     (md === its_LkM_Toggle) ? (
                         y = -1;
@@ -15502,7 +15573,7 @@ function its_Lk_Midi(st, d1, d2, blk) local(t, ch, kd, x, y, i, L, c, q, pr, ed,
                     (md === its_LkM_Push) ? (y = pr) : (y = its_Lk_Shape(L, x)); // (Abs : steps, curve)
                     (y >= 0) ? (
                         (L[3] === its_LkT_Ctl) ? (
-                            its_Lk_CtlDrive(i, L, y, (md === its_LkM_Abs) && L[its_LkW_Pick], blk);
+                            its_Lk_CtlDrive(i, L, y, (md === its_LkM_Abs) && (L[its_LkW_Pick] || its_LkForce[i]), blk);
                         ) : (
                             its_LkVal[i] = y; its_LkSeq[i] += 1; // (its_Lk_Apply : pickup, glide)
                         );
@@ -15529,6 +15600,7 @@ function its_Lk_Recv() local(n, ofs, q)
         (n <= 3) ? its_Lk_Midi(its_LkMBuf[0], its_LkMBuf[1], (n === 3) ? its_LkMBuf[2] : 0, 1);
     );
     its_Lk_GlideBlk();
+    its_Lk_RateBlk();
     while (its_LkOutR < its_LkOutW) (
         q = its_LkOutQ + 3 * (its_LkOutR % its_LkOutMx);
         midisend(0, q[0], q[1], q[2]);
@@ -15569,7 +15641,10 @@ function its_Lk_Leds() local(i, L, s, v)
     i = 0; loop(its_LkN,
         L = its_LkTab + i * its_LkSz;
         s = -1;
-        ((L[0] !== 0) && (L[3] !== its_LkT_Action)) ? (
+        ((L[0] !== 0) && (L[3] === its_LkT_Action)) ? (
+            (L[4] === its_LkA_Rate) ? (s = its_LkRateOn); // (its LED : lit when the knobs are incremental)
+        ) :
+        (L[0] !== 0) ? (
             (L[its_LkW_Mode] === its_LkM_Toggle) ? ( its_Lk_TogSync(i); its_LkOwn[i] ? (s = its_LkTog[i]); ) :
             its_LkOwn[i] ? ( s = (((v = its_Lk_TgtVal(i)) !== its_LkNoV) && (abs(v - L[7]) < abs(v - L[6]))) ? 1 : 0; );
         );
@@ -15578,15 +15653,34 @@ function its_Lk_Leds() local(i, L, s, v)
     );
 );
 
-// @gfx : the actions of the links pressed (target LEDs : all the LEDs sent again)
-function its_Lk_Actions() local(i, L)
+/*
+    @gfx : the knobs with a rate incremental (on 1) or classic (0 : the pickup forced, each one acts once it meets its value) ;
+    after a switch, a knob acts once it has passed the center (rate), or met its value (classic)
+*/
+function its_Lk_RateSet(on) local(i, L)
+(
+    its_LkRateOn = on ? 1 : 0;
+    i = 0; loop(its_LkN,
+        L = its_LkTab + i * its_LkSz;
+        ((L[0] !== 0) && (L[its_LkW_Rate] > 0)) ? (
+            its_LkRzn[i] = its_LkRarm[i] = 0; its_LkRu[i] = -1;
+            !on ? ( its_LkForce[i] = 1; its_LkPick[i] = 0; );
+        );
+        i += 1;
+    );
+    mSL_log(SysLogBox, on ? "Links : the knobs with a rate are incremental" : "Links : the knobs with a rate are classic");
+);
+
+// @gfx : the actions of the links pressed (target LEDs : all the LEDs sent again ; Rate : an odd count of presses switches)
+function its_Lk_Actions() local(i, L, n)
 (
     i = 0; loop(its_LkN,
-        (its_LkAct[i] !== its_LkActDone[i]) ? (
+        ((n = its_LkAct[i] - its_LkActDone[i]) !== 0) ? (
             its_LkActDone[i] = its_LkAct[i];
             L = its_LkTab + i * its_LkSz;
             ((L[0] !== 0) && (L[3] === its_LkT_Action)) ? (
-                (L[4] === its_LkA_LEDs) ? memset(its_LkLed, -1, LK_CNT);
+                (L[4] === its_LkA_LEDs) ? memset(its_LkLed, -1, LK_CNT) :
+                (L[4] === its_LkA_Rate) ? ( (n & 1) ? its_Lk_RateSet(!its_LkRateOn); );
             );
         );
         i += 1;
@@ -15625,7 +15719,7 @@ function its_Lk_SetKey(i, L, v) local(ty, k, ki, b, m, o, e)
 function its_Lk_Apply(i, u) local(L, v, pk)
 (
     L = its_LkTab + i * its_LkSz;
-    pk = (L[its_LkW_Mode] === its_LkM_Abs) && L[its_LkW_Pick];
+    pk = (L[its_LkW_Mode] === its_LkM_Abs) && (L[its_LkW_Pick] || its_LkForce[i]);
     (L[3] === its_LkT_Ctl) ? its_Lk_CtlDrive(i, L, u, pk, 0) :
     ((L[3] >= its_LkT_Reader) && (L[3] <= its_LkT_Effect) && ((v = its_Lk_TgtVal(i)) !== its_LkNoV)) ? (
         (!pk || its_Lk_PickGate(i, L, u, v)) ? (
@@ -15648,6 +15742,23 @@ function its_Lk_GlideGfx() local(i, L, t, dt)
                 its_Lk_SetKey(i, L, its_Lk_Map(L, its_Lk_GlideStep(i, dt)));
         );
         i += 1;
+    );
+);
+
+// @gfx, each frame : the rates of the links of the keys of the modules (the time since the last frame, at most 0.25 s)
+function its_Lk_RateGfx() local(i, L, t, dt, u, v)
+(
+    t = time_precise(); dt = max(0, min(0.25, t - its_LkRateT)); its_LkRateT = t;
+    its_LkRateOn ? (
+        i = 0; loop(its_LkN,
+            (its_LkRzn[i] !== 0) ? (
+                L = its_LkTab + i * its_LkSz;
+                ((L[0] !== 0) && (L[3] >= its_LkT_Reader) && (L[3] <= its_LkT_Effect) && (L[its_LkW_Rate] > 0)
+                    && ((v = its_Lk_TgtVal(i)) !== its_LkNoV) && ((u = its_Lk_RateStep(i, L, v, dt)) >= 0)) ?
+                    its_Lk_SetKey(i, L, its_Lk_Map(L, u));
+            );
+            i += 1;
+        );
     );
 );
 
@@ -15696,6 +15807,7 @@ function its_Lk_Frame() local(k)
     k = 0; loop(NB_GSL, its_LkCtlT[k] ? ( its_LkCtlT[k] = 0; its_Ctl_Notify(k); ); k += 1;);
     its_Lk_Pending();
     its_Lk_GlideGfx();
+    its_Lk_RateGfx();
     its_Lk_Actions();
     its_Lk_Leds();
     // the module "Links" in the last drawing : drawn again when a message arrives, while a cell flashes (see show_Links_Pad)
@@ -15728,6 +15840,9 @@ function its_Lk_Text(str, i) local(L, ty)
             (L[its_LkW_Curve] > 0) ? (
                 strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "curve %s", its_Crv_TbName(#its_LkM5, L[its_LkW_Curve] - 1)));
             );
+            (L[its_LkW_Rate] > 0) ? (
+                strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "rate %.10g %.10g", L[its_LkW_Rate], L[its_LkW_RateF]));
+            );
         );
         (L[its_LkW_Glide] > 0) ? ( strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "glide %.10g", L[its_LkW_Glide])); );
     );
@@ -15749,6 +15864,7 @@ function its_Lk_Write(i, kd, num, ch, tt, k, ki, mn, mx, lw) local(L)
     memcpy(L + its_LkW_Mode, its_LkX + its_LkW_Mode, its_LkSz - its_LkW_Mode);
     its_LkDone[i] = its_LkSeq[i]; its_LkActDone[i] = its_LkAct[i];
     its_LkTog[i] = its_LkBtn[i] = its_LkPick[i] = its_LkGOn[i] = 0; its_LkPrevU[i] = -1; its_LkSetV[i] = its_LkNoV;
+    its_LkRzn[i] = its_LkRarm[i] = its_LkForce[i] = 0; its_LkRu[i] = -1;
     L[0] = kd;
     its_Lk_Count();
 );
@@ -15894,7 +16010,7 @@ function its_Lk_TouchCtl(n)
 
 // Learn : the control learned and its target linked : the link that has both already, else a free one (its number + 1 ;
 // 0 : no free link) ; written in the log
-function its_Lk_LearnLink() local(i, f, L)
+function its_Lk_LearnLink() local(i, f, L, r)
 (
     f = -1;
     i = 0; while ((f < 0) && (i < its_LkN)) (
@@ -15903,12 +16019,24 @@ function its_Lk_LearnLink() local(i, f, L)
             && (L[5] === its_LkLrnKi)) ? (f = i);
         i += 1;
     );
-    // (a link that has this control and this target keeps its mode... ; a new one : the defaults, a cc : pickup On, a note :
-    // the mode Toggle)
+    // (a link that has this control and this target keeps its mode... ; a new one : the defaults, a cc : pickup On and the
+    // rate of another link of this control (a knob made incremental stays so for all its targets), a note : the mode Toggle)
     (f >= 0) ? its_Lk_XFrom(its_LkTab + f * its_LkSz) : (
         its_Lk_XReset();
         its_LkX[its_LkW_Pick] = (its_LkLrnK === 1);
         its_LkX[its_LkW_Mode] = (its_LkLrnK === 2) ? its_LkM_Toggle : its_LkM_Abs;
+        (its_LkLrnK === 1) ? (
+            r = -1; i = 0; while ((r < 0) && (i < its_LkN)) (
+                L = its_LkTab + i * its_LkSz;
+                ((L[0] === 1) && (L[1] === its_LkLrnNum) && ((L[2] === 0) || (its_LkLrnCh === 0) || (L[2] === its_LkLrnCh))
+                    && (L[3] !== its_LkT_Action) && (L[its_LkW_Rate] > 0)) ? (r = i);
+                i += 1;
+            );
+            (r >= 0) ? (
+                L = its_LkTab + r * its_LkSz;
+                its_LkX[its_LkW_Rate] = L[its_LkW_Rate]; its_LkX[its_LkW_RateF] = L[its_LkW_RateF];
+            );
+        );
     );
     i = 0; while ((f < 0) && (i < LK_CNT)) ( (its_LkTab[i * its_LkSz] === 0) ? (f = i); i += 1; );
     (f >= 0) ? (
@@ -15964,12 +16092,12 @@ function its_Lk_ActOf(w) local(i, a)
 */
 function its_Tb_Link(chk)
 local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, mn, mx, lw, md, gk, gc, gt, gm, gx, gl, gmd, L, b, fty, ok, ks, nk, mo,
-    pk, gd, st, cv, gpk, ggd, gst, gcv)
+    pk, gd, st, cv, gpk, ggd, gst, gcv, r1, r2, grt)
 (
     n = its_Tb_Int(chk ? "Check Link" : "Link", 1, LK_CNT);
-    kd = num = ch = tt = ty = lw = md = kw = pk = gd = st = cv = 0; k = ki = -1; mn = -1; mx = 1;
+    kd = num = ch = tt = ty = lw = md = kw = pk = gd = st = cv = r1 = r2 = 0; k = ki = -1; mn = -1; mx = 1;
     gk = gc = gt = gm = gx = gl = gmd = 0; // the keys given : the control, chan, target, min, max, law, mode
-    gpk = ggd = gst = gcv = 0; // pickup, glide, steps, curve
+    gpk = ggd = gst = gcv = grt = 0; // pickup, glide, steps, curve, rate
     while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Tb_Peek())) (
         its_Tb_Next();
         ((w === its_TK_cc) || (w === its_TK_note)) ? (
@@ -16049,6 +16177,14 @@ local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, mn, mx, lw, md, gk, gc, gt
         (w === its_LkSym_curve) ? (
             (its_Tb_Peek() === its_TK_none) ? ( its_Tb_Next(); cv = 0; ) : ( cv = its_Crv_Id(its_Tb_Next(), 0) + 1; ); gcv = 1;
         ) :
+        (w === its_LkSym_rate) ? (
+            // rate Off | On (300 s, 0.1 s) | the times of the slow and of the fast zones (seconds)
+            (its_Tb_Peek() === its_TbFSt[0]) ? ( its_Tb_Next(); r1 = r2 = 0; ) :
+            (its_Tb_Peek() === its_TbFSt[1]) ? ( its_Tb_Next(); r1 = 300; r2 = 0.1; ) : (
+                r1 = its_Tb_Num("rate", 0.01, 36000); r2 = its_Tb_Num("rate", 0.001, 36000);
+            );
+            grt = 1;
+        ) :
         its_Tb_KeyErr(w, "Link");
     );
     mo = (tt >= its_LkT_Reader) && (tt <= its_LkT_Effect); // (a key of a module)
@@ -16057,15 +16193,19 @@ local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, mn, mx, lw, md, gk, gc, gt
             sprintf(#its_TbW, "Link %d : %s expected", n, !gk ? "cc m or note m" : "target");
             its_Tb_Err(2732, #its_TbW);
         ) :
-        ((tt === its_LkT_Action) && (gl || gmd || gpk || ggd || gst || gcv)) ? (
+        ((tt === its_LkT_Action) && (gl || gmd || gpk || ggd || gst || gcv || grt)) ? (
             sprintf(#its_TbW, "Link %d : target %s is an action : no %s", n, its_LkActN[k],
-                gl ? "law" : gmd ? "mode" : gpk ? "pickup" : ggd ? "glide" : gst ? "steps" : "curve");
+                gl ? "law" : gmd ? "mode" : gpk ? "pickup" : ggd ? "glide" : gst ? "steps" : gcv ? "curve" : "rate");
             its_Tb_Err(2740, #its_TbW);
         ) :
-        ((md !== its_LkM_Abs) && (pk || (st >= 2) || (cv > 0))) ? (
-            sprintf(#its_TbW, "Link %d : %s : only in the mode Abs (not %s)", n, pk ? "pickup On" : (st >= 2) ? "steps" : "curve",
-                its_LkModeN[md]);
+        ((md !== its_LkM_Abs) && (pk || (st >= 2) || (cv > 0) || (r1 > 0))) ? (
+            sprintf(#its_TbW, "Link %d : %s : only in the mode Abs (not %s)", n,
+                pk ? "pickup On" : (st >= 2) ? "steps" : (cv > 0) ? "curve" : "rate", its_LkModeN[md]);
             its_Tb_Err(2741, #its_TbW);
+        ) :
+        ((r1 > 0) && (kd === 2)) ? (
+            sprintf(#its_TbW, "Link %d : rate : only for a cc (a knob, a fader), not a note", n);
+            its_Tb_Err(2742, #its_TbW);
         ) :
         (!chk && mo && (!gm || !gx)) ? (
             sprintf(#its_TbW, "Link %d : min and max expected (the values of the key at 0 and at 127)", n);
@@ -16131,6 +16271,11 @@ local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, mn, mx, lw, md, gk, gc, gt
                 (gcv && (L[its_LkW_Curve] !== cv)) ? (
                     its_Lk_Diff(n, "curve", sprintf(#its_LkM, "%d", L[its_LkW_Curve]), sprintf(#its_LkM2, "%d", cv)); ok = 0;
                 );
+                (grt && ((abs(L[its_LkW_Rate] - r1) >= 0.0000001) || ((r1 > 0) && (abs(L[its_LkW_RateF] - r2) >= 0.0000001)))) ? (
+                    its_Lk_Diff(n, "rate", sprintf(#its_LkM, "%.10g %.10g", L[its_LkW_Rate], L[its_LkW_RateF]),
+                        sprintf(#its_LkM2, "%.10g %.10g", r1, r2));
+                    ok = 0;
+                );
                 (gm && (abs(L[6] - mn) >= 0.0000001)) ? (
                     its_Lk_Diff(n, "min", sprintf(#its_LkM, "%.10g", L[6]), sprintf(#its_LkM2, "%.10g", mn)); ok = 0;
                 );
@@ -16148,6 +16293,7 @@ local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, mn, mx, lw, md, gk, gc, gt
         ) : (
             its_Lk_XReset(); its_LkX[its_LkW_Mode] = md;
             its_LkX[its_LkW_Pick] = pk; its_LkX[its_LkW_Glide] = gd; its_LkX[its_LkW_Steps] = st; its_LkX[its_LkW_Curve] = max(0, cv);
+            its_LkX[its_LkW_Rate] = r1; its_LkX[its_LkW_RateF] = r2;
             its_Lk_Write(n - 1, kd, num, ch, tt, k, ki, mn, mx, lw);
         );
     );
@@ -16198,6 +16344,7 @@ function its_Tb_Inject() local(w, kd, num, v, ch)
         ((its_Tb_mode === 3) && (its_Tb_error === 0)) ? (
             its_Lk_Midi((kd ? 0xB0 : (v > 0) ? 0x90 : 0x80) + ch - 1, num, v, 0);
             its_Lk_Pending();
+            its_Lk_Actions();
             (its_LkLogR !== its_LkLogW) ? its_Lk_LogDrain();
         );
     );
@@ -18561,6 +18708,8 @@ loadMode ? (
             memcpy(its_LkActDone, its_LkAct, LK_CNT);
             memset(its_LkPick, 0, LK_CNT); memset(its_LkGOn, 0, LK_CNT); memset(its_LkPrevU, -1, LK_CNT);
             memset(its_LkSetV, its_LkNoV, LK_CNT); its_LkOwnF = 8;
+            memset(its_LkRzn, 0, LK_CNT); memset(its_LkRarm, 0, LK_CNT); memset(its_LkForce, 0, LK_CNT); memset(its_LkRu, -1, LK_CNT);
+            its_LkRateOn = savtmp[3] & 1; // (the knobs with a rate incremental ; a session saved before : 0)
             its_Lk_Count();
         ) :
         (savtmp[0] === 'tnam') ? (
@@ -18672,7 +18821,7 @@ loadMode ? (
     );
     // Save the links (MIDI), if there are some
     (its_LkN > 0) ? (
-        savtmp[0] = 'link'; savtmp[1] = LK_CNT; savtmp[2] = its_LkSz; savtmp[3] = 0;
+        savtmp[0] = 'link'; savtmp[1] = LK_CNT; savtmp[2] = its_LkSz; savtmp[3] = its_LkRateOn; // (1 : the knobs with a rate incremental)
         svtotal += save_mem(0, savtmp, TMPSIZ);
         svtotal += save_mem(0, its_LkTab, LK_CNT * its_LkSz);
     );
@@ -25224,6 +25373,10 @@ function its_LkEd_Open(i, w) local(L)
     (w === its_LkW_Curve) ? (
         (L[w] > 0) ? its_Crv_Name(#its_LkEdO, L[w] - 1) : strcpy(#its_LkEdO, "");
         sprintf(#its_LkEdTt, "The curve of link %d : its number (1 ... %d) or its name ; empty : none", i + 1, its_CrvMx);
+    ) :
+    (w === its_LkW_Rate) ? (
+        (L[w] > 0) ? sprintf(#its_LkEdO, "%.10g %.10g", L[w], L[its_LkW_RateF]) : strcpy(#its_LkEdO, "");
+        sprintf(#its_LkEdTt, "Rate of link %d : the whole range in t1 s (slow zones), t2 s (fast) : 300 0.1 ; empty : none", i + 1);
     ) : (
         its_LkEd_Bounds(i, w);
         sprintf(#its_LkEdO, "%.10g", L[w]);
@@ -25247,11 +25400,25 @@ function its_Lk_ParseNum(s, dflt) local(n, k, c)
     ) : ui_parsenumber(s, dflt);
 );
 
-function its_LkEd_Take() local(L, v, k)
+function its_LkEd_Take() local(L, v, k, n)
 (
     ((its_LkEdI >= 0) && !(ui_screen() == "control.prompt")) ? (
         L = its_LkTab + its_LkEdI * its_LkSz;
         ((strcmp(#its_LkEdS, #its_LkEdO) !== 0) && (L[0] !== 0) && (L[3] === its_LkEdT) && (L[4] === its_LkEdN) && (L[5] === its_LkEdK)) ? (
+            (its_LkEdW === its_LkW_Rate) ? (
+                // the rate : "t1 t2" (t2 missing : 0.1 s) ; empty, or t1 0 : none
+                n = strlen(#its_LkEdS); k = 0;
+                while ((k < n) && (str_getchar(#its_LkEdS, k) !== ' ')) (k += 1);
+                strcpy_substr(#its_LkEdS1, #its_LkEdS, 0, k); strcpy_from(#its_LkEdS2, #its_LkEdS, min(n, k + 1));
+                v = its_Lk_ParseNum(#its_LkEdS1, 0);
+                (v > 0) ? (
+                    L[its_LkW_Rate] = max(0.01, min(36000, v));
+                    L[its_LkW_RateF] = max(0.001, min(36000, its_Lk_ParseNum(#its_LkEdS2, 0.1)));
+                ) : (
+                    L[its_LkW_Rate] = L[its_LkW_RateF] = 0;
+                );
+                its_LkRzn[its_LkEdI] = its_LkRarm[its_LkEdI] = 0; its_LkRu[its_LkEdI] = -1;
+            ) :
             (its_LkEdW === its_LkW_Curve) ? (
                 // the curve : empty (none), its number, or its name
                 (strlen(#its_LkEdS) === 0) ? (L[its_LkW_Curve] = 0) : (
@@ -25282,8 +25449,8 @@ function its_LkEd_Take() local(L, v, k)
 function its_Lk_Wait(i) local(L, v, uv, p)
 (
     L = its_LkTab + i * its_LkSz;
-    ((L[0] !== 0) && (L[3] !== its_LkT_Action) && (L[its_LkW_Mode] === its_LkM_Abs) && L[its_LkW_Pick]
-        && ((v = its_Lk_TgtVal(i)) !== its_LkNoV)) ? (
+    ((L[0] !== 0) && (L[3] !== its_LkT_Action) && (L[its_LkW_Mode] === its_LkM_Abs) && (L[its_LkW_Pick] || its_LkForce[i])
+        && !(its_LkRateOn && (L[its_LkW_Rate] > 0)) && ((v = its_Lk_TgtVal(i)) !== its_LkNoV)) ? (
         (its_LkPick[i] && (its_LkSetV[i] !== its_LkNoV) && (abs(v - its_LkSetV[i]) <= 0.000001 * (1 + abs(v)))) ? 0 : (
             uv = max(0, min(1, its_Lk_Unmap(L, v))); p = its_LkPrevU[i];
             (p < 0) ? 3 : (p < uv) ? 1 : 2;
@@ -25300,6 +25467,7 @@ function its_Lk_OptText(str, L) local(md)
         L[its_LkW_Pick] ? strcat(str, " P");
         (L[its_LkW_Steps] >= 2) ? strcat(str, sprintf(#its_LkM4, " S%d", L[its_LkW_Steps]));
         (L[its_LkW_Curve] > 0) ? strcat(str, sprintf(#its_LkM4, " C%d", L[its_LkW_Curve]));
+        (L[its_LkW_Rate] > 0) ? strcat(str, " R");
     );
     (L[its_LkW_Glide] > 0) ? strcat(str, " G");
     str;
@@ -25322,6 +25490,12 @@ function its_Lk_NowText(str, i) local(L, ty, b, w)
     ((w = its_Lk_Wait(i)) > 0) ? strcat(str, (w === 1) ? " ; pickup : move the control up" : (w === 2) ?
         " ; pickup : move the control down" : " ; pickup : move the control to the value");
     its_LkGOn[i] ? strcat(str, " ; gliding");
+    (its_LkRateOn && (L[3] !== its_LkT_Action) && (L[its_LkW_Mode] === its_LkM_Abs) && (L[its_LkW_Rate] > 0)) ? (
+        !its_LkRarm[i] ? strcat(str, " ; rate : bring the control to the center (4 ... 6)") :
+        (its_LkRzn[i] === 0) ? strcat(str, " ; rate : the center, the value is kept") :
+            strcat(str, sprintf(#its_LkM4, " ; rate : %s, the whole range in %.3g s", (its_LkRzn[i] > 0) ? "up" : "down",
+                1 / abs(its_Lk_RateSpd(L, its_LkRzn[i]))));
+    );
     str;
 );
 
@@ -25390,7 +25564,8 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                 strcpy(pad_Lk_Labs[0], "Links");
                 pad_Lk_Colrs[0] = Col_P1;
                 sprintf(pad_Lk_Labs[1], "%d link%s", n, (n > 1) ? "s" : "");
-                pad_Lk_Colrs[1] = Color_Heliotrope;
+                its_LkRateOn ? strcat(pad_Lk_Labs[1], " : rate"); // (the knobs with a rate incremental : clic)
+                pad_Lk_Colrs[1] = its_LkRateOn ? Color_Dark_Orange : Color_Heliotrope;
                 strcpy(pad_Lk_Labs[2], its_LkLearn ? "Learn On" : "Learn Off");
                 pad_Lk_Colrs[2] = its_LkLearn ? Color_Dark_Orange : Col_P1;
                 strcpy(pad_Lk_Labs[3], its_LkLog ? "MIDI log On" : "MIDI log Off");
@@ -25436,6 +25611,9 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                         ) :
                         (xx === 2) ? memset(its_LkLed, -1, LK_CNT) : // (sent again by its_Lk_Leds)
                         (xx === 4) ? ( its_Lk_LedsOff(); its_Lk_FreeAll(); LinksStruct[0] = LinksStruct[1] = 0; );
+                    ) :
+                    ((zz & ui_jpad_ev_lmc) && (zzmcl === 1)) ? (
+                        its_Lk_RateSet(!its_LkRateOn); // (as the action Rate)
                     ) :
                     ((zz & ui_jpad_ev_lmc) && (zzmcl === 2)) ? (
                         its_LkLearn = !its_LkLearn;
@@ -25498,8 +25676,13 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                             strcpy(pad_LkG_Labs[c + 5], (L[8] === 1) ? "Exp" : "Lin");
                             pad_LkG_Colrs[c + 5] = Col_P2;
                             its_Lk_OptText(pad_LkG_Labs[c + 6], L);
-                            // (Toggle : the color of its LED)
+                            // (Toggle : the color of its LED ; a rate, incremental : its zone, "." before the control passes the center)
                             pad_LkG_Colrs[c + 6] = (L[its_LkW_Mode] === its_LkM_Toggle) ? (its_LkTog[i] ? Color_Dark_Orange : Col_P2) : Col_P2;
+                            (its_LkRateOn && (L[its_LkW_Mode] === its_LkM_Abs) && (L[its_LkW_Rate] > 0)) ? (
+                                !its_LkRarm[i] ? strcat(pad_LkG_Labs[c + 6], " .") :
+                                (its_LkRzn[i] !== 0) ? strcat(pad_LkG_Labs[c + 6], sprintf(#its_LkM4, (its_LkRzn[i] > 0) ? "+%d" : "%d", its_LkRzn[i]));
+                                pad_LkG_Colrs[c + 6] = Color_Dark_Orange;
+                            );
                         );
                     ) : (
                         m = 0; loop(pad_LkG_NC, strcpy(pad_LkG_Labs[c + m], ""); pad_LkG_Colrs[c + m] = Col_Inactive; m += 1;);
@@ -25551,6 +25734,9 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                             (L[its_LkW_Curve] > 0) ? sprintf(#its_LkM3, "Curve : %s...", its_Crv_Name(#its_LkM5, L[its_LkW_Curve] - 1)) :
                                 strcpy(#its_LkM3, "Curve : none...");
                             its_Menu_Item(menu_Lk, 9, 0, !ab, #its_LkM3);
+                            (L[its_LkW_Rate] > 0) ? sprintf(#its_LkM3, "Rate (incremental) : %.4g s ... %.4g s...", L[its_LkW_Rate], L[its_LkW_RateF]) :
+                                strcpy(#its_LkM3, "Rate (incremental) : none...");
+                            its_Menu_Item(menu_Lk, 10, 0, !ab || (L[0] !== 1), #its_LkM3); // (a cc)
                             xx = control_jmenu(menu_Lk);
                             (xx === 1) ? mSL_log(SysLogBox, its_Lk_Text(#its_LkT, i)) :
                             (xx === 2) ? ( its_LkRel = i + 1; its_LkLrnSeen = its_LkCandN; ) :
@@ -25562,9 +25748,10 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                             ((xx === 8) && (L[3] !== its_LkT_Action)) ? its_LkEd_Open(i, its_LkW_Glide) :
                             ((xx === 9) && ab) ? its_LkEd_Open(i, its_LkW_Steps) :
                             ((xx === 10) && ab) ? its_LkEd_Open(i, its_LkW_Curve) :
-                            (xx === 11) ? its_Lk_ShowTarget(L) :
-                            (xx === 13) ? ( its_Lk_LedOff(i); L[0] = 0; its_Lk_Count(); (sel === i + 1) ? (LinksStruct[1] = 0); ) :
-                            (xx === 14) ? ( its_Lk_LedsOff(); its_Lk_FreeAll(); LinksStruct[0] = LinksStruct[1] = 0; );
+                            ((xx === 11) && ab && (L[0] === 1)) ? its_LkEd_Open(i, its_LkW_Rate) :
+                            (xx === 12) ? its_Lk_ShowTarget(L) :
+                            (xx === 14) ? ( its_Lk_LedOff(i); L[0] = 0; its_Lk_Count(); (sel === i + 1) ? (LinksStruct[1] = 0); ) :
+                            (xx === 15) ? ( its_Lk_LedsOff(); its_Lk_FreeAll(); LinksStruct[0] = LinksStruct[1] = 0; );
                         ) :
                         ((zz & ui_jpad_ev_lmc) && !(dr & 2)) ? (
                             (c === 0) ? (

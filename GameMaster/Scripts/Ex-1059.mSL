@@ -1,0 +1,84 @@
+print("Ex-1059. Interstys table : le mode incremental des liens MIDI (rate, target Rate).");
+
+/*
+  rate t1 t2 (un cc, mode Abs) : quand les boutons sont incrementaux (target Rate : chaque appui bascule), la position
+  p = 10 x de la commande choisit une vitesse : de 4 a 6 rien ; de 6 a 7 (3 a 4) toute la course en t1 secondes, puis de
+  plus en plus vite, de 9 a 10 (0 a 1) en t2 secondes ; la valeur s'arrete a min ou max. Apres le passage au mode
+  incremental, la commande n'agit qu'apres etre passee par le centre (cc 30 127 : rien) ; au retour au mode classique,
+  qu'apres avoir rejoint sa valeur (cc 30 100 : rien ; cc 30 0 : la valeur 0, rejointe). Le curseur Ctl avance dans
+  @block : les wait lui laissent le temps (0.1 s pour toute la course).
+  Erreurs (rien n'est cree) : e1 rate pour une note (2742) ; e2 rate en mode Push (2741) ; e3 min pour l'action Rate
+  (2740) ; e4 rate 0 (2754).
+*/
+
+var r1 = table(data(
+    Interstys
+    Free Link All
+    Control 1  value 0
+    Link 1  cc 30  target Ctl 1  min 0  max 1  rate 10 0.1
+    Link 2  note 27  target Rate
+    Dump Link 1
+    Dump Link 2
+    Check Link 1  rate 10 0.1
+    Inject note 27 127
+    Inject note 27 0
+    Inject cc 30 127
+));
+wait(0.5);
+
+var r2 = table(data(
+    Interstys
+    Dump Control 1
+    Inject cc 30 64
+    Inject cc 30 127
+));
+wait(0.5);
+
+var r3 = table(data(
+    Interstys
+    Dump Control 1
+    Inject cc 30 64
+    Dump Control 1
+    Inject cc 30 0
+));
+wait(0.5);
+
+var r4 = table(data(
+    Interstys
+    Dump Control 1
+    Inject cc 30 64
+    Inject note 27 127
+    Inject note 27 0
+    Inject cc 30 100
+    Dump Control 1
+    Inject cc 30 0
+    Inject cc 30 127
+    Dump Control 1
+    Free Link All
+    Control 1  value 0
+));
+print(sprintf(0, "Ex-1059. resultat : %d %d %d %d", r1, r2, r3, r4));
+
+var e1 = table(data( Interstys  Link 1  note 1  target Ctl 1  rate On ));
+var e2 = table(data( Interstys  Link 1  cc 1  mode Push  target Ctl 1  rate On ));
+var e3 = table(data( Interstys  Link 1  note 1  target Rate  min 0 ));
+var e4 = table(data( Interstys  Link 1  cc 1  target Ctl 1  rate 0 1 ));
+print(sprintf(0, "Ex-1059. erreurs : %d %d %d %d", e1, e2, e3, e4));
+
+// Expected "Link 1 cc 30 target Ctl 1 min 0 max 1 rate 10 0.1"
+// Expected "Link 2 note 27 target Rate"
+// Expected "Check Link 1 OK"
+// Expected "Links : the knobs with a rate are incremental"
+// Expected "Control 1 value 0"
+// Expected "Control 1 value 1"
+// Expected "Control 1 value 1"
+// Expected "Control 1 value 0"
+// Expected "Links : the knobs with a rate are classic"
+// Expected "Control 1 value 0"
+// Expected "Control 1 value 1"
+// Expected "Ex-1059. resultat : 0 0 0 0"
+// Expected error 2742
+// Expected error 2741
+// Expected error 2740
+// Expected error 2754
+// Expected "Ex-1059. erreurs : 2742 2741 2740 2754"
