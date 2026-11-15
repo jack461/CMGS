@@ -1326,6 +1326,7 @@ SummaryStruct = idx; idx += 8; // the summary modules (show_Summary_Pad) : the p
 // the module "Patch" (show_PGraph_Pad) : [0] 1 all the modules (0 : the patch of the module designated), [1] 1 In and the
 // controls not shown, [2] the first column shown
 PGraphStruct = idx; idx += 8;
+LinksStruct = idx; idx += 8; // the module "Links" (show_Links_Pad) : [0] the page, [1] the link selected + 1 (0 : none)
 // the display blocks of the modules above (number of the object shown, display options) : saved in the 'disp' block
 DispStructsSize = idx - ReadersStructA;
 
@@ -5133,6 +5134,52 @@ menu_InsAll_Action = make_jmenu(
     ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "instances-actions", 4, menu_InsAll_Action_N);
 its_InsUiSel = 0; // the instance selected in the module (0 : none)
+// Pads of the module "Links" (see show_Links_Pad) : line 1 (8 cells), then the links of the page (16 lines x 6 columns :
+// the control, the module, the key, min, max, the law)
+pad_Lk_Siz = 8;
+pad_Lk = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    1, pad_Lk_Siz, pad_Lk_Siz);
+pad_Lk_Labs = pad_Lk + pad_Lk[ui_jpad_labs];
+pad_Lk_Colrs = pad_Lk + pad_Lk[ui_jpad_clrs];
+pad_LkG_NL = 16; pad_LkG_NC = 6;
+pad_LkG_Siz = pad_LkG_NL * pad_LkG_NC;
+pad_LkG = make_jpad(
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    pad_LkG_NL, pad_LkG_NC, pad_LkG_Siz);
+pad_LkG_Labs = pad_LkG + pad_LkG[ui_jpad_labs];
+pad_LkG_Colrs = pad_LkG + pad_LkG[ui_jpad_clrs];
+i__ii = 0; loop(pad_Lk_Siz, pad_Lk_Colrs[i__ii] = Col_Inactive; pad_Lk_Labs[i__ii] = ""; i__ii += 1;);
+i__ii = 0; loop(pad_LkG_Siz, pad_LkG_Colrs[i__ii] = Col_Inactive; pad_LkG_Labs[i__ii] = ""; i__ii += 1;);
+menu_LkAll_N = make_array(3); // all the links (cell 0)
+menu_LkAll_N[0] = "Dump all in the log";
+menu_LkAll_N[1] = "---";
+menu_LkAll_N[2] = "Free all links";
+menu_LkAll = make_jmenu(
+    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "links-actions", 3, menu_LkAll_N);
+menu_Lk_N = make_array(10); // a link (right clic on one of its cells)
+menu_Lk_N[0] = "Dump in the log";
+menu_Lk_N[1] = "Learn its control (the next one moved)";
+menu_Lk_N[2] = "All channels";
+menu_Lk_N[3] = "Only the channel of the last control";
+menu_Lk_N[4] = "Swap min and max";
+menu_Lk_N[5] = "Reset min and max (the bounds of the key)";
+menu_Lk_N[6] = "Show the target";
+menu_Lk_N[7] = "---";
+menu_Lk_N[8] = "Free";
+menu_Lk_N[9] = "Free all links";
+menu_Lk = make_jmenu(
+    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "link-actions", 10, menu_Lk_N);
+menu_LkPage_N = make_array(4); // the pages (right clic on the cell 7)
+menu_LkPage_N[0] = "First page";
+menu_LkPage_N[1] = "Previous page";
+menu_LkPage_N[2] = "Next page";
+menu_LkPage_N[3] = "Last page";
+menu_LkPage = make_jmenu(
+    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "link-pages", 4, menu_LkPage_N);
 // Pad of the module "Scripts" (see show_Scripts_Pad) : one line
 pad_Scr_Siz = 8;
 pad_Scr = make_jpad(
@@ -7251,6 +7298,8 @@ local (i, j, g, it, fid, sid, ttl, gl0, gl1, gl2, gl3, gl4, othFirst, tmp, bln, 
     blockDispNames[blockCurves] = "Curves"; //
     blockAllMods = (itdsp += 1);
     blockDispNames[blockAllMods] = "Modules"; // see show_Summary_Pad (all the kinds)
+    blockLinks = (itdsp += 1);
+    blockDispNames[blockLinks] = "Links"; // see show_Links_Pad (the MIDI links)
 
     blockUsrFirst = itdsp+1;
     // Add users modules
@@ -15148,6 +15197,24 @@ its_LkLogMx = 64; its_LkLogQ = make_array(4 * its_LkLogMx); // the messages to l
 its_LkLogW = its_LkLogR = 0; // written by @block (or Inject), read by @gfx
 its_LkMBSz = 4096; its_LkMBuf = make_array(its_LkMBSz); // a message received (a larger sysex is skipped)
 its_LkMidiN = 0; // the count of messages received
+// the module "Links" (show_Links_Pad) : the last message received (@block, Inject), the last control moved (cc, note-on : the
+// one that Learn takes), the messages taken by each link (its cells flash), Learn (the control, then the slider touched)
+its_LkLastSt = its_LkLastD1 = its_LkLastD2 = its_LkLastN = 0;
+its_LkCandK = its_LkCandNum = its_LkCandCh = its_LkCandN = 0;
+its_LkHit = make_array(LK_CNT); its_LkHitSeen = make_array(LK_CNT); its_LkFlash = make_array(LK_CNT);
+its_LkLearn = 0; // Learn On
+its_LkLrnSeen = 0; // its_LkCandN when the control was taken (Learn : a newer control replaces it)
+its_LkLrnK = its_LkLrnNum = its_LkLrnCh = 0; // the control learned (kind 0 : none)
+its_LkLrnTt = 0; its_LkLrnTk = its_LkLrnKi = -1; // the target learned (kind 0 : none ; key -1 : a slider that can't be linked)
+its_LkLrnLo = its_LkLrnHi = its_LkLrnLaw = 0; // its range, its law (from the slider)
+its_LkRel = 0; its_LkRelSeen = 0; // a link whose control is learned again (its number + 1 ; 0 : none)
+its_LkTc0 = 0; // param_touch_count before a module is drawn (the dispatch of @gfx : its_Lk_Touched)
+its_LkPg = make_array(LK_CNT); // the links that exist, in the order of their numbers (show_Links_Pad : its pages)
+its_LkUiN = 0; // its_LkLastN seen by the module "Links" (a new message : drawn again)
+its_LkDrawnAt = -1; its_LkFlashEnd = 0; // the drawing (gfx_executed) that showed the module "Links", the end of its flashes
+its_LkLo = its_LkHi = its_LkFl = 0; // a range (its_Lk_Range, its_Lk_DragRange)
+its_LkEdI = -1; // the link whose min or max is edited in the prompt (-1 : none, see its_LkEd_Open)
+its_LkEdW = its_LkEdT = its_LkEdN = its_LkEdK = 0; // its word (6 min, 7 max), its target when the prompt opened
 
 // the keys of the modules that a link can drive : 1 a number, 2 an integer (the value is rounded) ; 0 : not a number (a
 // mode, a source, a module...) or not a setting of the sound
@@ -15206,12 +15273,16 @@ function its_Lk_Midi(st, d1, d2, blk) local(t, ch, kd, x, i, L, c, q)
     t = st & 0xF0; ch = (st & 0x0F) + 1;
     kd = (t === 0xB0) ? 1 : ((t === 0x90) || (t === 0x80)) ? 2 : 0;
     x = (t === 0x80) ? 0 : max(0, min(127, d2)) / 127;
+    its_LkLastSt = st; its_LkLastD1 = d1; its_LkLastD2 = d2; its_LkLastN += 1;
+    (kd && (t !== 0x80) && ((t !== 0x90) || (d2 > 0))) ? ( // (a control moved : the end of a note is not one)
+        its_LkCandK = kd; its_LkCandNum = d1; its_LkCandCh = ch; its_LkCandN += 1;
+    );
     c = 0;
     kd ? (
         i = 0; loop(its_LkN,
             L = its_LkTab + i * its_LkSz;
             ((L[0] === kd) && (L[1] === d1) && ((L[2] === 0) || (L[2] === ch))) ? (
-                c += 1;
+                c += 1; its_LkHit[i] += 1;
                 (L[3] === its_LkT_Ctl) ? (
                     blk ? ( its_Ctl_Put(L[4], its_Lk_Map(L, x)); its_LkCtlT[L[4]] = 1; ) : its_Ctl_Set(L[4], its_Lk_Map(L, x));
                 ) : (
@@ -15307,6 +15378,8 @@ function its_Lk_Frame() local(k)
     (its_LkLogR !== its_LkLogW) ? its_Lk_LogDrain();
     k = 0; loop(NB_GSL, its_LkCtlT[k] ? ( its_LkCtlT[k] = 0; its_Ctl_Notify(k); ); k += 1;);
     its_Lk_Pending();
+    // the module "Links" in the last drawing : drawn again when a message arrives, while a cell flashes (see show_Links_Pad)
+    ((its_LkDrawnAt === gfx_executed) && ((its_LkLastN !== its_LkUiN) || (its_LkFlashEnd !== 0))) ? (ui_GFXdoNow |= 4);
 );
 
 // the text of the link "i" in "str" : Link n  cc m  [chan c]  target ...  min v  max v  [law Exp] (a module of an instance in a
@@ -15325,6 +15398,197 @@ function its_Lk_Text(str, i) local(L, ty)
     strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "min %.10g", L[6]));
     strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "max %.10g", L[7]));
     (L[8] === 1) ? ( strcat(str, its_Xp_Sep()); strcat(str, "law Exp"); );
+    str;
+);
+
+// the link "i" (0 ... LK_CNT-1) written : its kind last (@block reads it first), no value pending
+function its_Lk_Write(i, kd, num, ch, tt, k, ki, mn, mx, lw) local(L)
+(
+    L = its_LkTab + i * its_LkSz;
+    L[0] = 0; // (@block : no link while it is written)
+    L[1] = num; L[2] = ch; L[3] = tt; L[4] = k; L[5] = ki; L[6] = mn; L[7] = mx; L[8] = lw;
+    L[9] = L[10] = L[11] = 0;
+    its_LkDone[i] = its_LkSeq[i];
+    L[0] = kd;
+    its_Lk_Count();
+);
+
+/*
+    the range of the key "ki" of the module "b" (type "ty" ; 0 : a slider Ctl, [-1, 1]) : its_LkLo, its_LkHi ; the bounds of
+    the table (its_Tb_Key, its_Tb_FxKey : keep them in step), but the positions of a reader : [0, the length of its line]
+*/
+function its_Lk_Range(ty, ki, b) local(ft, ln, lb, d)
+(
+    its_LkLo = -1; its_LkHi = 1;
+    d = 67108864 / srate;
+    (ty === its_TK_Reader) ? (
+        ln = ((b !== 0) && (b[its_Rdr_LineNb] >= 0) && ((lb = Lines_Set[b[its_Rdr_LineNb]]) > BASE_MEMORY) && (lb[-2] === KW_lcbl)) ?
+            lb[its_Lin_SmplCnt] / srate : d;
+        ((ki === 2) || (ki === 34) || (ki === 35) || (ki === 37)) ? ( its_LkLo = 0; its_LkHi = ln; ) :
+        ((ki === 3) || (ki === 19)) ? ( its_LkLo = -SPDMAX; its_LkHi = SPDMAX; ) :
+        (ki === 6) ? ( its_LkLo = -120; its_LkHi = 40; ) :
+        ((ki === 10) || (ki === 11) || (ki === 30)) ? ( its_LkLo = -1; its_LkHi = 1; ) :
+        (ki === 15) ? ( its_LkLo = 10; its_LkHi = 5000; ) : (ki === 16) ? ( its_LkLo = 5; its_LkHi = 50; ) :
+        (ki === 17) ? ( its_LkLo = 0; its_LkHi = 200; ) : (ki === 18) ? ( its_LkLo = -24; its_LkHi = 24; ) :
+        (ki === 20) ? ( its_LkLo = 10; its_LkHi = 10000; ) :
+        ((ki === 22) || (ki === 24)) ? ( its_LkLo = 0; its_LkHi = 100; ) :
+        (ki === 27) ? ( its_LkLo = -20; its_LkHi = 20; ) : (ki === 31) ? ( its_LkLo = 0.01; its_LkHi = 100; ) :
+        (ki === 32) ? ( its_LkLo = 0; its_LkHi = 1; ) : (ki === 36) ? ( its_LkLo = 0.01; its_LkHi = 20000; ) :
+        ((ki >= 21) && (ki <= 29)) ? ( its_LkLo = 1; its_LkHi = 5; ); // the random factors
+    ) :
+    (ty === its_TK_Writer) ? (
+        (ki === 3) ? ( its_LkLo = -120; its_LkHi = 40; ) : (ki === 4) ? ( its_LkLo = -150; its_LkHi = 150; ) :
+        (ki === 8) ? ( its_LkLo = 0.001; its_LkHi = 10; ) : ((ki === 9) || (ki === 10) || (ki === 12)) ? ( its_LkLo = 0; its_LkHi = 100; );
+    ) :
+    (ty === its_TK_Effect) ? (
+        ft = (b !== 0) ? b[its_Efx_Type] : 0;
+        ((ki >= 14) && (ki <= 21)) ? ( its_LkLo = -120; its_LkHi = 40; ) :
+        (ki === 22) ? ( its_LkLo = 0.001; its_LkHi = 0.5 * srate; ) : (ki === 23) ? ( its_LkLo = 0.05; its_LkHi = 2000; ) :
+        (ki === 26) ? ( (ft === its_Efx_TyMath) ? ( its_LkLo = -1000; its_LkHi = 1000; ) : ( its_LkLo = 0; its_LkHi = 10; ); ) :
+        (ki === 27) ? ( (ft === its_Efx_TyMath) ? ( its_LkLo = -1000; its_LkHi = 1000; ) : ( its_LkLo = -10; its_LkHi = 10; ); ) :
+        ((ki === 28) || (ki === 52) || (ki === 60) || (ki === 73) || (ki === 74)) ? ( its_LkLo = 0; its_LkHi = 1; ) :
+        (ki === 29) ? ( its_LkLo = -48; its_LkHi = 144; ) : (ki === 30) ? ( its_LkLo = -8; its_LkHi = 8; ) :
+        ((ki === 31) || (ki === 66) || (ki === 77) || (ki === 93)) ? ( its_LkLo = 0; its_LkHi = 100; ) :
+        (ki === 33) ? ( its_LkLo = -120; its_LkHi = 40; ) : ((ki === 34) || (ki === 35)) ? ( its_LkLo = -64; its_LkHi = 64; ) :
+        (ki === 36) ? ( (ft === its_Efx_TyRing) ? ( its_LkLo = 0; its_LkHi = 2; ) : ( its_LkLo = -8; its_LkHi = 8; ); ) :
+        (ki === 40) ? ( its_LkLo = 0.01; its_LkHi = 1000; ) : ((ki === 41) || (ki === 48)) ? ( its_LkLo = 0; its_LkHi = 0.5 * srate; ) :
+        ((ki === 42) || (ki === 43)) ? ( its_LkLo = 0.02; its_LkHi = 20000; ) :
+        ((ki === 44) || (ki === 56) || (ki === 65) || (ki === 83)) ? ( its_LkLo = -2; its_LkHi = 2; ) :
+        ((ki === 50) || (ki === 54) || (ki === 55)) ? ( its_LkLo = 0; its_LkHi = 2000; ) :
+        (ki === 51) ? ( its_LkLo = 0; its_LkHi = (ft === its_Efx_TyRandom) ? 20000 : 5000; ) :
+        ((ki === 53) || (ki === 62)) ? ( its_LkLo = 0; its_LkHi = 10; ) :
+        (ki === 58) ? ( its_LkLo = 1; its_LkHi = its_FlMaxV; ) : (ki === 59) ? ( its_LkLo = -1; its_LkHi = 1; ) :
+        (ki === 61) ? ( its_LkLo = -100; its_LkHi = 100; ) : (ki === 63) ? ( its_LkLo = 1; its_LkHi = its_PhMaxS; ) :
+        (ki === 64) ? ( its_LkLo = 0.1; its_LkHi = 100; ) : ((ki === 67) || (ki === 68)) ? ( its_LkLo = -36; its_LkHi = 36; ) :
+        (ki === 69) ? ( its_LkLo = 10; its_LkHi = 1000; ) : (ki === 72) ? ( its_LkLo = 0.01; its_LkHi = 100000; ) :
+        (ki === 75) ? ( its_LkLo = -6; its_LkHi = 6; ) : (ki === 76) ? ( its_LkLo = 0; its_LkHi = 8; ) :
+        (ki === 78) ? ( its_LkLo = 5; its_LkHi = 500; ) : (ki === 81) ? ( its_LkLo = 0; its_LkHi = 128; ) :
+        (ki === 82) ? ( its_LkLo = 0; its_LkHi = 2; ) : (ki === 85) ? ( its_LkLo = 1; its_LkHi = 10000; ) :
+        (ki === 86) ? ( its_LkLo = -1000; its_LkHi = 1000; ) : (ki === 88) ? ( its_LkLo = 0; its_LkHi = 10000; ) :
+        (ki === 89) ? ( its_LkLo = -10000; its_LkHi = 10000; ) : (ki === 90) ? ( its_LkLo = -40; its_LkHi = 0; ) :
+        (ki === 94) ? ( its_LkLo = -12; its_LkHi = 24; );
+    );
+);
+
+// the key of the slider "p" (a parameter) of a pad of the type "ty" (Reader, Writer, Effect) : its index ; -1 : none (a
+// depth of a modulation, a display...)
+function its_Lk_ParKey(ty, p)
+(
+    (ty === its_TK_Reader) ? (
+        (p === p_playVol) ? 6 : (p === p_playSpeed) ? 3 : (p === p_rdOffset) ? 2 : (p === p_rdStretch) ? 19 :
+        (p === p_play_S_Low) ? 34 : (p === p_play_S_High) ? 35 : (p === p_play_S_Len) ? 37 : (p === p_play_XFade) ? 36 :
+        (p === p_rdLoopSpd) ? 10 : (p === p_rdDesync) ? 11 : -1;
+    ) :
+    (ty === its_TK_Writer) ? (
+        (p === p_wrGain) ? 3 : (p === p_wrOvrdb) ? 4 : ((p >= p_wrWFade) && (p < p_wrWFade + 5)) ? 8 + p - p_wrWFade : -1;
+    ) : (
+        ((p >= p_fxGain1) && (p < p_fxGain1 + 8)) ? 14 + p - p_fxGain1 :
+        ((p === p_fxLfoFreq) || (p === p_fxFltFreq) || (p === p_fxPhFreq) || (p === p_fxRgFreq)) ? 22 :
+        (p === p_fxFltQ) ? 23 :
+        ((p === p_fxLfoAmp) || (p === p_fxRnAmp) || (p === p_fxMtScale)) ? 26 :
+        ((p === p_fxLfoDC) || (p === p_fxRnDC) || (p === p_fxMtDC)) ? 27 :
+        ((p === p_fxLfoSpread) || (p === p_fxFlSpread) || (p === p_fxRgSpread)) ? 28 :
+        (p === p_fxSatDrive) ? 29 : (p === p_fxSatBias) ? 30 :
+        ((p === p_fxSatMix) || (p === p_fxMxMix) || (p === p_fxRgMix)) ? 31 :
+        ((p === p_fxSatOut) || (p === p_fxNzLevel) || (p === p_fxLmLimit + 2)) ? 33 :
+        (p === p_fxSatOrder) ? 34 : (p === p_fxSatStretch) ? 35 : ((p === p_fxSatAmp) || (p === p_fxRgAmt)) ? 36 :
+        (p === p_fxMxDecay) ? 40 : (p === p_fxMxDamp) ? 41 : (p === p_fxMxDmin) ? 42 : (p === p_fxMxDmax) ? 43 :
+        (p === p_fxMxDiff) ? 44 : (p === p_fxMxHp) ? 48 : (p === p_fxMxWow) ? 50 :
+        ((p === p_fxMxRate) || (p === p_fxFlRate) || (p === p_fxRnRate)) ? 51 :
+        (p === p_fxMxSpread) ? 52 : ((p === p_fxMxGlide) || (p === p_fxRnGlide)) ? 53 :
+        (p === p_fxFlDelay) ? 54 : (p === p_fxFlSweep) ? 55 : (p === p_fxFlFb) ? 56 : (p === p_fxFlCross) ? 59 :
+        ((p === p_fxFlJitter) || (p === p_fxRnJitter)) ? 60 : (p === p_fxFlMix) ? 61 :
+        (p === p_fxPhSweep) ? 62 : (p === p_fxPhStages) ? 63 : (p === p_fxPhQ) ? 64 : (p === p_fxPhSpacing) ? 65 :
+        (p === p_fxShAmt) ? 66 : (p === p_fxShShift) ? 67 : (p === p_fxShShift + 1) ? 68 : (p === p_fxShGrain) ? 69 :
+        (p === p_fxNzDens) ? 72 : (p === p_fxNzCorr) ? 73 : (p === p_fxNzChaos) ? 74 : (p === p_fxNzTilt) ? 75 :
+        (p === p_fxNzPower) ? 76 : (p === p_fxNzRumble) ? 77 : (p === p_fxNzRFreq) ? 78 :
+        (p === p_fxRnSteps) ? 81 : (p === p_fxRnWalk) ? 82 : (p === p_fxRnThr) ? 83 :
+        ((p === p_fxRnRel) || (p === p_fxMtRel) || (p === p_fxLmLimit + 4)) ? 85 : (p === p_fxMtVal) ? 86 :
+        ((p === p_fxMtAtt) || (p === p_fxLmLimit + 3)) ? 88 : (p === p_fxRgDetune) ? 89 :
+        (p === p_fxLmLimit) ? 90 : (p === p_fxLmLimit + 5) ? 93 : (p === p_fxLmLimit + 1) ? 94 : -1;
+    );
+);
+
+/*
+    Learn : the slider "p" touched in the pad of the view "igb" (the dispatch of @gfx, param_touch_count changed) : the
+    target, if its view is a reader, a writer, an effect ; its range, its law : those of the slider (Exp if it is curved
+    and positive), in the bounds of the key (its_Lk_Range) ; a slider that is not a key (a depth...) : its_LkLrnKi -1
+*/
+function its_Lk_Touched(igb, p) local(ty, st, k, b, ki, lo, hi)
+(
+    ty = 0;
+    ((igb >= blockReaderA) && (igb <= blockReaderH)) ? (
+        ty = its_TK_Reader; st = ReadersStructA + (igb - blockReaderA) * ReadersBlockSize;
+    ) :
+    ((igb >= blockWriterA) && (igb <= blockWriterH)) ? (
+        ty = its_TK_Writer; st = WriterStructA + (igb - blockWriterA) * WriterBlockSize;
+    ) :
+    ((igb >= blockEffectA) && (igb <= blockEffectP)) ? (
+        ty = its_TK_Effect; st = EffectsStructA + (igb - blockEffectA) * LinesBlockSize;
+    );
+    (its_LkLearn && (ty !== 0) && ((b = its_Tb_Blk(ty, k = 0|st[0])) !== 0)) ? (
+        its_LkLrnTt = (ty === its_TK_Reader) ? its_LkT_Reader : (ty === its_TK_Writer) ? its_LkT_Writer : its_LkT_Effect;
+        its_LkLrnTk = k;
+        ki = its_Lk_ParKey(ty, p);
+        ((ki < 0) || !its_Lk_KeyOk(ty, ki) || ((ty === its_TK_Effect) && !its_Tb_FxOk(b[its_Efx_Type], ki))) ? (
+            its_LkLrnKi = -1;
+        ) : (
+            its_LkLrnKi = ki;
+            its_Lk_Range(ty, ki, b);
+            lo = parGetPP(p, pp_Min); hi = parGetPP(p, pp_Max);
+            its_LkLrnLo = max(its_LkLo, min(its_LkHi, lo)); its_LkLrnHi = max(its_LkLo, min(its_LkHi, hi));
+            (its_LkLrnLo >= its_LkLrnHi) ? ( its_LkLrnLo = its_LkLo; its_LkLrnHi = its_LkHi; );
+            its_LkLrnLaw = ((its_LkLrnLo > 0) && (parGetPP(p, pp_Slope) > 0)) ? 1 : 0;
+        );
+    );
+);
+
+// Learn : the slider Ctl n + 1 moved in the module "Controls"
+function its_Lk_TouchCtl(n)
+(
+    its_LkLearn ? (
+        its_LkLrnTt = its_LkT_Ctl; its_LkLrnTk = n; its_LkLrnKi = -1;
+        its_LkLrnLo = -1; its_LkLrnHi = 1; its_LkLrnLaw = 0;
+    );
+);
+
+// Learn : the control learned and its target linked : the link that has both already, else a free one (its number + 1 ;
+// 0 : no free link) ; written in the log
+function its_Lk_LearnLink() local(i, f, L)
+(
+    f = -1;
+    i = 0; while ((f < 0) && (i < its_LkN)) (
+        L = its_LkTab + i * its_LkSz;
+        ((L[0] === its_LkLrnK) && (L[1] === its_LkLrnNum) && (L[2] === its_LkLrnCh) && (L[3] === its_LkLrnTt) && (L[4] === its_LkLrnTk)
+            && (L[5] === its_LkLrnKi)) ? (f = i);
+        i += 1;
+    );
+    i = 0; while ((f < 0) && (i < LK_CNT)) ( (its_LkTab[i * its_LkSz] === 0) ? (f = i); i += 1; );
+    (f >= 0) ? (
+        its_Lk_Write(f, its_LkLrnK, its_LkLrnNum, its_LkLrnCh, its_LkLrnTt, its_LkLrnTk, its_LkLrnKi, its_LkLrnLo, its_LkLrnHi, its_LkLrnLaw);
+        mSL_log(SysLogBox, its_Lk_Text(#its_LkT, f));
+    ) : (
+        mSL_log(SysLogBox, "Links : no free link");
+    );
+    f + 1;
+);
+
+// the text of the control of the link "L" (cc 19, note 3 /2 : its channel)
+function its_Lk_SrcText(str, kd, num, ch)
+(
+    sprintf(str, "%s %d", (kd === 1) ? "cc" : "note", num);
+    (ch > 0) ? strcat(str, sprintf(#its_LkM4, " /%d", ch));
+    str;
+);
+
+// the text of the target "tt", "k", "ki" (Ctl 5, Effect 3 freq)
+function its_Lk_TgtText(str, tt, k, ki) local(ty)
+(
+    (tt === its_LkT_Ctl) ? sprintf(str, "Ctl %d", k + 1) : (
+        ty = its_Lk_TyTK(tt);
+        sprintf(str, "%s %d", its_Tb_TyName(ty), k + 1);
+        (ki >= 0) ? strcat(str, sprintf(#its_LkM4, " %s", its_Lk_KNam(ty, ki)));
+    );
     str;
 );
 
@@ -15480,12 +15744,7 @@ function its_Tb_Link(chk) local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, 
                 mSL_log(SysLogBox, #its_TbW);
             );
         ) : (
-            L[0] = 0; // (@block : no link while it is written)
-            L[1] = num; L[2] = ch; L[3] = tt; L[4] = k; L[5] = ki; L[6] = mn; L[7] = mx; L[8] = lw;
-            L[9] = L[10] = L[11] = 0;
-            its_LkDone[n - 1] = its_LkSeq[n - 1]; // (no value pending)
-            L[0] = kd;
-            its_Lk_Count();
+            its_Lk_Write(n - 1, kd, num, ch, tt, k, ki, mn, mx, lw);
         );
     );
 );
@@ -16649,7 +16908,8 @@ function its_Xp_ViewOf(k)
     ((k >= blockReaders) && (k <= blockEffects)) ? ( its_XpVSt = SummaryStruct + k - blockReaders; its_XpVSz = 1; ) :
     (k === blockLines) ? ( its_XpVSt = SummaryStruct + 3; its_XpVSz = 1; ) :
     (k === blockCurves) ? ( its_XpVSt = SummaryStruct + 4; its_XpVSz = 1; ) :
-    (k === blockAllMods) ? ( its_XpVSt = SummaryStruct + 5; its_XpVSz = 2; ); // (the page, the kind shown)
+    (k === blockAllMods) ? ( its_XpVSt = SummaryStruct + 5; its_XpVSz = 2; ) : // (the page, the kind shown)
+    (k === blockLinks) ? ( its_XpVSt = LinksStruct; its_XpVSz = 2; ); // (the page, the link selected)
     its_XpVSt;
 );
 
@@ -23337,6 +23597,7 @@ local (h1, h2, uix_jneed, zzmi, i, n, r, zz, zzmcl, pg, npg)
                         sprintf(#ctllab, "Ctl %d: %%.3f", n + 1);
                         r = slider_ctl(#ctllab, slider(GSL_FIRST + n), -1, 1, 0, 0, 0.001);
                         (r & 8) ? its_Ctl_Set(n, 0) : (r != 0) ? its_Ctl_Set(n, uix_jsl_val);
+                        (r != 0) ? its_Lk_TouchCtl(n); // (Learn of the module "Links")
                     );
                     i += 1;
                 );
@@ -24460,6 +24721,377 @@ local (h1, h2, h3, uix_jneed, zzmi, i, k, n, nt, mx, nl, zz, zzmcl, xx, hk, hx, 
                     ui_split_top(ui_texth()); ui_text(#its_InsTxt); ui_pop();
                 ) : (
                     ui_split_top(ui_texth()); ui_text("Mouse over an instance : its call and its modules."); ui_pop();
+                );
+            ui_pop();
+
+        ui_pop();
+    );
+);
+
+/*
+    The module "Links" : the MIDI links (see "Links (MIDI)")
+    line 1 : 0 "Links" (clic : menu of all the links : Dump, Free), 1 their count, 2 Learn Off|On (left clic), 3 MIDI log
+        Off|On (Global midilog ; left clic), 4 the last control received (Learn : the one learned), 5 Learn : the target (the
+        last slider touched in a reader, a writer, an effect or in Controls), 6 Learn : Link (left clic : the link made, or
+        the one that has this control and this target changed), 7 the page (left clic : the next one ; right clic : menu)
+    the links of the page (16, in the order of their numbers) : its number and its control (green when it moves ; left
+        clic : selected), the module and the key (left clic : the module shown), min and max (potentiometers : drag ;
+        Shift + clic : the bounds of the key), the law (left clic : Lin <-> Exp) ; right clic on a cell : the menu of the link
+    the text : the link under the mouse (or the one selected) and the value of its target ; else, what to do
+*/
+
+// the target of the link "L" shown (a slider Ctl : its page of the module Controls)
+function its_Lk_ShowTarget(L) local(r)
+(
+    (L[3] === its_LkT_Ctl) ? (
+        ControlsStruct[0] = floor(L[4] / 8);
+        r = its_Mod_Show('M', blockControls);
+    ) : (
+        r = its_Mod_Show((L[3] === its_LkT_Reader) ? 'R' : (L[3] === its_LkT_Writer) ? 'W' : 'E', L[4]);
+    );
+    !r ? mSL_log(SysLogBox, "Links : no free view or no room in the panes to show the target");
+);
+
+// the bounds of the key of the link "i" : its_LkLo, its_LkHi, its_LkFl (2 integers)
+function its_Lk_Bounds(i) local(L, ty)
+(
+    L = its_LkTab + i * its_LkSz;
+    ty = (L[3] === its_LkT_Ctl) ? 0 : its_Lk_TyTK(L[3]);
+    its_Lk_Range(ty, L[5], (ty !== 0) ? its_Tb_Blk(ty, L[4]) : 0);
+    its_LkFl = (its_Lk_KeyOk(ty, L[5]) === 2) ? 2 : 0;
+);
+
+// the range of a drag of min or max of the link "i" : its_LkLo, its_LkHi, its_LkFl (1 logarithmic : law Exp, min and max
+// positive ; 2 integers)
+function its_Lk_DragRange(i) local(L)
+(
+    its_Lk_Bounds(i);
+    L = its_LkTab + i * its_LkSz;
+    ((L[8] === 1) && (L[6] > 0) && (L[7] > 0) && (its_LkHi > 0)) ? (
+        its_LkFl |= 1;
+        its_LkLo = max(its_LkLo, its_LkHi / 1000000);
+    );
+);
+
+// the menu of a link : min and max reset to the bounds of its key (the law Exp, if they have different signs : Lin)
+function its_Lk_ResetRange(i) local(L)
+(
+    its_Lk_Bounds(i);
+    L = its_LkTab + i * its_LkSz;
+    L[6] = its_LkLo; L[7] = its_LkHi;
+    ((L[8] === 1) && !(L[6] * L[7] > 0)) ? (L[8] = 0);
+);
+
+/*
+    Alt + left clic on min or max of the link "i" (w : 6 min, 7 max) : the value typed in the prompt (the numeric edit
+    window of the sliders), in the bounds of the key (not those of a drag with the law Exp : a min typed below 0 sets the
+    law back to Lin) ; taken when the prompt is closed with a new text (its_LkEd_Take, at the start of show_Links_Pad),
+    if the link still exists with the same target
+*/
+function its_LkEd_Open(i, w) local(L)
+(
+    L = its_LkTab + i * its_LkSz;
+    its_LkEdI = i; its_LkEdW = w; its_LkEdT = L[3]; its_LkEdN = L[4]; its_LkEdK = L[5];
+    its_Lk_Bounds(i);
+    sprintf(#its_LkEdO, "%.10g", L[w]);
+    strcpy(#its_LkEdS, #its_LkEdO);
+    sprintf(#its_LkEdTt, "New value for  link %d %s (%.6g ... %.6g)", i + 1, (w === 6) ? "min" : "max", its_LkLo, its_LkHi);
+    ui_screen_open("control.prompt");
+    ui_screen_arg(0, #its_LkEdS);
+    ui_screen_arg(1, #its_LkEdTt);
+);
+
+// a number typed, with an optional exponent (ui_parsenumber stops at "e" : "4e-05" would give 4) ; none : dflt
+function its_Lk_ParseNum(s, dflt) local(n, k, c)
+(
+    n = strlen(s); k = 0;
+    while ((k < n) && ((c = str_getchar(s, k)) !== 'e') && (c !== 'E')) (k += 1);
+    (k < n) ? (
+        strcpy_substr(#its_LkNm, s, 0, k); strcpy_from(#its_LkNx, s, k + 1);
+        ui_parsenumber(#its_LkNm, dflt) * (10 ^ ui_parsenumber(#its_LkNx, 0));
+    ) : ui_parsenumber(s, dflt);
+);
+
+function its_LkEd_Take() local(L, v)
+(
+    ((its_LkEdI >= 0) && !(ui_screen() == "control.prompt")) ? (
+        L = its_LkTab + its_LkEdI * its_LkSz;
+        ((strcmp(#its_LkEdS, #its_LkEdO) !== 0) && (L[0] !== 0) && (L[3] === its_LkEdT) && (L[4] === its_LkEdN) && (L[5] === its_LkEdK)) ? (
+            its_Lk_Bounds(its_LkEdI);
+            v = max(its_LkLo, min(its_LkHi, its_Lk_ParseNum(#its_LkEdS, L[its_LkEdW])));
+            (its_LkFl & 2) ? (v = floor(v + 0.5));
+            L[its_LkEdW] = v;
+            ((L[8] === 1) && !(L[6] * L[7] > 0)) ? (L[8] = 0);
+        );
+        its_LkEdI = -1;
+    );
+);
+
+// the value of the target of the link "i" now, in "str"
+function its_Lk_NowText(str, i) local(L, ty, b)
+(
+    L = its_LkTab + i * its_LkSz;
+    (L[3] === its_LkT_Ctl) ? sprintf(str, "Ctl %d now : %.4g", L[4] + 1, its_Ctl_Get(L[4])) : (
+        ty = its_Lk_TyTK(L[3]);
+        ((b = its_Tb_Blk(ty, L[4])) === 0) ? sprintf(str, "%s %d does not exist : the link does nothing", its_Tb_TyName(ty), L[4] + 1) :
+        ((ty === its_TK_Effect) && !its_Tb_FxOk(b[its_Efx_Type], L[5])) ?
+            sprintf(str, "the key %s has no meaning for the type of Effect %d : the link does nothing", its_Lk_KNam(ty, L[5]), L[4] + 1) : (
+            (ty === its_TK_Effect) ? its_Tb_FxGet(L[5], b) : its_Tb_Get(ty, L[5], b);
+            sprintf(str, "%s %d %s now : %.4g", its_Tb_TyName(ty), L[4] + 1, its_Lk_KNam(ty, L[5]), its_Tb_g1);
+        );
+    );
+    str;
+);
+
+function show_Links_Pad(blockId)
+local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, zz, zzmcl, xx, c, L, ty, b, v, dr, jmc, t, ok, fe)
+(
+    t = time_precise();
+    its_LkEd_Take(); // (a min or a max typed in the prompt, its_LkEd_Open)
+    // the links that exist (its_LkPg), the page, the link selected
+    n = 0; i = 0; loop(its_LkN, (its_LkTab[i * its_LkSz] !== 0) ? ( its_LkPg[n] = i; n += 1; ); i += 1;);
+    np = max(1, ceil(n / pad_LkG_NL));
+    pg = LinksStruct[0] = max(0, min(np - 1, 0|LinksStruct[0]));
+    nl = max(1, min(pad_LkG_NL, n - pg * pad_LkG_NL));
+    sel = 0|LinksStruct[1];
+    ((sel > 0) && ((sel > LK_CNT) || (its_LkTab[(sel - 1) * its_LkSz] === 0))) ? (sel = LinksStruct[1] = 0);
+    // a control moved : the one of a link learned again (menu), or the one of Learn
+    (its_LkCandN !== its_LkLrnSeen) ? (
+        its_LkLrnSeen = its_LkCandN;
+        (its_LkRel > 0) ? (
+            L = its_LkTab + (its_LkRel - 1) * its_LkSz;
+            (L[0] !== 0) ? (
+                its_Lk_Write(its_LkRel - 1, its_LkCandK, its_LkCandNum, its_LkCandCh, L[3], L[4], L[5], L[6], L[7], L[8]);
+                mSL_log(SysLogBox, its_Lk_Text(#its_LkT, its_LkRel - 1));
+            );
+            its_LkRel = 0;
+        ) :
+        its_LkLearn ? ( its_LkLrnK = its_LkCandK; its_LkLrnNum = its_LkCandNum; its_LkLrnCh = its_LkCandCh; );
+    );
+    // the links that took a message flash ; the module drawn again by its_Lk_Frame (a new message, a cell that flashes)
+    its_LkDrawnAt = gfx_executed; its_LkUiN = its_LkLastN;
+    fe = 0;
+    i = 0; loop(its_LkN,
+        (its_LkHit[i] !== its_LkHitSeen[i]) ? ( its_LkHitSeen[i] = its_LkHit[i]; its_LkFlash[i] = t + 0.3; );
+        fe = max(fe, its_LkFlash[i]);
+        i += 1;
+    );
+    its_LkFlashEnd = (fe > t) ? fe : 0;
+    ok = its_LkLearn && its_LkLrnK && (its_LkLrnTt !== 0) && ((its_LkLrnTt === its_LkT_Ctl) || (its_LkLrnKi >= 0));
+    h1 = uix_jpadHeight(1);
+    h2 = uix_jpadHeight(nl);
+    h3 = uix_jBoxHeight(2);
+    uix_jneed = h1+h2+h3+ui_jd_ctgr;
+    (ui_height() >= uix_jneed) ? (
+        ui_split_top(uix_jneed);
+        ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
+            zzmi = ui_hover();
+            keepBlockInfos(blockId);
+            (zzmi) ? (
+                ui_push();
+                    // stack is now 2 levels deep
+                    ui_color(Col_Frame);
+                    ui_border(); // draws in purple
+                ui_pop();
+            );
+            control_group(blockDispNames[blockDispInverts[blockId]]);
+            ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+            jmc = ui_jmouse_cap;
+
+            // line 1
+            ui_split_top(h1);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_Lk_Labs, pad_Lk_Siz);
+                i = 0; loop(pad_Lk_Siz, pad_Lk_Colrs[i] = Col_InfoA; strcpy(pad_Lk_Labs[i], ""); i += 1;);
+                strcpy(pad_Lk_Labs[0], "Links");
+                pad_Lk_Colrs[0] = Col_P1;
+                sprintf(pad_Lk_Labs[1], "%d link%s", n, (n > 1) ? "s" : "");
+                pad_Lk_Colrs[1] = Color_Heliotrope;
+                strcpy(pad_Lk_Labs[2], its_LkLearn ? "Learn On" : "Learn Off");
+                pad_Lk_Colrs[2] = its_LkLearn ? Color_Dark_Orange : Col_P1;
+                strcpy(pad_Lk_Labs[3], its_LkLog ? "MIDI log On" : "MIDI log Off");
+                pad_Lk_Colrs[3] = its_LkLog ? Color_Limegreen : Col_P1;
+                its_LkLearn ? (
+                    // Learn : the control learned, the target, Link
+                    its_LkLrnK ? its_Lk_SrcText(pad_Lk_Labs[4], its_LkLrnK, its_LkLrnNum, its_LkLrnCh) : strcpy(pad_Lk_Labs[4], "move a control");
+                    pad_Lk_Colrs[4] = its_LkLrnK ? Color_Goldenrod : Col_Inactive;
+                    (its_LkLrnTt === 0) ? (
+                        strcpy(pad_Lk_Labs[5], "touch a slider"); pad_Lk_Colrs[5] = Col_Inactive;
+                    ) :
+                    ((its_LkLrnTt !== its_LkT_Ctl) && (its_LkLrnKi < 0)) ? (
+                        strcat(its_Lk_TgtText(pad_Lk_Labs[5], its_LkLrnTt, its_LkLrnTk, -1), " : not a key"); pad_Lk_Colrs[5] = Col_Error;
+                    ) : (
+                        its_Lk_TgtText(pad_Lk_Labs[5], its_LkLrnTt, its_LkLrnTk, its_LkLrnKi); pad_Lk_Colrs[5] = Color_Goldenrod;
+                    );
+                    strcpy(pad_Lk_Labs[6], "Link");
+                    pad_Lk_Colrs[6] = ok ? Color_Limegreen : Col_Inactive;
+                ) : (
+                    // the last message received
+                    (its_LkLastN > 0) ? (
+                        ((its_LkLastSt & 0xF0) === 0xB0) ? sprintf(pad_Lk_Labs[4], "cc %d /%d : %d", its_LkLastD1, (its_LkLastSt & 15) + 1, its_LkLastD2) :
+                        (((its_LkLastSt & 0xF0) === 0x90) || ((its_LkLastSt & 0xF0) === 0x80)) ?
+                            sprintf(pad_Lk_Labs[4], "note %d /%d : %d", its_LkLastD1, (its_LkLastSt & 15) + 1, ((its_LkLastSt & 0xF0) === 0x80) ? 0 : its_LkLastD2) :
+                        sprintf(pad_Lk_Labs[4], "%02X %02X %02X", its_LkLastSt, its_LkLastD1, its_LkLastD2);
+                        pad_Lk_Colrs[4] = Col_P3;
+                    ) : (
+                        strcpy(pad_Lk_Labs[4], "no MIDI yet"); pad_Lk_Colrs[4] = Col_Inactive;
+                    );
+                    pad_Lk_Colrs[5] = pad_Lk_Colrs[6] = Col_Inactive;
+                );
+                sprintf(pad_Lk_Labs[7], "Page %d/%d", pg + 1, np);
+                pad_Lk_Colrs[7] = (np > 1) ? Col_P1 : Col_Inactive;
+                zz = control_jpad(pad_Lk);
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4; ui_GFXReason = 39;
+                    zzmcl = pad_Lk[ui_jpad_last]-1;
+                    ((zzmcl === 0) && (zz & (ui_jpad_ev_rmc | ui_jpad_ev_lmc))) ? (
+                        xx = its_Menu_Clic(menu_LkAll, zz);
+                        (xx === 1) ? (
+                            i = 0; loop(n, mSL_log(SysLogBox, its_Lk_Text(#its_LkT, its_LkPg[i])); i += 1;);
+                            (n === 0) ? mSL_log(SysLogBox, "No link");
+                        ) :
+                        (xx === 3) ? ( its_Lk_FreeAll(); LinksStruct[0] = LinksStruct[1] = 0; );
+                    ) :
+                    ((zz & ui_jpad_ev_lmc) && (zzmcl === 2)) ? (
+                        its_LkLearn = !its_LkLearn;
+                        its_LkLrnK = its_LkLrnTt = its_LkRel = 0; its_LkLrnKi = -1; its_LkLrnSeen = its_LkCandN;
+                    ) :
+                    ((zz & ui_jpad_ev_lmc) && (zzmcl === 3)) ? (
+                        its_LkLog = !its_LkLog;
+                    ) :
+                    ((zz & ui_jpad_ev_lmc) && (zzmcl === 6) && ok) ? (
+                        (k = its_Lk_LearnLink()) ? (
+                            LinksStruct[1] = k;
+                            m = 0; i = 0; loop(k - 1, (its_LkTab[i * its_LkSz] !== 0) ? (m += 1); i += 1;);
+                            LinksStruct[0] = floor(m / pad_LkG_NL); // (its page)
+                        );
+                        its_LkLrnK = its_LkLrnTt = 0; its_LkLrnKi = -1; // (Learn stays On : the next link)
+                    ) :
+                    (zzmcl === 7) ? (
+                        (zz & ui_jpad_ev_lmc) ? (
+                            LinksStruct[0] = (pg + 1) % np;
+                        ) :
+                        (zz & ui_jpad_ev_rmc) ? (
+                            xx = control_jmenu(menu_LkPage);
+                            (xx === 1) ? (LinksStruct[0] = 0) : (xx === 2) ? (LinksStruct[0] = max(0, pg - 1)) :
+                            (xx === 3) ? (LinksStruct[0] = min(np - 1, pg + 1)) : (xx === 4) ? (LinksStruct[0] = np - 1);
+                        );
+                    );
+                );
+            ui_pop();
+
+            // the links of the page
+            ui_split_top(h2);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_LkG_Labs, pad_LkG_NC * nl);
+                hk = -1;
+                j = 0; loop(nl,
+                    c = j * pad_LkG_NC;
+                    (pg * pad_LkG_NL + j < n) ? (
+                        i = its_LkPg[pg * pad_LkG_NL + j];
+                        L = its_LkTab + i * its_LkSz;
+                        sprintf(pad_LkG_Labs[c], "%d : %s", i + 1, its_Lk_SrcText(#its_LkM, L[0], L[1], L[2]));
+                        pad_LkG_Colrs[c] = (its_LkFlash[i] > t) ? Color_Limegreen : (i + 1 === sel) ? Color_Goldenrod : Col_P3;
+                        ty = (L[3] === its_LkT_Ctl) ? 0 : its_Lk_TyTK(L[3]);
+                        b = (ty !== 0) ? its_Tb_Blk(ty, L[4]) : 0;
+                        (ty === 0) ? sprintf(pad_LkG_Labs[c + 1], "Ctl %d", L[4] + 1) : sprintf(pad_LkG_Labs[c + 1], "%s %d", its_Tb_TyName(ty), L[4] + 1);
+                        strcpy(pad_LkG_Labs[c + 2], (ty === 0) ? "" : its_Lk_KNam(ty, L[5]));
+                        pad_LkG_Colrs[c + 1] = pad_LkG_Colrs[c + 2] = ((ty === 0) || ((b !== 0) && ((ty !== its_TK_Effect) || its_Tb_FxOk(b[its_Efx_Type], L[5])))) ?
+                            Col_P1 : Col_Inactive; // (gray : the link does nothing)
+                        sprintf(pad_LkG_Labs[c + 3], "%.4g", L[6]);
+                        sprintf(pad_LkG_Labs[c + 4], "%.4g", L[7]);
+                        pad_LkG_Colrs[c + 3] = pad_LkG_Colrs[c + 4] = Color_Light_Sky_Blue;
+                        strcpy(pad_LkG_Labs[c + 5], (L[8] === 1) ? "Exp" : "Lin");
+                        pad_LkG_Colrs[c + 5] = Col_P2;
+                    ) : (
+                        m = 0; loop(pad_LkG_NC, strcpy(pad_LkG_Labs[c + m], ""); pad_LkG_Colrs[c + m] = Col_Inactive; m += 1;);
+                        strcpy(pad_LkG_Labs[c], "no link");
+                    );
+                    j += 1;
+                );
+                zz = control_jpad(pad_LkG, nl, -1, 0);
+                // the link under the mouse (geometry of the pad just drawn)
+                (ui_hover() && (ui_jpad_lst_wi > 0) && (ui_jpad_lst_he > 0)) ? (
+                    hx = floor((uix_mouse_x - ui_jpad_lst_left) / ui_jpad_lst_wi);
+                    hy = floor((uix_mouse_y - ui_jpad_lst_top) / ui_jpad_lst_he);
+                    ((hx >= 0) && (hx < pad_LkG_NC) && (hy >= 0) && (hy < nl) && (pg * pad_LkG_NL + hy < n)) ? (hk = its_LkPg[pg * pad_LkG_NL + hy]);
+                );
+                // min and max : potentiometers (ui_jdrag, see mSL_ui_Pads ; no drag with Alt : the prompt)
+                c = ui_jpad_cell_at();
+                (ui_jdrag_can_start() && !(mouse_cap & altCap) && (c >= 0) && (((c % pad_LkG_NC) === 3) || ((c % pad_LkG_NC) === 4))
+                    && (pg * pad_LkG_NL + floor(c / pad_LkG_NC) < n)) ? (
+                    i = its_LkPg[pg * pad_LkG_NL + floor(c / pad_LkG_NC)];
+                    its_Lk_DragRange(i);
+                    ui_jdrag_start(blockId, c, its_LkTab[i * its_LkSz + 3 + (c % pad_LkG_NC)], its_LkLo, its_LkHi, 300, its_LkFl);
+                );
+                dr = ui_jdrag(blockId);
+                ((dr & 1) && (ui_jdrag_cell >= 0) && (pg * pad_LkG_NL + floor(ui_jdrag_cell / pad_LkG_NC) < n)) ? (
+                    i = its_LkPg[pg * pad_LkG_NL + floor(ui_jdrag_cell / pad_LkG_NC)];
+                    L = its_LkTab + i * its_LkSz;
+                    L[3 + (ui_jdrag_cell % pad_LkG_NC)] = ui_jdrag_v; // (min : L[6], max : L[7])
+                    ((L[8] === 1) && !(L[6] * L[7] > 0)) ? (L[8] = 0);
+                );
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4; ui_GFXReason = 39;
+                    k = pad_LkG[ui_jpad_last] - 1; // (the cell)
+                    ((k >= 0) && (pg * pad_LkG_NL + floor(k / pad_LkG_NC) < n)) ? (
+                        i = its_LkPg[pg * pad_LkG_NL + floor(k / pad_LkG_NC)];
+                        L = its_LkTab + i * its_LkSz;
+                        c = k % pad_LkG_NC;
+                        (zz & ui_jpad_ev_rmc) ? (
+                            xx = control_jmenu(menu_Lk);
+                            (xx === 1) ? mSL_log(SysLogBox, its_Lk_Text(#its_LkT, i)) :
+                            (xx === 2) ? ( its_LkRel = i + 1; its_LkLrnSeen = its_LkCandN; ) :
+                            (xx === 3) ? ( L[2] = 0; ) :
+                            (xx === 4) ? ( (its_LkLastN > 0) ? (L[2] = (its_LkLastSt & 15) + 1); ) :
+                            (xx === 5) ? ( v = L[6]; L[6] = L[7]; L[7] = v; ) :
+                            (xx === 6) ? its_Lk_ResetRange(i) :
+                            (xx === 7) ? its_Lk_ShowTarget(L) :
+                            (xx === 9) ? ( L[0] = 0; its_Lk_Count(); (sel === i + 1) ? (LinksStruct[1] = 0); ) :
+                            (xx === 10) ? ( its_Lk_FreeAll(); LinksStruct[0] = LinksStruct[1] = 0; );
+                        ) :
+                        ((zz & ui_jpad_ev_lmc) && !(dr & 2)) ? (
+                            (c === 0) ? (
+                                LinksStruct[1] = (sel === i + 1) ? 0 : i + 1;
+                            ) :
+                            ((c === 1) || (c === 2)) ? (
+                                its_Lk_ShowTarget(L);
+                            ) :
+                            (((c === 3) || (c === 4)) && (jmc & altCap)) ? (
+                                its_LkEd_Open(i, 3 + c); // (the prompt : min L[6], max L[7])
+                            ) :
+                            (((c === 3) || (c === 4)) && (jmc & shfCap)) ? (
+                                its_Lk_DragRange(i);
+                                L[3 + c] = (c === 3) ? its_LkLo : its_LkHi;
+                                ((L[8] === 1) && !(L[6] * L[7] > 0)) ? (L[8] = 0);
+                            ) :
+                            (c === 5) ? (
+                                (L[8] === 1) ? (L[8] = 0) : (L[6] * L[7] > 0) ? (L[8] = 1) : (
+                                    sprintf(#its_LkM, "Link %d : the law Exp needs min and max of the same sign, not 0", i + 1);
+                                    mSL_log(SysLogBox, #its_LkM);
+                                );
+                            );
+                        );
+                    );
+                );
+            ui_pop();
+
+            // the text : the link under the mouse, or the one selected ; else, what to do
+            ui_split_top(h3);
+                ui_pad(4,2,4,2);
+                ui_pcolor(ui_jcolor_text);
+                ui_align(0, 0);
+                k = (hk >= 0) ? hk : sel - 1;
+                (k >= 0) ? (
+                    ui_split_top(ui_texth()); ui_text(its_Lk_Text(#its_LkT, k)); ui_pop();
+                    ui_split_top(ui_texth()); ui_text(its_Lk_NowText(#its_LkM2, k)); ui_pop();
+                ) :
+                its_LkLearn ? (
+                    ui_split_top(ui_texth()); ui_text("Learn : move a MIDI control, touch a slider (a reader, a writer, an effect, Controls),"); ui_pop();
+                    ui_split_top(ui_texth()); ui_text("then clic Link. Learn stays On for the next one."); ui_pop();
+                ) : (
+                    ui_split_top(ui_texth()); ui_text("Mouse over a link : its text. min, max : drag ; Shift + clic : bound ; Alt + clic : type."); ui_pop();
+                    ui_split_top(ui_texth()); ui_text("law : clic ; module, key : clic shows it ; right clic : the menu of the link."); ui_pop();
                 );
             ui_pop();
 
@@ -26252,6 +26884,7 @@ local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in
         // Hors interaction : mise en place des blocs
         Bigx = 0; loop(dcbMSize, igb = blockDesc[Bigx];  // = DISPLAY BLOCKS =
             (igb > 0) ? (
+                its_LkTc0 = param_touch_count; // (Learn of the module "Links" : a slider touched, see below)
                 (igb === blockReaderA) ? (
                     show_Reader_Pad(ReadersStructA, blockReaderA);
                 ) :
@@ -26376,9 +27009,14 @@ local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in
                 (igb === blockAllMods) ? (
                     show_Summary_Pad('M', igb);
                 ) :
+                (igb === blockLinks) ? (
+                    show_Links_Pad(blockLinks);
+                ) :
                 ((igb >= blockUsrFirst) && (igb <= blockUsrLast)) && (blockUsrChecks[blockUsrNum[igb - blockUsrFirst]]) ? (
                     show_UserModule(igb);
                 );
+                // Learn (the module "Links") : a slider of this module touched (its parameter, see parCtl)
+                (param_touch_count !== its_LkTc0) ? its_Lk_Touched(igb, param_last_touched);
             );
             Bigx += 1;
         );
