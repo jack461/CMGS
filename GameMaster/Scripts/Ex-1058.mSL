@@ -1,0 +1,114 @@
+print("Ex-1058. Interstys table : les liens MIDI continus (steps, curve, pickup, glide).");
+
+/*
+  Mode Abs : la position x de la commande (0 ... 1) passe par ses crans (steps n : n valeurs de 0 a 1), puis par sa courbe
+  (curve c : F(x) d'une enveloppe), donne u (0 ... 1), puis la loi (min, max).
+  pickup On : la commande n'agit qu'apres avoir rejoint la valeur de sa cible (pres d'elle, ou en la traversant) ; elle la
+  perd quand la cible change par autre chose (ici : Control 3 value 0).
+  glide t : la cible rejoint la nouvelle valeur en t secondes ; une cle d'un module (par @gfx) n'a pas bouge juste apres
+  l'Inject ; un curseur Ctl (par @block) est arrive une seconde apres.
+  La courbe lkc vaut 0 de 0 a 0.5, puis monte lineairement a 1 : sa table est construite en arriere-plan (wait). Son nom
+  est global ; ceux des autres modules (ln, wr) ne valent que dans la table qui les cree.
+  Erreurs (rien n'est cree) : e1 pickup en mode Toggle (2741) ; e2 glide pour une action (2740) ; e3 une courbe inconnue
+  (2792) ; e4 steps 200 (2754). Les numeros des modules dependent du projet (%d).
+*/
+
+var r1 = table(data(
+    Interstys
+    Free Link All
+    Curve lkc  type Env  points 0 0 0  0.5 0 0  1 1 0
+));
+wait(1);
+
+var r = table(data(
+    Interstys
+    Line ln  length 1
+    Writer wr  line ln  source In:0  gain 0
+    Control 1  value 0
+    Control 2  value 0
+    Control 3  value 0.5
+    Control 4  value 0
+    Link 1  cc 20  target Ctl 1  min 0  max 1  steps 5
+    Link 2  cc 21  target Ctl 2  min 0  max 1  curve lkc
+    Link 3  cc 22  target Ctl 3  pickup On
+    Link 4  cc 23  target Writer wr gain  min -20  max 20  glide 0.3
+    Link 5  cc 24  target Ctl 4  glide 0.3
+    Dump Link 1
+    Dump Link 2
+    Dump Link 3
+    Dump Link 4
+    Check Link 3  pickup On
+    Check Link 4  glide 0.3
+    Inject cc 20 50
+    Dump Control 1
+    Inject cc 20 64
+    Dump Control 1
+    Inject cc 20 127
+    Dump Control 1
+    Inject cc 21 32
+    Dump Control 2
+    Inject cc 21 127
+    Dump Control 2
+    Inject cc 22 0
+    Dump Control 3
+    Inject cc 22 127
+    Dump Control 3
+    Inject cc 22 0
+    Dump Control 3
+    Control 3  value 0
+    Inject cc 22 32
+    Dump Control 3
+    Inject cc 22 127
+    Dump Control 3
+    Inject cc 23 0
+    Check Writer wr  gain 0
+    Inject cc 24 0
+    Free Writer wr
+    Free Line ln
+));
+print(sprintf(0, "Ex-1058. resultat : %d", r));
+wait(1);
+
+var r2 = table(data(
+    Interstys
+    Dump Control 4
+    Free Link All
+    Control 1  value 0
+    Control 2  value 0
+    Control 3  value 0
+    Control 4  value 0
+    Free Curve lkc
+));
+print(sprintf(0, "Ex-1058. fin : %d %d", r1, r2));
+
+var e1 = table(data( Interstys  Link 1  note 1  mode Toggle  target Ctl 1  pickup On ));
+var e2 = table(data( Interstys  Link 1  note 1  target LEDs  glide 1 ));
+var e3 = table(data( Interstys  Link 1  cc 1  target Ctl 1  curve zzlkc ));
+var e4 = table(data( Interstys  Link 1  cc 1  target Ctl 1  steps 200 ));
+print(sprintf(0, "Ex-1058. erreurs : %d %d %d %d", e1, e2, e3, e4));
+
+// Expected "Link 1 cc 20 target Ctl 1 min 0 max 1 steps 5"
+// Expected "Link 2 cc 21 target Ctl 2 min 0 max 1 curve lkc"
+// Expected "Link 3 cc 22 target Ctl 3 min -1 max 1 pickup On"
+// Expected "Link 4 cc 23 target Writer %d gain min -20 max 20 glide 0.3"
+// Expected "Check Link 3 OK"
+// Expected "Check Link 4 OK"
+// Expected "Control 1 value 0.25"
+// Expected "Control 1 value 0.5"
+// Expected "Control 1 value 1"
+// Expected "Control 2 value 0"
+// Expected "Control 2 value 1"
+// Expected "Control 3 value 0.5"
+// Expected "Control 3 value 1"
+// Expected "Control 3 value -1"
+// Expected "Control 3 value 0"
+// Expected "Control 3 value 1"
+// Expected "Check Writer %d OK"
+// Expected "Ex-1058. resultat : 0"
+// Expected "Control 4 value -1"
+// Expected "Ex-1058. fin : 0 0"
+// Expected error 2741
+// Expected error 2740
+// Expected error 2792
+// Expected error 2754
+// Expected "Ex-1058. erreurs : 2741 2740 2792 2754"
