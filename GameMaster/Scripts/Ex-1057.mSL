@@ -1,0 +1,95 @@
+print("Ex-1057. Interstys table : les boutons des liens MIDI (mode Toggle, Push ; target LEDs).");
+
+/*
+  Un bouton : une note (appuyee : note-on ; relachee : note-off, ou note-on 0), ou un cc (appuye a 64 et plus). mode
+  Toggle : chaque appui fait basculer la cible entre min et max (en partant de son etat : la valeur la plus proche, min
+  ou max), le relachement ne fait rien ; sa LED (note-on 127 ou 0, sur la sortie MIDI de la piste) suit l'etat. mode
+  Push : appuye max, relache min. Un cc ne compte qu'un appui par front (cc 64 100 apres cc 64 127 : rien). target LEDs :
+  une action, chaque appui envoie de nouveau l'etat des LED (pas de min, max, law, mode).
+  Erreurs (rien n'est cree) : e1 mode Foo (2754) ; e2 min pour une action (2740) ; e3 mode pour une action (2740) ;
+  e4 target Bank, pas encore une action (2730). Les numeros des modules dependent du projet (%d).
+*/
+
+var r = table(data(
+    Interstys
+    Free Link All
+    Line ln  length 1
+    Writer wr  line ln  source In:0
+    Reader rd  line ln  vol -60
+    Control 1  value 0
+    Control 2  value -1
+    Link 1  note 1  mode Toggle  target Ctl 1  min 0  max 1
+    Link 2  note 3  mode Push  target Writer wr gain  min -20  max 20
+    Link 3  cc 64  mode Toggle  target Ctl 2
+    Link 4  note 27  target LEDs
+    Link 5  note 2  mode Toggle  target Reader rd vol  min -60  max 0
+    Dump Link 1
+    Dump Link 2
+    Dump Link 3
+    Dump Link 4
+    Dump Link 5
+    Check Link 1  mode Toggle
+    Check Link 4  target LEDs
+    Inject note 1 127
+    Dump Control 1
+    Inject note 1 0
+    Dump Control 1
+    Inject note 1 127
+    Dump Control 1
+    Inject note 3 127
+    Check Writer wr  gain 20
+    Inject note 3 0
+    Check Writer wr  gain -20
+    Inject cc 64 127
+    Dump Control 2
+    Inject cc 64 100
+    Dump Control 2
+    Inject cc 64 0
+    Inject cc 64 127
+    Dump Control 2
+    Inject note 2 127
+    Check Reader rd  vol 0
+    Inject note 2 0
+    Check Reader rd  vol 0
+    Inject note 2 127
+    Check Reader rd  vol -60
+    Inject note 27 127
+    Free Link All
+    Control 1  value 0
+    Control 2  value 0
+    Free Reader rd
+    Free Writer wr
+    Free Line ln
+));
+print(sprintf(0, "Ex-1057. resultat : %d", r));
+
+var e1 = table(data( Interstys  Link 1  note 1  mode Foo  target Ctl 1 ));
+var e2 = table(data( Interstys  Link 1  note 1  target LEDs  min 0 ));
+var e3 = table(data( Interstys  Link 1  note 1  mode Toggle  target LEDs ));
+var e4 = table(data( Interstys  Link 1  note 1  target Bank ));
+print(sprintf(0, "Ex-1057. erreurs : %d %d %d %d", e1, e2, e3, e4));
+
+// Expected "Link 1 note 1 mode Toggle target Ctl 1 min 0 max 1"
+// Expected "Link 2 note 3 mode Push target Writer %d gain min -20 max 20"
+// Expected "Link 3 cc 64 mode Toggle target Ctl 2 min -1 max 1"
+// Expected "Link 4 note 27 target LEDs"
+// Expected "Link 5 note 2 mode Toggle target Reader %d vol min -60 max 0"
+// Expected "Check Link 1 OK"
+// Expected "Check Link 4 OK"
+// Expected "Control 1 value 1"
+// Expected "Control 1 value 1"
+// Expected "Control 1 value 0"
+// Expected "Check Writer %d OK"
+// Expected "Check Writer %d OK"
+// Expected "Control 2 value 1"
+// Expected "Control 2 value 1"
+// Expected "Control 2 value -1"
+// Expected "Check Reader %d OK"
+// Expected "Check Reader %d OK"
+// Expected "Check Reader %d OK"
+// Expected "Ex-1057. resultat : 0"
+// Expected error 2754
+// Expected error 2740
+// Expected error 2740
+// Expected error 2730
+// Expected "Ex-1057. erreurs : 2754 2740 2740 2730"

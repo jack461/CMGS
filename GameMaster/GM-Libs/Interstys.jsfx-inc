@@ -5134,15 +5134,15 @@ menu_InsAll_Action = make_jmenu(
     ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "instances-actions", 4, menu_InsAll_Action_N);
 its_InsUiSel = 0; // the instance selected in the module (0 : none)
-// Pads of the module "Links" (see show_Links_Pad) : line 1 (8 cells), then the links of the page (16 lines x 6 columns :
-// the control, the module, the key, min, max, the law)
+// Pads of the module "Links" (see show_Links_Pad) : line 1 (8 cells), then the links of the page (16 lines x 7 columns :
+// the control, the module, the key, min, max, the law, the mode)
 pad_Lk_Siz = 8;
 pad_Lk = make_jpad(
     ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
     1, pad_Lk_Siz, pad_Lk_Siz);
 pad_Lk_Labs = pad_Lk + pad_Lk[ui_jpad_labs];
 pad_Lk_Colrs = pad_Lk + pad_Lk[ui_jpad_clrs];
-pad_LkG_NL = 16; pad_LkG_NC = 6;
+pad_LkG_NL = 16; pad_LkG_NC = 7;
 pad_LkG_Siz = pad_LkG_NL * pad_LkG_NC;
 pad_LkG = make_jpad(
     ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
@@ -5151,13 +5151,14 @@ pad_LkG_Labs = pad_LkG + pad_LkG[ui_jpad_labs];
 pad_LkG_Colrs = pad_LkG + pad_LkG[ui_jpad_clrs];
 i__ii = 0; loop(pad_Lk_Siz, pad_Lk_Colrs[i__ii] = Col_Inactive; pad_Lk_Labs[i__ii] = ""; i__ii += 1;);
 i__ii = 0; loop(pad_LkG_Siz, pad_LkG_Colrs[i__ii] = Col_Inactive; pad_LkG_Labs[i__ii] = ""; i__ii += 1;);
-menu_LkAll_N = make_array(3); // all the links (cell 0)
+menu_LkAll_N = make_array(4); // all the links (cell 0)
 menu_LkAll_N[0] = "Dump all in the log";
-menu_LkAll_N[1] = "---";
-menu_LkAll_N[2] = "Free all links";
+menu_LkAll_N[1] = "Send the LEDs (the states of the Toggle links)";
+menu_LkAll_N[2] = "---";
+menu_LkAll_N[3] = "Free all links";
 menu_LkAll = make_jmenu(
     ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-            "links-actions", 3, menu_LkAll_N);
+            "links-actions", 4, menu_LkAll_N);
 menu_Lk_N = make_array(10); // a link (right clic on one of its cells)
 menu_Lk_N[0] = "Dump in the log";
 menu_Lk_N[1] = "Learn its control (the next one moved)";
@@ -12902,6 +12903,32 @@ function its_Lk_FreeAll()
     memset(its_LkTab, 0, LK_CNT * its_LkSz);
 );
 
+// @gfx : a LED (the control of the link "L" : a note-on, a cc ; its channel, 1 for all) posted for @block (its_Lk_Recv) ;
+// 0 : the queue is full
+function its_Lk_Send(L, v) local(q)
+(
+    (its_LkOutW - its_LkOutR < its_LkOutMx) ? (
+        q = its_LkOutQ + 3 * (its_LkOutW % its_LkOutMx);
+        q[0] = ((L[0] === 1) ? 0xB0 : 0x90) + max(1, L[2]) - 1; q[1] = L[1]; q[2] = v;
+        its_LkOutW += 1;
+        1;
+    ) : 0;
+);
+
+// @gfx : the LED of the link "i" switched off, if it is lit (a link freed, changed, no longer Toggle)
+function its_Lk_LedOff(i) local(L)
+(
+    L = its_LkTab + i * its_LkSz;
+    ((L[0] !== 0) && (its_LkLed[i] === 1)) ? its_Lk_Send(L, 0);
+    its_LkLed[i] = -1;
+);
+
+// @gfx : all the LEDs lit switched off (before Free Link All, Clear All)
+function its_Lk_LedsOff() local(i)
+(
+    i = 0; loop(its_LkN, its_Lk_LedOff(i); i += 1;);
+);
+
 function its_Tb_Clear() local(k, all, p)
 (
     all = (its_Tb_Peek() === its_TK_All);
@@ -12924,7 +12951,7 @@ function its_Tb_Clear() local(k, all, p)
             its_CrvSelK = its_CrvUndoK = its_CrvPreK = -1; its_CrvDrag = 0;
             k = 0; loop(its_CrvEdN, p = its_CrvEd + k * its_CrvEdSz; p[11] = -1; p[3] = 0; k += 1;);
             k = 0; loop(NB_GSL, (its_Ctl_Get(k) !== 0) ? its_Ctl_Set(k, 0); k += 1;);
-            its_Lk_FreeAll(); // (and the links : MIDI)
+            its_Lk_LedsOff(); its_Lk_FreeAll(); // (and the links : MIDI ; their LEDs lit switched off)
         );
     ) : (
         memset(its_TbSimSp, 0, LN_CNT); memset(its_TbSimCh, 0, LN_CNT);
@@ -15173,24 +15200,47 @@ function its_Tb_CheckGlobal() local(ki, bad)
 
 /*
     A link : a MIDI control of the track (cc m, note m ; chan c, 0 : all) drives a generic slider (Ctl k) or a key of a
-    module (Reader, Writer, Effect k : the key ki of the table, a number, see its_Lk_KeyOk) ; the value of the control
-    (0 ... 127 ; a note : its velocity, 0 when it ends) goes from min to max (law Lin ; Exp : min (max / min) ^ x).
+    module (Reader, Writer, Effect k : the key ki of the table, a number, see its_Lk_KeyOk), or does an action (target LEDs) ;
+    the value of the control (0 ... 127 ; a note : its velocity, 0 when it ends) goes from min to max (law Lin ; Exp :
+    min (max / min) ^ x) ; a button (a note, a cc : pressed at 64 and more) : mode Toggle (each press : min <-> max, its
+    LED lit at max), Push (pressed : max, released : min).
     LK_CNT links of its_LkSz words : [0] the kind of the control (0 : no link, 1 cc, 2 note ; written last, read first by
-    @block), [1] its number, [2] its channel (0 : all), [3] the kind of the target (its_LkT_...), [4] its number (from 0),
-    [5] its key (Ctl : -1), [6] min, [7] max, [8] the law (0 Lin, 1 Exp), [9] ... [11] free (0) ; saved by @serialize ('link').
+    @block), [1] its number, [2] its channel (0 : all), [3] the kind of the target (its_LkT_...), [4] its number (from 0 ;
+    an action : its_LkA_...), [5] its key (Ctl, an action : -1), [6] min, [7] max, [8] the law (0 Lin, 1 Exp), [9] the mode
+    (its_LkM_...), [10] ... [19] free (0 ; steps 3a, 3c, 3d) ; saved by @serialize ('link' ; a session of links of 12 words
+    is read too).
     @block receives the messages (its_Lk_Recv) : a slider is written at once (its_Ctl_Put ; @gfx tells REAPER), the value
     of a key of a module is posted (its_LkVal, its_LkSeq) ; @gfx sets it (its_Lk_Pending : the last value of the frame,
-    with the functions of the table, its_Tb_SetFx, its_Tb_SetMod) and logs the messages (Global midilog On : its_LkLogQ).
-    Interstys takes the MIDI of its track : the messages are not passed on.
+    with the functions of the table, its_Tb_SetFx, its_Tb_SetMod), does the actions (the presses counted by @block, its_LkAct),
+    logs the messages (Global midilog On : its_LkLogQ) and posts the LEDs (its_Lk_Leds : its_LkOutQ, sent by @block).
+    Interstys takes the MIDI of its track : the messages are not passed on ; it sends only the LEDs.
 */
 LK_CNT = 256;
-its_LkSz = 12;
+its_LkSz = 20;
+its_LkW_Mode = 9; // (the word of the mode)
+its_LkM_Abs = 0; its_LkM_Toggle = 1; its_LkM_Push = 2; // the modes
+its_LkModeN = make_array(3); its_LkModeS = make_array(3);
+its_LkModeN[0] = "Abs"; its_LkModeN[1] = "Toggle"; its_LkModeN[2] = "Push";
+i__ii = 0; loop(3, its_LkModeS[i__ii] = mSL_symbol(its_LkModeN[i__ii]); i__ii += 1;);
+its_LkA_LEDs = 1; // the actions (target LEDs : the states of the LEDs sent again)
+its_LkActCnt = 2; its_LkActN = make_array(its_LkActCnt); its_LkActS = make_array(its_LkActCnt);
+its_LkActN[0] = ""; its_LkActN[1] = "LEDs";
+i__ii = 1; loop(its_LkActCnt - 1, its_LkActS[i__ii] = mSL_symbol(its_LkActN[i__ii]); i__ii += 1;);
+its_LkSym_mode = mSL_symbol("mode"); // (not reserved : "mode" is a key of the modules, "LEDs" a value)
+its_LkNoV = -(2^60); // no value (its_Lk_TgtVal)
+its_LkX = make_array(its_LkSz); // the words 9 ... of a link written by its_Lk_Write (its mode...)
 its_LkTab = make_array(LK_CNT * its_LkSz);
 its_LkVal = make_array(LK_CNT); // the last value posted by @block (0 ... 1)
 its_LkSeq = make_array(LK_CNT); // counted by @block at each value posted
 its_LkDone = make_array(LK_CNT); // the count of the value set by @gfx
 its_LkN = 0; // the links scanned : 0 ... its_LkN-1 (the last one used + 1)
-its_LkT_Ctl = 1; its_LkT_Reader = 2; its_LkT_Writer = 3; its_LkT_Effect = 4; // the kinds of targets
+its_LkT_Ctl = 1; its_LkT_Reader = 2; its_LkT_Writer = 3; its_LkT_Effect = 4; its_LkT_Action = 5; // the kinds of targets
+// the buttons : the state of a link Toggle (0 min, 1 max ; @block switches it, @gfx follows its target), a cc button pressed
+// (an edge : a press), the presses of an action (counted by @block, done by @gfx), the LED sent (-1 : to send)
+its_LkTog = make_array(LK_CNT); its_LkBtn = make_array(LK_CNT);
+its_LkAct = make_array(LK_CNT); its_LkActDone = make_array(LK_CNT);
+its_LkLed = make_array(LK_CNT); memset(its_LkLed, -1, LK_CNT);
+its_LkOutMx = 512; its_LkOutQ = make_array(3 * its_LkOutMx); its_LkOutW = its_LkOutR = 0; // the LEDs : @gfx -> @block (midisend)
 its_LkCtlT = make_array(NB_GSL); // the sliders written by @block, not yet told to REAPER
 its_LkLog = 0; // Global midilog : the messages received logged (not saved)
 its_LkLogMx = 64; its_LkLogQ = make_array(4 * its_LkLogMx); // the messages to log : status, data 1, data 2, count of links
@@ -15264,15 +15314,47 @@ function its_Lk_Count() local(i)
 );
 
 /*
+    @gfx : the value of the target of the link "i" now (a slider Ctl, a key of a module) ; its_LkNoV : none (an action, a
+    module that does not exist, a key that has no meaning for the type of the effect)
+*/
+function its_Lk_TgtVal(i) local(L, ty, b)
+(
+    L = its_LkTab + i * its_LkSz;
+    (L[3] === its_LkT_Ctl) ? its_Ctl_Get(L[4]) :
+    ((L[3] >= its_LkT_Reader) && (L[3] <= its_LkT_Effect)) ? (
+        ty = its_Lk_TyTK(L[3]);
+        (((b = its_Tb_Blk(ty, L[4])) !== 0) && ((ty !== its_TK_Effect) || its_Tb_FxOk(b[its_Efx_Type], L[5]))) ? (
+            (ty === its_TK_Effect) ? its_Tb_FxGet(L[5], b) : its_Tb_Get(ty, L[5], b);
+            its_Tb_g1;
+        ) : its_LkNoV;
+    ) : its_LkNoV;
+);
+
+// @gfx : the state of the link Toggle "i" follows its target (moved by the mouse, a preset, another link...), if no value
+// of the link is pending : 1 when the target is nearer to max than to min
+function its_Lk_TogSync(i) local(L, v)
+(
+    L = its_LkTab + i * its_LkSz;
+    ((its_LkSeq[i] === its_LkDone[i]) && ((v = its_Lk_TgtVal(i)) !== its_LkNoV)) ? (
+        its_LkTog[i] = (abs(v - L[7]) < abs(v - L[6])) ? 1 : 0;
+    );
+);
+
+/*
     a MIDI message (status "st", data "d1", "d2") : the links of its control ; "blk" : 1 called by @block (a slider : its_Ctl_Put,
     REAPER told by @gfx), 0 by @gfx (Inject : its_Ctl_Set) ; the value of a key of a module is posted (its_Lk_Pending sets
-    it) ; logged by @gfx (its_LkLog) ; returns the count of links
+    it) ; logged by @gfx (its_LkLog) ; returns the count of links.
+    A button : pressed by a note-on, a cc at 64 and more ; released by a note-off (or a note-on 0), a cc below 64 ; a press :
+    a note-on, the edge of a cc (its_LkBtn). Mode Toggle : a press switches the state (a slider : that of its value now ;
+    a key : its_LkTog, that @gfx keeps in step with the key, its_Lk_TogSync), a release does nothing ; Push : pressed max,
+    released min ; an action : its presses counted (its_LkAct, done by @gfx, its_Lk_Actions)
 */
-function its_Lk_Midi(st, d1, d2, blk) local(t, ch, kd, x, i, L, c, q)
+function its_Lk_Midi(st, d1, d2, blk) local(t, ch, kd, x, y, i, L, c, q, pr, ed, md)
 (
     t = st & 0xF0; ch = (st & 0x0F) + 1;
     kd = (t === 0xB0) ? 1 : ((t === 0x90) || (t === 0x80)) ? 2 : 0;
     x = (t === 0x80) ? 0 : max(0, min(127, d2)) / 127;
+    pr = (kd === 2) ? ((t === 0x90) && (d2 > 0)) : (d2 >= 64);
     its_LkLastSt = st; its_LkLastD1 = d1; its_LkLastD2 = d2; its_LkLastN += 1;
     (kd && (t !== 0x80) && ((t !== 0x90) || (d2 > 0))) ? ( // (a control moved : the end of a note is not one)
         its_LkCandK = kd; its_LkCandNum = d1; its_LkCandCh = ch; its_LkCandN += 1;
@@ -15283,10 +15365,30 @@ function its_Lk_Midi(st, d1, d2, blk) local(t, ch, kd, x, i, L, c, q)
             L = its_LkTab + i * its_LkSz;
             ((L[0] === kd) && (L[1] === d1) && ((L[2] === 0) || (L[2] === ch))) ? (
                 c += 1; its_LkHit[i] += 1;
-                (L[3] === its_LkT_Ctl) ? (
-                    blk ? ( its_Ctl_Put(L[4], its_Lk_Map(L, x)); its_LkCtlT[L[4]] = 1; ) : its_Ctl_Set(L[4], its_Lk_Map(L, x));
+                ed = pr && ((kd === 2) || !its_LkBtn[i]); // (a press)
+                its_LkBtn[i] = pr;
+                md = L[its_LkW_Mode];
+                (L[3] === its_LkT_Action) ? (
+                    ed ? (its_LkAct[i] += 1);
                 ) : (
-                    its_LkVal[i] = x; its_LkSeq[i] += 1;
+                    (md === its_LkM_Toggle) ? (
+                        y = -1;
+                        ed ? (
+                            (L[3] === its_LkT_Ctl) ? (
+                                q = its_Ctl_Get(L[4]);
+                                its_LkTog[i] = (abs(q - L[7]) < abs(q - L[6])) ? 1 : 0;
+                            ) : !blk ? its_Lk_TogSync(i);
+                            y = its_LkTog[i] = (its_LkTog[i] ? 0 : 1);
+                        );
+                    ) :
+                    (md === its_LkM_Push) ? (y = pr) : (y = x);
+                    (y >= 0) ? (
+                        (L[3] === its_LkT_Ctl) ? (
+                            blk ? ( its_Ctl_Put(L[4], its_Lk_Map(L, y)); its_LkCtlT[L[4]] = 1; ) : its_Ctl_Set(L[4], its_Lk_Map(L, y));
+                        ) : (
+                            its_LkVal[i] = y; its_LkSeq[i] += 1;
+                        );
+                    );
                 );
             );
             i += 1;
@@ -15301,11 +15403,45 @@ function its_Lk_Midi(st, d1, d2, blk) local(t, ch, kd, x, i, L, c, q)
     c;
 );
 
-// @block : the MIDI messages of the track (Interstys takes them : they are not passed on)
-function its_Lk_Recv() local(n, ofs)
+// @block : the MIDI messages of the track (Interstys takes them : they are not passed on) ; the LEDs posted by @gfx sent
+function its_Lk_Recv() local(n, ofs, q)
 (
     while ((n = midirecv_buf(ofs, its_LkMBuf, its_LkMBSz)) > 0) (
         (n <= 3) ? its_Lk_Midi(its_LkMBuf[0], its_LkMBuf[1], (n === 3) ? its_LkMBuf[2] : 0, 1);
+    );
+    while (its_LkOutR < its_LkOutW) (
+        q = its_LkOutQ + 3 * (its_LkOutR % its_LkOutMx);
+        midisend(0, q[0], q[1], q[2]);
+        its_LkOutR += 1;
+    );
+);
+
+// (its_Lk_Send, its_Lk_LedOff, its_Lk_LedsOff : with its_Lk_FreeAll, above)
+
+// @gfx, each frame : the state of each link Toggle (its_Lk_TogSync) ; its LED sent when it changes (its_LkLed -1 : to send)
+function its_Lk_Leds() local(i, L, s)
+(
+    i = 0; loop(its_LkN,
+        L = its_LkTab + i * its_LkSz;
+        s = -1;
+        ((L[0] !== 0) && (L[3] !== its_LkT_Action) && (L[its_LkW_Mode] === its_LkM_Toggle)) ? ( its_Lk_TogSync(i); s = its_LkTog[i]; );
+        ((s >= 0) && (s !== its_LkLed[i])) ? ( its_Lk_Send(L, s ? 127 : 0) ? (its_LkLed[i] = s); );
+        i += 1;
+    );
+);
+
+// @gfx : the actions of the links pressed (target LEDs : all the LEDs sent again)
+function its_Lk_Actions() local(i, L)
+(
+    i = 0; loop(its_LkN,
+        (its_LkAct[i] !== its_LkActDone[i]) ? (
+            its_LkActDone[i] = its_LkAct[i];
+            L = its_LkTab + i * its_LkSz;
+            ((L[0] !== 0) && (L[3] === its_LkT_Action)) ? (
+                (L[4] === its_LkA_LEDs) ? memset(its_LkLed, -1, LK_CNT);
+            );
+        );
+        i += 1;
     );
 );
 
@@ -15319,7 +15455,7 @@ function its_Lk_Apply(i, x) local(L, ty, k, ki, b, v, m, o, e)
     k = L[4]; ki = L[5];
     v = its_Lk_Map(L, x);
     (L[3] === its_LkT_Ctl) ? its_Ctl_Set(k, v) :
-    (L[3] >= its_LkT_Reader) ? (
+    ((L[3] >= its_LkT_Reader) && (L[3] <= its_LkT_Effect)) ? (
         ty = its_Lk_TyTK(L[3]);
         ((b = its_Tb_Blk(ty, k)) !== 0) ? (
             (its_Lk_KeyOk(ty, ki) === 2) ? (v = floor(v + 0.5));
@@ -15372,43 +15508,58 @@ function its_Lk_LogDrain() local(q)
     );
 );
 
-// @gfx, each frame : the messages logged, the sliders written by @block told to REAPER, the values posted set
+// @gfx, each frame : the messages logged, the sliders written by @block told to REAPER, the values posted set, the
+// actions done, the LEDs posted
 function its_Lk_Frame() local(k)
 (
     (its_LkLogR !== its_LkLogW) ? its_Lk_LogDrain();
     k = 0; loop(NB_GSL, its_LkCtlT[k] ? ( its_LkCtlT[k] = 0; its_Ctl_Notify(k); ); k += 1;);
     its_Lk_Pending();
+    its_Lk_Actions();
+    its_Lk_Leds();
     // the module "Links" in the last drawing : drawn again when a message arrives, while a cell flashes (see show_Links_Pad)
     ((its_LkDrawnAt === gfx_executed) && ((its_LkLastN !== its_LkUiN) || (its_LkFlashEnd !== 0))) ? (ui_GFXdoNow |= 4);
 );
 
-// the text of the link "i" in "str" : Link n  cc m  [chan c]  target ...  min v  max v  [law Exp] (a module of an instance in a
-// session : i:name, see its_Xp_Ref)
+// the text of the link "i" in "str" : Link n  cc m  [chan c]  [mode Toggle|Push]  target ...  min v  max v  [law Exp] ; an
+// action : Link n  cc m  [chan c]  target LEDs (a module of an instance in a session : i:name, see its_Xp_Ref)
 function its_Lk_Text(str, i) local(L, ty)
 (
     L = its_LkTab + i * its_LkSz;
     sprintf(str, "Link %d", i + 1);
     strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "%s %d", (L[0] === 1) ? "cc" : "note", L[1]));
     (L[2] > 0) ? ( strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "chan %d", L[2])); );
-    strcat(str, its_Xp_Sep());
-    (L[3] === its_LkT_Ctl) ? strcat(str, sprintf(#its_LkM4, "target Ctl %d", L[4] + 1)) : (
-        ty = its_Lk_TyTK(L[3]);
-        strcat(str, sprintf(#its_LkM4, "target %s %s %s", its_Tb_TyName(ty), its_Xp_Ref(#its_LkM5, ty, L[4]), its_Lk_KNam(ty, L[5])));
+    ((L[3] !== its_LkT_Action) && (L[its_LkW_Mode] > 0) && (L[its_LkW_Mode] < 3)) ? (
+        strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "mode %s", its_LkModeN[L[its_LkW_Mode]]));
     );
-    strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "min %.10g", L[6]));
-    strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "max %.10g", L[7]));
-    (L[8] === 1) ? ( strcat(str, its_Xp_Sep()); strcat(str, "law Exp"); );
+    strcat(str, its_Xp_Sep());
+    (L[3] === its_LkT_Action) ? strcat(str, sprintf(#its_LkM4, "target %s", its_LkActN[((L[4] > 0) && (L[4] < its_LkActCnt)) ? L[4] : 0])) : (
+        (L[3] === its_LkT_Ctl) ? strcat(str, sprintf(#its_LkM4, "target Ctl %d", L[4] + 1)) : (
+            ty = its_Lk_TyTK(L[3]);
+            strcat(str, sprintf(#its_LkM4, "target %s %s %s", its_Tb_TyName(ty), its_Xp_Ref(#its_LkM5, ty, L[4]), its_Lk_KNam(ty, L[5])));
+        );
+        strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "min %.10g", L[6]));
+        strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "max %.10g", L[7]));
+        (L[8] === 1) ? ( strcat(str, its_Xp_Sep()); strcat(str, "law Exp"); );
+    );
     str;
 );
 
-// the link "i" (0 ... LK_CNT-1) written : its kind last (@block reads it first), no value pending
+// the words 9 ... of the next link written (its_Lk_Write) : the defaults (mode Abs...), those of the link "L"
+function its_Lk_XReset() ( memset(its_LkX, 0, its_LkSz); );
+function its_Lk_XFrom(L) ( memcpy(its_LkX, L, its_LkSz); );
+
+// the link "i" (0 ... LK_CNT-1) written (@gfx), its words 9 ... from its_LkX : its kind last (@block reads it first), no
+// value and no press pending ; its LED (the old one lit : switched off) to send
 function its_Lk_Write(i, kd, num, ch, tt, k, ki, mn, mx, lw) local(L)
 (
+    its_Lk_LedOff(i);
     L = its_LkTab + i * its_LkSz;
     L[0] = 0; // (@block : no link while it is written)
     L[1] = num; L[2] = ch; L[3] = tt; L[4] = k; L[5] = ki; L[6] = mn; L[7] = mx; L[8] = lw;
-    L[9] = L[10] = L[11] = 0;
-    its_LkDone[i] = its_LkSeq[i];
+    memcpy(L + its_LkW_Mode, its_LkX + its_LkW_Mode, its_LkSz - its_LkW_Mode);
+    its_LkDone[i] = its_LkSeq[i]; its_LkActDone[i] = its_LkAct[i];
+    its_LkTog[i] = its_LkBtn[i] = 0;
     L[0] = kd;
     its_Lk_Count();
 );
@@ -15563,6 +15714,8 @@ function its_Lk_LearnLink() local(i, f, L)
             && (L[5] === its_LkLrnKi)) ? (f = i);
         i += 1;
     );
+    // (a link that has this control and this target keeps its mode... ; a new one : the defaults)
+    (f >= 0) ? its_Lk_XFrom(its_LkTab + f * its_LkSz) : its_Lk_XReset();
     i = 0; while ((f < 0) && (i < LK_CNT)) ( (its_LkTab[i * its_LkSz] === 0) ? (f = i); i += 1; );
     (f >= 0) ? (
         its_Lk_Write(f, its_LkLrnK, its_LkLrnNum, its_LkLrnCh, its_LkLrnTt, its_LkLrnTk, its_LkLrnKi, its_LkLrnLo, its_LkLrnHi, its_LkLrnLaw);
@@ -15581,9 +15734,10 @@ function its_Lk_SrcText(str, kd, num, ch)
     str;
 );
 
-// the text of the target "tt", "k", "ki" (Ctl 5, Effect 3 freq)
+// the text of the target "tt", "k", "ki" (Ctl 5, Effect 3 freq, LEDs)
 function its_Lk_TgtText(str, tt, k, ki) local(ty)
 (
+    (tt === its_LkT_Action) ? strcpy(str, its_LkActN[((k > 0) && (k < its_LkActCnt)) ? k : 0]) :
     (tt === its_LkT_Ctl) ? sprintf(str, "Ctl %d", k + 1) : (
         ty = its_Lk_TyTK(tt);
         sprintf(str, "%s %d", its_Tb_TyName(ty), k + 1);
@@ -15600,18 +15754,26 @@ function its_Lk_Diff(n, what, got, exp)
     (its_Tb_res === 0) ? (its_Tb_res = 2759);
 );
 
+// the action named "w" (target LEDs) : its number (its_LkA_...), 0 : not an action
+function its_Lk_ActOf(w) local(i, a)
+(
+    a = 0; i = 1; while ((a === 0) && (i < its_LkActCnt)) ( (its_LkActS[i] === w) ? (a = i); i += 1; );
+    a;
+);
+
 /*
     Link n keys ; chk : Check Link n keys (pass 3 : the keys given compared with the link n) ; the keys : cc m | note m,
-    chan c, target Ctl k | target Reader|Writer|Effect id key, min v, max v (read by the key : its range, the key of a word
-    of several keys chosen by the type of the effect, see its_Tb_FxKey), law Lin|Exp ; passes 2 and 3 : the module exists
-    (pass 2 : in the simulation), the key can be linked and has a meaning for its type ; pass 3 : the link written (its
-    kind last : @block reads it first)
+    chan c, mode Abs|Toggle|Push, target Ctl k | target Reader|Writer|Effect id key | target LEDs (an action : no min, max,
+    law, mode), min v, max v (read by the key : its range, the key of a word of several keys chosen by the type of the
+    effect, see its_Tb_FxKey), law Lin|Exp ; passes 2 and 3 : the module exists (pass 2 : in the simulation), the key can
+    be linked and has a meaning for its type ; pass 3 : the link written (its kind last : @block reads it first)
 */
-function its_Tb_Link(chk) local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, mn, mx, lw, gk, gc, gt, gm, gx, gl, L, b, fty, ok, ks, nk)
+function its_Tb_Link(chk)
+local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, mn, mx, lw, md, gk, gc, gt, gm, gx, gl, gmd, L, b, fty, ok, ks, nk, mo)
 (
     n = its_Tb_Int(chk ? "Check Link" : "Link", 1, LK_CNT);
-    kd = num = ch = tt = ty = lw = kw = 0; k = ki = -1; mn = -1; mx = 1;
-    gk = gc = gt = gm = gx = gl = 0; // the keys given : the control, chan, target, min, max, law
+    kd = num = ch = tt = ty = lw = md = kw = 0; k = ki = -1; mn = -1; mx = 1;
+    gk = gc = gt = gm = gx = gl = gmd = 0; // the keys given : the control, chan, target, min, max, law, mode
     while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Tb_Peek())) (
         its_Tb_Next();
         ((w === its_TK_cc) || (w === its_TK_note)) ? (
@@ -15621,10 +15783,16 @@ function its_Tb_Link(chk) local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, 
         (w === its_TK_chan) ? (
             ch = its_Tb_Int("chan", 1, 16); gc = 1;
         ) :
+        (w === its_LkSym_mode) ? (
+            md = its_Tb_Enum("mode", its_LkModeS, 3); gmd = 1; // Abs, Toggle, Push
+        ) :
         (w === its_TK_target) ? (
             gt = 1;
             ((w = its_Tb_Next()) === its_TK_Ctl) ? (
                 tt = its_LkT_Ctl; ty = 0; k = its_Tb_Int("target Ctl", 1, NB_GSL) - 1; ki = -1;
+            ) :
+            (its_Lk_ActOf(w) > 0) ? (
+                tt = its_LkT_Action; ty = 0; k = its_Lk_ActOf(w); ki = -1;
             ) :
             ((w === its_TK_Reader) || (w === its_TK_Writer) || (w === its_TK_Effect)) ? (
                 ty = w; tt = (w === its_TK_Reader) ? its_LkT_Reader : (w === its_TK_Writer) ? its_LkT_Writer : its_LkT_Effect;
@@ -15643,7 +15811,7 @@ function its_Tb_Link(chk) local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, 
                 );
                 ki = kj;
             ) : (
-                sprintf(#its_TbW, "Link %d : target %s : Ctl, Reader, Writer or Effect expected", n, mSL_edit_value(#its_TbV, w));
+                sprintf(#its_TbW, "Link %d : target %s : Ctl, Reader, Writer, Effect or LEDs expected", n, mSL_edit_value(#its_TbV, w));
                 its_Tb_Err(2730, #its_TbW);
             );
         ) :
@@ -15651,6 +15819,10 @@ function its_Tb_Link(chk) local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, 
             (tt === 0) ? (
                 sprintf(#its_TbW, "Link %d : %s before target", n, (w === its_TK_min) ? "min" : "max");
                 its_Tb_Err(2731, #its_TbW);
+            ) :
+            (tt === its_LkT_Action) ? (
+                sprintf(#its_TbW, "Link %d : target %s is an action : no %s", n, its_LkActN[k], (w === its_TK_min) ? "min" : "max");
+                its_Tb_Err(2740, #its_TbW);
             ) : (
                 (tt === its_LkT_Ctl) ? (
                     v = its_Tb_Num((w === its_TK_min) ? "min" : "max", -1, 1);
@@ -15671,16 +15843,21 @@ function its_Tb_Link(chk) local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, 
         ) :
         its_Tb_KeyErr(w, "Link");
     );
+    mo = (tt >= its_LkT_Reader) && (tt <= its_LkT_Effect); // (a key of a module)
     (its_Tb_error === 0) ? (
         (!chk && (!gk || !gt)) ? (
             sprintf(#its_TbW, "Link %d : %s expected", n, !gk ? "cc m or note m" : "target");
             its_Tb_Err(2732, #its_TbW);
         ) :
-        (!chk && (tt !== its_LkT_Ctl) && (!gm || !gx)) ? (
+        ((tt === its_LkT_Action) && (gl || gmd)) ? (
+            sprintf(#its_TbW, "Link %d : target %s is an action : no %s", n, its_LkActN[k], gl ? "law" : "mode");
+            its_Tb_Err(2740, #its_TbW);
+        ) :
+        (!chk && mo && (!gm || !gx)) ? (
             sprintf(#its_TbW, "Link %d : min and max expected (the values of the key at 0 and at 127)", n);
             its_Tb_Err(2733, #its_TbW);
         ) :
-        (!chk && (its_Tb_mode >= 2) && (tt !== its_LkT_Ctl)) ? (
+        (!chk && (its_Tb_mode >= 2) && mo) ? (
             // the module, its key
             b = (its_Tb_mode === 3) ? its_Tb_Blk(ty, k) : 0;
             !((its_Tb_mode === 2) ? its_Tb_SimEx(ty, k) : (b !== 0)) ? (
@@ -15721,13 +15898,12 @@ function its_Tb_Link(chk) local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, 
                     its_Lk_Diff(n, "chan", (L[2] === 0) ? "all" : sprintf(#its_LkM, "%d", L[2]), sprintf(#its_LkM2, "%d", ch));
                     ok = 0;
                 );
-                (gt && ((L[3] !== tt) || (L[4] !== k)
-                    || ((tt !== its_LkT_Ctl) && (strcmp(its_Lk_KNam(ty, L[5]), its_Lk_KNam(ty, ki)) !== 0)))) ? (
-                    (L[3] === its_LkT_Ctl) ? sprintf(#its_LkM, "Ctl %d", L[4] + 1) :
-                        sprintf(#its_LkM, "%s %d %s", its_Tb_TyName(its_Lk_TyTK(L[3])), L[4] + 1, its_Lk_KNam(its_Lk_TyTK(L[3]), L[5]));
-                    (tt === its_LkT_Ctl) ? sprintf(#its_LkM2, "Ctl %d", k + 1) : sprintf(#its_LkM2, "%s %d %s", its_Tb_TyName(ty), k + 1, its_Lk_KNam(ty, ki));
-                    its_Lk_Diff(n, "target", #its_LkM, #its_LkM2);
+                (gt && (strcmp(its_Lk_TgtText(#its_LkM, L[3], L[4], L[5]), its_Lk_TgtText(#its_LkM2, tt, k, ki)) !== 0)) ? (
+                    its_Lk_Diff(n, "target", #its_LkM, #its_LkM2); // (a key : compared by its name)
                     ok = 0;
+                );
+                (gmd && (L[its_LkW_Mode] !== md)) ? (
+                    its_Lk_Diff(n, "mode", its_LkModeN[L[its_LkW_Mode]], its_LkModeN[md]); ok = 0;
                 );
                 (gm && (abs(L[6] - mn) >= 0.0000001)) ? (
                     its_Lk_Diff(n, "min", sprintf(#its_LkM, "%.10g", L[6]), sprintf(#its_LkM2, "%.10g", mn)); ok = 0;
@@ -15744,6 +15920,7 @@ function its_Tb_Link(chk) local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, 
                 mSL_log(SysLogBox, #its_TbW);
             );
         ) : (
+            its_Lk_XReset(); its_LkX[its_LkW_Mode] = md;
             its_Lk_Write(n - 1, kd, num, ch, tt, k, ki, mn, mx, lw);
         );
     );
@@ -15771,10 +15948,10 @@ function its_Lk_FreeTb() local(n)
 (
     (its_Tb_Peek() === its_TK_All) ? (
         its_Tb_Next();
-        (its_Tb_mode === 3) ? its_Lk_FreeAll();
+        (its_Tb_mode === 3) ? ( its_Lk_LedsOff(); its_Lk_FreeAll(); );
     ) : (
         n = its_Tb_Int("Free Link", 1, LK_CNT);
-        ((its_Tb_mode === 3) && (its_Tb_error === 0)) ? ( its_LkTab[(n - 1) * its_LkSz] = 0; its_Lk_Count(); );
+        ((its_Tb_mode === 3) && (its_Tb_error === 0)) ? ( its_Lk_LedOff(n - 1); its_LkTab[(n - 1) * its_LkSz] = 0; its_Lk_Count(); );
     );
 );
 
@@ -18137,14 +18314,24 @@ loadMode ? (
             ((savtmp[1] >= 0) && (savtmp[1] < LN_CNT)) ? file_string(0, its_LnFile[savtmp[1]]) : file_string(0, #tnam_skip);
         ) :
         (savtmp[0] === 'link') ? (
-            // the links (MIDI) : savtmp[1] links of savtmp[2] words (another size : skipped ; more links : the first LK_CNT)
+            // the links (MIDI) : savtmp[1] links of savtmp[2] words (fewer words, at least 9 : a session saved before, the
+            // other words 0 ; more : skipped) ; more links : the first LK_CNT ; their LEDs sent again (@gfx, its_Lk_Leds)
             (savtmp[2] === its_LkSz) ? (
                 z__si = min(savtmp[1], LK_CNT);
                 ldtotal += load_mem(0, its_LkTab, z__si * its_LkSz);
                 loop(2 * (savtmp[1] - z__si) * its_LkSz, file_var(0, zzz_dskip)); // (each value in 2 words, see save_mem)
+            ) :
+            ((savtmp[2] >= 9) && (savtmp[2] < its_LkSz)) ? (
+                z__si = 0; loop(savtmp[1],
+                    (z__si < LK_CNT) ? ( ldtotal += load_mem(0, its_LkTab + z__si * its_LkSz, savtmp[2]); ) :
+                        loop(2 * savtmp[2], file_var(0, zzz_dskip));
+                    z__si += 1;
+                );
             ) : (
                 loop(2 * savtmp[1] * savtmp[2], file_var(0, zzz_dskip));
             );
+            memset(its_LkLed, -1, LK_CNT); memset(its_LkTog, 0, LK_CNT); memset(its_LkBtn, 0, LK_CNT);
+            memcpy(its_LkActDone, its_LkAct, LK_CNT);
             its_Lk_Count();
         ) :
         (savtmp[0] === 'tnam') ? (
@@ -24743,6 +24930,10 @@ local (h1, h2, h3, uix_jneed, zzmi, i, k, n, nt, mx, nl, zz, zzmcl, xx, hk, hx, 
 // the target of the link "L" shown (a slider Ctl : its page of the module Controls)
 function its_Lk_ShowTarget(L) local(r)
 (
+    r = 1;
+    (L[3] === its_LkT_Action) ? (
+        0; // (an action : nothing to show)
+    ) :
     (L[3] === its_LkT_Ctl) ? (
         ControlsStruct[0] = floor(L[4] / 8);
         r = its_Mod_Show('M', blockControls);
@@ -24831,6 +25022,7 @@ function its_LkEd_Take() local(L, v)
 function its_Lk_NowText(str, i) local(L, ty, b)
 (
     L = its_LkTab + i * its_LkSz;
+    (L[3] === its_LkT_Action) ? strcpy(str, (L[4] === its_LkA_LEDs) ? "LEDs : each press sends again the states of the Toggle links" : "") :
     (L[3] === its_LkT_Ctl) ? sprintf(str, "Ctl %d now : %.4g", L[4] + 1, its_Ctl_Get(L[4])) : (
         ty = its_Lk_TyTK(L[3]);
         ((b = its_Tb_Blk(ty, L[4])) === 0) ? sprintf(str, "%s %d does not exist : the link does nothing", its_Tb_TyName(ty), L[4] + 1) :
@@ -24861,6 +25053,7 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
         (its_LkRel > 0) ? (
             L = its_LkTab + (its_LkRel - 1) * its_LkSz;
             (L[0] !== 0) ? (
+                its_Lk_XFrom(L); // (its mode...)
                 its_Lk_Write(its_LkRel - 1, its_LkCandK, its_LkCandNum, its_LkCandCh, L[3], L[4], L[5], L[6], L[7], L[8]);
                 mSL_log(SysLogBox, its_Lk_Text(#its_LkT, its_LkRel - 1));
             );
@@ -24950,7 +25143,8 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                             i = 0; loop(n, mSL_log(SysLogBox, its_Lk_Text(#its_LkT, its_LkPg[i])); i += 1;);
                             (n === 0) ? mSL_log(SysLogBox, "No link");
                         ) :
-                        (xx === 3) ? ( its_Lk_FreeAll(); LinksStruct[0] = LinksStruct[1] = 0; );
+                        (xx === 2) ? memset(its_LkLed, -1, LK_CNT) : // (sent again by its_Lk_Leds)
+                        (xx === 4) ? ( its_Lk_LedsOff(); its_Lk_FreeAll(); LinksStruct[0] = LinksStruct[1] = 0; );
                     ) :
                     ((zz & ui_jpad_ev_lmc) && (zzmcl === 2)) ? (
                         its_LkLearn = !its_LkLearn;
@@ -24992,17 +25186,27 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                         L = its_LkTab + i * its_LkSz;
                         sprintf(pad_LkG_Labs[c], "%d : %s", i + 1, its_Lk_SrcText(#its_LkM, L[0], L[1], L[2]));
                         pad_LkG_Colrs[c] = (its_LkFlash[i] > t) ? Color_Limegreen : (i + 1 === sel) ? Color_Goldenrod : Col_P3;
-                        ty = (L[3] === its_LkT_Ctl) ? 0 : its_Lk_TyTK(L[3]);
-                        b = (ty !== 0) ? its_Tb_Blk(ty, L[4]) : 0;
-                        (ty === 0) ? sprintf(pad_LkG_Labs[c + 1], "Ctl %d", L[4] + 1) : sprintf(pad_LkG_Labs[c + 1], "%s %d", its_Tb_TyName(ty), L[4] + 1);
-                        strcpy(pad_LkG_Labs[c + 2], (ty === 0) ? "" : its_Lk_KNam(ty, L[5]));
-                        pad_LkG_Colrs[c + 1] = pad_LkG_Colrs[c + 2] = ((ty === 0) || ((b !== 0) && ((ty !== its_TK_Effect) || its_Tb_FxOk(b[its_Efx_Type], L[5])))) ?
-                            Col_P1 : Col_Inactive; // (gray : the link does nothing)
-                        sprintf(pad_LkG_Labs[c + 3], "%.4g", L[6]);
-                        sprintf(pad_LkG_Labs[c + 4], "%.4g", L[7]);
-                        pad_LkG_Colrs[c + 3] = pad_LkG_Colrs[c + 4] = Color_Light_Sky_Blue;
-                        strcpy(pad_LkG_Labs[c + 5], (L[8] === 1) ? "Exp" : "Lin");
-                        pad_LkG_Colrs[c + 5] = Col_P2;
+                        (L[3] === its_LkT_Action) ? (
+                            // an action : its name ; no min, max, law, mode
+                            strcpy(pad_LkG_Labs[c + 1], its_Lk_TgtText(#its_LkM, L[3], L[4], L[5]));
+                            pad_LkG_Colrs[c + 1] = Col_P1;
+                            m = 2; loop(pad_LkG_NC - 2, strcpy(pad_LkG_Labs[c + m], ""); pad_LkG_Colrs[c + m] = Col_Inactive; m += 1;);
+                        ) : (
+                            ty = (L[3] === its_LkT_Ctl) ? 0 : its_Lk_TyTK(L[3]);
+                            b = (ty !== 0) ? its_Tb_Blk(ty, L[4]) : 0;
+                            (ty === 0) ? sprintf(pad_LkG_Labs[c + 1], "Ctl %d", L[4] + 1) : sprintf(pad_LkG_Labs[c + 1], "%s %d", its_Tb_TyName(ty), L[4] + 1);
+                            strcpy(pad_LkG_Labs[c + 2], (ty === 0) ? "" : its_Lk_KNam(ty, L[5]));
+                            pad_LkG_Colrs[c + 1] = pad_LkG_Colrs[c + 2] = ((ty === 0) || ((b !== 0) && ((ty !== its_TK_Effect) || its_Tb_FxOk(b[its_Efx_Type], L[5])))) ?
+                                Col_P1 : Col_Inactive; // (gray : the link does nothing)
+                            sprintf(pad_LkG_Labs[c + 3], "%.4g", L[6]);
+                            sprintf(pad_LkG_Labs[c + 4], "%.4g", L[7]);
+                            pad_LkG_Colrs[c + 3] = pad_LkG_Colrs[c + 4] = Color_Light_Sky_Blue;
+                            strcpy(pad_LkG_Labs[c + 5], (L[8] === 1) ? "Exp" : "Lin");
+                            pad_LkG_Colrs[c + 5] = Col_P2;
+                            strcpy(pad_LkG_Labs[c + 6], its_LkModeN[((L[its_LkW_Mode] > 0) && (L[its_LkW_Mode] < 3)) ? L[its_LkW_Mode] : 0]);
+                            // (Toggle : the color of its LED)
+                            pad_LkG_Colrs[c + 6] = (L[its_LkW_Mode] === its_LkM_Toggle) ? (its_LkTog[i] ? Color_Dark_Orange : Col_P2) : Col_P2;
+                        );
                     ) : (
                         m = 0; loop(pad_LkG_NC, strcpy(pad_LkG_Labs[c + m], ""); pad_LkG_Colrs[c + m] = Col_Inactive; m += 1;);
                         strcpy(pad_LkG_Labs[c], "no link");
@@ -25019,7 +25223,8 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                 // min and max : potentiometers (ui_jdrag, see mSL_ui_Pads ; no drag with Alt : the prompt)
                 c = ui_jpad_cell_at();
                 (ui_jdrag_can_start() && !(mouse_cap & altCap) && (c >= 0) && (((c % pad_LkG_NC) === 3) || ((c % pad_LkG_NC) === 4))
-                    && (pg * pad_LkG_NL + floor(c / pad_LkG_NC) < n)) ? (
+                    && (pg * pad_LkG_NL + floor(c / pad_LkG_NC) < n)
+                    && (its_LkTab[its_LkPg[pg * pad_LkG_NL + floor(c / pad_LkG_NC)] * its_LkSz + 3] !== its_LkT_Action)) ? (
                     i = its_LkPg[pg * pad_LkG_NL + floor(c / pad_LkG_NC)];
                     its_Lk_DragRange(i);
                     ui_jdrag_start(blockId, c, its_LkTab[i * its_LkSz + 3 + (c % pad_LkG_NC)], its_LkLo, its_LkHi, 300, its_LkFl);
@@ -25042,13 +25247,13 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                             xx = control_jmenu(menu_Lk);
                             (xx === 1) ? mSL_log(SysLogBox, its_Lk_Text(#its_LkT, i)) :
                             (xx === 2) ? ( its_LkRel = i + 1; its_LkLrnSeen = its_LkCandN; ) :
-                            (xx === 3) ? ( L[2] = 0; ) :
-                            (xx === 4) ? ( (its_LkLastN > 0) ? (L[2] = (its_LkLastSt & 15) + 1); ) :
-                            (xx === 5) ? ( v = L[6]; L[6] = L[7]; L[7] = v; ) :
-                            (xx === 6) ? its_Lk_ResetRange(i) :
+                            (xx === 3) ? ( its_Lk_LedOff(i); L[2] = 0; ) :
+                            (xx === 4) ? ( (its_LkLastN > 0) ? ( its_Lk_LedOff(i); L[2] = (its_LkLastSt & 15) + 1; ); ) :
+                            ((xx === 5) && (L[3] !== its_LkT_Action)) ? ( v = L[6]; L[6] = L[7]; L[7] = v; ) :
+                            ((xx === 6) && (L[3] !== its_LkT_Action)) ? its_Lk_ResetRange(i) :
                             (xx === 7) ? its_Lk_ShowTarget(L) :
-                            (xx === 9) ? ( L[0] = 0; its_Lk_Count(); (sel === i + 1) ? (LinksStruct[1] = 0); ) :
-                            (xx === 10) ? ( its_Lk_FreeAll(); LinksStruct[0] = LinksStruct[1] = 0; );
+                            (xx === 9) ? ( its_Lk_LedOff(i); L[0] = 0; its_Lk_Count(); (sel === i + 1) ? (LinksStruct[1] = 0); ) :
+                            (xx === 10) ? ( its_Lk_LedsOff(); its_Lk_FreeAll(); LinksStruct[0] = LinksStruct[1] = 0; );
                         ) :
                         ((zz & ui_jpad_ev_lmc) && !(dr & 2)) ? (
                             (c === 0) ? (
@@ -25056,6 +25261,15 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                             ) :
                             ((c === 1) || (c === 2)) ? (
                                 its_Lk_ShowTarget(L);
+                            ) :
+                            (L[3] === its_LkT_Action) ? (
+                                0; // (an action : no min, max, law, mode)
+                            ) :
+                            (c === 6) ? (
+                                // the mode : Abs -> Toggle -> Push (its LED lit : switched off)
+                                its_Lk_LedOff(i);
+                                L[its_LkW_Mode] = (L[its_LkW_Mode] + 1) % 3;
+                                its_LkTog[i] = its_LkBtn[i] = 0;
                             ) :
                             (((c === 3) || (c === 4)) && (jmc & altCap)) ? (
                                 its_LkEd_Open(i, 3 + c); // (the prompt : min L[6], max L[7])
@@ -25091,7 +25305,7 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                     ui_split_top(ui_texth()); ui_text("then clic Link. Learn stays On for the next one."); ui_pop();
                 ) : (
                     ui_split_top(ui_texth()); ui_text("Mouse over a link : its text. min, max : drag ; Shift + clic : bound ; Alt + clic : type."); ui_pop();
-                    ui_split_top(ui_texth()); ui_text("law : clic ; module, key : clic shows it ; right clic : the menu of the link."); ui_pop();
+                    ui_split_top(ui_texth()); ui_text("law, mode : clic ; module, key : clic shows it ; right clic : the menu of the link."); ui_pop();
                 );
             ui_pop();
 
