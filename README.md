@@ -1,42 +1,219 @@
-# The "Concrete Music Gran Studio"
+# CMGS — Concrete Music Gran Studio
 
-The **"Concrete Music Gran Studio"**, or **CMGS**, is a tool aimed at concrete music composers. It is a kind of sampler coupled with an electroacoustic music generator, and is well suited for studio work or installations.
+*[Version française plus bas](#version-française).*
 
-This is a project intended to be used with REAPER, since the code is written in the *JSFX* programming language, that only REAPER supports. You need v7.25 or a later version of REAPER.
+The **Concrete Music Gran Studio**, or **CMGS**, is a set of tools for composers of concrete and electroacoustic
+music: a sampler coupled with a music generator, a multichannel spatialization system, a modular delay, and the
+auxiliary plugins they need in the studio, in concerts or in installations.
 
-The file ***GameMaster-Doc.pdf*** explains how to use the software, while other *.md* files describe some aspects of the installation of the system.
+CMGS is written in **JSFX**, the plugin language of [REAPER](https://www.reaper.fm), so it runs only inside
+REAPER, version **7.25 or later**.
 
-The **CMGS** was written by *Jean-Jacques Girardot*, with the invaluable help of *Jean-François Minjard*.
+## The applications
+
+| Application | Plugins | Role |
+|---|---|---|
+| **Game Master** | `GamePlayer`, with `FilePlayer`, `ScriptMaster`, `MIDI_In`, `MIDIduino` | Sampler and electroacoustic music generator: clip players, generator, scheduler, live control. `FilePlayer` is a sample reader driven by the Game Master, `ScriptMaster` an editor, debugger and runner of scripts, `MIDI_In` and `MIDIduino` bring MIDI and sensors into the Game Master. |
+| **Diffusion-3** | `Diffusion-3` | Spatialization of up to 128 inputs and outputs: projectors, scenes, morphing, 3D trajectories, configurations of the loudspeakers, control by an AKAI APCmini. |
+| **Interstys** | `Interstys` | Modular fractional delay: lines, readers (Stretch, Grains…), writers, effects (filters, saturation, feedback matrix, flanger, phaser, shimmer, noise, random…), curves, MIDI links. |
+
+These applications share **mSL**, a small scripting language: scripts drive them, exchange messages, and describe
+their configurations, patches and presets. Ready-to-use scripts are in [`CMGS-scripts/`](CMGS-scripts/README.md).
+
+### Auxiliary plugins
+
+- `MCBM-64`, `MCBM-128`: multichannel bass managers, up to 128 channels (`MCBM-128`: Linkwitz-Riley crossovers).
+- `SmoothMultiLimiter`: a limiter for up to 128 channels.
+- `Multichannel_VU_meter` (and its variant `Multichannel_VU_meter_U`): a VU meter for up to 128 channels.
+- Small utilities: `ChannelReducer16/24/48`, `CheapChannelReducer`, `ChannelsMuter`, `ChannelsSwitcher`,
+  `Mixer_8xM-1xS`, `mid-side`, `channels-folder`, `Synchronizer`.
+- Examples: `AKAI-Ex-01`, `AKAI-Ex-02` (AKAI APCmini), `Space3D-Demo` (the 3D view of Diffusion-3).
 
 ## Installation
 
-You need a recent version of **REAPER** (v7.25 or later), from http://reaper.fm/download.php. Check first that your sound card is recognized by REAPER (open the menu "Options > Setting...", and check "Audio > Device").
+1. Install **REAPER** 7.25 or later (<https://www.reaper.fm/download.php>), and check that it recognizes your sound
+   card (*Options > Settings… > Audio > Device*).
 
-> [!IMPORTANT]
-> Some settings may prevent the GameMaster to function correctly. Do check in the "REAPER Preferences" that in "Audio", both "Close audio device when stopped..." options are *not* set, and in "Audio > Playback" that "Run FX when stopped" is set.
+   > [!IMPORTANT]
+   > Some settings stop the Game Master. In *Options > Settings… > Audio*, the two options *Close audio device
+   > when stopped…* must **not** be checked, and in *Audio > Playback*, *Run FX when stopped* must be checked.
 
-In this https://github.com/jack461/CMGS directory, click on the green "Code" button, and select "Download ZIP". If necessary, click "Save" to save "CMGS-main.zip" in your downloads folder. Unzip the file. You now have in "CMGS-main" the latest version of the software. The folder can be kept in any place it is convenient for you (home, Desktop, Music, etc.), but don't install it in the REAPER Resource directory.
+2. Get CMGS: on <https://github.com/jack461/CMGS>, click the green **Code** button, then **Download ZIP**, and
+   unzip `CMGS-main.zip` wherever you like (or `git clone` the repository). Do not put this folder itself in the
+   REAPER resource folder.
 
-You may whish to get the first available tutorial, from https://github.com/jack461/CMGS-Tutorials. Here also, click on the green "Code" button, and select "Download ZIP". It is a much larger file, since it contains a whole project, with about 1 Go of samples. Unzip it, and follow the "README.md" explanations to install it.
+3. Open the REAPER resource folder (*Options > Show REAPER resource path in explorer/finder*), and copy into it:
 
+   | From the CMGS folder | To the REAPER resource folder |
+   |---|---|
+   | `CMGS-effects/` | `Effects/CMGS-effects/` |
+   | `CMGS-data/` | `Data/CMGS-data/` |
+   | `CMGS-auxiliary.eel` | `Scripts/CMGS-auxiliary.eel` |
 
-# Le "Concrete Music Gran Studio"
+   Keep these names: the plugins look for these folders, and REAPER projects refer to the plugins as
+   `CMGS-effects/<plugin>.jsfx`.
 
-Le **"Concrete Music Gran Studio"**, ou **CMGS**, est un outil destiné aux compositeurs de musique concrète. Il s'agit d'une sorte d'échantillonneur couplé à un générateur de musique électroacoustique, et convient bien au travail en studio ou aux installations.
+4. Load the auxiliary script: *Actions > Show action list… > New action > Load ReaScript…*, choose
+   `Scripts/CMGS-auxiliary.eel`, then run this action once in each REAPER session. It stays in the background and
+   lets the plugins write files (for instance the export of the system log with the key `p`, or the patches and
+   sessions exported by Interstys), know the folder of the project, and drive the transport of REAPER from scripts.
 
-Il s'agit d'un projet destiné à être utilisé avec REAPER, puisque le code est écrit dans le langage de programmation *JSFX*, que seul REAPER supporte. Il faut la version 7.25 ou une version ultérieure de REAPER.
+5. Optional: copy `CMGS-scripts/` into `Data/` as well (next to `CMGS-data`); the plugins can then open a script by
+   a name such as `CMGS-scripts/Algorithms/Matrix-Metal.mSL`.
 
-Le fichier ***GameMaster-Doc.pdf*** explique comment utiliser le logiciel, tandis que d'autres fichiers *.md* décrivent certains aspects de l'installation du système.
+The plugins now appear in the FX browser of REAPER, under *JS*, in the folder `CMGS-effects`.
 
-Le **CMGS** a été écrit par *Jean-Jacques Girardot*, avec l'aide précieuse de *Jean-François Minjard*.
+**Updating:** replace `Effects/CMGS-effects`, `Data/CMGS-data` and `Scripts/CMGS-auxiliary.eel` by the new
+versions. Your projects keep working: they refer to the plugins by name.
+
+**For developers:** instead of copying, you may make symbolic links from the REAPER resource folder to a clone of
+the repository (`ln -s` on macOS and Linux, `mklink /D` on Windows); REAPER then sees every change of the sources.
+macOS Finder aliases do not work. `CMGS-auxiliary.eel` is generated: edit
+`CMGS-effects/CMGS-libs/CMGS-auxiliary-src.eel`, then run `python3 -I CMGS-aux/tools/make_auxiliary.py`.
+
+A first tutorial, a complete project with about 1 GB of samples, is available at
+<https://github.com/jack461/CMGS-Tutorials>.
+
+## Documentation
+
+The manuals are in [`CMGS-docs/`](CMGS-docs/) and are written in French (the `.fodt` files are their LibreOffice
+sources).
+
+| File | Contents |
+|---|---|
+| `GameMaster-Doc-1.7.8.pdf` | Reference manual of the Game Master |
+| `GM-Commandes.pdf` | Commands of the Game Master |
+| `Diffusion-3-Manuel.pdf` | Diffusion-3 |
+| `Interstys-Manuel.pdf` | Interstys |
+| `MCBM-Manuel.pdf`, `SmoothMultiLimiter-Manuel.pdf`, `Multichannel_VU_meter-Manuel.pdf` | Auxiliary plugins |
+| `CMGS-Keys.md` | The keyboard keys of all the plugins |
+| `CMGS-Internals.fodt` | Internal documentation (in progress) |
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `CMGS-effects/` | The plugins (`.jsfx`) and `README.txt`, a marker the Game Master looks for. `CMGS-libs/` holds the shared libraries and the code of the large plugins (`.jsfx-inc`). |
+| `CMGS-data/` | What the plugins read at run time: `themes/` (the bitmap themes), `Diffusions/` (configurations read by Diffusion-3). |
+| `CMGS-auxiliary.eel` | The auxiliary ReaScript (generated, see above). |
+| `CMGS-scripts/` | mSL scripts: algorithms and presets for Interstys, examples, test series. |
+| `CMGS-docs/` | The manuals. |
+| `CMGS-aux/` | Development tools (Python) and archives. |
+
+## Credits
+
+CMGS is written by **Jean-Jacques Girardot**, with the invaluable help of **Jean-François Minjard**.
+The UI library `ui-lib.jsfx-inc` and the original *SmoothMultiLimiter* are by **Geraint Luff**.
+
+---
+
+# Version française
+
+Le **Concrete Music Gran Studio**, ou **CMGS**, est un ensemble d'outils pour les compositeurs de musique concrète et
+électroacoustique : un échantillonneur couplé à un générateur de musique, un système de spatialisation multicanal, un
+délai modulaire, et les plugins auxiliaires dont ils ont besoin en studio, en concert ou en installation.
+
+CMGS est écrit en **JSFX**, le langage de plugins de [REAPER](https://www.reaper.fm) : il ne fonctionne donc que dans
+REAPER, version **7.25 ou ultérieure**.
+
+## Les applications
+
+| Application | Plugins | Rôle |
+|---|---|---|
+| **Game Master** | `GamePlayer`, avec `FilePlayer`, `ScriptMaster`, `MIDI_In`, `MIDIduino` | Échantillonneur et générateur de musique électroacoustique : lecteurs de clips, générateur, ordonnanceur, contrôle en direct. `FilePlayer` est un lecteur d'échantillons piloté par le Game Master, `ScriptMaster` un éditeur, débogueur et exécuteur de scripts, `MIDI_In` et `MIDIduino` font entrer le MIDI et les capteurs dans le Game Master. |
+| **Diffusion-3** | `Diffusion-3` | Spatialisation jusqu'à 128 entrées et sorties : projecteurs, scènes, morphing, trajectoires 3D, configurations des haut-parleurs, contrôle par un AKAI APCmini. |
+| **Interstys** | `Interstys` | Délai fractionnaire modulaire : lignes, lecteurs (Stretch, Grains…), écrivains, effets (filtres, saturation, matrice de réinjection, flanger, phaser, shimmer, bruit, aléatoire…), courbes, liens MIDI. |
+
+Ces applications partagent **mSL**, un petit langage de script : les scripts les pilotent, échangent des messages, et
+décrivent leurs configurations, leurs patchs et leurs presets. Des scripts prêts à l'emploi se trouvent dans
+[`CMGS-scripts/`](CMGS-scripts/README.md).
+
+### Plugins auxiliaires
+
+- `MCBM-64`, `MCBM-128` : gestionnaires de basses multicanaux, jusqu'à 128 canaux (`MCBM-128` : filtres de
+  Linkwitz-Riley).
+- `SmoothMultiLimiter` : un limiteur jusqu'à 128 canaux.
+- `Multichannel_VU_meter` (et sa variante `Multichannel_VU_meter_U`) : un VU-mètre jusqu'à 128 canaux.
+- Petits utilitaires : `ChannelReducer16/24/48`, `CheapChannelReducer`, `ChannelsMuter`, `ChannelsSwitcher`,
+  `Mixer_8xM-1xS`, `mid-side`, `channels-folder`, `Synchronizer`.
+- Exemples : `AKAI-Ex-01`, `AKAI-Ex-02` (AKAI APCmini), `Space3D-Demo` (la vue 3D de Diffusion-3).
 
 ## Installation
 
-Vous avez besoin d'une version récente de **REAPER** (v7.25 ou ultérieure), téléchargeable depuis http://reaper.fm/download.php. Vérifiez d'abord que votre carte son est reconnue par REAPER (ouvrez le menu "Options > Réglages...", et cochez "Audio > Périphérique").
+1. Installez **REAPER** 7.25 ou ultérieur (<https://www.reaper.fm/download.php>), et vérifiez qu'il reconnaît votre
+   carte son (*Options > Préférences… > Audio > Périphérique*).
 
-> [!IMPORTANT]
-> Certains paramètres peuvent empêcher le GameMaster de fonctionner correctement. Vérifiez dans les "Préférences REAPER" que dans "Audio", les deux options "Fermer le périphérique audio à l'arrêt..." ne sont *pas* définies, et dans "Audio > Lecture" que "Exécuter les effets à l'arrêt" est défini.
+   > [!IMPORTANT]
+   > Certains réglages arrêtent le Game Master. Dans *Options > Préférences… > Audio*, les deux options *Fermer le
+   > périphérique audio à l'arrêt…* ne doivent **pas** être cochées, et dans *Audio > Lecture*, *Exécuter les effets
+   > à l'arrêt* doit être cochée.
 
-Dans ce répertoire, https://github.com/jack461/CMGS, cliquez sur le bouton vert "Code", et sélectionnez "Télécharger le ZIP". Si nécessaire, cliquez sur "Enregistrer" pour enregistrer "CMGS-main.zip" dans votre dossier de téléchargements. Décompressez le fichier. Vous avez maintenant dans "CMGS-main" la dernière version du logiciel. Le dossier peut être conservé à l'endroit qui vous convient (maison, bureau, musique, etc.), mais ne l'installez pas dans le répertoire des ressources de REAPER.
+2. Récupérez CMGS : sur <https://github.com/jack461/CMGS>, cliquez sur le bouton vert **Code**, puis sur
+   **Download ZIP**, et décompressez `CMGS-main.zip` où vous voulez (ou faites un `git clone` du dépôt). Ne placez
+   pas ce dossier lui-même dans le dossier des ressources de REAPER.
 
-Vous pouvez télécharger le premier tutoriel disponible sur https://github.com/jack461/CMGS-Tutorials. Ici aussi, cliquez sur le bouton vert "Code" et sélectionnez "Télécharger le ZIP". Il s'agit d'un fichier beaucoup plus volumineux, car il contient un projet complet, avec environ 1 Go d'échantillons. Décompressez-le et suivez les explications du "README.md" pour l'installer.
+3. Ouvrez le dossier des ressources de REAPER (*Options > Afficher le chemin des ressources de REAPER dans
+   l'explorateur/le Finder*), et copiez-y :
+
+   | Depuis le dossier de CMGS | Vers le dossier des ressources de REAPER |
+   |---|---|
+   | `CMGS-effects/` | `Effects/CMGS-effects/` |
+   | `CMGS-data/` | `Data/CMGS-data/` |
+   | `CMGS-auxiliary.eel` | `Scripts/CMGS-auxiliary.eel` |
+
+   Gardez ces noms : les plugins cherchent ces dossiers, et les projets REAPER désignent les plugins par
+   `CMGS-effects/<plugin>.jsfx`.
+
+4. Chargez le script auxiliaire : *Actions > Afficher la liste des actions… > Nouvelle action > Charger un
+   ReaScript…*, choisissez `Scripts/CMGS-auxiliary.eel`, puis lancez cette action une fois à chaque session de
+   REAPER. Il reste en tâche de fond et permet aux plugins d'écrire des fichiers (par exemple l'export du journal
+   système avec la touche `p`, ou les patchs et sessions exportés par Interstys), de connaître le dossier du projet,
+   et de piloter le transport de REAPER depuis les scripts.
+
+5. Facultatif : copiez aussi `CMGS-scripts/` dans `Data/` (à côté de `CMGS-data`) ; les plugins peuvent alors ouvrir
+   un script par un nom comme `CMGS-scripts/Algorithms/Matrix-Metal.mSL`.
+
+Les plugins apparaissent alors dans le navigateur d'effets de REAPER, sous *JS*, dans le dossier `CMGS-effects`.
+
+**Mise à jour :** remplacez `Effects/CMGS-effects`, `Data/CMGS-data` et `Scripts/CMGS-auxiliary.eel` par les
+nouvelles versions. Vos projets continuent de fonctionner : ils désignent les plugins par leur nom.
+
+**Pour les développeurs :** au lieu de copier, vous pouvez créer des liens symboliques du dossier des ressources de
+REAPER vers un clone du dépôt (`ln -s` sous macOS et Linux, `mklink /D` sous Windows) ; REAPER voit alors chaque
+modification des sources. Les alias du Finder de macOS ne fonctionnent pas. `CMGS-auxiliary.eel` est généré :
+modifiez `CMGS-effects/CMGS-libs/CMGS-auxiliary-src.eel`, puis lancez
+`python3 -I CMGS-aux/tools/make_auxiliary.py`.
+
+Un premier tutoriel, un projet complet avec environ 1 Go d'échantillons, est disponible sur
+<https://github.com/jack461/CMGS-Tutorials>.
+
+## Documentation
+
+Les manuels se trouvent dans [`CMGS-docs/`](CMGS-docs/) et sont écrits en français (les fichiers `.fodt` en sont les
+sources LibreOffice).
+
+| Fichier | Contenu |
+|---|---|
+| `GameMaster-Doc-1.7.8.pdf` | Manuel de référence du Game Master |
+| `GM-Commandes.pdf` | Les commandes du Game Master |
+| `Diffusion-3-Manuel.pdf` | Diffusion-3 |
+| `Interstys-Manuel.pdf` | Interstys |
+| `MCBM-Manuel.pdf`, `SmoothMultiLimiter-Manuel.pdf`, `Multichannel_VU_meter-Manuel.pdf` | Plugins auxiliaires |
+| `CMGS-Keys.md` | Les touches du clavier de tous les plugins |
+| `CMGS-Internals.fodt` | Documentation interne (en cours) |
+
+## Organisation du dépôt
+
+| Chemin | Contenu |
+|---|---|
+| `CMGS-effects/` | Les plugins (`.jsfx`) et `README.txt`, un repère que cherche le Game Master. `CMGS-libs/` contient les bibliothèques partagées et le code des gros plugins (`.jsfx-inc`). |
+| `CMGS-data/` | Ce que les plugins lisent à l'exécution : `themes/` (les thèmes bitmap), `Diffusions/` (configurations lues par Diffusion-3). |
+| `CMGS-auxiliary.eel` | Le ReaScript auxiliaire (généré, voir plus haut). |
+| `CMGS-scripts/` | Scripts mSL : algorithmes et presets pour Interstys, exemples, séries de tests. |
+| `CMGS-docs/` | Les manuels. |
+| `CMGS-aux/` | Outils de développement (Python) et archives. |
+
+## Crédits
+
+CMGS est écrit par **Jean-Jacques Girardot**, avec l'aide précieuse de **Jean-François Minjard**.
+La bibliothèque d'interface `ui-lib.jsfx-inc` et le *SmoothMultiLimiter* original sont de **Geraint Luff**.
