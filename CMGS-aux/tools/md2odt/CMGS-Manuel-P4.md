@@ -1,0 +1,596 @@
+---
+title: "CMGS — Partie IV"
+lang: fr-FR
+---
+
+# Liste des erreurs
+
+## Lire un message d'erreur
+
+Les plug-ins de CMGS vérifient autant que possible les données et les opérations qu'on leur confie. Lorsqu'un
+problème est détecté, ils le signalent par un **code d'erreur**, un nombre de quatre chiffres, accompagné le plus
+souvent d'un message, dans le journal (module *System Log*), sous la forme :
+
+```
+ERR: 2474    Space : the library of trajectories is full (128) : "Spirale" not kept
+```
+
+Certains modules affichent aussi le code de la dernière erreur dans une de leurs cellules (par exemple la cellule 13 du
+module *Play Control* du Game Master).
+
+Chaque code est **unique** dans l'ensemble des sources de CMGS : on peut le chercher tel quel dans ce chapitre, et le
+développeur peut le retrouver dans le code. Les codes sont classés ici par ordre numérique ; la colonne « Application »
+indique le plug-in qui le produit (« tous » : les bibliothèques communes, en particulier le langage mSL, présentes dans
+tous les plug-ins).
+
+**Erreurs de scripts.** Une erreur de **compilation** est signalée avec le numéro de la ligne et la position dans la
+ligne où le compilateur s'est arrêté. Une erreur d'**exécution** arrête le processus qui l'a commise (et, par défaut,
+les autres processus du plug-in : voir la Partie III). Un script peut signaler lui-même une erreur par la fonction
+`error(n)` : le code affiché est alors **10000 + n**.
+
+**Erreurs internes.** Les erreurs marquées « erreur interne » ou « erreur système » ne devraient pas se produire :
+elles révèlent un défaut du logiciel ou une mémoire endommagée. Si l'une d'elles apparaît, notez les circonstances,
+exportez le journal (touche `p`) et signalez-la à l'auteur ; il est en général prudent de recharger le projet.
+
+## Les familles de codes
+
+| Codes | Domaine |
+|----------------------|------------------------------------------------------------------------------|
+| 0100 à 0199 | mémoire statique, configurations de haut-parleurs du Game Master |
+| 0200 à 0299 | tables de Diffusion-3, listes d'actions du Game Master |
+| 0300 à 0399 | configurations de haut-parleurs et banques du Game Master |
+| 0400 à 0499 | fichiers son, écran « Live » |
+| 0500 à 0599 | lecture des clips (Game Master) |
+| 0600 à 0699 | blocs de commande des lecteurs (FilePlayer), paramètres |
+| 0700 à 0899 | tables du Game Master, matrices de Diffusion-3, modules définis par `gui` |
+| 1000 à 1999 | compilateur, mémoire dynamique, exécution des scripts |
+| 2000 à 2499 | syntaxe de mSL, lancement des scripts, tables de Diffusion-3 |
+| 2600 à 2999 | Interstys |
+| 3000 à 4999 | compilateur, ramasse-miettes, ordonnanceur, erreurs internes de Diffusion-3 |
+| 6000 à 7999 | script auxiliaire, playlog, actions différées |
+| 9000 à 9999 | erreurs internes et d'initialisation |
+| 10000 et plus | erreurs signalées par les scripts (`error(n)`) |
+
+Les codes de l'ancien manuel du Game Master qui ne figurent pas ici (par exemple 0310 à 0357, ou 0606 à 0610) ne sont
+plus utilisés : ils concernaient les anciens fichiers de configuration séparés, remplacés par le Profile.
+
+## Codes 0100 à 0999
+
+| Code | Application | Signification |
+|--------|----------------------|----------------------------------------------------------------------|
+| 0101 | Diffusion-3, tous | Mémoire statique : borne basse d'un bloc absente (bloc endommagé). |
+| 0103 | tous | Mémoire statique : allocation impossible, la zone demandée n'est pas disponible. |
+| 0104 | tous | Mémoire statique : allocation impossible (zone insuffisante). |
+| 0105 | tous | Mémoire statique : un bloc est déjà ouvert et n'a pas été terminé. |
+| 0106 | tous | Mémoire statique : fin de bloc demandée alors qu'aucun bloc n'est ouvert. |
+| 0107 | tous | Mémoire statique : mémoire insuffisante, ou fin de la mémoire endommagée. |
+| 0109 | tous | Mémoire statique : création d'un tableau refusée hors du mode statique (la fonction rend 0). |
+| 0111 | tous | Contrôle de la mémoire : type de bloc invalide. |
+| 0112 | tous | Contrôle de la mémoire : longueur de bloc invalide. |
+| 0113 | tous | Contrôle de la mémoire : les longueurs inscrites au début et à la fin du bloc ne correspondent pas. |
+| 0114 | tous | Contrôle de la mémoire : les types inscrits au début et à la fin du bloc ne correspondent pas. |
+| 0115 | tous | Contrôle de la mémoire : type de bloc invalide. |
+| 0116 | tous | Ramasse-miettes : longueur de bloc invalide (mémoire endommagée). |
+| 0117 | tous | Contrôle de la mémoire : longueurs de début et de fin de bloc différentes. |
+| 0118 | tous | Ramasse-miettes : types de début et de fin de bloc différents (mémoire endommagée). |
+| 0127 | script auxiliaire | Commande inconnue (numéro 127 ou plus) envoyée au script auxiliaire. |
+| 0137 | Game Master | Configuration de haut-parleurs : table d'utilisation des HP de taille incorrecte. |
+| 0140 | Game Master | Configuration de haut-parleurs : numéro de HP hors limites. |
+| 0141 | Game Master | Configuration de haut-parleurs : numéro de configuration hors limites. |
+| 0148 | tous | Interprète : instruction interne inconnue (code machine invalide). |
+| 0202 | Diffusion-3 | Table de diffusion : ce numéro de configuration est déjà utilisé. |
+| 0203 | Diffusion-3 | Table de diffusion : erreur de syntaxe. |
+| 0204 | Diffusion-3 | Table de diffusion : un numéro de canal est attendu. |
+| 0206 | Diffusion-3 | Table de diffusion : un « > » est attendu. |
+| 0207 | Diffusion-3 | Table de diffusion : erreur de syntaxe. |
+| 0208 | Diffusion-3 | Table de diffusion : un numéro de commande, de 0 à 256, est attendu. |
+| 0209 | Diffusion-3 | Table de diffusion : une valeur de volume est attendue après « dB ». |
+| 0210 | Diffusion-3 | Table de diffusion : un identificateur est attendu après « remove ». |
+| 0211 | Diffusion-3 | Table de diffusion : un numéro de groupe est attendu. |
+| 0212 | Diffusion-3 | Table de diffusion : un numéro de configuration est attendu après « remove conf ». |
+| 0213 | Diffusion-3 | Table de diffusion : configuration non définie. |
+| 0214 | Diffusion-3 | Table de diffusion : trop d'éléments. |
+| 0215 | Diffusion-3 | Table de diffusion : trop de configurations. |
+| 0216 | Diffusion-3 | Table de diffusion : valeur de volume incorrecte. |
+| 0217 | Diffusion-3 | Table de diffusion : ajustement de volume incorrect. |
+| 0218 | Diffusion-3 | Table de diffusion : durée de transition incorrecte. |
+| 0219 | Diffusion-3 | Table de diffusion : mode de fonctionnement (« opmod ») incorrect. |
+| 0220 | Diffusion-3 | Table de diffusion : délai aléatoire incorrect. |
+| 0222 | Diffusion-3 | Table de diffusion : un numéro de scène est attendu. |
+| 0223 | Diffusion-3 | Table de diffusion : ce numéro de préréglage est déjà utilisé. |
+| 0224 | Diffusion-3 | Table de diffusion : erreur de syntaxe. |
+| 0225 | Diffusion-3 | Table de diffusion : erreur de syntaxe. |
+| 0226 | Diffusion-3 | Table de diffusion : erreur de syntaxe. |
+| 0227 | Diffusion-3 | Table de diffusion : erreur de syntaxe. |
+| 0228 | Diffusion-3 | Table de diffusion : une valeur de « morph » est attendue. |
+| 0229 | Diffusion-3 | Table de diffusion : une valeur de « random delay » est attendue. |
+| 0230 | Diffusion-3 | Table de diffusion : cette configuration n'est pas définie. |
+| 0231 | Diffusion-3 | Table de diffusion : un numéro de configuration est attendu. |
+| 0233 | Diffusion-3 | Table de diffusion : erreur de syntaxe. |
+| 0234 | Diffusion-3 | Table de diffusion : un numéro de scène est attendu. |
+| 0235 | Diffusion-3 | Table de diffusion : un numéro de projecteur est attendu. |
+| 0236 | Diffusion-3 | Table de diffusion : préréglage de projecteur non défini. |
+| 0237 | Diffusion-3 | Table de diffusion : un numéro de préréglage de projecteur est attendu. |
+| 0238 | Diffusion-3 | Table de diffusion : un numéro de préréglage est attendu après « remove prop ». |
+| 0239 | Diffusion-3 | Table de diffusion : un numéro de couleur est attendu. |
+| 0240 | Diffusion-3 | Table de diffusion : un numéro de couleur est attendu. |
+| 0250 | Diffusion-3 | Table de diffusion : un numéro de haut-parleur est attendu. |
+| 0251 | Diffusion-3 | Table de diffusion : « < » manquant. |
+| 0252 | Diffusion-3 | Table de diffusion : position « x » manquante. |
+| 0253 | Diffusion-3 | Table de diffusion : position « y » manquante. |
+| 0254 | Diffusion-3 | Table de diffusion : position « z » manquante. |
+| 0255 | Diffusion-3 | Table de diffusion : « , » ou « ; » attendu. |
+| 0257 | Game Master | Liste d'actions trop longue. |
+| 0258 | Game Master | Liste d'actions : adresse incorrecte (trop basse). |
+| 0259 | Diffusion-3 | Table de diffusion (« invert ») : une configuration définie auparavant (et différente de celle-ci) est attendue. |
+| 0260 | Game Master | Table des macro-définitions saturée. |
+| 0261 | Diffusion-3 ; Game Master | Diffusion-3 : une couleur comprise entre 0 et 0xFFFFFF est attendue. Game Master : action non reconnue. |
+| 0262 | Game Master | Macro-définition : symbole introuvable. |
+| 0263 | Game Master | Action inconnue. |
+| 0311 | Game Master | Configuration de haut-parleurs : numéro de configuration trop élevé. |
+| 0312 | Game Master | Configuration de haut-parleurs : nombre de HP incorrect. |
+| 0313 | Game Master | Configuration de haut-parleurs : identification de configuration invalide. |
+| 0314 | Game Master | Configuration de haut-parleurs : identification de configuration invalide. |
+| 0315 | Game Master | Configuration de haut-parleurs : numéro de HP invalide. |
+| 0316 | Game Master | Configuration de haut-parleurs : le « 0 » final est absent. |
+| 0317 | Game Master | Configuration de haut-parleurs : configuration déjà définie. |
+| 0340 | Game Master | Banques : numéro de clip invalide. |
+| 0341 | Game Master | Banques : numéro de clip de fin hors limites. |
+| 0342 | Game Master | Banques : numéro de clip incorrect. |
+| 0344 | Game Master | Banques : numéro de groupe invalide. |
+| 0345 | Game Master | Banques : numéro de banque invalide. |
+| 0348 | Game Master | Banques : numéro de mode de jeu invalide. |
+| 0349 | Game Master | Banques : numéro de mode d'espace invalide. |
+| 0350 | Game Master | Banques : volume minimum invalide. |
+| 0351 | Game Master | Banques : volume maximum invalide. |
+| 0352 | Game Master | Banques : « poids » du partiel invalide. |
+| 0353 | Game Master | Banques : valeur des indicateurs (flags) invalide. |
+| 0354 | Game Master | Banques : table des partiels pleine. |
+| 0400 | Interstys | Fichier son : le fichier ne peut pas être ouvert. |
+| 0401 | Interstys | Fichier son : nombre de canaux nul. |
+| 0402 | Interstys | Fichier son : plus de 128 canaux. |
+| 0403 | Interstys | Fichier son : fréquence d'échantillonnage hors de [2 400, 384 000] Hz. |
+| 0404 | Game Master, FilePlayer ; Diffusion-3 | Game Master, FilePlayer : fichier audio introuvable (clip absent). Diffusion-3 : erreur interne, le projecteur est compromis. |
+| 0405 | FilePlayer | Fichier son trop court (480 échantillons au plus). |
+| 0406 | FilePlayer | Fichier son sans canal. |
+| 0407 | FilePlayer | Numéro de clip invalide, ou clip introuvable. |
+| 0408 | Interstys | Fichier son trop court (480 échantillons au plus). |
+| 0411 | Interstys | Fichier son : numéro de ligne invalide pour le chargement. |
+| 0412 | Interstys | Fichier son : la ligne de destination n'existe pas. |
+| 0416 | Interstys | Fichier son : lecture incomplète (moins d'échantillons lus que prévu). |
+| 0421 | Game Master | Fichier audio non pris en charge (probablement endommagé). |
+| 0433 | FilePlayer | Fichier son : fréquence d'échantillonnage hors de [2 400, 384 000] Hz. |
+| 0444 | FilePlayer | Lecture du fichier son incomplète (moins d'échantillons lus que demandé). |
+| 0448 | Game Master | Fichier audio non pris en charge : plus de 128 canaux. |
+| 0454 | FilePlayer | Lecture du fichier son : taille lue incorrecte. |
+| 0464 | FilePlayer | Fichier son de plus de 128 canaux. |
+| 0468 | Game Master | Fichier audio trop court. |
+| 0490 | tous | Écran « Live » : erreur interne en libérant une boîte d'affichage. |
+| 0491 | tous | Écran « Live » : erreur interne en libérant une boîte d'affichage. |
+| 0492 | tous | Écran « Live » : erreur interne (boîte d'affichage incohérente). |
+| 0493 | tous | Écran « Live » : erreur interne en libérant une boîte d'affichage. |
+| 0496 | Game Master | Fichier audio non pris en charge (hors des limites du FilePlayer). |
+| 0499 | FilePlayer | Fichier son trop long. |
+| 0500 | Game Master | Erreur dans une commande de lecture de clip. |
+| 0503 | Game Master | Lecture d'un clip : partiel invalide (aucune entrée). |
+| 0504 | Game Master | Lecture d'un clip : partiel invalide. |
+| 0505 | tous | Écran « Live » : rien à afficher (avertissement interne). |
+| 0506 | Game Master | Lecture d'un clip : mode de jeu hors limites. |
+| 0507 | Game Master | Lecture d'un clip : mode de jeu incorrect. |
+| 0508 | Game Master | Lecture d'un clip : mode d'espace probablement non défini. |
+| 0509 | Game Master | Lecture d'un clip : le mode d'espace désigne une configuration de HP non définie. |
+| 0511 | Game Master | Aucun lecteur (FilePlayer) disponible. |
+| 0513 | Game Master | Commande « loop » incorrecte. |
+| 0515 | Game Master | Commande « play » incorrecte. |
+| 0516 | Game Master | Commande de lecture inconnue. |
+| 0517 | Game Master | Ce n'est pas une commande de lecture. |
+| 0518 | Game Master | Clip injouable (introuvable ou invalide). |
+| 0519 | Game Master | Aucune configuration de haut-parleurs trouvée. |
+| 0601 | FilePlayer | Informations de clip reçues du Game Master incorrectes (type, taille, canaux ou fréquence). |
+| 0602 | FilePlayer | Aucun canal de sortie indiqué : la première paire stéréo est utilisée. |
+| 0603 | FilePlayer | Configuration de haut-parleurs invalide (premier jeu de canaux). |
+| 0604 | FilePlayer | Configuration de haut-parleurs incorrecte (premier jeu de canaux). |
+| 0605 | FilePlayer | Numéro de canal invalide (premier jeu de canaux). |
+| 0613 | FilePlayer | Configuration de haut-parleurs invalide (second jeu de canaux). |
+| 0614 | FilePlayer | Configuration de haut-parleurs incorrecte (second jeu de canaux). |
+| 0615 | FilePlayer | Numéro de canal invalide (second jeu de canaux). |
+| 0620 | FilePlayer | `` set(`pval, …) `` : les paramètres sont en lecture seule dans un FilePlayer. |
+| 0621 | Diffusion-3, Game Master, Interstys, ScriptMaster | `` set(`pval, …) `` : ce paramètre appartient à une autre application (il n'est donc pas modifié). |
+| 0702 | Game Master | Table : nom réservé. |
+| 0710 | Diffusion-3 | Matrices : erreur d'allocation d'une matrice. |
+| 0711 | Diffusion-3 ; Game Master | Diffusion-3 : plus de matrice libre. Game Master : identification de configuration invalide (table). |
+| 0712 | Game Master | Table : identification de configuration invalide. |
+| 0714 | Game Master | Table : identification de configuration invalide. |
+| 0715 | Game Master | Table : identification de configuration invalide. |
+| 0716 | Game Master | Table : identification de configuration invalide. |
+| 0723 | Game Master | Table : identification de configuration invalide. |
+| 0724 | Game Master | Table : identification de dossier invalide. |
+| 0725 | Game Master | Table : identification de dossier invalide. |
+| 0730 | Game Master | Table : données en trop à la fin de la table. |
+| 0731 | Game Master | Table : fin de table incorrecte (état final inattendu). |
+| 0732 | Game Master | Table : fin de table incorrecte (données non lues). |
+| 0733 | Game Master | Table : la table ne contient aucune définition. |
+| 0735 | Game Master | Table : erreur de syntaxe. |
+| 0736 | Game Master | Configuration de haut-parleurs (table) : numéro de configuration hors limites. |
+| 0737 | Game Master | Configuration de haut-parleurs (table) : adresse de configuration invalide. |
+| 0738 | Game Master | Configuration de haut-parleurs (table) : numéro de configuration incohérent. |
+| 0741 | Game Master | Table : les nombres ne correspondent pas. |
+| 0747 | Game Master | Table : cette configuration existe déjà. |
+| 0748 | Game Master | Table : dépassement de capacité. |
+| 0756 | Game Master | Table : identification de configuration invalide. |
+| 0759 | Game Master | Table des ensembles de clips (ClipSets) pleine. |
+| 0777 | FilePlayer, Game Master | Capteurs : numéro de capteur ou nombre de commandes incorrect. |
+| 0788 | Game Master | Table : capacité dépassée. |
+| 0870 | Game Master, Interstys | Module défini par un script (`gui`) : description incorrecte. |
+| 0871 | Game Master, Interstys | Module défini par un script (`gui`) : description incorrecte. |
+| 0880 | Game Master, Interstys | Module défini par un script (`gui`) : description incorrecte. |
+| 0881 | Game Master, Interstys | Module défini par un script (`gui`) : description incorrecte. |
+
+## Codes 1000 à 1999
+
+| Code | Application | Signification |
+|--------|----------------------|----------------------------------------------------------------------|
+| 1001 | tous | Compilateur : mémoire insuffisante pour compiler. |
+| 1002 | tous | Compilateur : débordement d'une table. |
+| 1003 | tous | Compilateur : mémoire insuffisante pour la table des variables locales. |
+| 1010 | tous | Compilateur : erreur en créant la table des constantes. |
+| 1016 | tous | Création d'un processus impossible : plus de place. |
+| 1025 | tous | Mémoire dynamique : initialisation impossible (zone de moins de 131 072 mots, ou déjà initialisée). |
+| 1026 | tous | Mémoire dynamique (erreur système) : un bloc semble hors de la mémoire. |
+| 1027 | tous | Mémoire dynamique (erreur système) : un bloc libre n'a pas le type « free ». |
+| 1028 | tous | Mémoire dynamique (erreur système) : bloc plus petit que prévu. |
+| 1029 | tous | Mémoire dynamique (erreur système) : les tailles de début et de fin d'un bloc diffèrent. |
+| 1030 | tous | Mémoire dynamique (erreur système) : le type de fin de bloc n'est pas celui d'un bloc libre. |
+| 1031 | tous | Mémoire dynamique (erreur système) : élément de liste incorrect. |
+| 1032 | tous | Mémoire dynamique : le bloc relu après allocation est incorrect. |
+| 1033 | tous | Mémoire dynamique : plus de bloc libre ; le processus qui demandait de la mémoire s'arrête. |
+| 1034 | tous | Mémoire dynamique (erreur système) : bloc libre suivant invalide. |
+| 1035 | tous | Mémoire dynamique (erreur système) : bloc libre précédent invalide. |
+| 1036 | tous | Mémoire dynamique (erreur système) : élément de liste incorrect. |
+| 1037 | tous | Mémoire dynamique (erreur système) : erreur en tête de liste. |
+| 1038 | tous | Mémoire dynamique (erreur système) : erreur en fin de liste. |
+| 1039 | tous | Mémoire dynamique (erreur système) : un bloc semble hors de la mémoire. |
+| 1040 | tous | Mémoire dynamique endommagée. |
+| 1100 | tous | Appel de `malloc` incorrect (nombre d'arguments). |
+| 1104 | tous | `sprintf` : trop de paramètres. |
+| 1271 | tous | Compilateur : impossible d'allouer la mémoire nécessaire. |
+| 1272 | tous | Compilateur : impossible d'allouer la mémoire nécessaire. |
+| 1273 | tous | Compilateur : impossible d'allouer les structures de compilation. |
+| 1274 | tous | Compilateur : impossible d'allouer les structures de compilation. |
+| 1275 | tous | Compilateur : tables des variables non disponibles. |
+| 1276 | tous | Compilateur : allocation de mémoire impossible. |
+| 1277 | tous | Compilateur : allocation de mémoire impossible. |
+| 1278 | tous | Compilateur : impossible d'allouer les chaînes constantes. |
+| 1279 | tous | Compilateur : trop de constantes statiques. |
+| 1423 | tous | Table des variables « semi-locales » (`loc`) pleine : impossible de la mettre à jour. |
+| 1601 | tous | Ordonnanceur : plus d'entrée libre pour une nouvelle tâche. |
+| 1602 | tous | Ordonnanceur : trop de tâches actives. |
+| 1603 | tous | Ordonnanceur : libération d'une entrée de tâche invalide (erreur interne). |
+| 1604 | tous | Ordonnanceur : libération d'une entrée de tâche encore attachée à une liste (erreur interne). |
+| 1619 | tous | Débordement de la pile (expression trop profonde, ou récursion trop profonde) : le processus s'arrête. |
+| 1620 | tous | Une fonction est attendue (appel d'une valeur qui n'est pas une fonction). |
+| 1621 | tous | Appel de fonction : nombre d'arguments incorrect. |
+| 1622 | tous | Une fonction est attendue. |
+| 1623 | tous | Appel de fonction : paramètres incorrects. |
+| 1627 | tous | Affectation à l'adresse 0 (variable non initialisée). |
+| 1628 | tous | Affectation à l'adresse 0 (variable non initialisée). |
+| 1629 | tous | Écriture indexée hors d'un bloc (indice négatif ou trop grand), ou hors de la partie utilisée de la pile. |
+| 1630 | tous | Écriture indexée dans quelque chose qui n'est pas un bloc (par exemple un tableau non défini, qui vaut 0). |
+| 1631 | tous | `poke` : arguments ou adresse incorrects. |
+| 1666 | tous | Les mots 0 à 7 de la mémoire ont été modifiés (erreur grave, mémoire endommagée). |
+| 1667 | tous | Les mots 0 à 7 de la mémoire ont été modifiés (erreur grave, mémoire endommagée). |
+| 1668 | tous | Les mots 0 à 7 de la mémoire ont été modifiés (erreur grave, mémoire endommagée). |
+| 1669 | tous | Les mots 0 à 7 de la mémoire ont été modifiés (erreur grave, mémoire endommagée). |
+| 1670 | tous | Les mots 0 à 7 de la mémoire ont été modifiés (erreur grave, mémoire endommagée). |
+| 1675 | tous | Compilateur : structure interne incorrecte. |
+| 1677 | tous | Création de la table des variables « semi-locales » d'un processus impossible (dictionnaire plein). |
+| 1717 | tous | Une erreur a déjà été détectée : le script n'est pas lancé. |
+| 1796 | tous | Copie d'un bloc impossible : mémoire insuffisante. |
+| 1901 | tous | Instruction illégale « 0 » : code exécutable endommagé. |
+| 1980 | tous | Interprète invalide (erreur interne). |
+| 1983 | tous | Compilateur invalide (erreur interne). |
+| 1999 | tous | Paramètre de `compile` incorrect (une chaîne est attendue). |
+
+## Codes 2000 à 2999
+
+| Code | Application | Signification |
+|--------|----------------------|----------------------------------------------------------------------|
+| 2011 | tous | Compilateur : chaînage interne rompu (erreur à la libération). |
+| 2101 | tous | Conversion d'une chaîne en nombre : chaîne vide. |
+| 2103 | tous | Conversion d'une chaîne en nombre : chaîne vide ou caractère illégal. |
+| 2104 | tous | Conversion d'une chaîne en nombre : aucun chiffre après le « e » de l'exposant. |
+| 2105 | tous | Conversion d'une chaîne en nombre : un nombre est attendu après le signe « - » ou « + ». |
+| 2106 | tous | Conversion d'une chaîne en nombre : caractère inattendu. |
+| 2201 | tous | Erreur de syntaxe sur un opérateur. |
+| 2202 | tous | Erreur de syntaxe : opérande incorrect. |
+| 2203 | tous | Fin de fichier inattendue. |
+| 2204 | tous | Caractère inattendu. |
+| 2205 | tous | Fin de fichier inattendue. |
+| 2206 | tous | Erreur de syntaxe dans un opérateur. |
+| 2207 | tous | Opérande manquant. |
+| 2208 | tous | Fin de fichier inattendue. |
+| 2209 | tous | Fin de fichier inattendue (chaîne ou constante non terminée). |
+| 2210 | tous | Fin de fichier inattendue. |
+| 2220 | tous | Erreur de syntaxe. |
+| 2221 | tous | Compilateur : erreur de chaînage interne. |
+| 2222 | tous | Compilateur : erreur de chaînage interne. |
+| 2223 | tous | Compilateur : erreur de chaînage interne. |
+| 2224 | tous | Parenthèse ou crochet fermant manquant. |
+| 2225 | tous | Parenthèses ou crochets mal imbriqués. |
+| 2226 | tous | Erreur de syntaxe dans une déclaration `var`, `loc`, `ptr`, `ext` ou `function`. |
+| 2227 | tous | Erreur de syntaxe dans une déclaration `var`, `loc`, `ptr`, `ext` ou `function`. |
+| 2228 | tous | Erreur de syntaxe dans une déclaration `var`, `loc`, `ptr`, `ext` ou `function`. |
+| 2229 | tous | Erreur de syntaxe dans une déclaration `var`, `loc`, `ptr`, `ext` ou `function`. |
+| 2230 | tous | Erreur de syntaxe dans une déclaration (point-virgule attendu). |
+| 2231 | tous | Erreur de syntaxe dans une déclaration `var`, `loc`, `ptr`, `ext` ou `function`. |
+| 2232 | tous | Erreur de syntaxe dans une déclaration `var`, `loc`, `ptr`, `ext` ou `function`. |
+| 2233 | tous | Erreur de syntaxe dans une déclaration `var`, `loc`, `ptr`, `ext` ou `function`. |
+| 2234 | tous | Caractère invalide dans un `data`. |
+| 2235 | tous | Erreur dans une instruction `import`. |
+| 2251 | tous | Erreur dans la définition d'une fonction (`function`). |
+| 2252 | tous | Erreur dans la définition d'une fonction (`function`). |
+| 2253 | tous | Erreur dans la définition d'une fonction (`function`). |
+| 2254 | tous | Erreur dans la définition d'une fonction (`function`). |
+| 2255 | tous | Erreur dans les paramètres d'une fonction (un « ; » n'est permis que dans la forme variadique `(n; args)`). |
+| 2301 | tous | Identificateur trop long. |
+| 2302 | tous | Erreur lexicale (caractère ou suite de caractères non reconnus). |
+| 2331 | tous | Erreur de syntaxe dans une expression entre parenthèses. |
+| 2332 | tous | Erreur de syntaxe dans des crochets. |
+| 2333 | tous | Indexation : un identificateur est attendu avant les crochets. |
+| 2334 | tous | Erreur dans une construction `gmem[…]`. |
+| 2335 | tous | Erreur de syntaxe dans un appel de fonction. |
+| 2336 | tous | Erreur de syntaxe dans un `while`. |
+| 2337 | tous | Erreur de syntaxe dans un `while`. |
+| 2338 | tous | Erreur de syntaxe dans une expression entre parenthèses. |
+| 2341 | tous | Unité inconnue dans une expression. |
+| 2404 | tous | Le fichier n'a pas pu être ouvert. |
+| 2405 | tous | Le script n'a pas pu être ouvert. |
+| 2406 | tous | Pas de processus disponible pour exécuter le script. |
+| 2407 | tous | Trop de fichiers à compiler en même temps : ce fichier est ignoré. |
+| 2408 | tous | Impossible de créer un nouveau processus. |
+| 2409 | tous | Une erreur dans le script a empêché sa compilation (aucun code produit). |
+| 2410 | tous | Aucun processus disponible. |
+| 2411 | tous | `thread` : nombre d'arguments incorrect. |
+| 2412 | tous | Entrée d'ordonnanceur incorrecte (erreur interne). |
+| 2413 | tous | Code exécutable incorrect. |
+| 2414 | tous | Processus incorrect. |
+| 2415 | tous | `` thread(`new, …) `` : une fonction est attendue. |
+| 2416 | tous | Code exécutable incorrect. |
+| 2417 | tous | Pas de pile définie pour le processus (erreur interne). |
+| 2418 | tous | Pas de table des variables globales (erreur interne). |
+| 2419 | tous | Pas de table des variables pointeurs (erreur interne). |
+| 2420 | tous | Pas de table des variables propres (erreur interne). |
+| 2421 | tous | Appel de fonction : le nombre d'arguments ne correspond pas au nombre de paramètres. |
+| 2438 | Diffusion-3 | Table de diffusion : erreur dans l'exécution de la table. |
+| 2461 | Diffusion-3 | Configurations : un numéro de source compris entre 1 et 255 est attendu. |
+| 2462 | Diffusion-3 | Configurations : cette source est déjà définie (la supprimer d'abord). |
+| 2463 | Diffusion-3 | Configurations : un numéro de configuration compris entre 1 et 4094 est attendu. |
+| 2464 | Diffusion-3 | Configurations : cette configuration est déjà définie (la supprimer d'abord). |
+| 2465 | Diffusion-3 | Configurations : cette configuration n'est plus définie. |
+| 2466 | Diffusion-3 | Configurations : mémoire insuffisante pour la copie. |
+| 2467 | Diffusion-3 | Configurations : le script auxiliaire n'est pas lancé (ou il faut le relancer) : rien n'est écrit. |
+| 2468 | Diffusion-3 | Configurations : texte trop long : rien n'est écrit. |
+| 2470 | Diffusion-3 | Trajectoire : un numéro compris entre 1 et 128 est attendu. |
+| 2471 | Diffusion-3 | Trajectoire : un nom, « closed », « open » ou « : » est attendu. |
+| 2472 | Diffusion-3 | Trajectoire : une coordonnée comprise entre -10 et 10 est attendue (ou plus de 1024 points). |
+| 2473 | Diffusion-3 | Trajectoire : « , » ou « ; » attendu après un point. |
+| 2474 | Diffusion-3 | Vue 3D : la bibliothèque des trajectoires est pleine (128) : la trajectoire n'est pas gardée. |
+| 2475 | Diffusion-3 | Edit : la bibliothèque des trajectoires est pleine (128) : en effacer une (module Trajectories). |
+| 2476 | Diffusion-3 | Edit : une trajectoire doit avoir au moins 2 points. |
+| 2477 | Diffusion-3 | Trajectories : le script auxiliaire n'est pas lancé (ou il faut le relancer) : rien n'est écrit. |
+| 2478 | Diffusion-3 | Trajectories : texte trop long : rien n'est écrit. |
+| 2480 | Diffusion-3 | Edit : aucun point à exporter. |
+| 2481 | Diffusion-3 | Edit : le script auxiliaire n'est pas lancé (ou il faut le relancer) : rien n'est écrit. |
+| 2482 | Diffusion-3 | Edit : texte trop long : rien n'est écrit. |
+| 2483 | Diffusion-3 | Edit : le fichier ne peut pas être écrit. |
+| 2484 | Diffusion-3 | Edit : la disposition a trop de points : elle n'est pas chargée. |
+| 2485 | Diffusion-3 | Edit : une trajectoire doit avoir au moins 2 points. |
+| 2486 | Diffusion-3 | Table Edit : « A », « B », « C » ou « D » attendu. |
+| 2487 | Diffusion-3 | Table Edit : un nom (entre guillemets) est attendu après « name ». |
+| 2488 | Diffusion-3 | Table Edit : « Speakers », « Sources » ou « Trajectory » attendu après « kind ». |
+| 2489 | Diffusion-3 | Table Edit : une clé (name, kind, closed, smooth, free, point) ou « Edit » est attendue. |
+| 2490 | Diffusion-3 | Table Edit : valeur hors de l'intervalle permis. |
+| 2491 | Diffusion-3 | Table Edit : trop de points. |
+| 2492 | Diffusion-3 | Source : un numéro compris entre 1 et 255 est attendu. |
+| 2493 | Diffusion-3 | Source : « : » attendu après son numéro. |
+| 2494 | Diffusion-3 | Source : un numéro de point compris entre 1 et 128, suivi de « < », est attendu (ou trop de points). |
+| 2495 | Diffusion-3 | Source : une coordonnée comprise entre -1 et 1 est attendue. |
+| 2496 | Diffusion-3 | Source : « , » ou « ; » attendu après un point. |
+| 2497 | Diffusion-3 | Space : cette source n'est pas définie (elle doit l'être avant). |
+| 2498 | Diffusion-3 | Space : un numéro de source compris entre 0 et 255 est attendu. |
+| 2601 | Interstys | Numéro de lecteur (Reader) invalide. |
+| 2602 | Interstys | Numéro d'enregistreur (Writer) invalide. |
+| 2603 | Interstys | Lecteur non défini, ou pas en mode délai. |
+| 2604 | Interstys | Enregistreur non défini, ou sans ligne. |
+| 2605 | Interstys | Numéro de lecteur invalide. |
+| 2606 | Interstys | Lecteur non défini, ou mode inconnu. |
+| 2607 | Interstys | Numéro de ligne invalide. |
+| 2608 | Interstys | L'entrée de la ligne n'est pas une ligne valide. |
+| 2609 | Interstys | Action inconnue sur une ligne (ou « Create » sur une ligne existante). |
+| 2610 | Interstys | Ligne : mémoire insuffisante (affiché « No memory » dans le pad de la ligne). |
+| 2701 | Interstys | Effet : nombre de canaux incorrect. |
+| 2702 | Interstys | Effet : sortie incorrecte (câble propre, Out ou bus). |
+| 2703 | Interstys | Effet : source incorrecte. |
+| 2704 | Interstys | Effet : une source recouvre la sortie. |
+| 2705 | Interstys | Effet : pas de source (le déclencheur d'un Random, les entrées A et B d'un Math ou d'un Ring sont facultatifs). |
+| 2706 | Interstys | Effet : type pas (encore) exécuté. |
+| 2716 | Interstys | Les paramètres d'Interstys dépassent sa plage de numéros. |
+| 2717 | Interstys | Les clés des effets dépassent la taille des tableaux d'un bloc (erreur interne). |
+| 2718 | Interstys | Table : trop de clés. |
+| 2720 | Interstys | Export : texte trop long : rien n'est écrit. |
+| 2721 | Interstys | Export : pas de nom. |
+| 2722 | Interstys | Export : le script auxiliaire n'est pas lancé (ou il faut le relancer). |
+| 2723 | Interstys | Export : cet élément n'existe pas. |
+| 2724 | Interstys | Export : le fichier ne peut pas être écrit. |
+| 2725 | Interstys | Table : « Control n value v » : la valeur est attendue. |
+| 2726 | Interstys | Table : « Export » : « Patch » ou « Session » attendu. |
+| 2727 | Interstys | Table : « Tab » : un nom est attendu. |
+| 2728 | Interstys | Table : « Dump View » : ce module n'a pas de vue. |
+| 2730 | Interstys | Lien MIDI : cible attendue (Ctl, Reader, Writer, Effect ou LEDs). |
+| 2731 | Interstys | Lien MIDI : « min » ou « max » avant la cible. |
+| 2732 | Interstys | Lien MIDI : « cc m » ou « note m », ou la cible, attendu. |
+| 2733 | Interstys | Lien MIDI : « min » et « max » attendus (valeurs de la clé pour 0 et pour 127). |
+| 2734 | Interstys | Lien MIDI : cette clé ne peut pas être liée (ce n'est pas un nombre). |
+| 2735 | Interstys | Lien MIDI : l'élément visé n'existe pas. |
+| 2736 | Interstys | Lien MIDI : cette clé n'a pas de sens pour ce type d'effet. |
+| 2737 | Interstys | Lien MIDI : loi « Exp » : « min » et « max » doivent être de même signe et non nuls. |
+| 2738 | Interstys | « Dump Link » : pas de lien. |
+| 2739 | Interstys | « Inject » : « cc » ou « note » attendu. |
+| 2740 | Interstys | Lien MIDI : la cible est une action : pas de « min » ni de « max ». |
+| 2741 | Interstys | Lien MIDI : options incompatibles (pickup, pas, courbe, vitesse) pour ce mode. |
+| 2742 | Interstys | Lien MIDI : « rate » n'est possible que pour un cc (bouton, fader), pas pour une note. |
+| 2750 | Interstys | Table : un nom de bloc est attendu (Line, Writer, Reader, Effect, Global, Control, Curve, Algorithm, Instance, Set, Dump, Check, Free, Display, Remove, Clear, Export, Tab…). |
+| 2751 | Interstys | Table : « Line », « Writer », « Reader » ou « Effect » attendu. |
+| 2752 | Interstys | Table : identificateur incorrect (un numéro ou un nom). |
+| 2753 | Interstys | Table : clé inconnue. |
+| 2754 | Interstys | Table : « Check Global » : une action ne peut pas être vérifiée. |
+| 2755 | Interstys | Table : plus d'élément libre de ce type. |
+| 2756 | Interstys | Table : ce nom ne désigne pas un élément de ce type. |
+| 2757 | Interstys | Table : nom déjà utilisé par un autre élément. |
+| 2758 | Interstys | Table : « Line » : canaux du lecteur incompatibles avec la ligne. |
+| 2759 | Interstys | Table : « Check » : la valeur ou l'état vérifié ne correspond pas à l'attente. |
+| 2762 | Interstys | Table : trop de noms. |
+| 2763 | Interstys | Table : l'enregistreur désigne une ligne non définie. |
+| 2764 | Interstys | Table : canaux de l'enregistreur incompatibles avec la ligne. |
+| 2765 | Interstys | Table : retard du lecteur plus long que la ligne. |
+| 2766 | Interstys | Table : mémoire insuffisante pour cet élément. |
+| 2767 | Interstys | Table : cette clé n'a pas de sens pour ce type d'effet. |
+| 2768 | Interstys | Table : la sortie de l'effet est aussi sa source. |
+| 2769 | Interstys | Table : fichier : le dossier du projet est inconnu (script auxiliaire). |
+| 2770 | Interstys | Table : le fichier ne peut pas être ouvert. |
+| 2771 | Interstys | Fichier son : le fichier ne peut pas être ouvert. |
+| 2772 | Interstys | Fichier son : nombre de canaux (1 à 128) ou fréquence (2 400 à 384 000 Hz) hors limites. |
+| 2773 | Interstys | Fichier son : lecture incomplète. |
+| 2774 | Interstys | Table : lecteur en mode « Delay » : il suit un enregistreur (clé « writer »), pas une ligne. |
+| 2775 | Interstys | Table : le lecteur suit un enregistreur qui n'écrit pas dans sa ligne. |
+| 2776 | Interstys | Table : « Display » : Effect, Reader, Writer, Line, Curve, Instance ou le nom d'un module attendu. |
+| 2777 | Interstys | Table : « Display » : aucun module de ce nom. |
+| 2781 | Interstys | Table : « Instance » : algorithme inconnu. |
+| 2782 | Interstys | Table : « Algorithm » : un nom est attendu. |
+| 2783 | Interstys | Table : « Instance » : un nom est attendu. |
+| 2784 | Interstys | Table : « Instance » : argument incorrect pour cet algorithme. |
+| 2785 | Interstys | Table : « Instance » : valeur d'argument hors des bornes déclarées par l'algorithme. |
+| 2786 | Interstys | Table : « Instance » : argument obligatoire manquant. |
+| 2787 | Interstys | Table : « Set » : instance inconnue. |
+| 2788 | Interstys | Table : trop d'arguments, de « Set » ou de modèles dans cette table. |
+| 2790 | Interstys | Table : mémoire insuffisante (arguments, algorithme ou table développée). |
+| 2792 | Interstys | Table : « Curve » : ce n'est pas une courbe (un numéro ou un nom). |
+| 2793 | Interstys | Table : « Curve » : trop de courbes. |
+| 2794 | Interstys | Table : « Curve » : les « x » des points doivent aller de 0 à 1 sans décroître. |
+| 2795 | Interstys | Table : « Curve » : un « y » est hors de l'intervalle permis pour ce type de courbe. |
+| 2796 | Interstys | Table : « Curve » : nom incorrect ou trop long. |
+| 2797 | Interstys | Table : « Curve » : mémoire insuffisante. |
+| 2799 | Interstys | Table : « Curve » : seule une enveloppe (Env) a un point de maintien (sustain). |
+| 2801 | Interstys | Lecteur : changement d'état impossible (lecteur invalide). |
+| 2802 | Interstys | Lecteur : changement de ligne impossible (lecteur invalide). |
+| 2803 | Interstys | Lecteur : changement de ligne impossible (ligne invalide). |
+| 2804 | Interstys | Lecteur : changement de ligne : lecteur non défini (ne devrait pas arriver). |
+| 2805 | Interstys | Lecteur : changement de ligne impossible. |
+| 2807 | Interstys | Lecteur : changement de ligne : ligne non définie (ne devrait pas arriver). |
+| 2808 | Interstys | Lecteur : changement d'état impossible. |
+| 2809 | Interstys | Lecteur : changement d'état : lecteur non défini (ne devrait pas arriver). |
+| 2810 | Interstys | Lecteur : changement d'état impossible. |
+| 2812 | Interstys | Lecteur : changement de vitesse impossible (lecteur invalide). |
+| 2813 | Interstys | Lecteur : changement de vitesse : ce n'est pas un lecteur. |
+| 2822 | Interstys | Lecteur : action impossible (lecteur invalide). |
+| 2823 | Interstys | Lecteur : action impossible. |
+| 2827 | Interstys | Lecteur : action impossible. |
+| 2832 | Interstys | Lecteur : mise à jour impossible (lecteur invalide). |
+| 2833 | Interstys | Lecteur : mise à jour impossible. |
+| 2840 | Interstys | Chargement de l'état sauvegardé : bloc de disposition (studio) trop grand. |
+| 2850 | Interstys | Chargement de l'état sauvegardé : données incorrectes. |
+| 2856 | Interstys | Chargement de l'état sauvegardé : bloc endommagé. |
+| 2860 | Interstys | Chargement de l'état sauvegardé : lecture d'un bloc incomplète. |
+| 2870 | Interstys | Chargement de l'état sauvegardé : mémoire insuffisante pour un bloc. |
+| 2871 | Interstys | Chargement de l'état sauvegardé : pas de place ou de mémoire pour un modèle d'algorithme. |
+| 2872 | Interstys | Chargement de l'état sauvegardé : mémoire insuffisante pour une instance. |
+| 2873 | Interstys | Chargement de l'état sauvegardé : numéro d'instance incorrect. |
+| 2874 | Interstys | Chargement de l'état sauvegardé : numéro de courbe ou nombre de points incorrect. |
+| 2875 | Interstys | Chargement de l'état sauvegardé : mémoire insuffisante pour une courbe. |
+| 2880 | Interstys | Chargement de l'état sauvegardé : numéro de bloc hors limites. |
+| 2910 | Interstys | Enregistreur : bloc invalide (erreur interne). |
+| 2912 | Interstys | Enregistreur : référence de ligne invalide (erreur interne). |
+| 2917 | Interstys | Enregistreur : bloc endommagé (erreur interne). |
+| 2918 | Interstys | Enregistreur : informations de ligne incohérentes (erreur interne). |
+| 2930 | Interstys | Mode d'exécution inconnu (erreur interne). |
+| 2950 | Interstys | L'enregistreur référencé n'est pas un bloc (erreur interne). |
+| 2954 | Interstys | La ligne n'est pas un bloc (erreur interne). |
+| 2960 | Interstys | Le lecteur n'est pas un bloc (erreur interne). |
+| 2964 | Interstys | La ligne n'est pas un bloc (erreur interne). |
+| 2965 | Interstys | Bloc de lecteur endommagé (erreur interne). |
+| 2966 | Interstys | Ligne incohérente avec le lecteur (erreur interne). |
+
+## Codes 3000 à 4999
+
+| Code | Application | Signification |
+|--------|----------------------|----------------------------------------------------------------------|
+| 3001 | tous | Compilateur : marqueur perdu (erreur système possible). |
+| 3301 | tous | Erreur dans une instruction `import`. |
+| 3303 | tous | Compilateur : code manquant. |
+| 3333 | tous | Ramasse-miettes : bloc endommagé. |
+| 3334 | tous | Opération non définie. |
+| 3335 | tous | Opération non définie. |
+| 3336 | tous | Ramasse-miettes : erreur en reconstruisant la mémoire libre. |
+| 3337 | tous | Ramasse-miettes : tables pleines, certains objets n'ont pas pu être marqués : rien n'est libéré. |
+| 3338 | tous | Ramasse-miettes : taille de bloc incorrecte (rien de plus n'est libéré). |
+| 3381 | tous | Processus non noté actif (erreur interne de l'ordonnanceur). |
+| 3401 | tous | Expression invalide. |
+| 3402 | tous | Expression invalide. |
+| 3403 | tous | Expression invalide. |
+| 3404 | tous | Indexation invalide. |
+| 3411 | tous | Instruction `loop` invalide. |
+| 3412 | tous | Expression invalide dans un `data`. |
+| 3413 | tous | Expression invalide dans un `data`. |
+| 3414 | tous | Expression invalide dans un `data`. |
+| 3415 | tous | Compilateur : type inconnu. |
+| 3416 | tous | Identificateur non déclaré. |
+| 3417 | tous | Identificateur non déclaré. |
+| 3418 | tous | Identificateur non déclaré. |
+| 3419 | tous | Identificateur non déclaré. |
+| 3420 | tous | Identificateur non déclaré. |
+| 3422 | tous | Compilateur : structure interne incorrecte. |
+| 3555 | tous | Appel de fonction invalide. |
+| 3556 | tous | Appel de fonction invalide. |
+| 4001 | tous | Compilateur : zone de travail trop petite. |
+| 4002 | tous | Compilateur : débordement d'une table interne. |
+| 4003 | tous | Compilateur : pas de mémoire virtuelle fournie. |
+| 4090 | Diffusion-3 | Écriture en mémoire refusée (adresse trop basse) : erreur interne. |
+| 4092 | Diffusion-3 | Écriture en mémoire refusée (adresse hors de la zone de travail) : erreur interne. |
+| 4097 | Diffusion-3 | Actions : erreur dans l'exécution d'une liste d'actions. |
+| 4401 | tous | Erreur dans la définition d'une fonction. |
+| 4402 | tous | Erreur dans la définition d'une fonction. |
+| 4403 | tous | Erreur dans la définition d'une fonction. |
+| 4404 | tous | Erreur dans la définition d'une fonction. |
+| 4410 | Diffusion-3 | Erreur interne de Diffusion-3. |
+| 4444 | tous | Compilateur : erreur en lisant une chaîne de caractères. |
+| 4621 | tous | Ordonnanceur : entrée de tâche invalide (erreur interne). |
+| 4622 | tous | Ordonnanceur : entrée de tâche invalide (erreur interne). |
+| 4623 | tous | Ordonnanceur : liste de tâches incohérente (erreur interne). |
+| 4626 | tous | Ordonnanceur : entrée de tâche invalide (erreur interne). |
+
+## Codes 6000 à 9999
+
+| Code | Application | Signification |
+|--------|----------------------|----------------------------------------------------------------------|
+| 6001 | Game Master | Le script auxiliaire n'est pas lancé. |
+| 6002 | Game Master | Numéro de tâche de journal non défini. |
+| 7123 | FilePlayer | Table des actions différées pleine. |
+| 7273 | Game Master | Playlog saturé : impossible d'enregistrer un nouveau son. |
+| 7276 | Game Master | Rejouage du playlog : aucun lecteur disponible. |
+| 9124 | tous | Compilateur : erreur interne. |
+| 9602 | tous | Erreur en restaurant un processus (`mSL_load_thread`). |
+| 9603 | tous | Erreur en sauvegardant un processus (`mSL_save_thread`). |
+| 9606 | tous | Aucun processus disponible. |
+| 9905 | Game Master | Initialisation : débordement des paramètres des lecteurs (erreur interne). |
+| 9906 | Game Master | Initialisation : débordement de la zone des lecteurs (erreur interne). |
+| 9922 | Game Master | Initialisation : trop de couleurs (erreur interne). |
+| 9923 | Game Master | Initialisation : trop d'onglets (erreur interne). |
+| 9924 | Game Master | Initialisation : erreur dans le bloc de sauvegarde (erreur interne). |
+| 9925 | Game Master | Initialisation : débordement du bloc de sauvegarde (erreur interne). |
+| 9926 | Game Master | Initialisation : erreur dans le bloc de sauvegarde (erreur interne). |
+| 9927 | Game Master, Interstys | Initialisation : débordement du tableau des chaînes de préréglage (erreur interne). |
+| 9936 | Game Master, Interstys | Initialisation : taille des entrées de paramètres incorrecte (erreur interne). |
+| 9937 | Game Master | Initialisation : nombre de paramètres incorrect (erreur interne). |
+| 9988 | tous | Mémoire statique saturée (erreur interne). |
+| 9991 | Game Master | Initialisation : bloc de contrôle des lecteurs trop grand (erreur interne). |
+| 9992 | Game Master | Initialisation : bloc de contrôle des lecteurs incohérent (erreur interne). |

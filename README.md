@@ -26,7 +26,7 @@ their configurations, patches and presets. Ready-to-use scripts are in [`CMGS-sc
 - `SmoothMultiLimiter`: a limiter for up to 128 channels.
 - `Multichannel_VU_meter` (and its variant `Multichannel_VU_meter_U`): a VU meter for up to 128 channels.
 - Small utilities: `ChannelReducer16/24/48`, `CheapChannelReducer`, `ChannelsMuter`, `ChannelsSwitcher`,
-  `Mixer_8xM-1xS`, `mid-side`, `channels-folder`, `Synchronizer`.
+  `mid-side`, `channels-folder`, `Synchronizer`.
 - Examples: `AKAI-Ex-01`, `AKAI-Ex-02` (AKAI APCmini), `Space3D-Demo` (the 3D view of Diffusion-3).
 
 ## Installation
@@ -135,7 +135,7 @@ décrivent leurs configurations, leurs patchs et leurs presets. Des scripts prê
 - `SmoothMultiLimiter` : un limiteur jusqu'à 128 canaux.
 - `Multichannel_VU_meter` (et sa variante `Multichannel_VU_meter_U`) : un VU-mètre jusqu'à 128 canaux.
 - Petits utilitaires : `ChannelReducer16/24/48`, `CheapChannelReducer`, `ChannelsMuter`, `ChannelsSwitcher`,
-  `Mixer_8xM-1xS`, `mid-side`, `channels-folder`, `Synchronizer`.
+  `mid-side`, `channels-folder`, `Synchronizer`.
 - Exemples : `AKAI-Ex-01`, `AKAI-Ex-02` (AKAI APCmini), `Space3D-Demo` (la vue 3D de Diffusion-3).
 
 ## Installation
