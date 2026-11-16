@@ -28,6 +28,7 @@ pats = [
   re.compile(r'\b(\w*[Ee]rr\w*)\s*=\s*(-?\d{3,4})\b(?![.\d])'),                 # xxErr = 1234
   re.compile(r'\b(\w*[Ee]rr\w*)\s*\(\s*(-?\d{3,4})\b(?![.\d])'),                # xx_err(1234, ...)
   re.compile(r'"(?:\*\*\* )?ERR:? *(\d{3,4})\b'),                                # "ERR: 1234 ..."
+  re.compile(r'"[^"]*\bERR:? +(\d{4})\b'),                                      # "... (ERR 2460) ..."
   re.compile(r'\b(error)\s*\(\s*(\d{3,4})\b'),
 ]
 inv = {}
