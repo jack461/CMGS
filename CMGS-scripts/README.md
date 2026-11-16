@@ -1,7 +1,24 @@
+# CMGS scripts (mSL)
 
-# mSL Scripts
+*Français plus bas.*
 
-This directory contains a few "mSL" scripts that may be used to test the mSL byte code compiler/interpreter included in "GameMaster", "Diffusion-3" or "Interstys".
+Scripts in **mSL**, the scripting language embedded in the CMGS applications (GamePlayer, Diffusion-3, Interstys,
+ScriptMaster, FilePlayer). The applications do not need them: they are recipes, presets, examples and tests.
+
+**Running a script:** drop the `.mSL` file into the window of the plugin (GamePlayer: with Alt, or in the top band;
+the other plugins: anywhere in the window). Its messages go to the system log of the plugin.
+
+**Option:** this folder may also be copied (or linked) into the `Data` folder of REAPER, next to `CMGS-data`. A plugin
+can then open a script by a name relative to `Data`, for instance `CMGS-scripts/Algorithms/Matrix-Metal.mSL`.
+
+| Folder | Contents |
+|---|---|
+| `Algorithms/` | Interstys: ready-to-use creative recipes (Matrix, Flanger, Chorus, Phaser, Shimmer, Noise, Random, Math, Ring), each with its parameters on its `Instance` line; `Sources.mSL` gives test material. See its README (in French). |
+| `Presets/` | Interstys: five generation presets (mSL conductors that transform an input buffer into about ten minutes of sound). See its README (in French). |
+| `Examples/` | Interstys: small examples (a chain of effects, curves, MIDI links of an AKAI MIDI Mix, the dump and removal of the MIDI links, the check of an exported session). |
+| `Tests/` | The test series `Ex-NNNN.mSL` and `check_scripts.py` (below). |
+
+## Tests
 
 The scripts "Ex-NNNN.mSL" announce their expected output with lines such as
 `// Expected "Ex-0001. s vaut 55"` (sprintf formats like `%d` or `%.2f` are allowed) or
@@ -9,7 +26,7 @@ The scripts "Ex-NNNN.mSL" announce their expected output with lines such as
 After running them in a plug-in, export the system log to a file
 ('p'), then check it with:
 
-    python3 check_scripts.py [log file | project folder] [-a]
+    python3 -I CMGS-scripts/Tests/check_scripts.py [log file | project folder] [-a]
 
 (by default, the most recent "syslog-*.txt" of ~/Music/REAPER-Projects/*/).
 
@@ -23,14 +40,26 @@ Numbering of the scripts:
 check_scripts.py takes the plugin from the name of the log ("syslog-Interstys-..."): it ignores the
 specific scripts of the other plugins, and reports one run in the wrong plugin as a failure.
 
-## Keyboard keys table
+The table of the keyboard keys of the plugins is now made by `CMGS-aux/tools/keys_table.py`
+(it writes `CMGS-docs/CMGS-Keys.md`).
 
-    python3 -I keys_table.py [-raw] [-o output.md]
+---
 
-lists the keys used by the `@gfx` code of the plugins (GamePlayer, FilePlayer, ScriptMaster, Diffusion-3,
-Interstys), per plugin and per level, in the order the levels see the key (the same scheme everywhere, see
-`GM-Libs/mSL_ui_LibJJ.jsfx-inc`, Keyboard: module, pane, tab, plugin, system, Studio pad). It reports the
-branches never reached and the commands masked over a module that uses the same key, and compares the
-commands of the plugins. The levels of the handlers are declared in `HANDLERS` at the top of the script:
-add a line there for a new keyboard handler. By default it writes `../Documents/CMGS-Keys.md` (in `CMGS/`);
-`-raw` prints one line per key test.
+# Scripts de CMGS (mSL)
+
+Des scripts en **mSL**, le langage de script intégré aux applications de CMGS (GamePlayer, Diffusion-3, Interstys,
+ScriptMaster, FilePlayer). Les applications n'en ont pas besoin : ce sont des recettes, des presets, des exemples et
+des tests.
+
+**Lancer un script :** déposer le fichier `.mSL` dans la fenêtre du plugin (GamePlayer : avec Alt, ou dans le bandeau
+du haut ; les autres plugins : n'importe où dans la fenêtre). Ses messages vont dans le journal système du plugin.
+
+**Option :** ce dossier peut aussi être copié (ou lié) dans le dossier `Data` de REAPER, à côté de `CMGS-data`. Un
+plugin peut alors ouvrir un script par un nom relatif à `Data`, par exemple `CMGS-scripts/Algorithms/Matrix-Metal.mSL`.
+
+| Dossier | Contenu |
+|---|---|
+| `Algorithms/` | Interstys : des recettes de création prêtes à l'emploi (Matrix, Flanger, Chorus, Phaser, Shimmer, Noise, Random, Math, Ring), chacune avec ses paramètres sur sa ligne `Instance` ; `Sources.mSL` fournit du matériau d'essai. Voir son README. |
+| `Presets/` | Interstys : cinq presets de génération (des chefs d'orchestre en mSL qui transforment un buffer d'entrée en une dizaine de minutes de son). Voir son README. |
+| `Examples/` | Interstys : de petits exemples (une chaîne d'effets, des courbes, les liens MIDI d'une MIDI Mix d'AKAI, l'affichage et le retrait des liens MIDI, la vérification d'une session exportée). |
+| `Tests/` | La série de tests `Ex-NNNN.mSL` et `check_scripts.py` (voir *Tests* plus haut). |

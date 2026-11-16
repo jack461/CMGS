@@ -17,6 +17,7 @@ uix_jtheme_ctlsiz = 0;
 uix_jtheme = 0;
 ui_jstyle = 0; // 0 : classic look ; 1 : "soft" look (no frames, soft cells, thin sliders, hidden tabs bar) - saved by the host
 uix_jtheme_prev = -1;
+uix_jtheme_img = -1; // the bitmap theme whose image is loaded (-1 : none ; see uix_jtheme_load)
 uix_jtheme_menu = 0;
 uix_jtheme_rtc_code = 0; // theme menu return code
 uix_jtheme_rtc_max = 3;
@@ -762,7 +763,35 @@ function ui_show(label)
 
 
 
-function update_theme() local(main)
+/*
+    The bitmap themes (3 to 11) : their PNG images are in REAPER/Data/CMGS-data/themes (a path relative to the
+    "Data" folder of REAPER). gfx_loadimg does nothing in @init : the image of the current theme is loaded here,
+    in @gfx, when the theme changes ; uix_jtheme_img, reset in @init, forces a new load after a recompilation.
+    The images keep the slots of the former "filename:" lines : 0, 2 to 9 (slot 1 is the reserved screen of ui-lib,
+    uix_control_reserved_screen). A missing image (CMGS-data not installed) has a null width : the caller then uses
+    the theme "default". Returns the slot of the image, or -1.
+*/
+function uix_jtheme_load() local(slot, w, h)
+(
+    slot = (uix_jtheme == 3) ? 0 : ((uix_jtheme >= 4) && (uix_jtheme <= 11)) ? uix_jtheme - 2 : -1;
+    (slot >= 0) ? (
+        (uix_jtheme_img != uix_jtheme) ? (
+            uix_jtheme_img = uix_jtheme;
+            sprintf(#uix_jtheme_path, "CMGS-data/themes/theme-%s.png",
+                (slot == 0) ? "cyan" : (slot == 2) ? "dark-orange" : (slot == 3) ? "dark-blue" :
+                (slot == 4) ? "dark-cyan" : (slot == 5) ? "dark-green" : (slot == 6) ? "dark-red" :
+                (slot == 7) ? "amber" : (slot == 8) ? "dark-neon-green" : "magenta");
+            gfx_loadimg(slot, #uix_jtheme_path);
+        );
+        w = h = 0;
+        gfx_getimgdim(slot, w, h);
+        (w <= 0) ? slot = -1;
+    );
+    slot;
+);
+
+
+function update_theme() local(main, img)
 (
     main = main_screen(uix_jG_menuscr);
     ui_spec_jd_ctgr = 0;
@@ -774,32 +803,8 @@ function update_theme() local(main)
         ui_spec_jd_ctgr = 6;
         control_start(main, "tron");
     ) :
-    (uix_jtheme == 3) ? (
-        control_start(main, "bitmap-simple", 0);
-    ) :
-    (uix_jtheme == 4) ? (
-        control_start(main, "bitmap-simple", 2);
-    ) :
-    (uix_jtheme == 5) ? (
-        control_start(main, "bitmap-simple", 3);
-    ) :
-    (uix_jtheme == 6) ? (
-        control_start(main, "bitmap-simple", 4);
-    ) :
-    (uix_jtheme == 7) ? (
-        control_start(main, "bitmap-simple", 5);
-    ) :
-    (uix_jtheme == 8) ? (
-        control_start(main, "bitmap-simple", 6);
-    ) :
-    (uix_jtheme == 9) ? (
-        control_start(main, "bitmap-simple", 7);
-    ) :
-    (uix_jtheme == 10) ? (
-        control_start(main, "bitmap-simple", 8);
-    ) :
-    (uix_jtheme == 11) ? (
-        control_start(main, "bitmap-simple", 9);
+    ((img = uix_jtheme_load()) >= 0) ? (
+        control_start(main, "bitmap-simple", img);
     ) : (
         control_start(main, "default");
     );

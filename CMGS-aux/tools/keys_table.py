@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Keys table of CMGS : the keyboard keys used by the @gfx code of the plugins.
 
-    python3 -I Scripts/keys_table.py [-raw] [-o output.md]
+    python3 -I CMGS-aux/tools/keys_table.py [-raw] [-o output.md]
 
-All the plugins follow the same scheme (see GM-Libs/mSL_ui_LibJJ.jsfx-inc, Keyboard) : one key per frame
+All the plugins follow the same scheme (see CMGS-effects/CMGS-libs/mSL_ui_LibJJ.jsfx-inc, Keyboard) : one key per frame
 (GM_key_frame), taken by the first level that uses it (GM_key_take), in the same order everywhere :
 the module under the mouse (its keys, then its pads) -> the pane -> the tab -> the commands of the plugin
 -> the system commands -> the Studio pad (GamePlayer).
 
-Scans GM-Libs/*.jsfx-inc for the key tests (GM_key_take('m'), or a key variable such as u_ch, zzch, gwk
+Scans CMGS-effects/CMGS-libs/*.jsfx-inc for the key tests (GM_key_take('m'), or a key variable such as u_ch, zzch, gwk
 compared with a character constant), finds the function that holds them, and writes a Markdown table :
 one line per key and handler, with its level (see HANDLERS), the plugins, the modifiers seen on the line,
 the action, and file:line. It then lists :
@@ -16,14 +16,14 @@ the action, and file:line. It then lists :
   - the commands masked over a module : a key of a later level (pane, tab, plugin, system, Studio pad)
     that a module also uses (over this module, the module wins : the command does not run) ;
   - the system commands of the plugins, to check that a key means the same thing everywhere.
-Without -o, the table goes to ../Documents/CMGS-Keys.md (relative to GameMaster/).
+Without -o, the table goes to CMGS-docs/CMGS-Keys.md (in the CMGS repository).
 -raw prints the raw extraction (one line per test) instead.
 """
 import re, os, sys, glob, collections
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-GM = os.path.dirname(HERE)                      # GameMaster/
-LIBS = os.path.join(GM, 'GM-Libs')
+CMGS = os.path.dirname(os.path.dirname(HERE))   # the CMGS repository (this file is in CMGS-aux/tools)
+LIBS = os.path.join(CMGS, 'CMGS-effects', 'CMGS-libs')
 
 # The variables that hold a key in the keyboard handlers
 KEY_VARS = r'(key|u_ch|ch|zzch|k|KeyedT|Keyed|gwk|xx|inKey)'
@@ -394,7 +394,7 @@ def sort_key(r):
 
 def report(rows):
     out = ['# Touches du clavier dans CMGS', '',
-           '*Fichier produit par `Scripts/keys_table.py` : ne pas le modifier à la main, relancer le script.*', '',
+           '*Fichier produit par `CMGS-aux/tools/keys_table.py` : ne pas le modifier à la main, relancer le script.*', '',
            'Pour chaque plugin, les touches testées par le code `@gfx`, par niveau dans l\'ordre où les niveaux '
            'voient la touche pendant une trame. « Modif. » : les modificateurs testés sur la même ligne '
            '(vide : non testés, la touche agit avec ou sans modificateur ; « none » : sans modificateur). '
@@ -454,7 +454,7 @@ def main():
         for r in rows:
             print(f"{r['file']}:{r['line']}\t{r['fn']}\t{r['level']}\t{r['var']}\t{r['key']}\t{r['mods']}\t{r['act']}")
         return
-    dest = args[args.index('-o') + 1] if '-o' in args else os.path.join(os.path.dirname(GM), 'Documents', 'CMGS-Keys.md')
+    dest = args[args.index('-o') + 1] if '-o' in args else os.path.join(CMGS, 'CMGS-docs', 'CMGS-Keys.md')
     open(dest, 'w', encoding='utf-8').write(report(rows))
     conf = conflicts(rows)
     print(f"{len(rows)} tests de touches ; conflits : " +

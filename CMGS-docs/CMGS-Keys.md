@@ -249,7 +249,7 @@ Ordre : Cmd + - + = 0 (taille d'affichage) → module sous la souris (puis ses p
 | `6` |  | module | log système / log utilisateur (show_SysLog) | box[5] = 6; | GamePlayer.jsfx-inc:20410 |
 | `7` |  | module | log système / log utilisateur (show_SysLog) | box[5] = 7; | GamePlayer.jsfx-inc:20411 |
 | `8` |  | module | log système / log utilisateur (show_SysLog) | box[5] = 8; | GamePlayer.jsfx-inc:20412 |
-| `P` |  | module | log système / log utilisateur (show_SysLog) | sysout(SysLogBox, 31);  // the log in the console of GMAuxiliary.eel, to copy it | GamePlayer.jsfx-inc:20414 |
+| `P` |  | module | log système / log utilisateur (show_SysLog) | sysout(SysLogBox, 31);  // the log in the console of CMGS-auxiliary.eel, to copy it | GamePlayer.jsfx-inc:20414 |
 | `j` |  | module | log système / log utilisateur (show_SysLog) | box[7] = (box[7]+1) % box[2]; | GamePlayer.jsfx-inc:20398 |
 | `k` |  | module | log système / log utilisateur (show_SysLog) | box[7] = max(0, box[7]-1); | GamePlayer.jsfx-inc:20397 |
 | `l` |  | module | log système / log utilisateur (show_SysLog) | box[6] = max(0, box[6]-1); | GamePlayer.jsfx-inc:20395 |
@@ -412,7 +412,7 @@ Ordre : Cmd + - + = 0 (taille d'affichage) → module sous la souris → panneau
 | `6` |  | module | log système (show_SysLog) | box[5] = 6; | FilePlayer.jsfx-inc:7391 |
 | `7` |  | module | log système (show_SysLog) | box[5] = 7; | FilePlayer.jsfx-inc:7392 |
 | `8` |  | module | log système (show_SysLog) | box[5] = 8; | FilePlayer.jsfx-inc:7393 |
-| `P` |  | module | log système (show_SysLog) | sysout(box, 31);  // the log in the console of GMAuxiliary.eel, to copy it | FilePlayer.jsfx-inc:7395 |
+| `P` |  | module | log système (show_SysLog) | sysout(box, 31);  // the log in the console of CMGS-auxiliary.eel, to copy it | FilePlayer.jsfx-inc:7395 |
 | `j` |  | module | log système (show_SysLog) | box[7] = (box[7]+1) % box[2]; | FilePlayer.jsfx-inc:7379 |
 | `k` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-1); | FilePlayer.jsfx-inc:7378 |
 | `l` |  | module | log système (show_SysLog) | box[6] = max(0, box[6]-1); | FilePlayer.jsfx-inc:7376 |
@@ -484,7 +484,7 @@ Ordre : Cmd + - + = 0 (taille d'affichage) → module sous la souris → panneau
 | `6` |  | module | log système (show_SysLog) | box[5] = 6; | ScriptMaster.jsfx-inc:2580 |
 | `7` |  | module | log système (show_SysLog) | box[5] = 7; | ScriptMaster.jsfx-inc:2581 |
 | `8` |  | module | log système (show_SysLog) | box[5] = 8; | ScriptMaster.jsfx-inc:2582 |
-| `P` |  | module | log système (show_SysLog) | sysout(box, 31);  // the log in the console of GMAuxiliary.eel, to copy it | ScriptMaster.jsfx-inc:2584 |
+| `P` |  | module | log système (show_SysLog) | sysout(box, 31);  // the log in the console of CMGS-auxiliary.eel, to copy it | ScriptMaster.jsfx-inc:2584 |
 | `j` |  | module | log système (show_SysLog) | box[7] = (box[7]+1) % box[2]; | ScriptMaster.jsfx-inc:2568 |
 | `k` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-1); | ScriptMaster.jsfx-inc:2567 |
 | `l` |  | module | log système (show_SysLog) | box[6] = max(0, box[6]-1); | ScriptMaster.jsfx-inc:2565 |
@@ -573,7 +573,7 @@ Ordre : Cmd + - + = 0 (taille d'affichage) → module sous la souris (écran Liv
 | `6` |  | module | log système (show_SysLog) | box[5] = 6; | Diffusion-3.jsfx-inc:6080 |
 | `7` |  | module | log système (show_SysLog) | box[5] = 7; | Diffusion-3.jsfx-inc:6081 |
 | `8` |  | module | log système (show_SysLog) | box[5] = 8; | Diffusion-3.jsfx-inc:6082 |
-| `P` |  | module | log système (show_SysLog) | sysout(box, 31);  // the log in the console of GMAuxiliary.eel, to copy it | Diffusion-3.jsfx-inc:6084 |
+| `P` |  | module | log système (show_SysLog) | sysout(box, 31);  // the log in the console of CMGS-auxiliary.eel, to copy it | Diffusion-3.jsfx-inc:6084 |
 | `j` |  | module | log système (show_SysLog) | box[7] = (box[7]+1) % box[2]; | Diffusion-3.jsfx-inc:6068 |
 | `k` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-1); | Diffusion-3.jsfx-inc:6067 |
 | `l` |  | module | log système (show_SysLog) | box[6] = max(0, box[6]-1); | Diffusion-3.jsfx-inc:6065 |
@@ -702,7 +702,7 @@ Ordre : Cmd + - + = 0 (taille d'affichage) → module sous la souris (puis ses p
 | `6` |  | module | log système (show_SysLog) | box[5] = 6; | Interstys.jsfx-inc:18237 |
 | `7` |  | module | log système (show_SysLog) | box[5] = 7; | Interstys.jsfx-inc:18238 |
 | `8` |  | module | log système (show_SysLog) | box[5] = 8; | Interstys.jsfx-inc:18239 |
-| `P` |  | module | log système (show_SysLog) | sysout(box, 31);  // the log in the console of GMAuxiliary.eel, to copy it | Interstys.jsfx-inc:18241 |
+| `P` |  | module | log système (show_SysLog) | sysout(box, 31);  // the log in the console of CMGS-auxiliary.eel, to copy it | Interstys.jsfx-inc:18241 |
 | `j` |  | module | log système (show_SysLog) | box[7] = (box[7]+1) % box[2]; | Interstys.jsfx-inc:18225 |
 | `k` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-1); | Interstys.jsfx-inc:18224 |
 | `l` |  | module | log système (show_SysLog) | box[6] = max(0, box[6]-1); | Interstys.jsfx-inc:18222 |

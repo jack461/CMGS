@@ -21,7 +21,7 @@ minutes de résultat, mono, dans un buffer de sortie. Chaque exécution est diff
 
    | Variable | Rôle |
    |---|---|
-   | `fichier` | un fichier son pour le buffer d'entrée (relatif au dossier du projet, GMAuxiliary.eel en marche, ou un chemin complet) ; `""` : le son de la piste est enregistré |
+   | `fichier` | un fichier son pour le buffer d'entrée (relatif au dossier du projet, CMGS-auxiliary.eel en marche, ou un chemin complet) ; `""` : le son de la piste est enregistré |
    | `duree` | la durée du buffer d'entrée (s, au plus 1300) : celle de l'enregistrement, ou celle du fichier (au-delà, les positions reviennent au début du fichier) |
    | `canaux` | les canaux enregistrés : 1 (In:0) ou 2 (In:0 et In:1) ; un fichier donne les siens |
    | `continu` | 1 : l'enregistrement continue (le buffer garde les `duree` dernières secondes) ; 0 : il s'arrête |
