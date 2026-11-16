@@ -52,13 +52,21 @@ set_black_theme_color(210, 130, 80); // some orange as base color
 uix_mouseblocked = 0;
 uix_clickmods = 0; // (JJG) the modifiers (cmd, shift, alt, ctrl) when the last button was pressed
 uix_mouseblock_until = 0; // (JJG) clicks stay blocked at least until this time (see control_jmenu)
-// (JJG 2026-11-11) the buttons that may stay "pressed" in mouse_cap after a gfx_showmenu (set to 67 by the end of the
-// menus : control_jmenu, prv_MenuEnd, vu_MenuEnd) : ignored until seen released ; uix_mcap : mouse_cap without them
+// (JJG 2026-11-11) the buttons that may stay "pressed" in mouse_cap after a gfx_showmenu (set to 67 by uix_menu_end, at
+// the end of the menus : control_jmenu, prv_MenuEnd, vu_MenuEnd...) : ignored until seen released ; uix_mcap : mouse_cap
+// without them
 uix_mghost = 0;
 uix_mcap = 0;
-// (JJG 2026-11-12) after a menu, until a real left clic : macOS may report the left button with each press of the right
-// one (mouse_cap 3 : seen in the Live screen of Diffusion-3) ; while uix_mgleft is set, that left button is a ghost too
-uix_mgleft = 0;
+// (JJG 2026-11-13) after a menu, macOS adds the button that closed it (left or right clic on an entry, or outside the
+// menu) to each press of the OTHER button (mouse_cap 3), until that button is pressed again (12/11 : chosen with the left,
+// each right press came as 3 ; 13/11 : chosen with the right, each left press). Nothing tells which one is real : the
+// button that closes the menus is learned, uix_mgh1 for the menus with an entry chosen, uix_mgh0 for the menus abandoned
+// (1 left, 2 right), and it is taken as the ghost of such a press (see ui_start, uix_menu_end)
+uix_mgh0 = uix_mgh1 = 1;
+uix_mgk = 0;    // the last menu : 1 an entry chosen, 0 abandoned
+uix_mgarm = 0;  // the next press of a single button tells which button closed the last menu
+uix_mgamb = 0;  // the last press (both buttons) was taken as a right clic, the left one as the ghost (at uix_mgambt)
+uix_mgambt = 0;
 uix_doubleclicktime = 0.2;
 uix_draglimit = 10;
 uix_click1count = uix_click2count = uix_click64count = 0;
@@ -141,10 +149,14 @@ function uix_setgfxfont() (
 		);
 	);
 );
-// (JJG 2026-11-12) the buttons of mouse_cap without the "ghost" ones (uix_mghost, uix_mgleft : see ui_start) : for the
-// code that reads the buttons itself (before or after ui_start)
+// (JJG 2026-11-13) a press of both buttons at once (no button before, no ghost) : one of them is a ghost (see uix_mgh0)
+function uix_mg_both() (
+	((mouse_cap & 3) === 3) && !(uix_mousecap_prev & 3) && !(uix_mghost & 3);
+);
+// (JJG 2026-11-12) the buttons of mouse_cap without the "ghost" ones (uix_mghost, and the learned one of a press of both
+// buttons : see ui_start) : for the code that reads the buttons itself (before or after ui_start)
 function uix_mouse_cap() (
-	mouse_cap - (mouse_cap & (uix_mghost | ((uix_mgleft && (mouse_cap & 2)) ? 1 : 0)) & 67);
+	mouse_cap - (mouse_cap & (uix_mghost | (uix_mg_both() ? (uix_mgk ? uix_mgh1 : uix_mgh0) : 0)) & 67);
 );
 function uix_click_block() (
 	uix_mouseblocked = 1;
@@ -154,6 +166,20 @@ function uix_click_block() (
 	uix_click1_x = uix_click1_y = uix_click1_t = 0; // Left
 	uix_click2_x = uix_click2_y = uix_click2_t = 0; // Right
 	uix_click64_x = uix_click64_y = uix_click64_t = 0; // Middle
+);
+// (JJG 2026-11-13) to call after each gfx_showmenu ; chosen : an entry was chosen (else the menu was abandoned). The clic
+// that closed the menu must not be seen again by the controls under it : the clics are ignored until the buttons are
+// released, and for 0.25 s ; a button that may stay pressed in mouse_cap is ignored until seen released (uix_mghost).
+// A press of both buttons taken as a right clic opened this menu, abandoned within 2 s : that left clic was real, the
+// ghost was the right button (learned for the kind of the previous menu)
+function uix_menu_end(chosen) (
+	(uix_mgamb && !chosen && (time_precise() - uix_mgambt < 2)) ? (uix_mgk ? (uix_mgh1 = 2) : (uix_mgh0 = 2));
+	uix_mgamb = 0;
+	uix_mgk = !!chosen;
+	uix_click_block();
+	uix_mouseblock_until = time_precise() + 0.25;
+	uix_mousecap_prev = 0; // the buttons used in the menu leave no trace in the controls
+	uix_mghost = 67;
 );
 function uix_key_clear() (
 	while (
@@ -265,7 +291,7 @@ function ui_reserve_image(index) (
 	uix_screen_reservations[index] = 1;
 );
 
-function ui_start(defaultScreen) local(i, click, clickdelta, imgW, imgH, retina_scaling) (
+function ui_start(defaultScreen) local(i, click, clickdelta, imgW, imgH, retina_scaling, mgb) (
 	uix_drawconfig_currentindex = 0;
 	uix_drawconfig_current = uix_drawconfig;
 
@@ -320,14 +346,24 @@ function ui_start(defaultScreen) local(i, click, clickdelta, imgW, imgH, retina_
 		uix_font_dirty = 1;
 		uix_setgfxfont();
 
-		// (JJG 2026-11-11) after a gfx_showmenu, a button released in the native menu may stay pressed in mouse_cap (macOS :
-		// an entry chosen with a left clic leaves the left button "down" until the next left clic, and the block of the
-		// clics, which waits for all the buttons released, never ended : the right clics were lost) ; such a button
-		// (uix_mghost) is ignored by the clics and by the block until it is seen released : uix_mcap
-		(uix_mghost === 67) ? uix_mgleft = 1; // (a menu has just ended)
+		// (JJG 2026-11-11) after a gfx_showmenu, a button released in the native menu may stay pressed in mouse_cap ; such a
+		// button (uix_mghost) is ignored by the clics and by the block of the clics (which waits for all the buttons
+		// released) until it is seen released : uix_mcap
+		(uix_mghost === 67) ? uix_mgarm = 1; // (a menu has just ended)
 		uix_mghost &= mouse_cap;
-		(((mouse_cap & 3) === 1) && !(uix_mghost & 1)) ? uix_mgleft = 0; // a real left clic
-		(uix_mgleft && (mouse_cap & 2)) ? uix_mghost |= mouse_cap & 1; // the left button that comes with the right one
+		// (2026-11-13) a press : of both buttons at once, the ghost is the button learned for the last menu (see uix_mgh0) ;
+		// of a single button, after a menu (or a press of both), it is the one that closed the menu (or a key did) : learned
+		uix_mg_both() ? (
+			mgb = uix_mgk ? uix_mgh1 : uix_mgh0;
+			uix_mghost |= mgb; uix_mgarm = 1;
+			uix_mgamb = (mgb === 1); uix_mgambt = time_precise();
+		) : ((mouse_cap & 3) && !(uix_mousecap_prev & 3) && !(uix_mghost & 3)) ? (
+			uix_mgarm ? (
+				uix_mgk ? (uix_mgh1 = mouse_cap & 3) : (uix_mgh0 = mouse_cap & 3);
+				uix_mgarm = 0;
+			);
+			uix_mgamb = 0;
+		);
 		uix_mcap = mouse_cap - (mouse_cap & uix_mghost & 67);
 		uix_interacted = (!!uix_mcap) || (uix_mcap != uix_mousecap_prev);
 		uix_undo_pending ? (

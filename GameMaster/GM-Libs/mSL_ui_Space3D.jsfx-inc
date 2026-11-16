@@ -738,7 +738,7 @@ local(c, b)
         (s3d_opt & s3d_oFade) ? "!" : "", (s3d_opt & s3d_oStars) ? "!" : "",
         (s3d_opt & s3d_oTraj) ? "!" : "", (s3d_opt & s3d_oClamp) ? "!" : "");
     gfx_x = mouse_x; gfx_y = mouse_y;
-    c = gfx_showmenu(#s3d_mnu);
+    c = gfx_showmenu(#s3d_mnu); s3d_mres = c; // (the result, for the host : e.g. uix_menu_end of ui-lib)
     ((c >= 1) && (c <= 11)) ? (
         b = (c === 1) ? s3d_oGains : (c === 2) ? s3d_oHideSrc : 2 ^ (c - 2);
         s3d_opt = (s3d_opt & b) ? s3d_opt - b : s3d_opt + b;
@@ -751,14 +751,18 @@ local(c, b)
 );
 
 
-// Mouse : left drag = orbit, left click = select, wheel = zoom, right click = menu
+// Mouse : left drag = orbit, left click = select, wheel = zoom, right click = menu (2026-11-13 : opened when the button
+// is released, inside the view : a menu opened at the press leaves the right button "down" in mouse_cap). The buttons :
+// mouse_cap, or s3d_mcap given by the host when s3d_hostcap is set (e.g. without the "ghost" buttons of ui-lib :
+// uix_mouse_cap) ; s3d_menued : the menu was shown in this call (the host may end it : e.g. uix_menu_end(s3d_mres > 0))
 function s3d_mouse(x, y, w, h, wheel)
-local(mx, my, inside, used, dx, dy, f, v)
+local(mx, my, inside, used, dx, dy, f, v, b)
 (
-    used = 0;
+    used = 0; s3d_menued = 0;
+    b = s3d_hostcap ? s3d_mcap : mouse_cap;
     mx = mouse_x - x; my = mouse_y - y;
     inside = (mx >= 0) && (my >= 0) && (mx < w) && (my < h);
-    (mouse_cap & 1) ? (
+    (b & 1) ? (
         (s3d_mdown === 0) ? (
             inside ? (
                 s3d_mdown = 1; s3d_moved = 0;
@@ -826,10 +830,11 @@ local(mx, my, inside, used, dx, dy, f, v)
         s3d_mdown = 0;
         s3d_dmode = 0;
     );
-    (mouse_cap & 2) ? (
-        ((s3d_rdown === 0) && inside && !(mouse_cap & 8)) ? s3d_menu(); // shift + right clic : left to the host
-        s3d_rdown = 1;
+    (b & 2) ? (
+        // pressed inside, without Shift : the menu at the release (2 : no menu ; shift + right clic : left to the host)
+        (s3d_rdown === 0) ? (s3d_rdown = (inside && !(mouse_cap & 8)) ? 1 : 2);
     ) : (
+        ((s3d_rdown === 1) && inside) ? (s3d_menu(); s3d_menued = 1;);
         s3d_rdown = 0;
     );
     (inside && (wheel != 0)) ? (

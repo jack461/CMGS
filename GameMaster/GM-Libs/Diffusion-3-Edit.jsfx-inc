@@ -14,7 +14,8 @@
           right : menu)
         3 Straight / Smooth : the segments of a trajectory, straight lines bent by their bends, or the same curves
           smoothed : at each point, its two segments share the mean of their tangents (no angle ; without bends, the
-          curve of Catmull-Rom) (left : the other one ; right : menu, also : straighten all)
+          curve of Catmull-Rom) (left : the other one ; right : menu, also : straighten all, which comes back to
+          Straight ; kept for Undo)
         4, 5, 6 the mode : View, Move, Add/Del (left : this mode ; right : menu ; keys v, m, p over the module)
         7 Points N (both clics : menu : select all, none, invert, delete the selection, delete all)
         8 the view : Front, Side, Top, 3D, Custom (left : the next one ; right : menu)
@@ -124,7 +125,8 @@ ED_MAXP = 128;              // the points of a configuration
 ED_PS = 8;                  // a point : [0] x, [1] y, [2] z, [3] flags (1 : selected), [4 ... 6] the bend of the segment
                             // from it to the next one (the shift of its middle, see ed_SegCtl), [7] reserved
 ED_SS = 32;                 // the state of a configuration
-ED_US = ED_MAXP * ED_PS + 4; // an undo buffer : [0] N, [1] the current point, [2] the next number (Alt), the points
+ED_US = ED_MAXP * ED_PS + 4; // an undo buffer : [0] N, [1] the current point, [2] the next number (Alt), [3] Smooth,
+                            // the points
 // the fields of the state
 ed_sN = 0;                  // the count of points
 ed_sCur = 1;                // the current point (its index : its number - 1), -1 : none
@@ -417,20 +419,20 @@ function ed_Keep(e)
 local(st, u)
 (
     st = ed_St(e); u = ed_und + e * ED_US;
-    u[0] = st[ed_sN]; u[1] = st[ed_sCur]; u[2] = ed_rn[e];
+    u[0] = st[ed_sN]; u[1] = st[ed_sCur]; u[2] = ed_rn[e]; u[3] = st[ed_sSmooth];
     memcpy(u + 4, ed_P(e, 0), ED_MAXP * ED_PS);
     st[ed_sUndo] = 1;
 );
 
 // Exchanges the configuration e and its undo buffer : Undo, then Redo
 function ed_Undo(e)
-local(st, u, n, c, r)
+local(st, u, n, c, r, sm)
 (
     st = ed_St(e); u = ed_und + e * ED_US;
     (st[ed_sUndo] > 0) ? (
-        n = u[0]; c = u[1]; r = u[2];
-        u[0] = st[ed_sN]; u[1] = st[ed_sCur]; u[2] = ed_rn[e];
-        ed_rn[e] = r;
+        n = u[0]; c = u[1]; r = u[2]; sm = u[3];
+        u[0] = st[ed_sN]; u[1] = st[ed_sCur]; u[2] = ed_rn[e]; u[3] = st[ed_sSmooth];
+        ed_rn[e] = r; st[ed_sSmooth] = !!sm;
         memcpy(ed_tmp, u + 4, ED_MAXP * ED_PS);
         memcpy(u + 4, ed_P(e, 0), ED_MAXP * ED_PS);
         memcpy(ed_P(e, 0), ed_tmp, ED_MAXP * ED_PS);
@@ -1152,7 +1154,7 @@ local(st, c, g)
         st[ed_sFree] ? "!" : "", ED_FAR);
     gfx_x = mouse_x; gfx_y = mouse_y;
     c = gfx_showmenu(#ed_mnu);
-    prv_MenuEnd(); // (the clic that chose the entry is not a new point)
+    prv_MenuEnd(c > 0); // (the clic that chose the entry is not a new point)
     ((c >= 1) && (c <= 4)) ? ed_SetView(e, c - 1) :
     ((c >= 5) && (c <= 9)) ? (st[ed_sGrid] = c - 5) :
     (c === 10) ? (st[ed_sSnap] = !st[ed_sSnap]) :
@@ -1179,7 +1181,7 @@ local(st, mx, my, inside, used, dx, dy, f, p, cur, mode, grid, pz, dvx, dvy, dvz
     ed_seen[e] = gfx_executed;
     uix_click1 ? (
         // the left button has just been pressed (not with the right one)
-        (inside && !(mouse_cap & 2)) ? (
+        (inside && !(uix_mcap & 2)) ? ( // (uix_mcap : without the "ghost" buttons, see ui-lib)
             ed_md[e] = 1; ed_dmoved = 0; ed_dk = 0; ed_dmods = mouse_cap; ed_dnew = -1;
             ed_mx0 = ed_lmx = mouse_x; ed_my0 = ed_lmy = mouse_y;
             ed_dhit = ed_Pick(e, mx, my); // (-2 : the barycentre)
@@ -1198,7 +1200,7 @@ local(st, mx, my, inside, used, dx, dy, f, p, cur, mode, grid, pz, dvx, dvy, dvz
         ) : (
             ed_md[e] = -1;
         );
-    ) : ((mouse_cap & 1) && (ed_md[e] === 1)) ? (
+    ) : ((uix_mcap & 1) && (ed_md[e] === 1)) ? (
         (!ed_dmoved && (abs(mouse_x - ed_mx0) + abs(mouse_y - ed_my0) > 3)) ? (
             // the kind of the drag, at its start : a point or the barycentre moved (Move, Add/Del), or the orbit
             ed_dmoved = 1;
@@ -1281,7 +1283,7 @@ local(st, mx, my, inside, used, dx, dy, f, p, cur, mode, grid, pz, dvx, dvy, dvz
             ui_GFXdoNow |= 4;
         );
         ed_lmx = mouse_x; ed_lmy = mouse_y;
-    ) : !(mouse_cap & 1) ? (
+    ) : !(uix_mcap & 1) ? (
         // released : a clic (not moved) on the handle of a segment : Shift, straight again ; Add/Del, a new point there
         ((ed_md[e] === 1) && !ed_dmoved && (ed_dhit <= -10) && (-10 - ed_dhit < ed_NSeg(e))) ? (
             (ed_dmods & 8) ? ed_Straight(e, -10 - ed_dhit) :
@@ -1791,7 +1793,7 @@ local(g, c)
     );
     gfx_x = mouse_x; gfx_y = mouse_y;
     c = gfx_showmenu(#ed_mnu);
-    prv_MenuEnd();
+    prv_MenuEnd(c > 0);
     ((c >= 2) && (c < sx_libng + 2)) ? c - 2 : -1;
 );
 
@@ -1963,7 +1965,7 @@ local(st, i, m)
     );
     gfx_x = mouse_x; gfx_y = mouse_y;
     m = gfx_showmenu(#ed_mnu) - 2; // (the title is the item 1)
-    prv_MenuEnd();
+    prv_MenuEnd(m > -2);
     m;
 );
 
@@ -2001,7 +2003,7 @@ local(st, c, f)
         (e === 0) ? "#" : "", (e === 1) ? "#" : "", (e === 2) ? "#" : "", (e === 3) ? "#" : "");
     gfx_x = mouse_x; gfx_y = mouse_y;
     c = gfx_showmenu(#ed_mnu);
-    prv_MenuEnd();
+    prv_MenuEnd(c > 0);
     (c === 1) ? ed_Prompt(e) :
     (c === 2) ? (ed_Keep(e); st[ed_sN] = 0; st[ed_sCur] = -1;) :
     ((c >= 3) && (c <= 6) && (c - 3 !== e)) ? (
@@ -2055,9 +2057,14 @@ local(st, rc, m, v)
         (m >= 0) ? (st[ed_sClosed] = m);
     ) :
     (c === 3) ? (
-        // a trajectory : straight or smooth segments (right : menu, also : all the segments straight again)
+        // a trajectory : straight or smooth segments (right : menu, also : all the segments straight again, and the
+        // mode Straight : in Smooth, segments without bends are still curves) ; kept for Undo (2026-11-13)
         m = rc ? prv_Menu(ed_SmoothNames, 3, st[ed_sSmooth]) : !st[ed_sSmooth];
-        ((m === 0) || (m === 1)) ? (st[ed_sSmooth] = m) : (m === 2) ? ed_Straight(e, -1);
+        ((m === 0) || (m === 1)) ? (
+            (m != st[ed_sSmooth]) ? (ed_Keep(e); st[ed_sSmooth] = m;);
+        ) : (m === 2) ? (
+            ed_Straight(e, -1); st[ed_sSmooth] = 0;
+        );
     ) :
     ((c >= 4) && (c <= 6)) ? (
         m = rc ? prv_Menu(ed_ModeNames, 3, st[ed_sMode]) : c - 4;
@@ -2160,7 +2167,7 @@ local(st, rc, sh, n, cur, ok, m, v)
         (ok && rc) ? (
             gfx_x = mouse_x; gfx_y = mouse_y;
             m = gfx_showmenu("#Scale the selection (around its barycentre)|x 0.5|x 0.8|x 0.9|x 1.1|x 1.25|x 2||Mirror x (through the plane x = Gx)|Mirror y (through the plane y = Gy)|Mirror z (through the plane z = Gz)");
-            prv_MenuEnd();
+            prv_MenuEnd(m > 0);
             ((m >= 2) && (m <= 7)) ? ed_Xform1(e, 0, (m === 2) ? 0.5 : (m === 3) ? 0.8 : (m === 4) ? 0.9 : (m === 5) ? 1.1 : (m === 6) ? 1.25 : 2) :
             ((m >= 8) && (m <= 10)) ? ed_Xform1(e, m - 4, 0);
         );
