@@ -1326,7 +1326,9 @@ SummaryStruct = idx; idx += 8; // the summary modules (show_Summary_Pad) : the p
 // the module "Patch" (show_PGraph_Pad) : [0] 1 all the modules (0 : the patch of the module designated), [1] 1 In and the
 // controls not shown, [2] the first column shown
 PGraphStruct = idx; idx += 8;
-LinksStruct = idx; idx += 8; // the module "Links" (show_Links_Pad) : [0] the page, [1] the link selected + 1 (0 : none)
+// the module "Links" (show_Links_Pad) : [0] the page, [1] the link selected + 1 (0 : none), [2] 1 : only the links of the
+// current bank and of all the banks shown
+LinksStruct = idx; idx += 8;
 // the display blocks of the modules above (number of the object shown, display options) : saved in the 'disp' block
 DispStructsSize = idx - ReadersStructA;
 
@@ -5134,15 +5136,15 @@ menu_InsAll_Action = make_jmenu(
     ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "instances-actions", 4, menu_InsAll_Action_N);
 its_InsUiSel = 0; // the instance selected in the module (0 : none)
-// Pads of the module "Links" (see show_Links_Pad) : line 1 (8 cells), then the links of the page (16 lines x 7 columns :
-// the control, the module, the key, min, max, the law, the mode)
-pad_Lk_Siz = 8;
+// Pads of the module "Links" (see show_Links_Pad) : line 1 (9 cells), then the links of the page (16 lines x 8 columns :
+// the control, the module, the key, min, max, the law, the mode, the bank)
+pad_Lk_Siz = 9;
 pad_Lk = make_jpad(
     ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
     1, pad_Lk_Siz, pad_Lk_Siz);
 pad_Lk_Labs = pad_Lk + pad_Lk[ui_jpad_labs];
 pad_Lk_Colrs = pad_Lk + pad_Lk[ui_jpad_clrs];
-pad_LkG_NL = 16; pad_LkG_NC = 7;
+pad_LkG_NL = 16; pad_LkG_NC = 8;
 pad_LkG_Siz = pad_LkG_NL * pad_LkG_NC;
 pad_LkG = make_jpad(
     ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
@@ -5159,7 +5161,7 @@ menu_LkAll_N[3] = "Free all links";
 menu_LkAll = make_jmenu(
     ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "links-actions", 4, menu_LkAll_N);
-menu_Lk_N = make_array(15); // a link (right clic on one of its cells ; items 6 ... 10 : ticked, texts, see show_Links_Pad)
+menu_Lk_N = make_array(16); // a link (right clic on one of its cells ; items 6 ... 11 : ticked, texts, see show_Links_Pad)
 menu_Lk_N[0] = "Dump in the log";
 menu_Lk_N[1] = "Learn its control (the next one moved)";
 menu_Lk_N[2] = "All channels";
@@ -5171,13 +5173,22 @@ menu_Lk_N[7] = "Glide...";
 menu_Lk_N[8] = "Steps...";
 menu_Lk_N[9] = "Curve...";
 menu_Lk_N[10] = "Rate (incremental)...";
-menu_Lk_N[11] = "Show the target";
-menu_Lk_N[12] = "---";
-menu_Lk_N[13] = "Free";
-menu_Lk_N[14] = "Free all links";
+menu_Lk_N[11] = "Bank...";
+menu_Lk_N[12] = "Show the target";
+menu_Lk_N[13] = "---";
+menu_Lk_N[14] = "Free";
+menu_Lk_N[15] = "Free all links";
 menu_Lk = make_jmenu(
     ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-            "link-actions", 15, menu_Lk_N);
+            "link-actions", 16, menu_Lk_N);
+// the banks (right clic on the cell 8 of the line 1 ; texts : the count of links of each bank, see show_Links_Pad)
+menu_LkBank_N = make_array(18);
+i__ii = 0; loop(16, menu_LkBank_N[i__ii] = "Bank"; i__ii += 1;);
+menu_LkBank_N[16] = "---";
+menu_LkBank_N[17] = "Show only the links of this bank (and of all the banks)";
+menu_LkBank = make_jmenu(
+    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
+            "link-banks", 18, menu_LkBank_N);
 menu_LkPage_N = make_array(4); // the pages (right clic on the cell 7)
 menu_LkPage_N[0] = "First page";
 menu_LkPage_N[1] = "Previous page";
@@ -11779,16 +11790,18 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
                                         the settings of the module "Globals" ; the action is performed last, at once ;
                                         "chan" (the channels of the track) is accepted and ignored, checked by Check
         Control n  value v              the generic slider Ctl n (v in [-1, 1]) ; Dump Control n
-        Link n  cc m|note m  [chan c]  target Ctl k | target Reader|Writer|Effect id key  min v  max v  [law Lin|Exp]
+        Link n  cc m|note m  [chan c]  target Ctl k | target Reader|Writer|Effect id key  min v  max v  [law Lin|Exp]  [bank b]
                                         a MIDI control of the track (n : 1 ... LK_CNT ; chan : 1 ... 16, all by default)
                                         drives a generic slider, or a key of a module (a number : see its_Lk_KeyOk) ;
                                         min, max : the values at 0 and at 127 (in the range of the key ; Ctl : -1, 1 by
                                         default) ; Exp : min and max of the same sign ; a note : its velocity, 0 when it
                                         ends ; several links may have the same control ; Dump, Check, Free Link n|All
-                                        (see "Links" below)
+                                        (see "Links" below) ; target LEDs | Rate | Bank Prev|Next|n : an action ;
+                                        bank b : only when the bank b is the current one (0, by default : always)
         Inject cc m v|note m v  [chan c]
                                         a MIDI message simulated (as if the track had sent it : tests)
         Global midilog On|Off           the messages received logged (not saved ; Dump : when it is On)
+        Global bank b                   the current bank of the links (1 ... 16 ; Dump : when it is not 1)
         Tab n  name "text"  panes p  widths w1 w2 w3 w4  live On|Off  pane1 "module" ...  pane4 "module" ...
                                         the tab n (1 ... dcbTabsCount) : its name ("" : the default one), its panes, the
                                         modules of each pane by their names (as Display "name" ; a pane key, even without a
@@ -11828,7 +11841,7 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
         2 checks everything on a simulation (lines, channels...), 3 executes.
     Algorithm, Instance, Free Instance|Algorithm, Dump Instance : see "Algorithms" below.
     Export Patch Line|Writer|Reader|Effect id ["name"], Export Session ["name"], Dump Patch ..., Dump Session : see "Exports (2)".
-    Errors 2730 ... 2739 (the links), 2750 ... 2775, 2780 ... 2790, 2792 ... 2799 ; the result of "table" is 0, or the first error.
+    Errors 2730 ... 2743 (the links), 2750 ... 2775, 2780 ... 2790, 2792 ... 2799 ; the result of "table" is 0, or the first error.
     It runs in @gfx (the mSL threads of Interstys) : the state of the analysis is global.
 */
 its_TK_Cnt = 0;
@@ -12256,12 +12269,13 @@ its_TbRnDtN[its_RnDtWave] = "Wave"; its_TbRnDtN[its_RnDtEnv] = "Env";
 i__ii = 0; loop(2, its_TbRnDt[i__ii] = mSL_symbol(its_TbRnDtN[i__ii]); i__ii += 1;);
 its_TbHarm = make_array(its_SatHarm); // the weights of the key "harm" (its_TbK1 : their count)
 // the keys of the block Global ; track samples (its_GlSmpl), actions (index : its_GlAct_..., see its_actions)
-its_TbGNk = 7;
+its_TbGNk = 8;
 its_TbGKey = make_array(its_TbGNk); its_TbGNam = make_array(its_TbGNk);
 its_TbKey(its_TbGKey, its_TbGNam, 0, "samples"); its_TbKey(its_TbGKey, its_TbGNam, 1, "input");
 its_TbKey(its_TbGKey, its_TbGNam, 2, "output"); its_TbKey(its_TbGKey, its_TbGNam, 3, "action");
 its_TbKey(its_TbGKey, its_TbGNam, 4, "chan"); its_TbKey(its_TbGKey, its_TbGNam, 5, "display");
 its_TbKey(its_TbGKey, its_TbGNam, 6, "midilog"); // the MIDI messages received logged (its_LkLog : Off|On)
+its_TbKey(its_TbGKey, its_TbGNam, 7, "bank"); // the current bank of the links (its_LkBank : 1 ... its_LkBkMx)
 its_TbGDsN = make_array(3); its_TbGDs = make_array(3); // display : what the patches show (its_XpShow)
 its_TbGDsN[0] = "None"; its_TbGDsN[1] = "Essential"; its_TbGDsN[2] = "All";
 i__ii = 0; loop(3, its_TbGDs[i__ii] = mSL_symbol(its_TbGDsN[i__ii]); i__ii += 1;);
@@ -12901,11 +12915,12 @@ function its_Tb_Out(str)
     (its_Xp_Sink === 2) ? xpt_Block(str, its_Xp_Ind);
 );
 
-// all the links deleted (Free Link All, Clear All ; see "Links (MIDI)" below)
+// all the links deleted (Free Link All, Clear All ; see "Links (MIDI)" below) ; the bank 1, the knobs classic
 function its_Lk_FreeAll()
 (
     its_LkN = 0; // (first : @block no longer reads them)
     memset(its_LkTab, 0, LK_CNT * its_LkSz);
+    its_LkBank = 1; its_LkRateOn = 0; // (the current bank : the first one ; the knobs : classic)
 );
 
 // @gfx : a LED (the control of the link "L" : a note-on, a cc ; its channel, 1 for all) posted for @block (its_Lk_Recv) ;
@@ -12933,6 +12948,58 @@ function its_Lk_LedOff(i) local(L)
 function its_Lk_LedsOff() local(i)
 (
     i = 0; loop(its_LkN, its_Lk_LedOff(i); i += 1;);
+);
+
+// the link "L" is active : its bank is 0 (all the banks) or the current one (its_LkBank)
+function its_Lk_On(L) ( (L[its_LkW_Bank] === 0) || (L[its_LkW_Bank] === its_LkBank); );
+
+// the highest bank of the links (0 : none)
+function its_Lk_BankHi() local(i, L, h)
+(
+    h = 0;
+    i = 0; loop(its_LkN, L = its_LkTab + i * its_LkSz; (L[0] !== 0) ? (h = max(h, L[its_LkW_Bank])); i += 1;);
+    h;
+);
+
+/*
+    @gfx : the current bank "b" (1 ... its_LkBkMx ; the actions Bank, the module "Links", Global bank) : the links of the
+    old bank switch their LEDs off and no longer take the messages ; those of the new bank in the mode Abs act once their
+    control meets their value (pickup forced), a rate waits for the center ; all the LEDs sent again (its_Lk_Leds)
+*/
+function its_Lk_BankSet(b) local(i, L, w)
+(
+    b = max(1, min(its_LkBkMx, floor(b + 0.5)));
+    (b !== its_LkBank) ? (
+        i = 0; loop(its_LkN,
+            L = its_LkTab + i * its_LkSz;
+            ((L[0] !== 0) && ((w = L[its_LkW_Bank]) > 0)) ? (
+                (w === its_LkBank) ? its_Lk_LedOff(i);
+                its_LkRzn[i] = its_LkRarm[i] = 0; its_LkRu[i] = -1;
+                (w === b) ? ( its_LkForce[i] = 1; its_LkPick[i] = 0; its_LkPrevU[i] = -1; its_LkBtn[i] = 0; );
+            );
+            i += 1;
+        );
+        its_LkBank = b;
+        memset(its_LkLed, -1, LK_CNT); its_LkOwnF = 8;
+        sprintf(#its_LkBk, "Links : bank %d", b);
+        mSL_log(SysLogBox, #its_LkBk);
+    );
+);
+
+// @gfx : the bank "b" (0 : all the banks) of the link "i" (an action Bank : always 0) ; active, it acts once its control
+// meets its value (mode Abs : pickup forced)
+function its_Lk_SetBank(i, b) local(L)
+(
+    L = its_LkTab + i * its_LkSz;
+    ((L[3] === its_LkT_Action) && (L[4] >= its_LkA_BankP)) ? (b = 0);
+    b = max(0, min(its_LkBkMx, floor(b + 0.5)));
+    (L[its_LkW_Bank] !== b) ? (
+        its_Lk_LedOff(i);
+        L[its_LkW_Bank] = b;
+        its_LkRzn[i] = its_LkRarm[i] = 0; its_LkRu[i] = -1; its_LkBtn[i] = 0;
+        its_LkForce[i] = 1; its_LkPick[i] = 0; its_LkPrevU[i] = -1;
+        memset(its_LkLed, -1, LK_CNT);
+    );
 );
 
 function its_Tb_Clear() local(k, all, p)
@@ -15130,6 +15197,7 @@ function its_Tb_GKeys() local(w, ki, i)
                 (ki === 3) ? its_Tb_Enum("action", its_TbGAc, its_GlActTbN) :
                 (ki === 5) ? its_Tb_Enum("display", its_TbGDs, 3) :
                 (ki === 6) ? its_Tb_Enum("midilog", its_TbFSt, 2) :
+                (ki === 7) ? its_Tb_Int("bank", 1, its_LkBkMx) :
                 its_Tb_Int("chan", 0, 128);
             its_TbKS[ki] = !its_Tb_setm || its_Tb_chg; // (Set : only the keys of a changed argument)
         );
@@ -15140,7 +15208,7 @@ function its_Tb_GKeys() local(w, ki, i)
 function its_Tb_GGet(ki)
 (
     (ki === 0) ? its_GlSmpl : (ki === 1) ? its_GlInGain : (ki === 2) ? its_GlOutVol : (ki === 3) ? 0 : (ki === 5) ? its_XpShow :
-    (ki === 6) ? its_LkLog : chcnt;
+    (ki === 6) ? its_LkLog : (ki === 7) ? its_LkBank : chcnt;
 );
 
 function its_Tb_GText(str, ki, v)
@@ -15164,6 +15232,7 @@ function its_Tb_Global()
         its_TbKS[2] ? ( its_GlOutVol = its_TbK1[2]; );
         its_TbKS[5] ? ( its_XpShow = its_TbK1[5]; );
         its_TbKS[6] ? ( its_LkLog = its_TbK1[6]; );
+        its_TbKS[7] ? its_Lk_BankSet(its_TbK1[7]);
         its_Gl_Apply();
         (its_TbKS[3] && (its_TbK1[3] !== its_GlAct_None)) ? its_actions(its_TbK1[3]);
     );
@@ -15173,7 +15242,7 @@ function its_Tb_DumpGlobal() local(ki)
 (
     strcpy(#its_TbW, "Global");
     ki = 0; loop(its_TbGNk,
-        ((ki !== 3) && ((ki !== 6) || its_LkLog)) ? ( // (midilog : when it is On)
+        ((ki !== 3) && ((ki !== 6) || its_LkLog) && ((ki !== 7) || (its_LkBank !== 1))) ? ( // (midilog : when it is On ; bank : not 1)
             strcat(#its_TbW, its_Xp_Sep()); strcat(#its_TbW, its_TbGNam[ki]); strcat(#its_TbW, " ");
             strcat(#its_TbW, its_Tb_GText(#its_TbV1, ki, its_Tb_GGet(ki)));
         );
@@ -15215,8 +15284,12 @@ function its_Tb_CheckGlobal() local(ki, bad)
     an action : its_LkA_...), [5] its key (Ctl, an action : -1), [6] min, [7] max, [8] the law (0 Lin, 1 Exp), [9] the mode
     (its_LkM_...), [10] pickup (1 : On), [11] glide (seconds ; 0 : none), [12] steps (0 : none ; 2 ... 128), [13] the curve
     (its number + 1 ; 0 : none), [14] rate : the time of the slow zones (seconds ; 0 : no rate), [15] that of the fast zones,
-    [16] ... [19] free (0 ; step 3c) ; saved by @serialize ('link', its_LkRateOn in the header ; a session of links of 12
-    words is read too).
+    [16] the bank (0 : all the banks ; 1 ... its_LkBkMx), [17] ... [19] free (0) ; saved by @serialize ('link', its_LkRateOn
+    and the current bank in the header ; a session of links of 12 words is read too).
+    Banks : only the links of the bank 0 and of the current bank (its_LkBank, its_Lk_On) take the messages and show their
+    LEDs ; the actions Bank Prev, Bank Next (their LEDs lit when that bank exists : 1 ... the highest bank of the links),
+    Bank n (lit when it is the current one), the cell 8 of the module, Global bank n change it (its_Lk_BankSet) : the links
+    of the new bank in the mode Abs act once their control meets their value (pickup forced, as after the rate).
     Rate (a cc, mode Abs, when its_LkRateOn : the action Rate, the cell 1 of the module) : the position p = 10 x of the
     control chooses a speed (its_Lk_RateZone : 4 ... 6 none ; 6 ... 7 and 3 ... 4 : the whole range in [14] seconds ; then
     faster, 9 ... 10 and 0 ... 1 : in [15] seconds) ; the value moves (its_Lk_RateBlk, its_Lk_RateGfx) until the control
@@ -15239,10 +15312,18 @@ its_LkM_Abs = 0; its_LkM_Toggle = 1; its_LkM_Push = 2; // the modes
 its_LkModeN = make_array(3); its_LkModeS = make_array(3);
 its_LkModeN[0] = "Abs"; its_LkModeN[1] = "Toggle"; its_LkModeN[2] = "Push";
 i__ii = 0; loop(3, its_LkModeS[i__ii] = mSL_symbol(its_LkModeN[i__ii]); i__ii += 1;);
-its_LkA_LEDs = 1; its_LkA_Rate = 2; // the actions (target LEDs : the states of the LEDs sent again ; Rate : the switch)
-its_LkActCnt = 3; its_LkActN = make_array(its_LkActCnt); its_LkActS = make_array(its_LkActCnt);
+// the actions (target LEDs : the states of the LEDs sent again ; Rate : the switch ; Bank Prev, Bank Next, Bank n : the
+// current bank, n in the word 5 of the link)
+its_LkA_LEDs = 1; its_LkA_Rate = 2; its_LkA_BankP = 3; its_LkA_BankN = 4; its_LkA_Bank = 5;
+its_LkActCnt = 6; its_LkActN = make_array(its_LkActCnt); its_LkActS = make_array(its_LkActCnt);
 its_LkActN[0] = ""; its_LkActN[1] = "LEDs"; its_LkActN[2] = "Rate";
-i__ii = 1; loop(its_LkActCnt - 1, its_LkActS[i__ii] = mSL_symbol(its_LkActN[i__ii]); i__ii += 1;);
+its_LkActN[3] = "Bank Prev"; its_LkActN[4] = "Bank Next"; its_LkActN[5] = "Bank";
+i__ii = 0; loop(its_LkActCnt, its_LkActS[i__ii] = 0; i__ii += 1;);
+i__ii = 1; loop(2, its_LkActS[i__ii] = mSL_symbol(its_LkActN[i__ii]); i__ii += 1;); // (Bank : its_LkSym_BkAct, see its_Tb_Link)
+its_LkSym_BkAct = mSL_symbol("Bank"); its_LkSym_BkPrev = mSL_symbol("Prev"); its_LkSym_BkNext = mSL_symbol("Next");
+its_LkSym_BkKey = mSL_symbol("bank"); // (the key of a link ; also a key of Global : reserved)
+its_LkW_Bank = 16; its_LkBkMx = 16; // the word of the bank, the highest bank
+its_LkBank = 1; // the current bank (1 ... its_LkBkMx)
 its_LkSym_mode = mSL_symbol("mode"); // (not reserved : "mode" is a key of the modules, "LEDs" a value)
 its_LkNoV = -(2^60); // no value (its_Lk_TgtVal)
 its_LkX = make_array(its_LkSz); // the words 9 ... of a link written by its_Lk_Write (its mode...)
@@ -15541,7 +15622,7 @@ function its_Lk_Midi(st, d1, d2, blk) local(t, ch, kd, x, y, i, L, c, q, pr, ed,
     kd ? (
         i = 0; loop(its_LkN,
             L = its_LkTab + i * its_LkSz;
-            ((L[0] === kd) && (L[1] === d1) && ((L[2] === 0) || (L[2] === ch))) ? (
+            ((L[0] === kd) && (L[1] === d1) && ((L[2] === 0) || (L[2] === ch)) && its_Lk_On(L)) ? ( // (its bank)
                 c += 1; its_LkHit[i] += 1;
                 ed = pr && ((kd === 2) || !its_LkBtn[i]); // (a press)
                 its_LkBtn[i] = pr;
@@ -15611,17 +15692,17 @@ function its_Lk_Recv() local(n, ofs, q)
 // (its_Lk_Send, its_Lk_LedOff, its_Lk_LedsOff : with its_Lk_FreeAll, above)
 
 /*
-    the link "i" shows the LED of its control : a note (any mode), a cc in the mode Toggle ; not an action ; among the links
-    of the same control (kind, number, channel), a link Toggle first, then the first one
+    the link "i" shows the LED of its control : a note (any mode), a cc in the mode Toggle ; not an action ; among the
+    active links (their bank, its_Lk_On) of the same control (kind, number, channel), a link Toggle first, then the first one
 */
 function its_Lk_LedOwner(i) local(L, M, j, r, ti, tj)
 (
     L = its_LkTab + i * its_LkSz;
     ti = (L[its_LkW_Mode] === its_LkM_Toggle);
-    r = (L[0] !== 0) && (L[3] !== its_LkT_Action) && ((L[0] === 2) || ti);
+    r = (L[0] !== 0) && (L[3] !== its_LkT_Action) && ((L[0] === 2) || ti) && its_Lk_On(L);
     j = 0; while (r && (j < its_LkN)) (
         M = its_LkTab + j * its_LkSz;
-        ((j !== i) && (M[0] === L[0]) && (M[1] === L[1]) && (M[2] === L[2]) && (M[3] !== its_LkT_Action)) ? (
+        ((j !== i) && (M[0] === L[0]) && (M[1] === L[1]) && (M[2] === L[2]) && (M[3] !== its_LkT_Action) && its_Lk_On(M)) ? (
             tj = (M[its_LkW_Mode] === its_LkM_Toggle);
             ((tj && !ti) || ((tj === ti) && (j < i))) ? (r = 0);
         );
@@ -15635,14 +15716,21 @@ function its_Lk_LedOwner(i) local(L, M, j, r, ti, tj)
     every 8 frames, and after a change of the links : its_LkOwnF) lit when the target is nearer to max than to min (Toggle :
     its state), sent when they change (its_LkLed -1 : to send ; a LED left lit by a link that no longer exists is switched off)
 */
-function its_Lk_Leds() local(i, L, s, v)
+function its_Lk_Leds() local(i, L, s, v, hi)
 (
     ((its_LkOwnF += 1) >= 8) ? ( its_LkOwnF = 0; i = 0; loop(its_LkN, its_LkOwn[i] = its_Lk_LedOwner(i); i += 1;); );
+    hi = its_Lk_BankHi();
     i = 0; loop(its_LkN,
         L = its_LkTab + i * its_LkSz;
         s = -1;
         ((L[0] !== 0) && (L[3] === its_LkT_Action)) ? (
-            (L[4] === its_LkA_Rate) ? (s = its_LkRateOn); // (its LED : lit when the knobs are incremental)
+            // (Rate : lit when the knobs are incremental ; Bank Prev, Next : when that bank exists ; Bank n : when it is
+            // the current one ; an action of another bank : nothing)
+            !its_Lk_On(L) ? 0 :
+            (L[4] === its_LkA_Rate) ? (s = its_LkRateOn) :
+            (L[4] === its_LkA_BankP) ? (s = (its_LkBank > 1)) :
+            (L[4] === its_LkA_BankN) ? (s = (its_LkBank < hi)) :
+            (L[4] === its_LkA_Bank) ? (s = (its_LkBank === L[5]));
         ) :
         (L[0] !== 0) ? (
             (L[its_LkW_Mode] === its_LkM_Toggle) ? ( its_Lk_TogSync(i); its_LkOwn[i] ? (s = its_LkTog[i]); ) :
@@ -15671,8 +15759,9 @@ function its_Lk_RateSet(on) local(i, L)
     mSL_log(SysLogBox, on ? "Links : the knobs with a rate are incremental" : "Links : the knobs with a rate are classic");
 );
 
-// @gfx : the actions of the links pressed (target LEDs : all the LEDs sent again ; Rate : an odd count of presses switches)
-function its_Lk_Actions() local(i, L, n)
+// @gfx : the actions of the links pressed (target LEDs : all the LEDs sent again ; Rate : an odd count of presses switches ;
+// Bank Prev, Bank Next : n banks, in 1 ... the highest bank of the links ; Bank n : that one)
+function its_Lk_Actions() local(i, L, n, hi)
 (
     i = 0; loop(its_LkN,
         ((n = its_LkAct[i] - its_LkActDone[i]) !== 0) ? (
@@ -15680,7 +15769,10 @@ function its_Lk_Actions() local(i, L, n)
             L = its_LkTab + i * its_LkSz;
             ((L[0] !== 0) && (L[3] === its_LkT_Action)) ? (
                 (L[4] === its_LkA_LEDs) ? memset(its_LkLed, -1, LK_CNT) :
-                (L[4] === its_LkA_Rate) ? ( (n & 1) ? its_Lk_RateSet(!its_LkRateOn); );
+                (L[4] === its_LkA_Rate) ? ( (n & 1) ? its_Lk_RateSet(!its_LkRateOn); ) :
+                (L[4] === its_LkA_BankP) ? ( (its_LkBank > 1) ? its_Lk_BankSet(max(1, its_LkBank - n)); ) :
+                (L[4] === its_LkA_BankN) ? ( hi = its_Lk_BankHi(); (its_LkBank < hi) ? its_Lk_BankSet(min(hi, its_LkBank + n)); ) :
+                (L[4] === its_LkA_Bank) ? its_Lk_BankSet(L[5]);
             );
         );
         i += 1;
@@ -15814,6 +15906,18 @@ function its_Lk_Frame() local(k)
     ((its_LkDrawnAt === gfx_executed) && ((its_LkLastN !== its_LkUiN) || (its_LkFlashEnd !== 0))) ? (ui_GFXdoNow |= 4);
 );
 
+// the text of the target "tt", "k", "ki" (Ctl 5, Effect 3 freq, LEDs, Bank Next, Bank 2)
+function its_Lk_TgtText(str, tt, k, ki) local(ty)
+(
+    (tt === its_LkT_Action) ? ( (k === its_LkA_Bank) ? sprintf(str, "Bank %d", ki) : strcpy(str, its_LkActN[((k > 0) && (k < its_LkActCnt)) ? k : 0]); ) :
+    (tt === its_LkT_Ctl) ? sprintf(str, "Ctl %d", k + 1) : (
+        ty = its_Lk_TyTK(tt);
+        sprintf(str, "%s %d", its_Tb_TyName(ty), k + 1);
+        (ki >= 0) ? strcat(str, sprintf(#its_LkM4, " %s", its_Lk_KNam(ty, ki)));
+    );
+    str;
+);
+
 // the text of the link "i" in "str" : Link n  cc m  [chan c]  [mode Toggle|Push]  target ...  min v  max v  [law Exp] ; an
 // action : Link n  cc m  [chan c]  target LEDs (a module of an instance in a session : i:name, see its_Xp_Ref)
 function its_Lk_Text(str, i) local(L, ty)
@@ -15826,7 +15930,7 @@ function its_Lk_Text(str, i) local(L, ty)
         strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "mode %s", its_LkModeN[L[its_LkW_Mode]]));
     );
     strcat(str, its_Xp_Sep());
-    (L[3] === its_LkT_Action) ? strcat(str, sprintf(#its_LkM4, "target %s", its_LkActN[((L[4] > 0) && (L[4] < its_LkActCnt)) ? L[4] : 0])) : (
+    (L[3] === its_LkT_Action) ? strcat(str, sprintf(#its_LkM4, "target %s", its_Lk_TgtText(#its_LkM5, L[3], L[4], L[5]))) : (
         (L[3] === its_LkT_Ctl) ? strcat(str, sprintf(#its_LkM4, "target Ctl %d", L[4] + 1)) : (
             ty = its_Lk_TyTK(L[3]);
             strcat(str, sprintf(#its_LkM4, "target %s %s %s", its_Tb_TyName(ty), its_Xp_Ref(#its_LkM5, ty, L[4]), its_Lk_KNam(ty, L[5])));
@@ -15846,6 +15950,7 @@ function its_Lk_Text(str, i) local(L, ty)
         );
         (L[its_LkW_Glide] > 0) ? ( strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "glide %.10g", L[its_LkW_Glide])); );
     );
+    (L[its_LkW_Bank] > 0) ? ( strcat(str, its_Xp_Sep()); strcat(str, sprintf(#its_LkM4, "bank %d", L[its_LkW_Bank])); );
     str;
 );
 
@@ -16010,13 +16115,13 @@ function its_Lk_TouchCtl(n)
 
 // Learn : the control learned and its target linked : the link that has both already, else a free one (its number + 1 ;
 // 0 : no free link) ; written in the log
-function its_Lk_LearnLink() local(i, f, L, r)
+function its_Lk_LearnLink() local(i, f, L, r, bk)
 (
     f = -1;
     i = 0; while ((f < 0) && (i < its_LkN)) (
         L = its_LkTab + i * its_LkSz;
         ((L[0] === its_LkLrnK) && (L[1] === its_LkLrnNum) && (L[2] === its_LkLrnCh) && (L[3] === its_LkLrnTt) && (L[4] === its_LkLrnTk)
-            && (L[5] === its_LkLrnKi)) ? (f = i);
+            && (L[5] === its_LkLrnKi) && its_Lk_On(L)) ? (f = i); // (in another bank : a new link)
         i += 1;
     );
     // (a link that has this control and this target keeps its mode... ; a new one : the defaults, a cc : pickup On and the
@@ -16037,6 +16142,15 @@ function its_Lk_LearnLink() local(i, f, L, r)
                 its_LkX[its_LkW_Rate] = L[its_LkW_Rate]; its_LkX[its_LkW_RateF] = L[its_LkW_RateF];
             );
         );
+        // the bank : the current one if another link of this control is in a bank (the control changes with the banks),
+        // else 0 (all the banks)
+        bk = 0; i = 0; while (!bk && (i < its_LkN)) (
+            L = its_LkTab + i * its_LkSz;
+            ((L[0] === its_LkLrnK) && (L[1] === its_LkLrnNum) && ((L[2] === 0) || (its_LkLrnCh === 0) || (L[2] === its_LkLrnCh))
+                && (L[its_LkW_Bank] > 0)) ? (bk = its_LkBank);
+            i += 1;
+        );
+        its_LkX[its_LkW_Bank] = bk;
     );
     i = 0; while ((f < 0) && (i < LK_CNT)) ( (its_LkTab[i * its_LkSz] === 0) ? (f = i); i += 1; );
     (f >= 0) ? (
@@ -16053,18 +16167,6 @@ function its_Lk_SrcText(str, kd, num, ch)
 (
     sprintf(str, "%s %d", (kd === 1) ? "cc" : "note", num);
     (ch > 0) ? strcat(str, sprintf(#its_LkM4, " /%d", ch));
-    str;
-);
-
-// the text of the target "tt", "k", "ki" (Ctl 5, Effect 3 freq, LEDs)
-function its_Lk_TgtText(str, tt, k, ki) local(ty)
-(
-    (tt === its_LkT_Action) ? strcpy(str, its_LkActN[((k > 0) && (k < its_LkActCnt)) ? k : 0]) :
-    (tt === its_LkT_Ctl) ? sprintf(str, "Ctl %d", k + 1) : (
-        ty = its_Lk_TyTK(tt);
-        sprintf(str, "%s %d", its_Tb_TyName(ty), k + 1);
-        (ki >= 0) ? strcat(str, sprintf(#its_LkM4, " %s", its_Lk_KNam(ty, ki)));
-    );
     str;
 );
 
@@ -16092,12 +16194,12 @@ function its_Lk_ActOf(w) local(i, a)
 */
 function its_Tb_Link(chk)
 local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, mn, mx, lw, md, gk, gc, gt, gm, gx, gl, gmd, L, b, fty, ok, ks, nk, mo,
-    pk, gd, st, cv, gpk, ggd, gst, gcv, r1, r2, grt)
+    pk, gd, st, cv, gpk, ggd, gst, gcv, r1, r2, grt, bk, gbk)
 (
     n = its_Tb_Int(chk ? "Check Link" : "Link", 1, LK_CNT);
-    kd = num = ch = tt = ty = lw = md = kw = pk = gd = st = cv = r1 = r2 = 0; k = ki = -1; mn = -1; mx = 1;
+    kd = num = ch = tt = ty = lw = md = kw = pk = gd = st = cv = r1 = r2 = bk = 0; k = ki = -1; mn = -1; mx = 1;
     gk = gc = gt = gm = gx = gl = gmd = 0; // the keys given : the control, chan, target, min, max, law, mode
-    gpk = ggd = gst = gcv = grt = 0; // pickup, glide, steps, curve, rate
+    gpk = ggd = gst = gcv = grt = gbk = 0; // pickup, glide, steps, curve, rate, bank
     while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Tb_Peek())) (
         its_Tb_Next();
         ((w === its_TK_cc) || (w === its_TK_note)) ? (
@@ -16114,6 +16216,17 @@ local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, mn, mx, lw, md, gk, gc, gt
             gt = 1;
             ((w = its_Tb_Next()) === its_TK_Ctl) ? (
                 tt = its_LkT_Ctl; ty = 0; k = its_Tb_Int("target Ctl", 1, NB_GSL) - 1; ki = -1;
+            ) :
+            (w === its_LkSym_BkAct) ? (
+                // the actions Bank Prev, Bank Next, Bank n (n : the word 5)
+                tt = its_LkT_Action; ty = 0; ki = -1;
+                (its_Tb_Peek() === its_LkSym_BkPrev) ? ( its_Tb_Next(); k = its_LkA_BankP; ) :
+                (its_Tb_Peek() === its_LkSym_BkNext) ? ( its_Tb_Next(); k = its_LkA_BankN; ) :
+                (abs(its_Tb_Peek()) < mSL_CharConst) ? ( k = its_LkA_Bank; ki = its_Tb_Int("target Bank", 1, its_LkBkMx); ) : (
+                    k = its_LkA_BankN;
+                    sprintf(#its_TbW, "Link %d : target Bank Prev, Bank Next or Bank n (1 ... %d) expected", n, its_LkBkMx);
+                    its_Tb_Err(2730, #its_TbW);
+                );
             ) :
             (its_Lk_ActOf(w) > 0) ? (
                 tt = its_LkT_Action; ty = 0; k = its_Lk_ActOf(w); ki = -1;
@@ -16135,7 +16248,7 @@ local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, mn, mx, lw, md, gk, gc, gt
                 );
                 ki = kj;
             ) : (
-                sprintf(#its_TbW, "Link %d : target %s : Ctl, Reader, Writer, Effect or LEDs expected", n, mSL_edit_value(#its_TbV, w));
+                sprintf(#its_TbW, "Link %d : target %s : Ctl, Reader, Writer, Effect, LEDs, Rate or Bank expected", n, mSL_edit_value(#its_TbV, w));
                 its_Tb_Err(2730, #its_TbW);
             );
         ) :
@@ -16185,6 +16298,9 @@ local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, mn, mx, lw, md, gk, gc, gt
             );
             grt = 1;
         ) :
+        (w === its_LkSym_BkKey) ? (
+            bk = its_Tb_Int("bank", 0, its_LkBkMx); gbk = 1; // (0 : all the banks)
+        ) :
         its_Tb_KeyErr(w, "Link");
     );
     mo = (tt >= its_LkT_Reader) && (tt <= its_LkT_Effect); // (a key of a module)
@@ -16206,6 +16322,10 @@ local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, mn, mx, lw, md, gk, gc, gt
         ((r1 > 0) && (kd === 2)) ? (
             sprintf(#its_TbW, "Link %d : rate : only for a cc (a knob, a fader), not a note", n);
             its_Tb_Err(2742, #its_TbW);
+        ) :
+        ((tt === its_LkT_Action) && (k >= its_LkA_BankP) && (bk > 0)) ? (
+            sprintf(#its_TbW, "Link %d : target %s is in all the banks : no bank %d", n, its_LkActN[k], bk);
+            its_Tb_Err(2743, #its_TbW);
         ) :
         (!chk && mo && (!gm || !gx)) ? (
             sprintf(#its_TbW, "Link %d : min and max expected (the values of the key at 0 and at 127)", n);
@@ -16285,6 +16405,9 @@ local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, mn, mx, lw, md, gk, gc, gt
                 (gl && (L[8] !== lw)) ? (
                     its_Lk_Diff(n, "law", its_TbMShpN[L[8] ? 1 : 0], its_TbMShpN[lw]); ok = 0;
                 );
+                (gbk && (L[its_LkW_Bank] !== bk)) ? (
+                    its_Lk_Diff(n, "bank", sprintf(#its_LkM, "%d", L[its_LkW_Bank]), sprintf(#its_LkM2, "%d", bk)); ok = 0;
+                );
             );
             ok ? (
                 sprintf(#its_TbW, "Check Link %d OK", n);
@@ -16293,7 +16416,7 @@ local(n, w, i, v, kd, num, ch, tt, ty, k, kw, kj, ki, mn, mx, lw, md, gk, gc, gt
         ) : (
             its_Lk_XReset(); its_LkX[its_LkW_Mode] = md;
             its_LkX[its_LkW_Pick] = pk; its_LkX[its_LkW_Glide] = gd; its_LkX[its_LkW_Steps] = st; its_LkX[its_LkW_Curve] = max(0, cv);
-            its_LkX[its_LkW_Rate] = r1; its_LkX[its_LkW_RateF] = r2;
+            its_LkX[its_LkW_Rate] = r1; its_LkX[its_LkW_RateF] = r2; its_LkX[its_LkW_Bank] = bk;
             its_Lk_Write(n - 1, kd, num, ch, tt, k, ki, mn, mx, lw);
         );
     );
@@ -18710,6 +18833,7 @@ loadMode ? (
             memset(its_LkSetV, its_LkNoV, LK_CNT); its_LkOwnF = 8;
             memset(its_LkRzn, 0, LK_CNT); memset(its_LkRarm, 0, LK_CNT); memset(its_LkForce, 0, LK_CNT); memset(its_LkRu, -1, LK_CNT);
             its_LkRateOn = savtmp[3] & 1; // (the knobs with a rate incremental ; a session saved before : 0)
+            its_LkBank = max(1, min(its_LkBkMx, floor(savtmp[3] / 2))); // (the current bank ; saved before : 1)
             its_Lk_Count();
         ) :
         (savtmp[0] === 'tnam') ? (
@@ -18821,7 +18945,8 @@ loadMode ? (
     );
     // Save the links (MIDI), if there are some
     (its_LkN > 0) ? (
-        savtmp[0] = 'link'; savtmp[1] = LK_CNT; savtmp[2] = its_LkSz; savtmp[3] = its_LkRateOn; // (1 : the knobs with a rate incremental)
+        // (savtmp[3] : 1 the knobs with a rate incremental, + 2 x the current bank)
+        savtmp[0] = 'link'; savtmp[1] = LK_CNT; savtmp[2] = its_LkSz; savtmp[3] = its_LkRateOn + 2 * its_LkBank;
         svtotal += save_mem(0, savtmp, TMPSIZ);
         svtotal += save_mem(0, its_LkTab, LK_CNT * its_LkSz);
     );
@@ -25298,10 +25423,13 @@ local (h1, h2, h3, uix_jneed, zzmi, i, k, n, nt, mx, nl, zz, zzmcl, xx, hk, hx, 
     line 1 : 0 "Links" (clic : menu of all the links : Dump, Free), 1 their count, 2 Learn Off|On (left clic), 3 MIDI log
         Off|On (Global midilog ; left clic), 4 the last control received (Learn : the one learned), 5 Learn : the target (the
         last slider touched in a reader, a writer, an effect or in Controls), 6 Learn : Link (left clic : the link made, or
-        the one that has this control and this target changed), 7 the page (left clic : the next one ; right clic : menu)
-    the links of the page (16, in the order of their numbers) : its number and its control (green when it moves ; left
-        clic : selected), the module and the key (left clic : the module shown), min and max (potentiometers : drag ;
-        Shift + clic : the bounds of the key), the law (left clic : Lin <-> Exp) ; right clic on a cell : the menu of the link
+        the one that has this control and this target changed), 7 the page (left clic : the next one ; right clic : menu),
+        8 the current bank (left clic : the next one, up to the highest bank of the links + 1 ; right clic : menu of the
+        banks, and "only the links of this bank", LinksStruct[2], orange)
+    the links of the page (16, in the order of their numbers) : its number and its control (green when it moves, gray in
+        another bank ; left clic : selected), the module and the key (left clic : the module shown), min and max
+        (potentiometers : drag ; Shift + clic : the bounds of the key), the law (left clic : Lin <-> Exp), the mode, the
+        bank (left clic : the current bank <-> all the banks ; Alt + clic : typed) ; right clic on a cell : the menu of the link
     the text : the link under the mouse (or the one selected) and the value of its target ; else, what to do
 */
 
@@ -25355,6 +25483,7 @@ function its_Lk_ResetRange(i) local(L)
 function its_LkEd_Bounds(i, w)
 (
     (w === its_LkW_Glide) ? ( its_LkLo = 0; its_LkHi = 60; its_LkFl = 0; ) :
+    (w === its_LkW_Bank) ? ( its_LkLo = 0; its_LkHi = its_LkBkMx; its_LkFl = 2; ) :
     (w === its_LkW_Steps) ? ( its_LkLo = 0; its_LkHi = 128; its_LkFl = 2; ) :
     its_Lk_Bounds(i);
 );
@@ -25381,7 +25510,8 @@ function its_LkEd_Open(i, w) local(L)
         its_LkEd_Bounds(i, w);
         sprintf(#its_LkEdO, "%.10g", L[w]);
         sprintf(#its_LkEdTt, "New value for  link %d %s (%.6g ... %.6g)", i + 1,
-            (w === 6) ? "min" : (w === 7) ? "max" : (w === its_LkW_Glide) ? "glide, in seconds" : "steps (0 : none)", its_LkLo, its_LkHi);
+            (w === 6) ? "min" : (w === 7) ? "max" : (w === its_LkW_Glide) ? "glide, in seconds" :
+            (w === its_LkW_Bank) ? "bank (0 : all the banks)" : "steps (0 : none)", its_LkLo, its_LkHi);
     );
     strcpy(#its_LkEdS, #its_LkEdO);
     ui_screen_open("control.prompt");
@@ -25419,6 +25549,9 @@ function its_LkEd_Take() local(L, v, k, n)
                 );
                 its_LkRzn[its_LkEdI] = its_LkRarm[its_LkEdI] = 0; its_LkRu[its_LkEdI] = -1;
             ) :
+            (its_LkEdW === its_LkW_Bank) ? (
+                its_Lk_SetBank(its_LkEdI, max(0, min(its_LkBkMx, floor(its_Lk_ParseNum(#its_LkEdS, L[its_LkW_Bank]) + 0.5))));
+            ) :
             (its_LkEdW === its_LkW_Curve) ? (
                 // the curve : empty (none), its number, or its name
                 (strlen(#its_LkEdS) === 0) ? (L[its_LkW_Curve] = 0) : (
@@ -25450,7 +25583,7 @@ function its_Lk_Wait(i) local(L, v, uv, p)
 (
     L = its_LkTab + i * its_LkSz;
     ((L[0] !== 0) && (L[3] !== its_LkT_Action) && (L[its_LkW_Mode] === its_LkM_Abs) && (L[its_LkW_Pick] || its_LkForce[i])
-        && !(its_LkRateOn && (L[its_LkW_Rate] > 0)) && ((v = its_Lk_TgtVal(i)) !== its_LkNoV)) ? (
+        && its_Lk_On(L) && !(its_LkRateOn && (L[its_LkW_Rate] > 0)) && ((v = its_Lk_TgtVal(i)) !== its_LkNoV)) ? (
         (its_LkPick[i] && (its_LkSetV[i] !== its_LkNoV) && (abs(v - its_LkSetV[i]) <= 0.000001 * (1 + abs(v)))) ? 0 : (
             uv = max(0, min(1, its_Lk_Unmap(L, v))); p = its_LkPrevU[i];
             (p < 0) ? 3 : (p < uv) ? 1 : 2;
@@ -25477,7 +25610,13 @@ function its_Lk_OptText(str, L) local(md)
 function its_Lk_NowText(str, i) local(L, ty, b, w)
 (
     L = its_LkTab + i * its_LkSz;
-    (L[3] === its_LkT_Action) ? strcpy(str, (L[4] === its_LkA_LEDs) ? "LEDs : each press sends again the states of the Toggle links" : "") :
+    (L[3] === its_LkT_Action) ? (
+        (L[4] === its_LkA_LEDs) ? strcpy(str, "LEDs : each press sends again the states of the Toggle links") :
+        (L[4] === its_LkA_Rate) ? strcpy(str, its_LkRateOn ? "Rate : the knobs with a rate are incremental" : "Rate : the knobs are classic") :
+        (L[4] === its_LkA_BankP) ? sprintf(str, "Bank Prev : the previous bank (now : bank %d)", its_LkBank) :
+        (L[4] === its_LkA_BankN) ? sprintf(str, "Bank Next : the next bank (now : bank %d ; the last one : %d)", its_LkBank, max(1, its_Lk_BankHi())) :
+        (L[4] === its_LkA_Bank) ? sprintf(str, "Bank %d : that bank (now : bank %d)", L[5], its_LkBank) : strcpy(str, "");
+    ) :
     (L[3] === its_LkT_Ctl) ? sprintf(str, "Ctl %d now : %.4g", L[4] + 1, its_Ctl_Get(L[4])) : (
         ty = its_Lk_TyTK(L[3]);
         ((b = its_Tb_Blk(ty, L[4])) === 0) ? sprintf(str, "%s %d does not exist : the link does nothing", its_Tb_TyName(ty), L[4] + 1) :
@@ -25487,6 +25626,7 @@ function its_Lk_NowText(str, i) local(L, ty, b, w)
             sprintf(str, "%s %d %s now : %.4g", its_Tb_TyName(ty), L[4] + 1, its_Lk_KNam(ty, L[5]), its_Tb_g1);
         );
     );
+    !its_Lk_On(L) ? strcat(str, sprintf(#its_LkM4, " ; bank %d : inactive (now : bank %d)", L[its_LkW_Bank], its_LkBank));
     ((w = its_Lk_Wait(i)) > 0) ? strcat(str, (w === 1) ? " ; pickup : move the control up" : (w === 2) ?
         " ; pickup : move the control down" : " ; pickup : move the control to the value");
     its_LkGOn[i] ? strcat(str, " ; gliding");
@@ -25501,12 +25641,21 @@ function its_Lk_NowText(str, i) local(L, ty, b, w)
 
 function show_Links_Pad(blockId)
 local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, zz, zzmcl, xx, c, L, ty, b, v, dr, jmc, t, ok, fe,
-    wt, ab)
+    wt, ab, nt, flt, hi, on)
 (
     t = time_precise();
     its_LkEd_Take(); // (a min or a max typed in the prompt, its_LkEd_Open)
-    // the links that exist (its_LkPg), the page, the link selected
-    n = 0; i = 0; loop(its_LkN, (its_LkTab[i * its_LkSz] !== 0) ? ( its_LkPg[n] = i; n += 1; ); i += 1;);
+    // the links that exist (its_LkPg ; LinksStruct[2] : only those of the current bank and of all the banks), the page,
+    // the link selected
+    flt = LinksStruct[2] ? 1 : 0;
+    n = nt = 0; i = 0; loop(its_LkN,
+        L = its_LkTab + i * its_LkSz;
+        (L[0] !== 0) ? (
+            nt += 1;
+            (!flt || its_Lk_On(L)) ? ( its_LkPg[n] = i; n += 1; );
+        );
+        i += 1;
+    );
     np = max(1, ceil(n / pad_LkG_NL));
     pg = LinksStruct[0] = max(0, min(np - 1, 0|LinksStruct[0]));
     nl = max(1, min(pad_LkG_NL, n - pg * pad_LkG_NL));
@@ -25563,7 +25712,7 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                 i = 0; loop(pad_Lk_Siz, pad_Lk_Colrs[i] = Col_InfoA; strcpy(pad_Lk_Labs[i], ""); i += 1;);
                 strcpy(pad_Lk_Labs[0], "Links");
                 pad_Lk_Colrs[0] = Col_P1;
-                sprintf(pad_Lk_Labs[1], "%d link%s", n, (n > 1) ? "s" : "");
+                sprintf(pad_Lk_Labs[1], "%d link%s", nt, (nt > 1) ? "s" : "");
                 its_LkRateOn ? strcat(pad_Lk_Labs[1], " : rate"); // (the knobs with a rate incremental : clic)
                 pad_Lk_Colrs[1] = its_LkRateOn ? Color_Dark_Orange : Color_Heliotrope;
                 strcpy(pad_Lk_Labs[2], its_LkLearn ? "Learn On" : "Learn Off");
@@ -25599,6 +25748,9 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                 );
                 sprintf(pad_Lk_Labs[7], "Page %d/%d", pg + 1, np);
                 pad_Lk_Colrs[7] = (np > 1) ? Col_P1 : Col_Inactive;
+                // the current bank (orange : only its links shown, and those of all the banks)
+                sprintf(pad_Lk_Labs[8], flt ? "Bank %d only" : "Bank %d", its_LkBank);
+                pad_Lk_Colrs[8] = flt ? Color_Dark_Orange : Col_P1;
                 zz = control_jpad(pad_Lk);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 39;
@@ -25625,10 +25777,29 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                     ((zz & ui_jpad_ev_lmc) && (zzmcl === 6) && ok) ? (
                         (k = its_Lk_LearnLink()) ? (
                             LinksStruct[1] = k;
-                            m = 0; i = 0; loop(k - 1, (its_LkTab[i * its_LkSz] !== 0) ? (m += 1); i += 1;);
+                            m = 0; i = 0; loop(k - 1, L = its_LkTab + i * its_LkSz; ((L[0] !== 0) && (!flt || its_Lk_On(L))) ? (m += 1); i += 1;);
                             LinksStruct[0] = floor(m / pad_LkG_NL); // (its page)
                         );
                         its_LkLrnK = its_LkLrnTt = 0; its_LkLrnKi = -1; // (Learn stays On : the next link)
+                    ) :
+                    (zzmcl === 8) ? (
+                        (zz & ui_jpad_ev_lmc) ? (
+                            // the next bank : up to the highest bank of the links + 1, then the first one
+                            hi = its_Lk_BankHi();
+                            its_Lk_BankSet((its_LkBank < min(its_LkBkMx, hi + 1)) ? its_LkBank + 1 : 1);
+                        ) :
+                        (zz & ui_jpad_ev_rmc) ? (
+                            k = 0; loop(its_LkBkMx,
+                                m = 0; i = 0; loop(its_LkN, L = its_LkTab + i * its_LkSz; ((L[0] !== 0) && (L[its_LkW_Bank] === k + 1)) ? (m += 1); i += 1;);
+                                sprintf(#its_LkM3, (m === 0) ? "Bank %d" : (m === 1) ? "Bank %d : 1 link" : "Bank %d : %d links", k + 1, m);
+                                its_Menu_Item(menu_LkBank, k, k + 1 === its_LkBank, 0, #its_LkM3);
+                                k += 1;
+                            );
+                            its_Menu_Item(menu_LkBank, 17, flt, 0, 0);
+                            xx = control_jmenu(menu_LkBank);
+                            ((xx >= 1) && (xx <= its_LkBkMx)) ? its_Lk_BankSet(xx) :
+                            (xx === 18) ? ( LinksStruct[2] = !flt; LinksStruct[0] = 0; );
+                        );
                     ) :
                     (zzmcl === 7) ? (
                         (zz & ui_jpad_ev_lmc) ? (
@@ -25654,10 +25825,11 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                         i = its_LkPg[pg * pad_LkG_NL + j];
                         L = its_LkTab + i * its_LkSz;
                         sprintf(pad_LkG_Labs[c], "%d : %s", i + 1, its_Lk_SrcText(#its_LkM, L[0], L[1], L[2]));
-                        // (pickup : the link waits for its control, an arrow : where to move it)
+                        // (pickup : the link waits for its control, an arrow : where to move it ; gray : another bank)
                         ((wt = its_Lk_Wait(i)) > 0) ? strcat(pad_LkG_Labs[c], (wt === 1) ? " ↑" : (wt === 2) ? " ↓" : " ↕");
+                        on = its_Lk_On(L);
                         pad_LkG_Colrs[c] = (its_LkFlash[i] > t) ? Color_Limegreen : (i + 1 === sel) ? Color_Goldenrod :
-                            (wt > 0) ? Color_Dark_Orange : Col_P3;
+                            (wt > 0) ? Color_Dark_Orange : on ? Col_P3 : Col_Inactive;
                         (L[3] === its_LkT_Action) ? (
                             // an action : its name ; no min, max, law, mode
                             strcpy(pad_LkG_Labs[c + 1], its_Lk_TgtText(#its_LkM, L[3], L[4], L[5]));
@@ -25684,6 +25856,9 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                                 pad_LkG_Colrs[c + 6] = Color_Dark_Orange;
                             );
                         );
+                        // the bank : 0 all the banks ; green the current one, gray another one
+                        (L[its_LkW_Bank] === 0) ? strcpy(pad_LkG_Labs[c + 7], "All banks") : sprintf(pad_LkG_Labs[c + 7], "Bank %d", L[its_LkW_Bank]);
+                        pad_LkG_Colrs[c + 7] = (L[its_LkW_Bank] === 0) ? Col_P2 : on ? Color_Limegreen : Col_Inactive;
                     ) : (
                         m = 0; loop(pad_LkG_NC, strcpy(pad_LkG_Labs[c + m], ""); pad_LkG_Colrs[c + m] = Col_Inactive; m += 1;);
                         strcpy(pad_LkG_Labs[c], "no link");
@@ -25737,6 +25912,8 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                             (L[its_LkW_Rate] > 0) ? sprintf(#its_LkM3, "Rate (incremental) : %.4g s ... %.4g s...", L[its_LkW_Rate], L[its_LkW_RateF]) :
                                 strcpy(#its_LkM3, "Rate (incremental) : none...");
                             its_Menu_Item(menu_Lk, 10, 0, !ab || (L[0] !== 1), #its_LkM3); // (a cc)
+                            (L[its_LkW_Bank] > 0) ? sprintf(#its_LkM3, "Bank : %d...", L[its_LkW_Bank]) : strcpy(#its_LkM3, "Bank : all...");
+                            its_Menu_Item(menu_Lk, 11, 0, (L[3] === its_LkT_Action) && (L[4] >= its_LkA_BankP), #its_LkM3);
                             xx = control_jmenu(menu_Lk);
                             (xx === 1) ? mSL_log(SysLogBox, its_Lk_Text(#its_LkT, i)) :
                             (xx === 2) ? ( its_LkRel = i + 1; its_LkLrnSeen = its_LkCandN; ) :
@@ -25749,9 +25926,10 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                             ((xx === 9) && ab) ? its_LkEd_Open(i, its_LkW_Steps) :
                             ((xx === 10) && ab) ? its_LkEd_Open(i, its_LkW_Curve) :
                             ((xx === 11) && ab && (L[0] === 1)) ? its_LkEd_Open(i, its_LkW_Rate) :
-                            (xx === 12) ? its_Lk_ShowTarget(L) :
-                            (xx === 14) ? ( its_Lk_LedOff(i); L[0] = 0; its_Lk_Count(); (sel === i + 1) ? (LinksStruct[1] = 0); ) :
-                            (xx === 15) ? ( its_Lk_LedsOff(); its_Lk_FreeAll(); LinksStruct[0] = LinksStruct[1] = 0; );
+                            ((xx === 12) && !((L[3] === its_LkT_Action) && (L[4] >= its_LkA_BankP))) ? its_LkEd_Open(i, its_LkW_Bank) :
+                            (xx === 13) ? its_Lk_ShowTarget(L) :
+                            (xx === 15) ? ( its_Lk_LedOff(i); L[0] = 0; its_Lk_Count(); (sel === i + 1) ? (LinksStruct[1] = 0); ) :
+                            (xx === 16) ? ( its_Lk_LedsOff(); its_Lk_FreeAll(); LinksStruct[0] = LinksStruct[1] = 0; );
                         ) :
                         ((zz & ui_jpad_ev_lmc) && !(dr & 2)) ? (
                             (c === 0) ? (
@@ -25759,6 +25937,12 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                             ) :
                             ((c === 1) || (c === 2)) ? (
                                 its_Lk_ShowTarget(L);
+                            ) :
+                            (c === 7) ? (
+                                // the bank : Alt + clic the prompt ; clic : the current bank <-> all the banks (an action Bank :
+                                // always all)
+                                (jmc & altCap) ? ( !((L[3] === its_LkT_Action) && (L[4] >= its_LkA_BankP)) ? its_LkEd_Open(i, its_LkW_Bank); ) :
+                                its_Lk_SetBank(i, (L[its_LkW_Bank] === its_LkBank) ? 0 : its_LkBank);
                             ) :
                             (L[3] === its_LkT_Action) ? (
                                 0; // (an action : no min, max, law, mode)
@@ -25803,7 +25987,7 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                     ui_split_top(ui_texth()); ui_text("then clic Link. Learn stays On for the next one."); ui_pop();
                 ) : (
                     ui_split_top(ui_texth()); ui_text("Mouse over a link : its text. min, max : drag ; Shift + clic : bound ; Alt + clic : type."); ui_pop();
-                    ui_split_top(ui_texth()); ui_text("law, mode : clic ; module, key : clic shows it ; right clic : menu (pickup, glide, steps...)."); ui_pop();
+                    ui_split_top(ui_texth()); ui_text("law, mode : clic ; bank : clic (this bank <-> all) ; module, key : clic shows it ; right clic : menu."); ui_pop();
                 );
             ui_pop();
 
