@@ -933,6 +933,23 @@ KW_rdwk = 'rdwk'; // the work area of a reader in mode Stretch (its_Rdr_Work)
 <? include("CMGS-libs/ui-lib-JJ-GUI.jsfx-inc"); ?>
 // The engines of the VU meter and of the Smooth Limiter (the effect types "VU meter" and "Limiter")
 <? include("CMGS-libs/GM-Meters.jsfx-inc"); ?>
+// keeps the position of the displayed module "bCurrent" (used to find the "current" module ; here, in @init : the modules
+// "VU meter", "Limiter" of GM-Meters-Modules call it)
+function keepBlockInfos(bCurrent)
+local(i)
+(
+    blockDesc ? (
+        // keep position
+        i = 0; loop (dcbMSize - 1,
+            (blockDesc[i] === bCurrent) ? (
+                blockDesc[i+dcbMSize] = A99PBlock = (ui_top_retina()*10000)+ui_height_retina();
+            );
+            i += 1;
+        );
+    );
+);
+
+// (the modules "VU meter", "Limiter" : GM-Meters-Modules, after mSL_Serialize, whose save_mem, load_mem it calls)
 // The mSL compiler
 <? include("CMGS-libs/mSL_Comp_lib.jsfx-inc"); ?>
 
@@ -1497,9 +1514,7 @@ ui_lib_start = mSL_StM_BlockStart('uilb'); // ui lib block
 ui_lib_end = ui_setup(ui_lib_start);
 mSL_StM_BlockEnd(ui_lib_end);
 gfxInit();
-// the VU meter and the limiter (GM-Meters) : the table of the limiter, the offscreen image of the meters
-lm_hctab = make_array(lm_TabSize); lm_InitTab(lm_hctab);
-ui_reserve_image(VU_IMG);
+// (the VU meter and the limiter, GM-Meters : the table of the limiter, the offscreen image of the meters : fm_Init, below)
 //====== Init "ui-lib-JJ-GUI.jsfx-inc" ======
 studPrefDispPanes = 2;
 studPrefDispSize = 1;
@@ -1522,7 +1537,7 @@ mm_lowblocks[0] = 'Low_'; mm_lowblocks[1] = '_Mem';
 */
 
 // The Main menu
-dcbNamesCnt = 192; // up to 192 strings in the dcb Menu - 163 used with 32 user modules (16 views Effect A ... P)
+dcbNamesCnt = 224; // up to 224 strings in the dcb Menu (192 until the modules "VU meter", "Limiter" : 2026-11-17)
 // memory block for the menu
 GUI_Main_Menu_Block = mSL_StM_Alloc(ui_jmenu_items+dcbNamesCnt, 'Menu', mSL_StM_FlClear);
 
@@ -2153,6 +2168,15 @@ savcode = '1tr6'; // a save code
 // Saving doubles in @serialize as two singles : save_mem, load_mem, savwrk (shared, mSL_Serialize.jsfx-inc)
 <? include("CMGS-libs/mSL_Serialize.jsfx-inc"); ?>
 ser_Init();
+// The modules "VU meter A" ... "D" and "Limiter A" ... "D" (as in Diffusion-3, 2026-11-17) : the engines of GM-Meters on
+// the channels of the track, its inputs (before Interstys) or its outputs (after it, whatever the patch) ; see fm_Block
+// (@block), fm_Sample (@sample), fm_Gfx (@gfx), the block 'fxm1' (@serialize), show_FxMeter_Pad ; fm_Init : also the
+// table of the limiter and the offscreen image of the meters (the effect types VU meter, Limiter use them too)
+fm_HasIn = 1;
+<? include("CMGS-libs/GM-Meters-Modules.jsfx-inc"); ?>
+fm_Init();
+its_FmIn = make_array(CH_NB); its_FmOut = make_array(CH_NB); // (the samples of the track given to them, @sample)
+mm_usr_prot[mm_usr_prot_ptr] = fm_ptr; mm_usr_prot_ptr += 1; // (their work areas : kept by the garbage collector)
 
 
 // Créations des tables d'objets et de cellules
@@ -7174,7 +7198,7 @@ local (cb, lcbl, cpy)
 
 
 function mkModuleMenu()
-local (i, j, g, it, fid, sid, ttl, gl0, gl1, gl2, gl3, gl4, othFirst, tmp, bln, blu, itdsp, MM2, blockStrSpace, blockThemeBlack, blockThemeTron, blockThemeLightCyan, blockThemeOrange, blockThemeBlue, blockThemeDarkCyan, blockThemeDarkGreen, blockThemeDarkRed, blockThemeLightAmber, blockThemeNeonGreen, blockThemeLightMagenta)
+local (i, j, g, it, fid, sid, ttl, gl0, gl1, gl2, gl3, gl4, gl5, othFirst, tmp, bln, blu, itdsp, MM2, blockStrSpace, blockThemeBlack, blockThemeTron, blockThemeLightCyan, blockThemeOrange, blockThemeBlue, blockThemeDarkCyan, blockThemeDarkGreen, blockThemeDarkRed, blockThemeLightAmber, blockThemeNeonGreen, blockThemeLightMagenta)
 (
 
     i = 0; loop(dcbNamesCnt,
@@ -7317,6 +7341,17 @@ local (i, j, g, it, fid, sid, ttl, gl0, gl1, gl2, gl3, gl4, othFirst, tmp, bln, 
     blockDispNames[blockAllMods] = "Modules"; // see show_Summary_Pad (all the kinds)
     blockLinks = (itdsp += 1);
     blockDispNames[blockLinks] = "Links"; // see show_Links_Pad (the MIDI links)
+    // the modules "VU meter A" ... "D" and "Limiter A" ... "D" (GM-Meters-Modules, 2026-11-17 ; after "Links" : the numbers
+    // of the modules are saved), in the sub-menu "VU meters, Limiters" (no summary module)
+    blockFxMeter0 = itdsp + 1; // blockFxMeter0 ... blockFxMeter0 + 7 (FM_NM)
+    blockDispNames[(itdsp += 1)] = "VU meter A";
+    blockDispNames[(itdsp += 1)] = "VU meter B";
+    blockDispNames[(itdsp += 1)] = "VU meter C";
+    blockDispNames[(itdsp += 1)] = "VU meter D";
+    blockDispNames[(itdsp += 1)] = "Limiter A";
+    blockDispNames[(itdsp += 1)] = "Limiter B";
+    blockDispNames[(itdsp += 1)] = "Limiter C";
+    blockDispNames[(itdsp += 1)] = "Limiter D";
 
     blockUsrFirst = itdsp+1;
     // Add users modules
@@ -7332,20 +7367,22 @@ local (i, j, g, it, fid, sid, ttl, gl0, gl1, gl2, gl3, gl4, othFirst, tmp, bln, 
     blockUsrLast = itdsp;
     //
     // The numbers above are the module numbers (kept in the panes descriptions, saved with the project).
-    // The "Modules" submenu shows them in another order : first 5 sub-menus (Lines, Readers, Writers, Effects, Curves ;
-    // each one starts with its summary module), then the other modules, sorted alphabetically.
+    // The "Modules" submenu shows them in another order : first 6 sub-menus (Lines, Readers, Writers, Effects, Curves ;
+    // each one starts with its summary module ; then VU meters, Limiters), then the other modules, sorted alphabetically.
     // blockDispIdts[menu item] = module number (0 for a sub-menu title), blockDispInverts[module number] = menu item
     i = 0; loop(blockUsrLast + 1, blockModNames[i] = blockDispNames[i]; i += 1;);
     it = blockFirst;
-    g = 0; loop(5,
+    g = 0; loop(6,
         (g === 0) ? (ttl = ">Lines"; fid = blockLineA; sid = blockLines;) :
         (g === 1) ? (ttl = ">Readers"; fid = blockReaderA; sid = blockReaders;) :
         (g === 2) ? (ttl = ">Writers"; fid = blockWriterA; sid = blockWriters;) :
-        (g === 3) ? (ttl = ">Effects"; fid = blockEffectA; sid = blockEffects;) : (ttl = ">Curves"; fid = blockCurvesA; sid = blockCurves;);
+        (g === 3) ? (ttl = ">Effects"; fid = blockEffectA; sid = blockEffects;) :
+        (g === 4) ? (ttl = ">Curves"; fid = blockCurvesA; sid = blockCurves;) : (ttl = ">VU meters, Limiters"; fid = blockFxMeter0; sid = 0;);
         blockDispNames[it] = ttl; blockDispIdts[it] = 0; it += 1;
         (sid > 0) ? (blockDispNames[it] = blockModNames[sid]; blockDispIdts[it] = sid; it += 1;);
-        i = 0; loop((g === 3) ? its_EfxViews : 8, blockDispNames[it] = blockModNames[fid + i]; blockDispIdts[it] = fid + i; it += 1; i += 1;);
-        (g === 0) ? (gl0 = it - 1) : (g === 1) ? (gl1 = it - 1) : (g === 2) ? (gl2 = it - 1) : (g === 3) ? (gl3 = it - 1) : (gl4 = it - 1);
+        i = 0; loop((g === 3) ? its_EfxViews : (g === 5) ? FM_NM : 8, blockDispNames[it] = blockModNames[fid + i]; blockDispIdts[it] = fid + i; it += 1; i += 1;);
+        (g === 0) ? (gl0 = it - 1) : (g === 1) ? (gl1 = it - 1) : (g === 2) ? (gl2 = it - 1) : (g === 3) ? (gl3 = it - 1) :
+        (g === 4) ? (gl4 = it - 1) : (gl5 = it - 1);
         g += 1;
     );
     othFirst = it;
@@ -7353,7 +7390,7 @@ local (i, j, g, it, fid, sid, ttl, gl0, gl1, gl2, gl3, gl4, othFirst, tmp, bln, 
         !(((i >= blockLineA) && (i <= blockLineH)) || ((i >= blockReaderA) && (i <= blockReaderH))
             || ((i >= blockWriterA) && (i <= blockWriterH)) || ((i >= blockEffectA) && (i <= blockEffectP))
             || ((i >= blockCurvesA) && (i <= blockCurvesH)) || ((i >= blockReaders) && (i <= blockEffects))
-            || (i === blockLines) || (i === blockCurves)) ? (
+            || (i === blockLines) || (i === blockCurves) || ((i >= blockFxMeter0) && (i < blockFxMeter0 + FM_NM))) ? (
             blockDispNames[it] = blockModNames[i]; blockDispIdts[it] = i; it += 1;
         );
         i += 1;
@@ -7483,6 +7520,7 @@ local (i, j, g, it, fid, sid, ttl, gl0, gl1, gl2, gl3, gl4, othFirst, tmp, bln, 
     str_setchar(menu_Stud_Mod[ui_jmenu_items + gl2], 5, '<');
     str_setchar(menu_Stud_Mod[ui_jmenu_items + gl3], 5, '<');
     str_setchar(menu_Stud_Mod[ui_jmenu_items + gl4], 5, '<');
+    str_setchar(menu_Stud_Mod[ui_jmenu_items + gl5], 5, '<');
     //ADump(menu_Stud_Mod-2);
     0 ? (
         sprintf(#zz, "Creating Sudio: %d", menu_Stud_Mod);
@@ -18836,6 +18874,15 @@ loadMode ? (
             its_LkBank = max(1, min(its_LkBkMx, floor(savtmp[3] / 2))); // (the current bank ; saved before : 1)
             its_Lk_Count();
         ) :
+        (savtmp[0] === 'fxm1') ? (
+            // the settings of the modules "VU meter", "Limiter" (GM-Meters-Modules) : savtmp[1] modules of savtmp[2] words
+            ((savtmp[1] === FM_NM) && (savtmp[2] === FM_SW)) ? (
+                ldtotal += load_mem(0, fm_st, FM_NM * FM_SW);
+                fm_Check();
+            ) : (
+                loop(2 * savtmp[1] * savtmp[2], file_var(0, zzz_dskip)); // (each value in 2 words, see save_mem)
+            );
+        ) :
         (savtmp[0] === 'tnam') ? (
             ldtnam = savtmp[1]; // alternate tabs names (see "Rename tab...")
             z__si = 0; loop(savtmp[1],
@@ -18950,6 +18997,10 @@ loadMode ? (
         svtotal += save_mem(0, savtmp, TMPSIZ);
         svtotal += save_mem(0, its_LkTab, LK_CNT * its_LkSz);
     );
+    // Save the settings of the modules "VU meter", "Limiter" (GM-Meters-Modules)
+    savtmp[0] = 'fxm1'; savtmp[1] = FM_NM; savtmp[2] = FM_SW; savtmp[3] = 0;
+    svtotal += save_mem(0, savtmp, TMPSIZ);
+    svtotal += save_mem(0, fm_st, FM_NM * FM_SW);
 
     // siz4 = 0;
     // Save all objects, except lines set pointers and contents
@@ -18987,6 +19038,7 @@ doingLoad = doingSave = 0;
 @block
 gm_time_keep(); // shared gmem time fields, if nobody keeps them (see mSL_clip_lib)
 chcnt = num_ch;
+fm_Block(); // the modules "VU meter", "Limiter" : the work areas prepared by @gfx (see GM-Meters-Modules)
 
 // the MIDI messages of the track : the links (see its_Lk_Recv ; first : a slider that they move is read below)
 its_Lk_Recv();
@@ -19083,6 +19135,13 @@ its_RdrSolos = b__j; // count of readers in solo mode
 
 @sample
 
+// the modules "Limiter", "VU meter" on the inputs of the track, before Interstys (see GM-Meters-Modules)
+fm_act ? (
+    s__i = 0; loop(chcnt, its_FmIn[s__i] = spl(s__i); s__i += 1;);
+    fm_Sample(0, its_FmIn, chcnt);
+    s__i = 0; loop(chcnt, spl(s__i) = its_FmIn[s__i]; s__i += 1;);
+);
+
 ((pgmode < 2) && (its_Hold === 0)) ? (
     // the modules, in the order of the list prepared by @gfx (see its_Run_Schedule)
     s__p = its_RunX;
@@ -19100,6 +19159,13 @@ its_RdrSolos = b__j; // count of readers in solo mode
         );
         s__p += 1;
     );
+);
+
+// the modules "Limiter", "VU meter" on the outputs of the track, after Interstys, whatever the patch (see GM-Meters-Modules)
+fm_act ? (
+    s__i = 0; loop(chcnt, its_FmOut[s__i] = spl(s__i); s__i += 1;);
+    fm_Sample(1, its_FmOut, chcnt);
+    s__i = 0; loop(chcnt, spl(s__i) = its_FmOut[s__i]; s__i += 1;);
 );
 
 
@@ -19268,6 +19334,7 @@ while (g__efi) (
 its_PrjDir_Poll(); // the folder of the project, asked to CMGS-auxiliary.eel (relative files of the tables)
 its_Xp_Frame(); // the exports : the prompt of the name, the file written
 its_Lk_Frame(); // the MIDI links : the messages logged, the sliders moved told to REAPER, the keys of the modules set
+fm_Gfx(chcnt, chcnt); // the work areas of the modules "VU meter", "Limiter" (even when the window is closed : see GM-Meters-Modules)
 (perform_loading === 0) ? its_Ln_AutoReload(); // the files of the lines, after a load
 
 
@@ -19602,19 +19669,7 @@ its_Crv_TabsUpdate(); // the tables of the curves (the shape "Curve" of the LFO)
 );
 
 
-function keepBlockInfos(bCurrent)
-local(i)
-(
-    blockDesc ? (
-        // keep position
-        i = 0; loop (dcbMSize - 1,
-            (blockDesc[i] === bCurrent) ? (
-                blockDesc[i+dcbMSize] = A99PBlock = (ui_top_retina()*10000)+ui_height_retina();
-            );
-            i += 1;
-        );
-    );
-);
+// (keepBlockInfos : in @init, before GM-Meters-Modules, whose module "VU meter" / "Limiter" calls it)
 
 // Shared display modules : show_Scheduler_Pad(title, blkId) (mSL_show_Utilities.jsfx-inc)
 <? shw_part = 2; include("CMGS-libs/mSL_show_Utilities.jsfx-inc"); ?>
@@ -23596,16 +23651,19 @@ local (ty)
 */
 // keys of a resizable graphic area of an effect (the VU meter, the Limiter), the mouse over the module : '+' (or '=') and
 // '-' change its height ("hp" : the height kept, 0 for the default "dflt" ; "hs" : the height shown, the height kept
-// reduced to the height left in the pane : '-' starts from it)
+// reduced to the height left in the pane : '-' starts from it) ; not with Cmd (Cmd + '+', Cmd + '-' : the display size,
+// GM_Size_Keys)
 function its_FxGraph_Keys(hp, dflt, hs)
 local (h)
 (
     h = (hp[0] > 0) ? hp[0] : dflt;
-    (GM_key_take('+') || GM_key_take('=')) ? (
-        hp[0] = max(its_FxGraphHMin, min(its_FxGraphHMax, h + its_FxGraphHStep)); // taller
-    ) :
-    GM_key_take('-') ? (
-        hp[0] = max(its_FxGraphHMin, min(its_FxGraphHMax, min(h, hs) - its_FxGraphHStep)); // smaller
+    !(GM_key_mods() & 4) ? (
+        (GM_key_take('+') || GM_key_take('=')) ? (
+            hp[0] = max(its_FxGraphHMin, min(its_FxGraphHMax, h + its_FxGraphHStep)); // taller
+        ) :
+        GM_key_take('-') ? (
+            hp[0] = max(its_FxGraphHMin, min(its_FxGraphHMax, min(h, hs) - its_FxGraphHStep)); // smaller
+        );
     );
 );
 function show_Effect_Pad(RDBL, blockId)
@@ -28041,6 +28099,9 @@ local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in
                 ) :
                 (igb === blockLinks) ? (
                     show_Links_Pad(blockLinks);
+                ) :
+                ((igb >= blockFxMeter0) && (igb < blockFxMeter0 + FM_NM)) ? (
+                    show_FxMeter_Pad(igb, igb - blockFxMeter0); // (the modules "VU meter", "Limiter")
                 ) :
                 ((igb >= blockUsrFirst) && (igb <= blockUsrLast)) && (blockUsrChecks[blockUsrNum[igb - blockUsrFirst]]) ? (
                     show_UserModule(igb);
