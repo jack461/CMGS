@@ -27039,6 +27039,137 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, i, k, b, ok, zz, zzmcl, xx, cgh, x0, w,
 );
 
 /*
+    The module "Main Infos" : the state of Interstys, in 1 to 3 columns (as the width allows) ; the counts are computed
+    again twice a second (its_Inf_Update) ; orange : something to look at
+    Objects : active / defined / possible (lines : written or read by a module that runs ; readers, writers : reading,
+        writing ; effects : On ; curves : used), instances, models, MIDI links (and the current bank), buses, cells of the Pool
+    System : version, up time, dynamic memory free / total (MW : 2^20 words), garbage collections, processes active /
+        active or waiting / possible, sample rate and block
+    Audio : channels of the track, In channels read and Out channels written by the modules, input and output volumes,
+        track samples, modules run by @sample, connections not valid, effects in a feedback loop, non-finite values reset,
+        MIDI messages received, the mode of the knobs
+*/
+function its_Inf_Update() local(i, b, k)
+(
+    its_Sum_Usage(); // (the lines that run, the curves used : its_SumLA, its_SumCU)
+    its_InfLnA = its_InfLnD = its_InfRdA = its_InfRdD = its_InfWrA = its_InfWrD = its_InfFxA = its_InfFxD = 0;
+    its_InfCvU = its_InfCvD = 0;
+    i = 0; loop(LN_CNT, (its_Sum_Blk('L', i) !== 0) ? ( its_InfLnD += 1; (its_SumLA[i] > 0) ? (its_InfLnA += 1); ); i += 1;);
+    i = 0; loop(RD_CNT, ((b = its_Sum_Blk('R', i)) !== 0) ? ( its_InfRdD += 1; (its_Sum_State('R', b) === 1) ? (its_InfRdA += 1); ); i += 1;);
+    i = 0; loop(WR_CNT, ((b = its_Sum_Blk('W', i)) !== 0) ? ( its_InfWrD += 1; (its_Sum_State('W', b) === 1) ? (its_InfWrA += 1); ); i += 1;);
+    i = 0; loop(FX_CNT, ((b = its_Sum_Blk('E', i)) !== 0) ? ( its_InfFxD += 1; (its_Sum_State('E', b) === 1) ? (its_InfFxA += 1); ); i += 1;);
+    i = 0; loop(its_CrvMx, (its_Sum_Blk('C', i) !== 0) ? ( its_InfCvD += 1; (its_SumCU[i] > 0) ? (its_InfCvU += 1); ); i += 1;);
+    its_InfIns = 0; i = 1; loop(its_InsMx, (its_InsSym[i] !== 0) ? (its_InfIns += 1); i += 1;);
+    its_InfAlg = 0; i = 0; loop(its_AlgMx, ((its_AlgSym[i] !== 0) && (its_AlgBlk[i] > BASE_MEMORY)) ? (its_InfAlg += 1); i += 1;);
+    its_InfLk = 0; i = 0; loop(its_LkN, (its_LkTab[i * its_LkSz] !== 0) ? (its_InfLk += 1); i += 1;);
+    its_InfBus = 0; i = 0; loop(NB_BUS, (BusWidth[i] > 0) ? (its_InfBus += 1); i += 1;);
+    its_InfPool = 0; i = 0; loop(CBL_CELLS, CblPool[i] ? (its_InfPool += 1); i += 1;);
+    // the modules that @sample runs (not the blocks Clear, Input, Output)
+    its_InfRun = 0;
+    i = 0; while ((i < its_RunSize) && ((b = its_RunX[i]) !== 0)) (
+        k = b[its_Run_Kind];
+        ((k === its_RunK_Reader) || (k === its_RunK_Writer) || (k === its_RunK_Effect)) ? (its_InfRun += 1);
+        i += 1;
+    );
+    // the channels of the track read in In, written in Out (and the connections not valid), as the module "Connections"
+    its_Patch_Scan(-1);
+    its_InfInR = its_InfOutW = 0;
+    i = 0; loop(min(num_ch, CH_NB), (its_PchR[IN_P + i] > 0) ? (its_InfInR += 1); (its_PchW[OUT_P + i] > 0) ? (its_InfOutW += 1); i += 1;);
+    its_InfBad = its_PchBad;
+);
+
+// the lines of the columns of the module "Main Infos" : the objects, the system, the audio ; the count of lines shown
+function its_Inf_Objects()
+(
+    ui_show("Objects : active / defined / possible");
+    ui_show("Lines", its_InfLnA, its_InfLnD, LN_CNT, "%d / %d / %d");
+    ui_show("Readers", its_InfRdA, its_InfRdD, RD_CNT, "%d / %d / %d");
+    ui_show("Writers", its_InfWrA, its_InfWrD, WR_CNT, "%d / %d / %d");
+    ui_show("Effects", its_InfFxA, its_InfFxD, FX_CNT, "%d / %d / %d");
+    ui_show("Curves", its_InfCvU, its_InfCvD, its_CrvMx, "%d / %d / %d");
+    ui_show("Instances", its_InfIns, its_InsMx, "%d / %d");
+    ui_show("Models", its_InfAlg, its_AlgMx, "%d / %d");
+    ui_show("MIDI links", its_InfLk, LK_CNT, its_LkBank, "%d / %d  (bank %d)");
+    ui_show("Buses", its_InfBus, NB_BUS, "%d / %d");
+    (its_InfPool > 0.9 * CBL_CELLS) ? (ui_jshow_color = Color_Dark_Orange);
+    ui_show("Pool cells", its_InfPool, CBL_CELLS, "%d / %d");
+    11;
+);
+
+function its_Inf_System() local(f, t)
+(
+    ui_show("System");
+    ui_show("Version", (version >> 16) & 255, (version >> 8) & 255, version & 255, "%d.%d.%d");
+    ui_show("Up time", edTime(time() - tStart));
+    f = mSL_Dyn_Dispo; t = max(1, mm_sizmem);
+    (f < 0.1 * t) ? (ui_jshow_color = Color_Dark_Orange);
+    ui_show("Memory (MW)", f / 1048576, t / 1048576, 100 * f / t, "%.2f / %.2f  free %.0f %%");
+    ui_show("Garbage coll.", gc_count, "%d");
+    ui_show("Processes", mSL_act, mSL_act + mSL_wait + mSL_plck, SchedNEmax, "%d / %d / %d");
+    ui_show("Sample rate", srate, samplesblock, "%d Hz  block %d");
+    7;
+);
+
+function its_Inf_Audio()
+(
+    ui_show("Audio");
+    ui_show("Track channels", num_ch, "%d");
+    ui_show("In read / Out written", its_InfInR, its_InfOutW, "%d / %d");
+    ui_show("Input / Output", its_GlInGain, its_GlOutVol, "%+.1f / %+.1f dB");
+    ui_show("Track samples", its_TbGSmN[max(0, min(2, its_GlSmpl))]);
+    ui_show("Run by @sample", its_InfRun, "%d modules");
+    (its_InfBad > 0) ? (ui_jshow_color = Color_Dark_Orange);
+    ui_show("Bad connections", its_InfBad, "%d");
+    ui_show("Feedback loops", its_FxCycN, "%d effects");
+    (its_NaNCnt > 0) ? (ui_jshow_color = Color_Dark_Orange);
+    ui_show("Non-finite reset", its_NaNCnt, "%d");
+    ui_show("MIDI received", its_LkMidiN, "%d messages");
+    ui_show("MIDI knobs", its_LkRateOn ? "incremental" : "classic");
+    11;
+);
+
+function show_Main_Infos(blockId)
+local (uix_jneed, uix_jmini, zzmi, nbcol, t, h1, h2, h3)
+(
+    t = time_precise();
+    (abs(t - its_InfT) >= 0.5) ? ( its_InfT = t; its_Inf_Update(); );
+    uix_jneed = uix_jBoxHeight(max(2, its_InfH)) + ui_jd_ctgr;
+    uix_jmini = uix_jBoxHeight(2) + ui_jd_ctgr;
+    (ui_height() >= uix_jmini) ? (
+        ui_split_top(uix_jneed);
+            zzmi = ui_hover();
+            keepBlockInfos(blockId);
+            (zzmi) ? (
+                ui_push();
+                    // stack is now 2 levels deep
+                    ui_color(Col_Frame);
+                    ui_border(); // draws in purple
+                ui_pop();
+            );
+            control_group(blockDispNames[blockDispInverts[blockId]]);
+            ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
+            // 1 column : all ; 2 : objects and system, audio ; 3 : one each
+            nbcol = max(1, min(3, floor(ui_width() / gfx_col_width)));
+            ui_new_column(1 / nbcol);
+                h1 = its_Inf_Objects();
+                (nbcol !== 3) ? ( h1 += its_Inf_System(); );
+                (nbcol === 1) ? ( h1 += its_Inf_Audio(); );
+            h2 = h3 = 0;
+            (nbcol === 3) ? (
+                ui_new_column();
+                    h2 = its_Inf_System();
+            );
+            (nbcol >= 2) ? (
+                ui_new_column();
+                    h3 = its_Inf_Audio();
+            );
+            its_InfH = max(h1, max(h2, h3));
+            ui_pop();
+        ui_pop();
+    );
+);
+
+/*
     The globals of Interstys (they replace the last native sliders) : one line of 8 cells
     0 : "Globals"  1 : channels  2 : track samples (menu)  3..6 : count of lines, readers, writers, effects
     7 : global action (menu)
@@ -27781,6 +27912,9 @@ local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in
         Bigx = 0; loop(dcbMSize, igb = blockDesc[Bigx];  // = DISPLAY BLOCKS =
             (igb > 0) ? (
                 its_LkTc0 = param_touch_count; // (Learn of the module "Links" : a slider touched, see below)
+                (igb === blockMainInfos) ? (
+                    show_Main_Infos(blockMainInfos);
+                ) :
                 (igb === blockReaderA) ? (
                     show_Reader_Pad(ReadersStructA, blockReaderA);
                 ) :
