@@ -7,6 +7,7 @@
 mSL_GC_BDMG = 0; // Global "block damaged" counter
 mSL_GC_Err = 0; // Last GC error (3333 damaged block, 3336 rebuild, 3337 overflow, 3338 bad size in phase 2)
 mSL_GC_Ovf = 0; // Set when the hash table or the list of objects overflowed : nothing is freed by this GC
+mSL_Str_GCOk = 1; // (2026-11-18) this application has a GC : the string allocator asks for one when no string is free (mSL_Strings)
 
 // Enter a "verified" block in the "protect" area
 function gc_protect(obj)
@@ -519,7 +520,9 @@ local (mpt, lwd, ty, s, s2, ub, xty, fl, k, mm_show_chflr)
 /*
     After the sweep phase of a GC (call it after gc_sweep) :
     - clear the marks set by gc_mark on the strings (mSL_Str_Flg_marked),
-    - age the unmarked temporary strings (temporary -> dispensable -> free),
+    - age the unmarked temporary strings (temporary -> dispensable -> free : put back in the stack, 2026-11-18),
+    - put back in the stack the strings free (0) that are not in it (2026-11-18 : found otherwise by the slow pass of the
+      allocator only),
     - if "recycle", put back in the stack the unmarked strings "in use" (Diffusion-3).
       A string referenced only from a JSFX variable or a static array is never marked :
       "recycle" would reuse it while it is still in use. Nothing is recycled when the GC overflowed.
@@ -543,10 +546,17 @@ local (i, k, mk, s, used)
             (k === mSL_Str_Flg_temporary) ? (
                 k = mSL_Str_Flg_dispensable;
             ) :
+            (((k === mSL_Str_Flg_dispensable) || (k === 0)) && (mSL_Str_Uptr < mSL_Str_Range - 1)) ? (
+                // free : put back in the stack
+                s = i + mSL_Str_First;
+                k = mSL_Str_Flg_inStack;
+                mSL_Str_Uptr += 1;
+                mSL_Str_Stack[mSL_Str_Uptr] = s;
+            ) :
             (k === mSL_Str_Flg_dispensable) ? (
                 k = 0;
             ) :
-            (recycle && ((k === mSL_Str_Flg_inUse) || (k === 0)) && (mSL_Str_Uptr < mSL_Str_Range)) ? (
+            (recycle && (k === mSL_Str_Flg_inUse) && (mSL_Str_Uptr < mSL_Str_Range - 1)) ? (
                 // Put it back in the stack
                 s = i + mSL_Str_First;
                 k = mSL_Str_Flg_inStack;
@@ -561,8 +571,8 @@ local (i, k, mk, s, used)
         );
         mSL_Str_CFree = mSL_Str_Uptr + 1; mSL_Str_CUsed = used;
         (mSL_Str_StInLO > mSL_Str_LOrep) ? (
-            sprintf(#ms, "Strings pool exhausted : %d low strings (%d..%d) reused - they may still be in use",
-                mSL_Str_StInLO - mSL_Str_LOrep, mSL_Str_TempF, mSL_Str_TempL);
+            sprintf(#ms, "Strings pool exhausted : %d string(s) asked when none was free (the emergency string given ; GC asked %d times)",
+                mSL_Str_StInLO - mSL_Str_LOrep, mSL_Str_GCAsk);
             mSL_log(SysLogBox, #ms);
             mSL_Str_LOrep = mSL_Str_StInLO;
         );

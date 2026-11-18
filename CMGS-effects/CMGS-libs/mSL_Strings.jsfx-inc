@@ -37,8 +37,17 @@ mSL_Str_Flg_unavailable = 32;
 mSL_Str_Flg_inStack = 64;
 mSL_Str_Flg_marked = 128;
 
-// By default, use first strings
+// (until 2026-11-18 : the last chance of the allocator, the low strings 32 ... 1024, that may still be in use ; unused now)
 mSL_Str_TempC = mSL_Str_TempF = 32; mSL_Str_TempL = 1024;
+// (2026-11-18) when no string is free : the emergency string (shared : its text may change at once ; no string of the
+// application is overwritten), counted in mSL_Str_StInLO and reported by the next GC (mSL_Str_sweep_strings)
+mSL_Str_Emerg = #mSL_Str_Emerg;
+// when the stack of the free strings is empty : a GC is asked (mSL_Str_GCOk : 1 when the application has a GC, set by
+// mSL_Garbage_Collector ; mSL_Str_GCAsk : the count of these requests)
+mSL_Str_GCOk = 0; mSL_Str_GCAsk = 0; mSL_Str_GCT = 0; // (the time of the last request : one per second at most)
+// the counts of mSL_Str_Count (the Processes Manager) : free (in the stack, or never taken), temporary (temporary or
+// dispensable : waiting for the GC or the allocator), in use (in use, permanent) ; the time of the last count
+mSL_Str_NFree = mSL_Str_NTemp = mSL_Str_NUsed = 0; mSL_Str_CntT = 0;
 
 mSL_Str_Setsx = 0;
 mSL_Str_Setsiz = 20; // allows 10 pairs.
@@ -111,7 +120,8 @@ local (i, j, k, low, hig)
 function mSL_Str_Int_Get1()
 global(mSL_Str_Entry, mSL_Str_Item, mSL_Str_Uptr, mSL_Str_Stack, mSL_Str_Last, mSL_Str_Range, mSL_Str_Aptr, mSL_Str_StACycl,
     mSL_Str_Use, mSL_Str_First, mSL_Str_Flg_inStack, mSL_Str_Flg_inUse, mSL_Str_Flg_dispensable, mSL_Str_Flg_temporary,
-    mSL_Str_TempC, mSL_Str_TempL, mSL_Str_TempF, mSL_Str_CUsed, mSL_Str_CFree, mSL_Str_StInST, mSL_Str_StInTU, mSL_Str_StInLO)
+    mSL_Str_TempC, mSL_Str_TempL, mSL_Str_TempF, mSL_Str_CUsed, mSL_Str_CFree, mSL_Str_StInST, mSL_Str_StInTU, mSL_Str_StInLO,
+    mSL_Str_Emerg, mSL_Str_GCOk, mSL_Str_GCAsk, mSL_Str_GCT, gc_run_phaz, mSL_Lock, mSL_loc_tim)
 local (itm, ent, i, k)
 (
     mSL_Str_Entry = mSL_Str_Item = i = 0;
@@ -129,6 +139,15 @@ local (itm, ent, i, k)
         );
         mSL_Str_Stack[mSL_Str_Uptr] = 0;
         mSL_Str_Uptr -= 1;
+    );
+    // (2026-11-18) the stack is empty : a GC is asked, as for a malloc that fails (see the evaluator) : it marks the strings
+    // still referenced, ages the temporary ones, and puts the freed ones back in the stack (mSL_Str_sweep_strings)
+    ((mSL_Str_Item === 0) && (mSL_Str_Use !== 0) && mSL_Str_GCOk && (gc_run_phaz === 0) && (time_precise() - mSL_Str_GCT > 1)) ? (
+        mSL_Str_GCT = time_precise();
+        gc_run_phaz = 1;
+        atomic_add(mSL_Lock, 1);
+        atomic_add(mSL_loc_tim, 2);
+        mSL_Str_GCAsk += 1;
     );
     // Second, perform a pass inside the uselist
     while ((mSL_Str_Item === 0) && (i < mSL_Str_Range)) (
@@ -150,9 +169,9 @@ local (itm, ent, i, k)
         i += 0.333;
     );
     ((mSL_Str_Item === 0) && (mSL_Str_Use !== 0)) ? (
-        // Last chance allocate a low number string - it may still be in use : reported by mSL_Str_sweep_strings
-        (mSL_Str_TempC >= mSL_Str_TempL) ? (mSL_Str_TempC = mSL_Str_TempF) : (mSL_Str_TempC += 1);
-        mSL_Str_Item = mSL_Str_TempC;
+        // no string free : the emergency string (2026-11-18 ; before : a low number string 32 ... 1024, that could still be in
+        // use, and be overwritten) : reported by mSL_Str_sweep_strings ; mSL_Str_Entry : the slot after the uselist (a dummy)
+        mSL_Str_Item = mSL_Str_Emerg;
         mSL_Str_Entry = mSL_Str_Range; mSL_Str_StInLO += 1;
     );
     mSL_Str_Item;
@@ -174,6 +193,23 @@ global (mSL_Str_Item, mSL_Str_Use, mSL_Str_Entry, mSL_Str_Flg_temporary, mSL_Str
         mSL_Str_StTemp += 1;
     );
     mSL_Str_Item;
+);
+
+// the counts of the strings (mSL_Str_NFree, mSL_Str_NTemp, mSL_Str_NUsed : see above ; a pass on the uselist)
+function mSL_Str_Count() local(i, k)
+(
+    mSL_Str_NFree = mSL_Str_NTemp = mSL_Str_NUsed = 0;
+    (mSL_Str_Use !== 0) ? (
+        i = 0;
+        loop(mSL_Str_Range,
+            k = mSL_Str_Use[i] & 0x7F;
+            ((k === 0) || (k === mSL_Str_Flg_inStack)) ? (mSL_Str_NFree += 1) :
+            ((k === mSL_Str_Flg_temporary) || (k === mSL_Str_Flg_dispensable)) ? (mSL_Str_NTemp += 1) :
+            ((k === mSL_Str_Flg_inUse) || (k === mSL_Str_Flg_permanent)) ? (mSL_Str_NUsed += 1);
+            i += 1;
+        );
+    );
+    mSL_Str_CntT = time_precise();
 );
 
 function mSL_Str_PInit(first, last)

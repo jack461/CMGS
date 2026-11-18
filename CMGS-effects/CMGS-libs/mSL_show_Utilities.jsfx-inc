@@ -256,6 +256,7 @@ local (ii, padScriptsCells, padScriptsNC, padScriptsVals, showThrdent, showThrdT
     showThrdTypeNms[5] = "Free";
     shw_Proc_DeferKill = 0;
     shw_Proc_GCFlg = -1;
+    shw_Proc_Details = 1; // (2026-11-18) the 4 columns of information under the pad shown (cell 14 : shown or not)
     (cmdCap == 0) ? cmdCap = 0x4 | 0x20; // On Mac: allow "cmd" or "ctrl" as "alternate" modifiers
 );
 
@@ -405,8 +406,9 @@ show_ProcessesMgr(title, blkId)
 local (h1, h2, h3, uix_jneed, uix_jmini, ig, r, w, xx, zzmi, jmc, zz, zzch, zzent, zzmcl, errv, zzmmd, mm_dur_maxU)
 (
     h1 = uix_jpadHeight(padScriptsNL); // height
-    h2 = uix_jBoxHeight(10); // second block height
-    h3 = uix_jBoxHeight(2); // minimum 2nd block height
+    // the second block (the 4 columns of information) : hidden by the cell 14 (shw_Proc_Details)
+    h2 = shw_Proc_Details ? uix_jBoxHeight(10) : 0; // second block height
+    h3 = shw_Proc_Details ? uix_jBoxHeight(2) : 0; // minimum 2nd block height
     uix_jneed = h1+h2+ui_jd_ctgr;
     uix_jmini = h1+h3+ui_jd_ctgr;
     (ui_height() >= uix_jmini) ? (
@@ -484,6 +486,13 @@ local (h1, h2, h3, uix_jneed, uix_jmini, ig, r, w, xx, zzmi, jmc, zz, zzch, zzen
                 padScriptsLabs[8] = showThrdTypeNms[showThrdType];
                 padScriptsColrs[8] = Col_InfoC;
 
+                // (2026-11-18) 14 : the information under the pad, shown or not (clic) ; 15 : the processes active / waiting
+                // / locked
+                padScriptsLabs[14] = shw_Proc_Details ? "Details On" : "Details Off";
+                padScriptsColrs[14] = shw_Proc_Details ? Col_P3 : Col_P1;
+                sprintf(padScriptsLabs[15], "%d/%d/%d", mSL_act, mSL_wait, mSL_plck);
+                padScriptsColrs[15] = (mSL_plck > 0) ? Color_Indian_Red : ((mSL_act + mSL_wait) > 0) ? Color_Light_Green : Col_InfoC;
+
                 zz = control_jpad(padScriptsp);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1;
@@ -514,6 +523,9 @@ local (h1, h2, h3, uix_jneed, uix_jmini, ig, r, w, xx, zzmi, jmc, zz, zzch, zzen
                             (jmc & cmdCap) ? (
                                 shw_Proc_DeferKill ? flagKillAllThreads = 1 : mSL_kill_all_thread();
                             );
+                        ):
+                        (zzmcl === 14) ? (
+                            shw_Proc_Details = !shw_Proc_Details; // the information under the pad, shown or not
                         ):
                         (zzmcl === 7) ? (
                             mSL_errC = mSL_errX = mSL_errM = 0; // reset error
@@ -595,6 +607,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, ig, r, w, xx, zzmi, jmc, zz, zzch, zzen
             mm_cyc_maxU = max(mm_cyc_max, mm_cyc_maxU);
             mm_dur_maxU = max(mm_dur_max, mm_dur_maxU);
 
+          shw_Proc_Details ? (
             ui_split_top(h2);
             w = ui_width();
             r = (w > 4* ui_MinSubColSize) ? 4 : (w > 3* ui_MinSubColSize) ? 3 : 2;
@@ -605,8 +618,11 @@ local (h1, h2, h3, uix_jneed, uix_jmini, ig, r, w, xx, zzmi, jmc, zz, zzch, zzen
                     ui_show("Free % m.", 100 * mm_show_ttf/mm_sizmem, "%.2f %%");
                     ui_show("Free blocks", mm_show_frbl, "%d");
                     ui_show("Free [Huge]", mm_bl_huge, "%d");
-                    ui_show("Free Strings", mSL_Str_Uptr, "%d");
-                    ui_show("Temp Str use", mSL_Str_TempU, "%d");
+                    // (2026-11-18) the strings free (in the stack, or never taken) and the temporary ones waiting for the GC or the
+                    // allocator (counted twice a second : mSL_Str_Count)
+                    (time_precise() - mSL_Str_CntT > 0.5) ? mSL_Str_Count();
+                    ui_show("Free Strings", mSL_Str_NFree, "%d");
+                    ui_show("Temp Strings", mSL_Str_NTemp, "%d");
                     ui_show("Instr./second", mm_xec_cnt, "%d");
                     ui_show("Max. Inst./s.", mm_xec_max, "%d");
                 ui_new_column();
@@ -647,6 +663,7 @@ local (h1, h2, h3, uix_jneed, uix_jmini, ig, r, w, xx, zzmi, jmc, zz, zzch, zzen
                     ui_show("Th. mark.", mSL_Thread_mark, "%d");
                 );
                 ui_pop();
+          );
 
             ui_pop();
 
