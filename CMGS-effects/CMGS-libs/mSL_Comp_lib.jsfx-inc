@@ -679,6 +679,7 @@ mSL_LCCod = 0; //  ==ARRAY==
 mSL_LCTabSize = 0;
 // The common externals table
 mSL_EXTab = 0; //  ==ARRAY==
+mSL_stArgs = 0; mSL_stArgsMax = 1024; // the words of "settings" called with arguments (mSL_buildPTTab, opcode 118)
 // The common pointer table
 mSL_PTTab = 0; //  ==ARRAY==
 mSL_lvar = 0; // allocator for loc. var #
@@ -877,7 +878,7 @@ local (ii)
     dsttab[mSL_K_pGet] = "get";
     dsttab[mSL_K_pSet] = "set";
     dsttab[mSL_K_pGMAction] = "action";
-    dsttab[mSL_K_pGMSetTab] = "table";
+    dsttab[mSL_K_pGMSetTab] = "settings"; // (2026-11-18 ; "table" : the former name, a synonym)
     dsttab[mSL_K_pStrlen] = "strlen";
     dsttab[mSL_K_pIRand] = "irand";
     dsttab[mSL_K_pStrcpy] = "strcpy";
@@ -953,6 +954,8 @@ function mSL_buildEXTab(aprime)
 function mSL_buildPTTab(aprime)
 (
     mSL_PTSiz = aprime;
+    // (also, 2026-11-18 : the words of "settings" called with arguments, see the evaluator, opcode 118 ; word 0 : their count)
+    mSL_stArgs = mSL_StM_Alloc(mSL_stArgsMax + 1, 'stga', mSL_StM_FlClear);
     mSL_PTTab = mSL_StM_Alloc(2 * aprime, 'ptab', mSL_StM_FlClear);
 );
 
@@ -1423,7 +1426,8 @@ mSL_define_primitives()
     mSL_defGlobal("error", 0, mSL_tyPrimF, mSL_tyPrimFun | (1 << 12) | mSL_K_fError);
     mSL_defGlobal("set", 0, mSL_tyPrimF, mSL_tyPrimFun | (0xff << 12) | mSL_K_pSet);
     mSL_defGlobal("action", 0, mSL_tyPrimF, mSL_tyPrimFun | (0xff << 12) | mSL_K_pGMAction);
-    mSL_defGlobal("table", 0, mSL_tyPrimF, mSL_tyPrimFun | (0xff << 12) | mSL_K_pGMSetTab);
+    mSL_defGlobal("settings", 0, mSL_tyPrimF, mSL_tyPrimFun | (0xff << 12) | mSL_K_pGMSetTab);
+    mSL_defGlobal("table", 0, mSL_tyPrimF, mSL_tyPrimFun | (0xff << 12) | mSL_K_pGMSetTab); // (the former name of settings)
     mSL_defGlobal("yield", 0, mSL_tyPrimF, mSL_tyPrimFun | (0 << 12) | mSL_K_pYield);
     mSL_defGlobal("wait", 0, mSL_tyPrimF, mSL_tyPrimFun | (1 << 12) | mSL_K_pWait);
     //----
@@ -2646,12 +2650,13 @@ local (res, p, state, ty, va, elc, prv, nxt, erf)
 
 // Next syntactic unit - 2025-10-25
 function mSL_lex()
-local (state, lex, cod, ch, fac, dec, expn, exps, i, s, w, addr)
+local (state, lex, cod, ch, fac, dec, expn, exps, i, s, w, addr, bq)
 (
     state = 1; // init state
     lex = 0;
     cod = 1;
     dec = 1;
+    bq = 0; // `x, x a punctuation (state 30)
     #sid = ""; #bio = ""; #bic = ""; #str = "";
     while ((state > 0) && (mSL_errC === 0)) (
         (mSL_C_chcurr === 0) ? (mSL_C_chcurr = mSL_getchar(dec));
@@ -3367,6 +3372,14 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, w, addr)
                 i = mSL_checkGId(cod = mSL_ckwData); // the entry
                 lex = mSL_GCTyp[i];
                 state = 0; // done
+            ) :
+            // (2026-11-18) a punctuation : `: `; `, `. `< `> `<= `== ... : the operator or the separator read from here
+            // (state 1), then coded as inside a data (see the end ; not ( " ' { $ / ) : data, a string, a constant, a
+            // comment ; the identifiers and the other characters : state 2, as before)
+            ((ch > 32) && (ch < 127) && !(((ch >= '0') && (ch <= '9')) || ((ch >= 'A') && (ch <= 'Z')) ||
+                ((ch >= 'a') && (ch <= 'z')) || (ch === '_') || (ch === ')') || (ch === 0x22) || (ch === 0x27) ||
+                (ch === '{') || (ch === '$') || (ch === '/'))) ? (
+                bq = 1; state = 1;
             ) : (
                 state = 2;
             );
@@ -3515,6 +3528,16 @@ local (state, lex, cod, ch, fac, dec, expn, exps, i, s, w, addr)
 
 
         );););););););
+    );
+    // `x, x a punctuation : the value of the word x in a data (an operator or a separator, as a "printable char" : see
+    // the data blocks, cod + mSL_CharConst), a constant
+    bq ? (
+        ((((lex & mSL_tyMMask) === mSL_tyOP) || ((lex & mSL_tyMMask) === mSL_tySep)) && (cod > 32) && (cod < 0x7FFFFF)) ? (
+            cod += mSL_CharConst; lex = mSL_tyNum;
+        ) : (mSL_errC === 0) ? (
+            mSL_errC = 2303; // ` followed by a character that is not a punctuation
+            lex = 0;
+        );
     );
     mSL_lcod = cod;
     lex;

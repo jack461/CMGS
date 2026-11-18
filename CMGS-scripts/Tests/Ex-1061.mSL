@@ -1,0 +1,57 @@
+print("Ex-1061. Interstys table : l'effet Reverb (le Matrix avec pre-retard, reflexions, diffuseurs), l'entree Fold.");
+
+/*
+  Une nouvelle Reverb prend les valeurs par defaut : Hadamard, mix 35 %, decay 3 s, damp 5000 Hz, retards de 25 a 90 ms,
+  hp 40 Hz, entree Fold, wow 0.3 ms, rate 0.4 Hz, 16 lignes au moins, predelay 20 ms, size 1, diffuse 0.7, 4 etages,
+  density 0.5, early 0.4, bass 1. Puis Householder, l'entree Direct, la boucle Freeze, ses propres reglages changes (les
+  mots stages et density, communs avec d'autres types, sont lus apres le type de l'effet : "rv" est nomme dans la table)
+  et la taille modulee (l'entree Size). Puis le type Matrix : ses valeurs par defaut, l'entree Fold, 8 lignes ; la
+  troisieme entree de modulation reste branchee : pour un Matrix c'est Diffusion.
+  Erreurs (rien n'est cree) : e1 predelay pour un Matrix (2767) ; e2 stages 9 (2754) ; e3 size 200 (2754) ; e4 diffuse 1
+  (2754) ; e5 mod Diffusion pour une Reverb (2767) ; e6 mod Size pour un Shimmer (2767) ; e7 stages 3 pour un Filter
+  (2754 : 1, 2, 4 ... 32, le mot garde son sens pour le Filter).
+  Les numeros des effets dependent du projet (%d).
+*/
+
+var r = table(data(
+    Interstys
+    Effect rv  type Reverb  chan 2  source In:0
+    Dump Effect rv
+    Check Effect rv  mode Hadamard  mix 35  decay 3  damp 5000  dmin 25  dmax 90  hp 40  inject Fold  wow 0.3  rate 0.4
+                     lines 16  predelay 20  size 1  diffuse 0.7  stages 4  density 0.5  early 0.4  bass 1
+    Effect rv  mode Householder  inject Direct  loop Freeze  predelay 150  size 4  diffuse -0.5  stages 8  density 0.9
+               early 0  bass 3  mod Size Ctl 1  depth 2
+    Dump Effect rv
+    Check Effect rv  mode Householder  inject Direct  loop Freeze  predelay 150  size 4  diffuse -0.5  stages 8  density 0.9
+                     early 0  bass 3  mod Size Ctl 1  depth 2  att 1
+    Effect rv  type Matrix  inject Fold  lines 8
+    Dump Effect rv
+    Check Effect rv  type Matrix  mode Householder  mix 100  decay 2  inject Fold  lines 8  mod Diffusion Ctl 1  depth 2
+    Free Effect rv
+));
+print(sprintf(0, "Ex-1061. resultat : %d", r));
+
+var e1 = table(data( Interstys  Effect x  type Matrix  predelay 10 ));
+var e2 = table(data( Interstys  Effect x  type Reverb  stages 9 ));
+var e3 = table(data( Interstys  Effect x  type Reverb  size 200 ));
+var e4 = table(data( Interstys  Effect x  type Reverb  diffuse 1 ));
+var e5 = table(data( Interstys  Effect x  type Reverb  mod Diffusion Ctl 1 ));
+var e6 = table(data( Interstys  Effect x  type Shimmer  mod Size Ctl 1 ));
+var e7 = table(data( Interstys  Effect x  type Filter  stages 3 ));
+print(sprintf(0, "Ex-1061. erreurs : %d %d %d %d %d %d %d", e1, e2, e3, e4, e5, e6, e7));
+
+// Expected "Effect %d status On type Reverb phase Std chan 2 out Own limiter On source In:0 gain 0 mode Hadamard mix 35 decay 3 damp 5000 dmin 25 dmax 90 diffusion 1 loop Decay seed 1 delays Geometric hp 40 inject Fold wow 0.3 rate 0.4 spread 0.25 glide 0.05 lines 16 predelay 20 size 1 diffuse 0.7 stages 4 density 0.5 early 0.4 bass 1"
+// Expected "Check Effect %d OK"
+// Expected "Effect %d status On type Reverb phase Std chan 2 out Own limiter On source In:0 gain 0 mode Householder mix 35 decay 3 damp 5000 dmin 25 dmax 90 diffusion 1 loop Freeze seed 1 delays Geometric hp 40 inject Direct wow 0.3 rate 0.4 spread 0.25 glide 0.05 lines 16 predelay 150 size 4 diffuse -0.5 stages 8 density 0.9 early 0 bass 3 mod Size Ctl 1 depth 2 att 1"
+// Expected "Check Effect %d OK"
+// Expected "Effect %d status On type Matrix phase Std chan 2 out Own limiter On source In:0 gain 0 mode Householder mix 100 decay 2 damp 6000 dmin 20 dmax 80 diffusion 1 loop Decay seed 1 delays Geometric hp 0 inject Fold wow 0 rate 0.2 spread 0.25 glide 0.05 lines 8 mod Diffusion Ctl 1 depth 2 att 1"
+// Expected "Check Effect %d OK"
+// Expected "Ex-1061. resultat : 0"
+// Expected error 2767
+// Expected error 2754
+// Expected error 2754
+// Expected error 2754
+// Expected error 2767
+// Expected error 2767
+// Expected error 2754
+// Expected "Ex-1061. erreurs : 2767 2754 2754 2754 2767 2767 2754"

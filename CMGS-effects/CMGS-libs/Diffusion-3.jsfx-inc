@@ -1564,13 +1564,22 @@ memset(firstmat, 0, matrcnt * matrsiz);
 
 // Before reloading a configuration
 function clearArea()
-local (sik)
+local (sik, pp)
 (
     // memset(diffstart, 0, diffend-diffstart);
     // pcfdef : config steréo par defaut, 1 > left / 2 > right
-    // All these are actual dynamically allocated memory blocks
+    // The projectors forget the blocks of their configurations BEFORE they are freed (-4 : they keep their numbers,
+    // prx_numconf ; the loop of the projectors takes the new blocks of these numbers, prx_iochg) ; else @block would read
+    // freed blocks, maybe given again to the new configurations (confload, prx_numconf, sx_ConfGains)
+    pp = projectors;
+    loop(akousmax,
+        ((pp[prx_ptrconf] > 0) && (pp[prx_ptrconf] !== pcfdef)) ? pp[prx_ptrconf] = -4;
+        pp += projsize;
+    );
+    prvchcnf = -1; // (the cache of confload : a new block may have the address of a freed one)
+    // All these are actual dynamically allocated memory blocks (but pcfdef, the last entry of the conflist, is static)
     // memset(conflist, 0, conflsize + 4); // Clear the conflist
-    mSL_mfree_all(conflist, conflsize);  //  Clear the conflist
+    mSL_mfree_all(conflist, conflsize - 1);  //  Clear the conflist
     // memset(proprerefs, 0, proprescnt); // Clear the projectors preset list
     mSL_mfree_all(proprerefs, proprescnt);  // Clear the projectors preset list
     memset(groupdefs, 0, groupdefsize); // Clear the continuum configs
@@ -4944,6 +4953,9 @@ while ((ppro = dlist[0]) > 0) (
             ppro[prx_iochg] = 0;
             cf_OutList(ppro);
             prvchcnf = -1;
+            // (the configurations read again : clearArea forgot the block, -4, its number gives the new one, if defined ; a
+            // new choice, -3, is made below)
+            (ppro[prx_ptrconf] === -4) ? ppro[prx_ptrconf] = cf_Blk(ppro[prx_numconf]);
             (pflgso & hypmodon) ? (pflgso |= hypamch) : (ppro[prx_ptrconf] > 0) ? (ppro[prx_cnfupdt] = 1);
         );
 
@@ -6028,6 +6040,7 @@ local (uix_jneed, uix_jmini, k, w, siz, u_ch, ent, nbcol)
 function show_SysLog(blnb, box)
 local (h1, h3, disps, mini, avail, uix_jneed, uix_jmini, ptr, nc, as, fl, flg, zzmi, xx, ii, u_ch, siz, dep, had, thgh)
 (
+    sysout_Poll(); // (the confirmation of the keys p, P : see mSL_show_Utilities)
     disps = box[4]; mini = 2;
     h1 = uix_jBoxHeight(mini);
     h3 = uix_jBoxHeight(disps);

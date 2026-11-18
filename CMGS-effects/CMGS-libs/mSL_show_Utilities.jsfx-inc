@@ -31,6 +31,9 @@
                                           (key "p" in the System Log module ; CMGS-auxiliary.eel must be running)
         sysout(logbox, 31)                the same text in the console of CMGS-auxiliary.eel ("ReaScript console output"),
                                           where it can be copied (key "P")
+        sysout_Poll()                     at each frame (the module System Log) : once the script has done it, a line in the
+                                          log confirms the export : the name of the file written (or that it could not be),
+                                          or its console ; no answer within 10 s : said too (2026-11-18)
         shw_AppName                       name of the application, in the file names (set by the host)
         nowIs()                           current date and time as a string ("dd/mm/yyyy hh:mm:ss")
 
@@ -111,6 +114,8 @@ local (esent, xend, k, n)
 
 //================ Log export ==================
 shw_AppName = "";
+sys_xReq = 0; // the date of the last request of sysout (0 : none ; sysout_Poll confirms it in the log)
+sys_xKmd = sys_xBox = 0; // its command (30 : a file, 31 : the console), its log (its name : #sys_xName)
 
 function nowIs()
 local(str)
@@ -185,14 +190,37 @@ local (i, j, k, l, m, dst, ss, bsiz, s1st, bn, cc, an)
         gmem[scptPar2] = xplStr2;
         gmem[scptPar3] = infoBStarts;
 
+        // the name, for the confirmation (gmem[xplStr2] : shared by the applications)
+        mSL_g6unpackArray(#sys_xName, xplStr2, 0);
+
         // the command first, the dates last : the script (another thread) starts on the dates
         gmem[cmndKode] = kmd;
         gmem[dateRqst] = gmem[dateCfrm] = time_precise() + timeD;
+        sys_xReq = gmem[dateRqst]; sys_xKmd = kmd; sys_xBox = logbox; // (confirmed by sysout_Poll)
     ) : (
         mSL_log(SysLogBox, "No auxiliary script present");
     );
 );
 function sysout(logbox) ( sysout(logbox, 30); );
+
+// The confirmation of sysout (keys p, P), in its log, once CMGS-auxiliary.eel has done the command (its dates, as
+// xpt_Poll in mSL_Export) ; at each frame (the module System Log of each application)
+function sysout_Poll()
+(
+    (sys_xReq > 0) ? (
+        (gmem[dateDone] > sys_xReq) ? (
+            (sys_xKmd === 31) ? sprintf(#sys_xMsg, "Log shown in the console of CMGS-auxiliary.eel : %s", #sys_xName) :
+            (gmem[rtrnVal3] > 0) ? sprintf(#sys_xMsg, "Log written in the project folder : %s", #sys_xName) :
+            sprintf(#sys_xMsg, "Log : the file %s could not be written", #sys_xName);
+            mSL_log(sys_xBox, #sys_xMsg);
+            sys_xReq = 0;
+        ) :
+        (time_precise() + timeD > sys_xReq + 10) ? (
+            mSL_log(sys_xBox, "Log : no answer from CMGS-auxiliary.eel (is it running ?)");
+            sys_xReq = 0;
+        );
+    );
+);
 
 
 //================ Processes manager ==================
