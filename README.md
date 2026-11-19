@@ -81,7 +81,9 @@ sources).
 
 | File | Contents |
 |---|---|
-| `GameMaster-Doc-1.7.8.pdf` | Reference manual of the Game Master |
+| `CMGS-Manuel.pdf` | General manual: what CMGS is, installation, the common user interface, the mSL language (with a programming course), the list of all the error codes |
+| `GameMaster-Manuel.pdf` | The Game Master (what is specific to it; the rest is in the general manual) |
+| `GameMaster-Doc-1.7.8.pdf` | The former complete manual of the Game Master (version 1.7.8, 2024) |
 | `GM-Commandes.pdf` | Commands of the Game Master |
 | `Diffusion-3-Manuel.pdf` | Diffusion-3 |
 | `Interstys-Manuel.pdf` | Interstys |
@@ -194,7 +196,9 @@ sources LibreOffice).
 
 | Fichier | Contenu |
 |---|---|
-| `GameMaster-Doc-1.7.8.pdf` | Manuel de référence du Game Master |
+| `CMGS-Manuel.pdf` | Manuel général : présentation de CMGS, installation, l'interface commune, le langage mSL (avec une initiation à la programmation), la liste de tous les codes d'erreur |
+| `GameMaster-Manuel.pdf` | Le Game Master (ce qui lui est propre ; le reste est dans le manuel général) |
+| `GameMaster-Doc-1.7.8.pdf` | L'ancien manuel complet du Game Master (version 1.7.8, 2024) |
 | `GM-Commandes.pdf` | Les commandes du Game Master |
 | `Diffusion-3-Manuel.pdf` | Diffusion-3 |
 | `Interstys-Manuel.pdf` | Interstys |
