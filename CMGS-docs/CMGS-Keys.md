@@ -686,9 +686,9 @@ Ordre : Cmd + - + = 0 (taille d'affichage) → module sous la souris (puis ses p
 | `-` |  | module | Effect : hauteur du graphique (VU meter, Limiter) (its_FxGraph_Keys) | hp[0] = max(its_FxGraphHMin, min(its_FxGraphHMax, min(h, hs) - its_FxGraphHStep)); | Interstys.jsfx-inc:24557 |
 | `=` |  | module | Effect : hauteur du graphique (VU meter, Limiter) (its_FxGraph_Keys) | hp[0] = max(its_FxGraphHMin, min(its_FxGraphHMax, h + its_FxGraphHStep)); | Interstys.jsfx-inc:24554 |
 | `d` |  | module | Line (show_Line_Pad) | GM_Dump(lcbl, its_Lin_BlkSize, sprintf(#, "Line %d", lnr+1)) | Interstys.jsfx-inc:22650 |
-| `Space` |  | module | Reader (show_Reader_Pad) | Rd_Set_Status(rdr, -1);  // Space : toggle run/pause state | Interstys.jsfx-inc:22278 |
 | `d` |  | module | Reader (show_Reader_Pad) | GM_Dump(rcbl, its_Rdr_BlkSize, sprintf(#, "Reader %d", rdr+1)) | Interstys.jsfx-inc:21621 |
 | `e` |  | module | Reader (show_Reader_Pad) | RDBL[6] = (RDBL[6] + 1) % 3;  // 'e' (extent, étendue) : the length shown of the region, Full / 10 s / 1 s | Interstys.jsfx-inc:22281 |
+| `j` |  | module | Reader (show_Reader_Pad) | Rd_Set_Status(rdr, -1);  // 'j' (joue) : toggle run/pause state | Interstys.jsfx-inc:22278 |
 | `d` |  | module | Writer (show_Writer_Pad) | GM_Dump(wcbl, its_Wrt_BlkSize, sprintf(#, "Writer %d", wrt+1)) | Interstys.jsfx-inc:24885 |
 | `+` |  | module | forme d'onde (Line, Reader, Writer) (its_Wave_Keys) | hp[0] = min(its_WaveHMax, h + its_WaveHStep); | Interstys.jsfx-inc:1674 |
 | `-` |  | module | forme d'onde (Line, Reader, Writer) (its_Wave_Keys) | hp[0] = max(its_WaveHMin, h - its_WaveHStep); | Interstys.jsfx-inc:1678 |
