@@ -1,0 +1,49 @@
+print("Reverb-Boite. Une boite qui se referme : la reverberation coupee net (gated reverb).");
+
+/*
+  Une piece dense et brillante, mais sa traine est coupee des que le son s'arrete : la porte (tailmode Gate) reste
+  ouverte tant que l'entree depasse le seuil, puis "ouvert" millisecondes, et se ferme en 15 ms. Sur des percussions,
+  des sons brefs : un espace enorme qui s'arrete d'un coup.
+
+  Parametres :
+      nch       canaux
+      duree     duree de la traine (s, -60 dB)
+      taille    le facteur des retards
+      ouvert    le temps de la porte apres le son (ms)
+      seuil     le seuil de l'entree (dB)
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0 (dry, wet).
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. Les autres reglages se
+  changent a la main dans le pad des effets de l'instance (le module Instances la montre ; le module Effect montre ses
+  effets, "pre", "rv", "post").
+  L'effet "rv" s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+settings(data( Free Instance boite )); // (l'instance precedente)
+var r = settings(data(
+    Interstys
+    Algorithm Boite
+        input src
+        output dst
+        param nch 2 1 128
+        param duree 4 0.01 1000
+        param taille 1.5 0.01 100
+        param ouvert 250 10 10000
+        param seuil -30 -80 0
+        param dry 0 -120 40
+        param wet -3 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect rv  type Reverb  chan nch  source Effect pre  mix 100  decay duree  size taille  predelay 5  damp 9000
+                   early 0.6  diffuse 0.75  stages 6  density 0.8  tailmode Gate  time ouvert  thresh seuil
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect rv  gain2 wet  out dst
+        Display Effect rv
+    End
+    Instance boite Boite  src In:0  dst Out:0  nch 2  duree 4  taille 1.5  ouvert 250  seuil -30  dry 0  wet -3
+));
+print(sprintf(0, "Reverb-Boite. instance boite : %d (0 : OK)", r));

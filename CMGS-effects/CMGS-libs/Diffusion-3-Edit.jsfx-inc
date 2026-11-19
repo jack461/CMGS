@@ -34,7 +34,7 @@
         16 Proj on / off : the projections of the current point (or of the barycentre) shown (both clics)
         17 Action (both clics : menu : rename, clear, copy another Edit, load the speakers of Diffusion or the source of
           the projector of the last view "Space",
-          load a layout of its library, export the configuration : mSL table (to load again), .lay, hppos, trajectory
+          load a layout of its library, export the configuration : mSL settings (to load again), .lay, hppos, trajectory
           .xml)
     The column at the left, the current point and the selection :
         0 P k / N (left : the next one, Shift + left : the previous one, selected alone ; right : menu of the points)
@@ -95,7 +95,7 @@
         it).
     Files (step 2, 2026-11-10) : the exports, in the folder Data of the project (Data/name-d3-EditA-date.lay, .mSL or
         .xml), written by CMGS-auxiliary.eel (mSL_Export : the script must run) : a layout of GRM Spaces (.lay, [-1, 1]) ;
-        the positions of the speakers for Diffusion (.mSL : D3_config(data( hppos n < x y z, ... ; )), [-5, 5] :
+        the positions of the speakers for Diffusion (.mSL : settings(data( hppos clear frame -1 1 n < x y z, ... ; )) :
         dropped, it changes only HP_Positions ; or the declaration copied in a configuration file) ; a trajectory of GRM
         Spaces (.xml : Trajectory closed, P x y z end 0 ; the curves sampled, 16 points at most each, ed_Path). Points
         (or a path) beyond 1 : first moved (their barycentre at the origin), then reduced (ed_Fit, ed_FitBuf). A .lay
@@ -104,7 +104,7 @@
         projectors (2026-11-11, Diffusion-3-Spatial) : a live link (the kinds Edit A ... D of the menus of the
         trajectories of the views "Space A" ... "D" : tr_EdSync copies it, fitted into [-1, 1], at each change), or a
         copy into the library of trajectories (Action : ed_ToLib ; module "Trajectories" : "copy from Edit X").
-        The configuration for mSL (2026-11-10) : table(data( Edit A name "..." kind Trajectory closed On smooth On free
+        The configuration for mSL (2026-11-10) : settings(data( Edit A name "..." kind Trajectory closed On smooth On free
         Off point x y z bend dx dy dz ... )) (Data/name-d3-EditA-table-date.mSL) : the points as they are, in their
         order (no number : a point added or removed in the file renumbers the next ones), with their bends ; dropped on a module Edit, it is loaded there again (elsewhere : in the module named in the file ; read by
         Set_Table in Diffusion-3-Set-Table, staged, taken by ed_Frame : ed_TbTake).
@@ -203,7 +203,7 @@ ed_c1x = ed_c1y = ed_c1z = ed_c2x = ed_c2y = ed_c2z = 0;
 ed_bx = ed_by = ed_bz = 0;          // a point of a segment (ed_SegAt)
 ed_tx = ed_ty = ed_tz = 0;          // a tangent (ed_Tan)
 ed_DivNames = "1|2|3|4|5|6|7|8|9|10";
-// the configurations read by the mSL "table" (Set_Table, Diffusion-3-Set-Table), taken by ed_Frame : pending (1), the
+// the configurations read by the mSL "settings" (Set_Table, Diffusion-3-Set-Table), taken by ed_Frame : pending (1), the
 // fields ([0] the keys given : 1 name, 2 kind, 4 closed, 8 smooth, 16 free, 32 points ; [1] kind, [2] closed, [3]
 // smooth, [4] free, [5] N), the points (ED_PS per point), the names
 ed_tq = make_array(ED_NV);
@@ -1519,6 +1519,7 @@ function ed_Err(code, e, msg)
 (
     sprintf(#ed_em, "ERR: %04d    Edit %c : %s", code, 'A' + e, msg);
     mSL_log(SysLogBox, #ed_em);
+    mSL_ErrNote(code, msg); // (2026-11-19, for "? n" in the mSL Console)
     code;
 );
 
@@ -1530,7 +1531,7 @@ function ed_LName(e, dst)
 );
 
 // The places of the points of the editor e, for a file or for "Space 3D" : x, y, z per point in ed_tmp, multiplied by
-// sc (5 for hppos : [-5, 5]) ; when a coordinate goes beyond 1 (Free), the configuration is first moved (its
+// sc (until 2026-11-18, 5 for hppos : [-5, 5]) ; when a coordinate goes beyond 1 (Free), the configuration is first moved (its
 // barycentre at the origin), then reduced (a homothety) so that no coordinate goes beyond 1. Returns the count of
 // points ; ed_fitd : 1 if moved and reduced, ed_fitr : the ratio.
 function ed_FitBuf(buf, n, sc)
@@ -1629,9 +1630,9 @@ local(l)
 );
 
 // Exports the configuration e in the folder Data of the project : kd 0, a layout of GRM Spaces (.lay, the coordinates
-// in [-1, 1]) ; kd 1, the positions of the speakers for Diffusion (.mSL : D3_config(data( hppos ... )), the
-// coordinates in [-5, 5]) ; kd 2, a trajectory of GRM Spaces (.xml : the points in their order, the curves sampled,
-// ed_Path ; the coordinates in [-1, 1]) ; kd 3, the configuration for the mSL "table" (.mSL : table(data( Edit A ...
+// in [-1, 1]) ; kd 1, the positions of the speakers for Diffusion (.mSL : settings(data( hppos clear frame -1 1 ... )),
+// the coordinates in [-1, 1], the size of the speakers of Diffusion if any ; until 2026-11-18 : [-5, 5]) ; kd 2, a trajectory of GRM Spaces (.xml : the points in their order, the curves sampled,
+// ed_Path ; the coordinates in [-1, 1]) ; kd 3, the configuration for the mSL "settings" (.mSL : settings(data( Edit A ...
 // )), the points as they are, with their bends, the name, the kind, the options : dropped on a module Edit, it is
 // loaded again, see Set_Table in Diffusion-3-Set-Table) ; the file : Data/name-d3-EditA-YYYY-MM-DD-HH-MM-SS.lay (.xml ;
 // -hppos-date.mSL, -table-date.mSL), written by CMGS-auxiliary.eel (ed_Frame logs when it is written). Returns 0, or the
@@ -1652,19 +1653,19 @@ local(st, n, k, p, q, c)
             "the auxiliary script is busy : try again");
     ) : (
         (kd === 3) ? (ed_fitd = 0) : // (the table : the points as they are)
-        (kd === 2) ? (n = ed_Path(e, ed_pth, ED_NPATH); ed_FitBuf(ed_pth, n, 1);) : (n = ed_Fit(e, (kd === 1) ? 5 : 1));
+        (kd === 2) ? (n = ed_Path(e, ed_pth, ED_NPATH); ed_FitBuf(ed_pth, n, 1);) : (n = ed_Fit(e, 1)); // (hppos : frame -1 1, 2026-11-18)
         // the names : of the file (only letters, digits, - and _), of the configuration (else "Edit A"), the date
         strcpy(#ed_xn, ed_nm[e]); xpt_Clean(#ed_xn);
-        (strlen(#ed_xn) > 0) ? sprintf(#ed_xf, "%s/%s-d3-Edit%c-%s%s.%s", #xpt_Folder, #ed_xn, 'A' + e, (kd === 1) ? "hppos-" : (kd === 3) ? "table-" : "",
+        (strlen(#ed_xn) > 0) ? sprintf(#ed_xf, "%s/%s-d3-Edit%c-%s%s.%s", #xpt_Folder, #ed_xn, 'A' + e, (kd === 1) ? "hppos-" : (kd === 3) ? "settings-" : "",
             xpt_Date(#ed_xd, 0), (kd === 2) ? "xml" : kd ? "mSL" : "lay") :
-            sprintf(#ed_xf, "%s/d3-Edit%c-%s%s.%s", #xpt_Folder, 'A' + e, (kd === 1) ? "hppos-" : (kd === 3) ? "table-" : "",
+            sprintf(#ed_xf, "%s/d3-Edit%c-%s%s.%s", #xpt_Folder, 'A' + e, (kd === 1) ? "hppos-" : (kd === 3) ? "settings-" : "",
             xpt_Date(#ed_xd, 0), (kd === 2) ? "xml" : kd ? "mSL" : "lay");
         (strlen(ed_nm[e]) > 0) ? strcpy(#ed_xa, ed_nm[e]) : sprintf(#ed_xa, "Edit %c", 'A' + e);
         (strlen(#ed_xn) === 0) ? sprintf(#ed_xn, "Edit%c", 'A' + e);
         xpt_Date(#ed_xd, 1);
         xpt_Begin();
         (kd === 3) ? (
-            // the configuration for the mSL "table" (Set_Table) : dropped on a module Edit, it is loaded there again
+            // the configuration for the mSL "settings" (Set_Table) : dropped on a module Edit, it is loaded there again
             strcpy(#ed_xk, (st[ed_sKind] === 1) ? "sources" : (st[ed_sKind] === 2) ? "trajectoire" : "haut-parleurs");
             sprintf(#ed_xt, "print(\"%s : configuration de Edit %c (%s), exportee le %s.\");", #ed_xn, 'A' + e, #ed_xk, #ed_xd);
             xpt_Line(#ed_xt);
@@ -1681,7 +1682,7 @@ local(st, n, k, p, q, c)
             xpt_Line("  suivantes). Les cles absentes ne changent rien ; les points, s'il y en a, remplacent tous les points du module.");
             xpt_Line(sprintf(#ed_xt, "*%c", '/'));
             xpt_Line("");
-            xpt_Line("var r = table(data(");
+            xpt_Line("var r = settings(data(");
             (strlen(ed_nm[e]) > 0) ? sprintf(#ed_xq, "  name \"%s\"", ed_MslName(#ed_xx, ed_nm[e])) : strcpy(#ed_xq, "");
             sprintf(#ed_xt, "    Edit %c%s  kind %s  closed %s  smooth %s  free %s", 'A' + e, #ed_xq,
                 (st[ed_sKind] === 1) ? "Sources" : (st[ed_sKind] === 2) ? "Trajectory" : "Speakers",
@@ -1698,7 +1699,7 @@ local(st, n, k, p, q, c)
                 k += 1;
             );
             xpt_Line("));");
-            sprintf(#ed_xt, "print(sprintf(0, \"%s : table %%d (0 : OK)\", r));", #ed_xn);
+            sprintf(#ed_xt, "print(sprintf(0, \"%s : settings %%d (0 : OK)\", r));", #ed_xn);
             xpt_Line(#ed_xt);
         ) :
         (kd === 2) ? (
@@ -1719,7 +1720,7 @@ local(st, n, k, p, q, c)
             xpt_Line("</Trajectory>");
         ) :
         kd ? (
-            // (an mSL script : D3_config with only hppos changes only the positions of the speakers)
+            // (an mSL script : settings with only hppos changes only the positions of the speakers)
             sprintf(#ed_xt, "print(\"%s : positions des haut-parleurs (hppos) de Edit %c, exportees le %s.\");", #ed_xn, 'A' + e, #ed_xd);
             xpt_Line(#ed_xt);
             xpt_Line("");
@@ -1728,15 +1729,22 @@ local(st, n, k, p, q, c)
                 (st[ed_sKind] === 1) ? "sources" : (st[ed_sKind] === 2) ? "points d'une trajectoire" : "haut-parleurs");
             xpt_Line(#ed_xt);
             ed_fitd ? (
-                sprintf(#ed_xt, "  Mode Free : le barycentre est ramene a l'origine, puis reduit (rapport %.4f) : les coordonnees restent dans [-5, 5].", ed_fitr);
+                sprintf(#ed_xt, "  Mode Free : le barycentre est ramene a l'origine, puis reduit (rapport %.4f) : les coordonnees restent dans [-1, 1].", ed_fitr);
                 xpt_Line(#ed_xt);
             );
             xpt_Line("  Deposer ce fichier dans Diffusion 3 : seules les positions des haut-parleurs changent (ecran Live, Space 3D en mode");
             xpt_Line("  Diffusion). Ou copier la declaration hppos dans un fichier de configuration (Diffusion-1.mSL ...).");
             xpt_Line(sprintf(#ed_xt, "*%c", '/'));
             xpt_Line("");
-            xpt_Line("D3_config(data(");
-            xpt_Line("    hppos");
+            xpt_Line("settings(data(");
+            // (2026-11-18 : the hppos add up : clear, this layout replaces the former one ; the cube of the editor, frame
+            // -1 1 ; the size of the speakers of Diffusion, if they have one : the same room)
+            strcpy(#ed_xt, "    hppos clear  frame -1 1");
+            ((hp_Geo[0] > 0) && (hp_Geo[3] > 0)) ? (
+                sprintf(#ed_xx, "  size %s %s %s", ed_Fmt(#ed_f1, hp_Geo[3]), ed_Fmt(#ed_f2, hp_Geo[4]), ed_Fmt(#ed_f3, hp_Geo[5]));
+                strcat(#ed_xt, #ed_xx);
+            );
+            xpt_Line(#ed_xt);
             k = 0;
             loop(n,
                 q = ed_tmp + 3 * k;
@@ -1846,7 +1854,7 @@ local(g)
     );
 );
 
-// A configuration read by the mSL "table" (Set_Table, staged : ed_tf, ed_tpt, ed_tnm) becomes the configuration e
+// A configuration read by the mSL "settings" (Set_Table, staged : ed_tf, ed_tpt, ed_tnm) becomes the configuration e
 // (kept for Undo : the points) : the keys given ; points outside the room : the mode Free
 function ed_TbTake(e)
 local(st, f, n, k, p, q, fr, out)
@@ -1877,7 +1885,7 @@ local(st, f, n, k, p, q, fr, out)
     );
     st[ed_sCur] = max(-1, min(st[ed_sN] - 1, st[ed_sCur]));
     ed_LName(e, #ed_ln);
-    sprintf(#ed_lg, "%s : read from a table%s%s", #ed_ln,
+    sprintf(#ed_lg, "%s : read from settings%s%s", #ed_ln,
         (f[0] & 32) ? sprintf(#ed_l2, ", %d points", st[ed_sN]) : "", out ? " (outside the room : Free)" : "");
     mSL_log(SysLogBox, #ed_lg);
     ui_GFXdoNow |= 4;
@@ -1889,7 +1897,7 @@ local(st, f, n, k, p, q, fr, out)
 function ed_Frame()
 local(e, n, k, q, r, st)
 (
-    // the configurations read by the mSL "table"
+    // the configurations read by the mSL "settings"
     e = 0; loop(ED_NV, ed_tq[e] ? ( ed_tq[e] = 0; ed_TbTake(e); ); e += 1;);
     // (the trajectories of the editors : a live link, tr_EdSync in Diffusion-3-Trajectories ; or a copy into the library,
     // ed_ToLib)
@@ -1999,7 +2007,7 @@ function ed_ActMenu(e)
 local(st, c, f)
 (
     st = ed_St(e);
-    sprintf(#ed_mnu, "Rename...|Clear all the points||%sCopy Edit A|%sCopy Edit B|%sCopy Edit C|%sCopy Edit D||Load the speakers of Diffusion (hppos)|Load the source of the projector of the last view Space|Load a layout of the library (files dropped)...|Copy the path into the library of trajectories (same name, or free)||Export : configuration (mSL table, to load again)|Export : layout of GRM Spaces (.lay)|Export : speakers of Diffusion (hppos, .mSL)|Export : trajectory of GRM Spaces (.xml)",
+    sprintf(#ed_mnu, "Rename...|Clear all the points||%sCopy Edit A|%sCopy Edit B|%sCopy Edit C|%sCopy Edit D||Load the speakers of Diffusion (hppos)|Load the source of the projector of the last view Space|Load a layout of the library (files dropped)...|Copy the path into the library of trajectories (same name, or free)||Export : configuration (mSL settings, to load again)|Export : layout of GRM Spaces (.lay)|Export : speakers of Diffusion (hppos, .mSL)|Export : trajectory of GRM Spaces (.xml)",
         (e === 0) ? "#" : "", (e === 1) ? "#" : "", (e === 2) ? "#" : "", (e === 3) ? "#" : "");
     gfx_x = mouse_x; gfx_y = mouse_y;
     c = gfx_showmenu(#ed_mnu);

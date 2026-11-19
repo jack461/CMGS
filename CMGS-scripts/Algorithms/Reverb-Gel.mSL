@@ -1,0 +1,49 @@
+print("Reverb-Gel. Un espace gele : une traine de cinq minutes, que l'on peut figer tout a fait.");
+
+/*
+  La decroissance dure trois cents secondes : chaque son s'ajoute aux precedents, en une nappe qui ne s'eteint presque
+  plus, ses aigus amortis. Pour la figer : la cellule 10 du pad (Loop) sur Freeze ; l'entree est alors coupee, la
+  traine tourne seule, indefiniment. Retour sur Decay pour la laisser s'eteindre.
+
+  Parametres :
+      nch       canaux
+      duree     duree de la traine (s, -60 dB)
+      taille    le facteur des retards
+      aigus     l'amortissement des aigus (Hz)
+      graves    la duree des graves (x la duree)
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0 (dry, wet).
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. Les autres reglages se
+  changent a la main dans le pad des effets de l'instance (le module Instances la montre ; le module Effect montre ses
+  effets, "pre", "rv", "post").
+  L'effet "rv" s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+settings(data( Free Instance gel )); // (l'instance precedente)
+var r = settings(data(
+    Interstys
+    Algorithm Gel
+        input src
+        output dst
+        param nch 2 1 128
+        param duree 300 0.01 1000
+        param taille 2 0.01 100
+        param aigus 4000 0 24000
+        param graves 2 0.1 10
+        param dry 0 -120 40
+        param wet -8 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect rv  type Reverb  chan nch  source Effect pre  mix 100  decay duree  size taille  predelay 40  damp aigus
+                   bass graves  early 0.2  diffuse 0.85  stages 6  density 0.8  lines 32  wow 1  rate 0.15
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect rv  gain2 wet  out dst
+        Display Effect rv
+    End
+    Instance gel Gel  src In:0  dst Out:0  nch 2  duree 300  taille 2  aigus 4000  graves 2  dry 0  wet -8
+));
+print(sprintf(0, "Reverb-Gel. instance gel : %d (0 : OK)", r));

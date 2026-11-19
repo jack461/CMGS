@@ -4,9 +4,9 @@
 
 Scans CMGS-effects (block comments skipped, dispatch tables "Err=N" between //===N===// ignored) for the error codes
 (xxErr = NNNN, xx_err(NNNN, ...), "ERR: NNNN", ternaries on an error assignment). Then compare with the list of the
-general manual, CMGS-aux/tools/md2odt/CMGS-Erreurs.tsv (code, application, explanation), to find the new codes :
+general manual, CMGS-data/CMGS-Erreurs.tsv (code, application, explanation), to find the new codes :
   python3 -I -c "import json;e={o['code'] for o in json.load(open('out.json')) if o['in_code']};
-t={l.split()[0] for l in open('CMGS-aux/tools/md2odt/CMGS-Erreurs.tsv')};print(sorted(e-t), sorted(t-e))"
+t={l.split()[0] for l in open('CMGS-data/CMGS-Erreurs.tsv')};print(sorted(e-t), sorted(t-e))"
 old_manual.txt (optional) : the text of the old Game Master manual (made by fodt2txt.py), to get its texts of ch. 18.
 """
 import re, glob, os, json, sys

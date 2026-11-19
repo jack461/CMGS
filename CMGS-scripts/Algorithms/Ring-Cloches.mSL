@@ -1,0 +1,47 @@
+print("Ring-Cloches. Des cloches : la phase du son modulee (PM), chaque partiel entoure de raies inharmoniques.");
+
+/*
+  Le mode PM tourne la phase du son par un sinus de frequence "pitch", de "indice" radians : chaque frequence f du
+  son s'entoure de raies f + k pitch (k = +-1, +-2...), d'autant plus nombreuses que l'indice est grand. Contrairement au
+  Ring, le son d'origine reste au centre. beat ecarte les modulateurs d'un canal au suivant : chaque haut-parleur sonne
+  une autre cloche. Un indice de 0.5 colore, 3 a 8 fait sonner le metal.
+
+  Parametres :
+      nch       canaux
+      pitch     la frequence du modulateur (Hz)
+      indice    l'indice (radians)
+      beat      l'ecart d'un canal au suivant (Hz)
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0 (dry, wet).
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. Les autres reglages se
+  changent a la main dans le pad des effets de l'instance (le module Instances la montre ; le module Effect montre ses
+  effets, "pre", "rg", "post").
+  L'effet "rg" s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+settings(data( Free Instance cloches )); // (l'instance precedente)
+var r = settings(data(
+    Interstys
+    Algorithm Cloches
+        input src
+        output dst
+        param nch 2 1 128
+        param pitch 173 0.01 20000
+        param indice 4 0 100
+        param beat 0.3 -10000 10000
+        param dry -120 -120 40
+        param wet 0 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect rg  type Ring  chan nch  source Effect pre  mode PM  freq pitch  wave Sine  index indice  detune beat
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect rg  gain2 wet  out dst
+        Display Effect rg
+    End
+    Instance cloches Cloches  src In:0  dst Out:0  nch 2  pitch 173  indice 4  beat 0.3  dry -120  wet 0
+));
+print(sprintf(0, "Ring-Cloches. instance cloches : %d (0 : OK)", r));

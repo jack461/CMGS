@@ -84,7 +84,7 @@ function tab(n; v) local(m, c, i, w, r)
             ((w > PH) && (w < PH + n)) ? (w = v[w - PH]);
             c[i] = w; i += 1;
         );
-        r = table(c);
+        r = settings(c);
         mfree(c);
         (r !== 0) ? (
             print(sprintf(0, "%s : erreur %04d dans une table", TITRE, r));
@@ -205,8 +205,8 @@ MAIN = r'''
 );
 thread(`name, NOM);
 // les instances precedentes (la ligne d'abord : lue d'un fichier, elle n'appartient plus a son instance)
-table(data( Free Instance @INS@ ));
-table(data( Free Line @INSIN@:src  Free Instance @INSIN@ ));
+settings(data( Free Instance @INS@ ));
+settings(data( Free Line @INSIN@:src  Free Instance @INSIN@ ));
 var r = tab(TIN, (avecfic ? 1 : borne(duree, 2, 1300)), (avecfic ? 1 : borne(canaux, 1, 2)));
 ((r === 0) && avecfic) ? (r = tab(TFIC, fichier));
 (r === 0) ? (r = creer());

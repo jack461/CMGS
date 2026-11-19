@@ -320,6 +320,36 @@ SysLogBox = 0;
 UsrLogBox = 0;
 logTask = 0;
 
+// (2026-11-19) The notes of the errors : a detail (an identifier, a word ...) kept with the code of an error when it is
+// detected (mSL_ErrNote), given by "? n" in the mSL Console (mSL_ErrNoteGet : the most recent note of the error n) ;
+// a ring of mSL_enN notes (their strings : #mSL_en0 + k, declared in a row ; their codes : an array, init_log_boxes)
+#mSL_en0 = ""; #mSL_en1 = ""; #mSL_en2 = ""; #mSL_en3 = ""; #mSL_en4 = ""; #mSL_en5 = ""; #mSL_en6 = ""; #mSL_en7 = "";
+mSL_enN = 8; mSL_enP = 0; mSL_enCodes = 0;
+
+function mSL_ErrNote(code, s)
+(
+    (mSL_enCodes > 0) ? (
+        mSL_enCodes[mSL_enP] = code;
+        strncpy(#mSL_en0 + mSL_enP, s, 250);
+        mSL_enP = (mSL_enP + 1) % mSL_enN;
+    );
+);
+
+// the string of the most recent note of the error "code", or 0
+function mSL_ErrNoteGet(code)
+local (k, i, r)
+(
+    r = k = 0;
+    (mSL_enCodes > 0) ? (
+        while ((r === 0) && (k < mSL_enN)) (
+            i = (mSL_enP + mSL_enN - 1 - k) % mSL_enN;
+            (mSL_enCodes[i] === code) ? (r = #mSL_en0 + i;);
+            k += 1;
+        );
+    );
+    r;
+);
+
 
 
 function init_log_boxes() local (mSL_Sys_LB_Str, mSL_Usr_LB_Str)
@@ -350,18 +380,40 @@ function init_log_boxes() local (mSL_Sys_LB_Str, mSL_Usr_LB_Str)
     UsrLogBox[8] = 0; // 1 when the ring has been filled once (see mSL_log)
     UsrLogBox[9] = "usrlog";
     mSL_Usr_LB_Str = #mSL_Usr_log000;
+    // (2026-11-19) the codes of the notes of the errors (see mSL_ErrNote)
+    mSL_enCodes = make_array(mSL_enN);
+    memset(mSL_enCodes, 0, mSL_enN);
 );
 
 
-function mSL_log(box, str)
+// The string k of the ring of a box : box[1] + k (named strings declared in a row), or (2026-11-19) box[7][k] when
+// box[7] is an array of string numbers (the mSL Console : strings of the pool, see mSL_Console)
+function mSL_logStr(box, k)
+local (a)
+(
+    ((a = box[7]) > 0) ? a[k] : box[1] + k;
+);
+
+// A line in the ring of strings of a box (SysLogBox, UsrLogBox ...)
+function mSL_logRing(box, str)
 local (lnb)
 (
     lnb = box[3];
-    strcpy(box[1] + lnb, str);
+    strcpy(mSL_logStr(box, lnb), str);
     lnb = (lnb + 1) % box[2];
     (lnb === 0) ? box[8] = 1; // the ring is full : the oldest lines are now replaced
-    strcpy(box[1] + lnb, "_________________");
+    strcpy(mSL_logStr(box, lnb), "_________________");
     box[3] = lnb;
+);
+
+// (2026-11-19) mSL_logTee, when it is not 0, is a box of the same kind that also receives the lines of SysLogBox : the
+// own lines of the mSL Console (see mSL_Console), set only during its work (the compilation and the run of its lines)
+mSL_logTee = 0;
+
+function mSL_log(box, str)
+(
+    mSL_logRing(box, str);
+    ((mSL_logTee > 0) && (box === SysLogBox)) ? mSL_logRing(mSL_logTee, str);
 );
 
 // Dump in the system log "size" words of memory from "add" : a header line with "msg", the address and the size,
@@ -1565,8 +1617,10 @@ local (sz)
 (
     sz = targ[-1];
     (sz >= 4) ? (
-        sprintf(#sfc, "Fwrd chain %d to %d", targ, extt);
-        mSL_log(SysLogBox, #sfc);
+        (mSL_CP_Flags & 8) ? ( // (2026-11-19 : a trace of the compiler only ; the incremental mSL Console grows its tables)
+            sprintf(#sfc, "Fwrd chain %d to %d", targ, extt);
+            mSL_log(SysLogBox, #sfc);
+        );
         targ[sz-2] = mSL_Fwrd_Link;
         targ[sz-1] = extt;
     );

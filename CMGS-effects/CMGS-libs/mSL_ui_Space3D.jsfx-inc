@@ -37,6 +37,9 @@
                     background s3d_bgr, s3d_bgg, s3d_bgb (black), texts s3d_txr, s3d_txg, s3d_txb (white) : 0..1 ;
                     the grid, the cross and the halo get colors contrasting with the background (s3d_colors)
                     s3d_style = 1 : the gains are shown as crosses, the levels as halos (instead of balls)
+                    sizes (2026-11-18, menu "Size of ...") : s3d_kSpk the balls of the speakers, s3d_kSrc those of the
+                    sources (and the group center), s3d_kX the crosses (or the balls) of the gains : factors, 1 by
+                    default, x 0.25 ... x 4 in the menu (s3d_kval) ; the host may save them
                 trajectories : s3d_mktraj(kind, cx, cy, cz, r) ; s3d_trjpos(u) : the point at u (0..1) of the path
                     s3d_mkmorph(ka, kb, w, cx, cy, cz, r) : interpolation between two trajectories (w = 0 : ka, 1 : kb)
                     kind "File" : a trajectory given by s3d_settraj (read with s3d_load_lay from a GRM Spaces
@@ -133,6 +136,8 @@ local(k, a, b)
     // the group of sources : size, rotations (radians), frame (0 room, 1 trajectory), target of the drags
     s3d_gsc = 1; s3d_gyaw = s3d_gpitch = s3d_groll = 0; s3d_grel = 0; s3d_mtarget = 0;
     s3d_tdx = 0; s3d_tdy = 1; s3d_tdz = 0; // direction of the trajectory at the group center
+    // the sizes : the balls of the speakers, of the sources, the crosses of the gains (factors)
+    s3d_kSpk = s3d_kSrc = s3d_kX = 1;
     // the stars : random directions, far away
     k = 0;
     loop(s3d_StarsNb,
@@ -437,25 +442,26 @@ function s3d_label(x, y, r, str)
 
 // Draw an object of the sorted list
 function s3d_object(id)
-local(ty, k, e, r, r0, hl, g, fa, x, y)
+local(ty, k, e, r, r0, rb, hl, g, fa, x, y)
 (
     ty = (id / 1024) | 0; k = id - ty * 1024;
     e = (ty === s3d_tSpk) ? s3d_spk + k * s3d_st : s3d_src + k * s3d_st;
     x = e[s3d_fsx]; y = e[s3d_fsy];
     fa = s3d_fade(e[s3d_fsz]);
     (ty === s3d_tSpk) ? (
-        r0 = 0.035 * s3d_foc / e[s3d_fsz];
+        rb = 0.035 * s3d_foc / e[s3d_fsz]; // (the size of the ball by default : that of the crosses)
+        r0 = rb * s3d_kSpk;
         s3d_ball(x, y, r0, 1, 0.75, 0.05, fa);
         hl = 0; // half length of the cross
         g = e[s3d_fg];
         ((s3d_opt & s3d_oGains) && (g > 0.001)) ? (
             s3d_style ? (
                 // a cross over the ball, more opaque for the higher gains
-                hl = max(6, 3 * r0);
+                hl = max(6, 3 * rb) * s3d_kX;
                 gfx_set(s3d_xr, s3d_xg, s3d_xb, 1);
-                s3d_cross(x, y, hl, max(1.5, 0.3 * r0), (0.45 + 0.55 * min(1, g)) * fa);
+                s3d_cross(x, y, hl, max(1.5, 0.1 * hl), (0.45 + 0.55 * min(1, g)) * fa);
             ) : (
-                r = (0.04 + 0.16 * min(1, g)) * s3d_foc / e[s3d_fsz];
+                r = (0.04 + 0.16 * min(1, g)) * s3d_foc / e[s3d_fsz] * s3d_kX;
                 s3d_ball(x, y, r, 0.1, 0.35, 1, 0.75 * fa);
             );
         );
@@ -480,7 +486,7 @@ local(ty, k, e, r, r0, hl, g, fa, x, y)
             s3d_label(x, y, max(r0, hl), #s3d_lbl);
         );
     ) : (
-        r = 0.03 * s3d_foc / e[s3d_fsz];
+        r = 0.03 * s3d_foc / e[s3d_fsz] * s3d_kSrc;
         s3d_ball(x, y, r, 0.1, 0.85, 1, fa);
         (s3d_opt & (s3d_oInfos | s3d_oAllInfos)) ? (
             gfx_set(0.7, 0.95, 1, 0.9 * fa);
@@ -670,13 +676,13 @@ local(k, e, ax, s, p, q, r, od, bx, by, bz)
     p = s3d_px; q = s3d_py; s = s3d_pz;
     loop(s3d_nobj,
         (r && (s3d_okey[k] < s)) ? (
-            s3d_ball(p, q, 0.012 * s3d_foc / s, 0.1, 0.75, 1, s3d_fade(s));
+            s3d_ball(p, q, 0.012 * s3d_foc / s * s3d_kSrc, 0.1, 0.75, 1, s3d_fade(s));
             r = 0;
         );
         s3d_object(s3d_oid[k]);
         k += 1;
     );
-    r ? s3d_ball(p, q, 0.012 * s3d_foc / s, 0.1, 0.75, 1, s3d_fade(s));
+    r ? s3d_ball(p, q, 0.012 * s3d_foc / s * s3d_kSrc, 0.1, 0.75, 1, s3d_fade(s));
 
     s3d_selection();
 
@@ -726,17 +732,41 @@ local(k, e, d, bd)
 );
 
 
+// The sizes (2026-11-18) : the factor i (0 ... s3d_kN - 1) : x 0.25 ... x 4, by steps of sqrt(2) (i = 4 : 1)
+s3d_kN = 9;
+function s3d_kval(i)
+(
+    2 ^ ((i - 4) / 2);
+);
+// the sub-menu "title" of a size (the factor cur checked), added to #s3d_mnu
+function s3d_kmenu(title, cur)
+local(i, v)
+(
+    strcat(#s3d_mnu, "|>"); strcat(#s3d_mnu, title);
+    i = 0;
+    loop(s3d_kN,
+        v = s3d_kval(i);
+        sprintf(#s3d_kit, "|%s%sx %.2g", (i === s3d_kN - 1) ? "<" : "", (abs(cur - v) < 0.001) ? "!" : "", v);
+        strcat(#s3d_mnu, #s3d_kit);
+        i += 1;
+    );
+);
+
 function s3d_menu()
-local(c, b)
+local(c, b, k, v)
 (
     // items 1 ... 11 : the options : 1 = bit 1 (s3d_oGains), 2 = s3d_oHideSrc (inverted : checked when not set),
-    // 3 ... 11 = bit 2^(item-2) (s3d_oLevels ... s3d_oClamp) ; 12 ... 15 : the views (as the cell View of Diffusion-3)
-    sprintf(#s3d_mnu, "%sDisplay Diffusers|%sDisplay Source|%sDisplay Levels|%sDisplay Infos|%sDisplay All Infos||%sDisplay Box|%sProjection on planes|%sFade out|%sStarfield|%sDisplay Trajectory||%sLimit to the room||Front view|Side view|Top view|3D view",
+    // 3 ... 11 = bit 2^(item-2) (s3d_oLevels ... s3d_oClamp) ; 12 ... 15 : the views (as the cell View of Diffusion-3) ;
+    // 16 ... 15 + 3 * s3d_kN : the sizes of the speakers, of the sources, of the crosses (s3d_kmenu)
+    sprintf(#s3d_mnu, "%sDisplay Diffusers|%sDisplay Source|%sDisplay Levels|%sDisplay Infos|%sDisplay All Infos||%sDisplay Box|%sProjection on planes|%sFade out|%sStarfield|%sDisplay Trajectory||%sLimit to the room||Front view|Side view|Top view|3D view|",
         (s3d_opt & s3d_oGains) ? "!" : "", (s3d_opt & s3d_oHideSrc) ? "" : "!", (s3d_opt & s3d_oLevels) ? "!" : "",
         (s3d_opt & s3d_oInfos) ? "!" : "", (s3d_opt & s3d_oAllInfos) ? "!" : "",
         (s3d_opt & s3d_oBox) ? "!" : "", (s3d_opt & s3d_oProj) ? "!" : "",
         (s3d_opt & s3d_oFade) ? "!" : "", (s3d_opt & s3d_oStars) ? "!" : "",
         (s3d_opt & s3d_oTraj) ? "!" : "", (s3d_opt & s3d_oClamp) ? "!" : "");
+    s3d_kmenu("Size of the speakers", s3d_kSpk);
+    s3d_kmenu("Size of the sources", s3d_kSrc);
+    s3d_kmenu("Size of the crosses (gains)", s3d_kX);
     gfx_x = mouse_x; gfx_y = mouse_y;
     c = gfx_showmenu(#s3d_mnu); s3d_mres = c; // (the result, for the host : e.g. uix_menu_end of ui-lib)
     ((c >= 1) && (c <= 11)) ? (
@@ -746,7 +776,11 @@ local(c, b)
     (c === 12) ? (s3d_az = 0; s3d_el = 0;) :           // front
     (c === 13) ? (s3d_az = $pi / 2; s3d_el = 0;) :     // side
     (c === 14) ? (s3d_az = 0; s3d_el = 1.55;) :        // top
-    (c === 15) ? (s3d_az = s3d_Az3D; s3d_el = s3d_El3D; s3d_dist = s3d_Dist3D;);
+    (c === 15) ? (s3d_az = s3d_Az3D; s3d_el = s3d_El3D; s3d_dist = s3d_Dist3D;) :
+    ((c >= 16) && (c < 16 + 3 * s3d_kN)) ? (
+        k = c - 16; v = s3d_kval(k % s3d_kN);
+        (k < s3d_kN) ? s3d_kSpk = v : (k < 2 * s3d_kN) ? s3d_kSrc = v : s3d_kX = v;
+    );
     (c > 0) ? s3d_changed = 1;
 );
 

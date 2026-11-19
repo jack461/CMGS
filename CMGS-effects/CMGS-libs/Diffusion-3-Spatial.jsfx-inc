@@ -13,8 +13,9 @@
     cell 2 of the views "Space A" ... "D", Diffusion-3-Space3D). The source is placed in the room by the settings of
     its projector (sp_st : trajectories A and B, mix, radius, dynamics, speed, frame, spread, size, yaw, pitch, roll,
     size / rotation / translation of the trajectory, as in the module Space 3D), then projected on the speakers of
-    Diffusion (hppos, scaled into [-1, 1] as in Space 3D : the largest coordinate becomes 1 ; only the outputs in use)
-    by a law :
+    Diffusion (hppos, in the cube [-1, 1] as in Space 3D, by the frame of hppos : hp_Cube ; only the outputs in use and
+    the active speakers ; 2026-11-18) by a law, its distances in the real proportions of the room (the size of hppos :
+    hp_Weights ; none : the cube ; "reach" : in halves of its largest dimension) :
         0 Equal (equal power, nothing lost) : the nearest speaker, and those less than "reach" farther than it (cosine
           weight ; reach 0 : the nearest one only) ; normalized in power : all the energy of a point goes to the speakers ;
         1 Radius (projective) : the speakers nearer than "reach" (cosine of d / reach) ; normalized only when the sum of
@@ -130,6 +131,7 @@ sp_tAct = make_array(SP_NP);
 sp_tPend = make_array(SP_NP);
 sp_spk = make_array(2 * 128 * 4);   // the speakers : x y z, output (0 ...)
 sp_spkN = make_array(2);
+sp_spkW = make_array(2 * 3);        // the weights of the distances (hp_Weights : the real proportions of the room)
 sp_sAct = sp_sPend = 0;
 sp_sHP = -1; sp_sDef = -1; sp_sOut = -1; // (@gfx) the HP_Positions, sp_defSeq and actchout published
 // @block
@@ -228,34 +230,28 @@ local(p, i, n, ok)
     @gfx : the publications for @block
 */
 
-// The speakers of Diffusion (HP_Positions : number, x, y, z ; scaled as in Space 3D : the largest coordinate becomes 1),
-// only the outputs in use (actchout) : x y z, output (0 ...)
+// The speakers of Diffusion (HP_Positions : number, x, y, z), in the cube [-1, 1] as in Space 3D (hp_Cube, by the frame
+// of hppos ; 2026-11-18), only the outputs in use (actchout) and the active speakers (hp_Act) : x y z, output (0 ...) ;
+// the weights of the distances (hp_Weights : the real proportions of the room, sp_Gains)
 function sp_PubSpk()
 local(b, d, c, i, n, m, k)
 (
     b = 1 - sp_sAct; d = sp_spk + b * 512; k = 0;
     (HP_Positions > 0) ? (
         c = HP_Positions[-1];
-        m = 0; i = 0;
-        while (i < c) (
-            n = HP_Positions[i];
-            ((n >= 1) && (n <= 128)) ? (
-                m = max(m, max(abs(HP_Positions[i+1]), max(abs(HP_Positions[i+2]), abs(HP_Positions[i+3]))));
-            );
-            i += 4;
-        );
-        m = (m > 0) ? 1 / m : 1;
+        m = hp_Old();
         i = 0;
         while (i < c) (
             n = HP_Positions[i];
-            ((n >= 1) && (n <= min(128, actchout)) && (k < 128)) ? (
-                d[4*k] = HP_Positions[i+1] * m; d[4*k+1] = HP_Positions[i+2] * m; d[4*k+2] = HP_Positions[i+3] * m;
+            ((n >= 1) && (n <= min(128, actchout)) && hp_Act[n] && (k < 128)) ? (
+                hp_Cube(i, m, d + 4 * k);
                 d[4*k+3] = n - 1;
                 k += 1;
             );
             i += 4;
         );
     );
+    hp_Weights(sp_spkW + 3 * b);
     sp_spkN[b] = k;
     sp_sPend = b;
 );
@@ -593,13 +589,14 @@ local(st, w, lay, pos, k, x, y, z, a, sc, fx, fy, fz, rx, ry, rz, ux, uy, uz, l,
 // The gains of the n points of the projector p on the speakers (the law, the reach, the level) : the list of @sample,
 // each gain going from its current value to its target in sp_R samples ; the power sent to each output (sp_hpg)
 function sp_Gains(p, n)
-local(st, law, reach, lv, a, b2, spk, ns, pos, gc, e, hp, i, k, d, dn, s, t, g, x, y, z, c, cnt, mx, att, o)
+local(st, law, reach, lv, a, b2, spk, ns, pos, gc, e, hp, i, k, d, dn, s, t, g, x, y, z, c, cnt, mx, att, o, w, wx, wy, wz)
 (
     st = sp_st + p * SP_SS;
     law = st[sp_fLaw]; reach = max(0, st[sp_fReach]);
     lv = (st[sp_fLevel] <= -120) ? 0 : 10 ^ (st[sp_fLevel] / 20);
     a = max(0.1, st[sp_fRoff]) / 6.0206; b2 = sqr(SP_DBAPB);
     spk = sp_spk + sp_sAct * 512; ns = sp_spkN[sp_sAct];
+    w = sp_spkW + sp_sAct * 3; wx = w[0]; wy = w[1]; wz = w[2]; // (the real proportions of the room : hp_Weights)
     pos = sp_pos + p * SP_MAXP * 3;
     gc = sp_gc + p * SP_MAXP * 128;
     hp = sp_hpg + p * 128;
@@ -612,10 +609,10 @@ local(st, law, reach, lv, a, b2, spk, ns, pos, gc, e, hp, i, k, d, dn, s, t, g, 
     i = 0;
     loop(n,
         x = pos[3*i]; y = pos[3*i+1]; z = pos[3*i+2];
-        // the distances to the speakers, the nearest one
+        // the distances to the speakers (in the real proportions of the room), the nearest one
         dn = 1000; k = 0;
         loop(ns,
-            sp_row[k] = d = sqrt(sqr(spk[4*k] - x) + sqr(spk[4*k+1] - y) + sqr(spk[4*k+2] - z));
+            sp_row[k] = d = sqrt(sqr((spk[4*k] - x) * wx) + sqr((spk[4*k+1] - y) * wy) + sqr((spk[4*k+2] - z) * wz));
             dn = min(dn, d);
             k += 1;
         );

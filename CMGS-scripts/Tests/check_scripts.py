@@ -25,6 +25,9 @@ the script ; they should therefore name the script (e.g. "Ex-0001. s vaut 55").
 A line  // Expected error 1629  announces an error : a log line "ERR: 1629 ..." (compilation)
 or "*** ERR: thread: ... Error:1629 ..." (execution, the thread stops) after the "Using" line of
 the script. Repeat it to expect the same error several times.
+The lines of the mSL Console (2026-11-19) are not scripts : a "can't compile" line whose name is not a
+.mSL file, and the error lines that follow a line typed in the console ("> ...", "< ...", within 3
+lines) are counted apart ("console : n error(s)"), never as unexpected errors.
 A line  // Allowed error 0621  allows an error that may appear or not (a message logged once per
 session, for example) : found after the "Using" line, it is not reported ; missing, it is not a failure.
 The error lines after the first "Using" which are not expected by a script are reported at the
@@ -166,8 +169,11 @@ def main():
                 firsts[name] = k
                 first = k if first is None else min(first, k)
     # a script which did not compile has no "Using" line : it starts at its "can't compile" line
+    # (not a line of the mSL Console : its "name" is the line itself, not a .mSL file)
     for i, l in enumerate(lines):
         m = COMPILE_FAIL.match(l)
+        if m and not m.group(1).endswith('.mSL'):
+            continue
         if m and os.path.basename(m.group(1)) not in runs:
             runs[os.path.basename(m.group(1))] = lines[i:]
             nruns[os.path.basename(m.group(1))] = 1
@@ -182,6 +188,14 @@ def main():
             if m:
                 errors.append([i, int(m.group(1) or m.group(2)), False])
     start = {name: len(lines) - len(out) - 1 for name, out in runs.items()}
+    # the errors of the lines typed in the mSL Console : its "can't compile" lines, the errors just after a line typed
+    ncons = 0
+    for e in errors:
+        m = COMPILE_FAIL.match(lines[e[0]])
+        near = any(lines[k].startswith(('> ', '< ')) for k in range(max(0, e[0] - 3), e[0]))
+        if (m and not m.group(1).endswith('.mSL')) or near:
+            e[2] = True
+            ncons += 1
 
     nok = nfail = 0
     for path in sorted(glob.glob(os.path.join(scripts, '*.mSL'))):
@@ -244,6 +258,8 @@ def main():
     unexp = [e for e in errors if not e[2]]
     for e in unexp:
         print('  ERR    %s' % lines[e[0]])
+    if ncons:
+        print('  (console : %d error(s) of the lines typed, not counted)' % ncons)
     print('%d correct, %d failed, %d unexpected error(s)' % (nok, nfail, len(unexp)))
     sys.exit(1 if nfail or unexp else 0)
 

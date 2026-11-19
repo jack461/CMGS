@@ -1,0 +1,49 @@
+print("Reverb-Respire. Une respiration : chaque son fait monter sa traine, qui se coupe au sommet (comme a l'envers).");
+
+/*
+  La traine monte (tailmode Swell) : a chaque attaque au-dessus du seuil, le son traite part du silence et grandit
+  pendant "montee" millisecondes, puis il est coupe ; la porte se rearme quand l'entree retombe sous le seuil. Une
+  reverberation qui inspire au lieu d'expirer, proche d'une reverberation a l'envers, sans attendre.
+
+  Parametres :
+      nch       canaux
+      duree     duree de la traine (s, -60 dB)
+      taille    le facteur des retards
+      montee    la duree de la montee (ms)
+      seuil     le seuil de l'entree (dB)
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0 (dry, wet).
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. Les autres reglages se
+  changent a la main dans le pad des effets de l'instance (le module Instances la montre ; le module Effect montre ses
+  effets, "pre", "rv", "post").
+  L'effet "rv" s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+settings(data( Free Instance respire )); // (l'instance precedente)
+var r = settings(data(
+    Interstys
+    Algorithm Respire
+        input src
+        output dst
+        param nch 2 1 128
+        param duree 5 0.01 1000
+        param taille 2 0.01 100
+        param montee 900 10 10000
+        param seuil -35 -80 0
+        param dry 0 -120 40
+        param wet -2 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect rv  type Reverb  chan nch  source Effect pre  mix 100  decay duree  size taille  predelay 0  damp 7000
+                   early 0  diffuse 0.8  stages 6  density 0.6  tailmode Swell  time montee  thresh seuil
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect rv  gain2 wet  out dst
+        Display Effect rv
+    End
+    Instance respire Respire  src In:0  dst Out:0  nch 2  duree 5  taille 2  montee 900  seuil -35  dry 0  wet -2
+));
+print(sprintf(0, "Reverb-Respire. instance respire : %d (0 : OK)", r));

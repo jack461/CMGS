@@ -1,0 +1,50 @@
+print("Reverb-Spirale. Une spirale : la taille de l'espace respire, la traine glisse comme une bande.");
+
+/*
+  Un LFO tres lent module la taille (l'entree Size, en octaves) : tous les retards s'allongent puis se raccourcissent,
+  et la hauteur de la traine glisse vers le grave puis vers l'aigu, comme une bande qui ralentit et accelere. ampleur
+  regle l'excursion (1 : une octave de part et d'autre), vitesse sa periode.
+
+  Parametres :
+      nch       canaux
+      duree     duree de la traine (s, -60 dB)
+      taille    le facteur des retards
+      vitesse   la frequence du LFO (Hz)
+      ampleur   l'excursion de la taille (octaves)
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0 (dry, wet).
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. Les autres reglages se
+  changent a la main dans le pad des effets de l'instance (le module Instances la montre ; le module Effect montre ses
+  effets, "pre", "rv", "post", "lfo").
+  L'effet "rv" s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+settings(data( Free Instance helice )); // (l'instance precedente)
+var r = settings(data(
+    Interstys
+    Algorithm Helice
+        input src
+        output dst
+        param nch 2 1 128
+        param duree 6 0.01 1000
+        param taille 1.5 0.01 100
+        param vitesse 0.07 0.001 20
+        param ampleur 1 0 10
+        param dry 0 -120 40
+        param wet -5 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect lfo  type LFO  chan 1  freq vitesse  mode Sine  amp 1  offset 0
+        Effect rv  type Reverb  chan nch  source Effect pre  mix 100  decay duree  size taille  predelay 20  damp 6000
+                   early 0  diffuse 0.7  stages 4  density 0.6  mod Size Effect lfo  depth ampleur
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect rv  gain2 wet  out dst
+        Display Effect rv
+    End
+    Instance helice Helice  src In:0  dst Out:0  nch 2  duree 6  taille 1.5  vitesse 0.07  ampleur 1  dry 0  wet -5
+));
+print(sprintf(0, "Reverb-Spirale. instance helice : %d (0 : OK)", r));

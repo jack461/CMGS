@@ -1,0 +1,46 @@
+print("Ring-Vibre. Une vibration : les frequences tremblent au hasard, d'un tremblement different sur chaque canal (FM).");
+
+/*
+  Le mode FM avec un modulateur au hasard (Random : des valeurs tirees a chaque periode, reliees en douceur) : toutes
+  les frequences du son derivent ensemble de quelques Hz, sans regularite, comme une bande abimee, mais en Hz : le son
+  devient instable, inharmonique. beat donne a chaque canal sa vitesse : le tremblement se disperse dans l'espace.
+
+  Parametres :
+      nch       canaux
+      vitesse   la frequence du modulateur (Hz)
+      indice    l'indice (ecart = indice x vitesse, Hz)
+      beat      l'ecart d'un canal au suivant (Hz)
+      dry       son sec (dB)
+      wet       son traite (dB)
+
+  Utilisation : deposer ce fichier dans Interstys. Le son de la piste (In:0) et le bus d'essai (Bus 64, ou Sources.mSL
+  met des clics ou un buzz) entrent dans l'algorithme ; le son sec et le son traite sortent vers Out:0 (dry, wet).
+  Reglages : les parametres de la ligne "Instance" en bas (les modifier, puis redeposer le fichier : l'instance est
+  refaite). nch : le nombre de canaux (1 ... 128), celui de la piste ou des haut-parleurs. Les autres reglages se
+  changent a la main dans le pad des effets de l'instance (le module Instances la montre ; le module Effect montre ses
+  effets, "pre", "rg", "post").
+  L'effet "rg" s'affiche dans un module Effect de l'onglet courant (Display).
+  Pour la retirer : Free-All.mSL (toutes les instances de la bibliotheque). La premiere fois, le journal note une erreur
+  2787 (l'instance a retirer n'existe pas encore) : sans consequence.
+*/
+
+settings(data( Free Instance vibre )); // (l'instance precedente)
+var r = settings(data(
+    Interstys
+    Algorithm Vibre
+        input src
+        output dst
+        param nch 2 1 128
+        param vitesse 3 0.01 20000
+        param indice 8 0 100
+        param beat 0.4 -10000 10000
+        param dry -120 -120 40
+        param wet 0 -120 40
+        Effect pre  type Mixer  chan nch  src1 src  gain1 0  src2 Bus 64  gain2 0
+        Effect rg  type Ring  chan nch  source Effect pre  mode FM  freq vitesse  wave Random  index indice  detune beat
+        Effect post  type Mixer  chan nch  src1 Effect pre  gain1 dry  src2 Effect rg  gain2 wet  out dst
+        Display Effect rg
+    End
+    Instance vibre Vibre  src In:0  dst Out:0  nch 2  vitesse 3  indice 8  beat 0.4  dry -120  wet 0
+));
+print(sprintf(0, "Ring-Vibre. instance vibre : %d (0 : OK)", r));

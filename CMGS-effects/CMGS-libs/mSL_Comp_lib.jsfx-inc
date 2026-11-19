@@ -102,6 +102,10 @@ mSL_current_stack = 0;
 // mSL_new_stack = 0;
 mSL_CodeStop = 0; // reason for stopping execution
 mSL_ExitValue = 0; // the exit value of the code
+// (2026-11-19) names declared "ext" by previous compilations, entered again by the next mSL_compile with the flag 2
+// (an array of mSL_cpExtN identifiers ; the incremental mode of the mSL Console) ; mSL_compile sets mSL_cpExtN to 0
+mSL_cpExt = 0;
+mSL_cpExtN = 0;
 
 
 // Used strings
@@ -3741,7 +3745,9 @@ local (flg, ty, PBExp, xp, xty, r, x, y, z, opt, prev, xprev, xnext, idt, newc)
                     // Combine with left operand, id. expected
                     idt = mSL_lptr[PBExp];
                     AA_idt = idt; //TRACE
-                    (mSL_tyun[idt] === mSL_tyIdent) ? (
+                    // (2026-11-19) or an expression (not a special form) : h()[1], (h())[1], a[1][2]
+                    (((x = mSL_tyun[idt]) === mSL_tyIdent) ||
+                        ((x === mSL_tySubExp) && ((y = mSL_valu[idt]) > 0) && (mSL_tyun[y] !== mSL_tyFSpcF))) ? (
                         //AA_step = max(AA_step, 5); //TRACE
                         // create a new node for the indexation
                         newc = mSL_getChEnt();
@@ -3798,7 +3804,13 @@ local (flg, ty, PBExp, xp, xty, r, x, y, z, opt, prev, xprev, xnext, idt, newc)
                 r = mSL_checkCList(xp, z); // get the length of the list
                 AAA_lastXP = xp; AAA_lastXPlg = r; AAA_lastXPty = mSL_tyun[xp]; AAA_lastXPval = mSL_valu[xp];
                 // mSL_errC = 2222; r = 333; xty = 0;
+                // (2026-11-19) or a mark : a lambda, or "_" (see mSL_doLambdas ; mSL_lbIsMark, defined after) ; or an
+                // expression whose value is a function, g()(2), (w = g()) (2) : not a special form, not the head of a
+                // definition "function f(x)" (followed by its body)
                 ((xty === mSL_tyIdent) || (xty === mSL_tyKeywrd) || (xty === mSL_tyPrimF) ||
+                    ((xty === mSL_tyNum) && (x > mSL_lbBase) && (x <= mSL_lbSelf) && (x === floor(x))) ||
+                    ((xty === mSL_tySubExp) && ((y = mSL_valu[idt]) > 0) && (mSL_tyun[y] !== mSL_tyFSpcF)
+                        && !(((z = mSL_lptr[idt]) > 0) && (mSL_tyun[z] === mSL_tyKeywrd) && (mSL_valu[z] === mSL_ckwFunction))) ||
                     ((xty === mSL_tySubExp) && ((x = mSL_valu[idt]) > 0) && (mSL_tyun[x] === mSL_tyFSpcF)
                         && ((xty = mSL_tyFSpcF))))? (
                     // This is bound to be a function call or a special form
@@ -3851,8 +3863,9 @@ local (flg, ty, PBExp, xp, xty, r, x, y, z, opt, prev, xprev, xnext, idt, newc)
                                 // This points before the identifier
                                 mSL_lptr[PBExp] = prev; mSL_rptr[prev] = PBExp;
                                 opt = 0;
-                                (xty === mSL_tyIdent) ? (
-                                    // This is a "standard" function call
+                                ((xty === mSL_tyIdent) || (xty === mSL_tyNum) || (xty === mSL_tySubExp)) ? (
+                                    // This is a "standard" function call (2026-11-19 : or the call of a mark, or of
+                                    // an expression)
                                     mSL_tyun[newc] = mSL_tyFCall; mSL_valu[newc] = mSL_prFCall;
                                     opt = 1; // keep the size as start of list
                                 ) :
@@ -3950,6 +3963,15 @@ local (bl, bp, ad)
 
 
 // Add a codeop without parameter
+// (2026-11-19) The note of a compilation error on the identifier idt : its name and its position (mSL_ErrNote, for
+// "? n" in the mSL Console)
+function mSL_cpErrNote(idt)
+(
+    mSL_id2Str(idt, #mSL_cpen);
+    sprintf(#mSL_cpen2, "%s (line %d, column %d)", #mSL_cpen, mSL_errPos >> 16, mSL_errPos & 0xFFFF);
+    mSL_ErrNote(mSL_errC, #mSL_cpen2);
+);
+
 function mSL_addCode1(code) local (mSL_PrK, mSL_PrPos)
 (
     //xxtrace(code, mSL_pCCode);
@@ -4100,11 +4122,13 @@ local (ptr, nxp, flg, ty, valu, upos, q, qty, argc, ent, prev, pty, next, nnext,
                         ) :
                         (
                             mSL_errC = 3416; // undeclared identifier
+                            mSL_cpErrNote(valu);
                         );
                     ) :
                     (
                         mSL_errC = 3418; // undeclared identifier
                         sprintf(#dbg_trace2, "Error %d -  Line %d/%d", mSL_errC, mSL_errPos >> 16, mSL_errPos & 0xFFFF);
+                        mSL_cpErrNote(valu);
                     );
                     AA_CGen |= 8;
                 ) :
@@ -4131,11 +4155,13 @@ local (ptr, nxp, flg, ty, valu, upos, q, qty, argc, ent, prev, pty, next, nnext,
                         ) :
                         (
                             mSL_errC = 3420; // undeclared identifier
+                            mSL_cpErrNote(valu);
                         );
                     ) :
                     (
                         mSL_errC = 3419; // undeclared identifier
                         sprintf(#dbg_trace2, "Error %d -  Line %d/%d", mSL_errC, mSL_errPos >> 16, mSL_errPos & 0xFFFF);
+                        mSL_cpErrNote(valu);
                     );
                     AA_CGen |= 8;
                 ) :
@@ -4419,7 +4445,8 @@ local (ptr, nxp, flg, ty, valu, upos, q, qty, argc, ent, prev, pty, next, nnext,
                                 mSL_pushToken(next);
                                 // The left is supposed to be an identifier
                                 AAA_prevty = mSL_tyun[prev];
-                                (mSL_tyun[prev] != mSL_tyIdent) ? (
+                                // (2026-11-19 : or an expression, h()[1] ; its value is pushed as the one of a variable)
+                                ((mSL_tyun[prev] != mSL_tyIdent) && (mSL_tyun[prev] != mSL_tySubExp)) ? (
                                     mSL_errC = 3404;
                                 );
                                 mSL_pushToken(prev);
@@ -4823,6 +4850,160 @@ local (wa, ip, idx)
 
 
 
+// (2026-11-19) The lambda expressions (the functions without a name) and "_" (the function itself), on the flat list of
+// the lexical units, before the brackets are reduced (mSL_compile and mSL_insert_file, before mSL_mod_primitives) :
+//   - "function (x) (2*x + 3)", anywhere in an expression, is a value : the function. Its definition becomes a statement
+//     of level zero "function L(x) (2*x + 3);", put right after the HEAD, L a name no text can contain (mSL_lbBase + k :
+//     "lambda", a 6 bits group 0, then k, 1 ... 62 ; never a global variable : the name is only the one of the code) ;
+//     its place becomes the number mSL_lbBase + k (a mark), replaced by the address of its code in the compiled code
+//     (mSL_lbPatch, at the end of mSL_compile). Nothing else keeps it : the function disappears when no variable holds
+//     it any more. "local(...)" groups may follow its parameters ; its body is between parentheses ; arguments right
+//     after it call it at once : "function (x) (x + 1) (3)" is 4 (a mark followed by "(" is a call, see
+//     mSL_reduceBrackets), as "(function (x) (x + 1))(3)" ;
+//   - in a function, named or not, "_" is the function itself (the number mSL_lbSelf, replaced by the address of the code
+//     of the function where it is) : "_(n - 1)" is a recursive call, independent of any variable ; the functions are
+//     handled from the right, the innermost one first : "_" is the nearest function ; elsewhere, "_" stays an identifier.
+// No closure : the body of a lambda sees the global variables, not the parameters or the locals of an enclosing function.
+mSL_lbBase = mSL_symbol("lambda"); // the marks : mSL_lbBase + k (the lambda k of the text), mSL_lbSelf ("_")
+mSL_lbSelf = mSL_lbBase + 63;
+mSL_lbN = 0;                       // the lambdas of the text being compiled (62 at most : error 2258)
+mSL_symUnder = mSL_symbol("_");    // the identifier "_"
+
+// A mark : a lambda, or "_"
+function mSL_lbIsMark(v)
+(
+    (v > mSL_lbBase) && (v <= mSL_lbSelf) && (v === floor(v));
+);
+
+// The ")" that closes the group starting at the "(" p, or 0 (error 2257 : not closed)
+function mSL_lbGroup(p)
+local (d, e)
+(
+    d = 0; e = 0;
+    while ((e === 0) && (p > 0) && (mSL_tyun[p] !== mSL_tyTAIL)) (
+        (mSL_tyun[p] === mSL_tyLPar) ? (d += 1;) :
+        (mSL_tyun[p] === mSL_tyRPar) ? (d -= 1; (d === 0) ? (e = p;););
+        p = mSL_rptr[p];
+    );
+    ((e === 0) && (mSL_errC === 0)) ? (mSL_errC = 2257;);
+    e;
+);
+
+// The ";" that ends the statement starting at p (its level : not inside parentheses), or 0 (the end of the text)
+function mSL_lbEndStmt(p)
+local (d, e)
+(
+    d = 0; e = 0;
+    while ((e === 0) && (p > 0) && (mSL_tyun[p] !== mSL_tyTAIL)) (
+        (mSL_tyun[p] === mSL_tyLPar) ? (d += 1;) :
+        (mSL_tyun[p] === mSL_tyRPar) ? (d -= 1;) :
+        ((mSL_tyun[p] === mSL_tySemiCol) && (d <= 0)) ? (e = p;);
+        p = mSL_rptr[p];
+    );
+    e;
+);
+
+// The identifier "_" becomes the mark mSL_lbSelf, from the unit p to the unit e included (e = 0 : to the end)
+function mSL_lbSelfMark(p, e)
+local (flg)
+(
+    flg = 1;
+    while (flg && (p > 0)) (
+        ((mSL_tyun[p] === mSL_tyIdent) && (mSL_valu[p] === mSL_symUnder)) ? (
+            mSL_tyun[p] = mSL_tyNum; mSL_valu[p] = mSL_lbSelf;
+        );
+        (p === e) ? (flg = 0;) : (p = mSL_rptr[p];);
+    );
+);
+
+// The lambdas and "_" of the whole text (see above), from its end to its start
+function mSL_doLambdas()
+local (p, prv, q, e, b, nm, h, a, f2, i2, s2, rgt)
+(
+    p = mSL_start; while (mSL_rptr[p] > 0) (p = mSL_rptr[p];); // the last unit (the TAIL)
+    while ((p > 0) && (mSL_errC === 0)) (
+        prv = mSL_lptr[p];
+        ((mSL_tyun[p] === mSL_tyKeywrd) && (mSL_valu[p] === mSL_ckwFunction)) ? (
+            q = mSL_rptr[p];
+            (mSL_tyun[q] === mSL_tyIdent) ? (
+                // a named function : "_" is the function, up to the ";" that ends its definition
+                mSL_lbSelfMark(mSL_rptr[q], mSL_lbEndStmt(q));
+            ) :
+            (mSL_tyun[q] === mSL_tyLPar) ? (
+                // a lambda : its parameters, its "local(...)" groups, its body
+                e = mSL_lbGroup(q);
+                b = (e > 0) ? mSL_rptr[e] : 0;
+                while ((e > 0) && (b > 0) && (mSL_tyun[b] === mSL_tyKeywrd) && (mSL_valu[b] === mSL_ckwLocal)
+                        && (mSL_tyun[mSL_rptr[b]] === mSL_tyLPar)) (
+                    e = mSL_lbGroup(mSL_rptr[b]);
+                    b = (e > 0) ? mSL_rptr[e] : 0;
+                );
+                ((e > 0) && (b > 0) && (mSL_tyun[b] === mSL_tyLPar)) ? (
+                    e = mSL_lbGroup(b);
+                ) : (
+                    (mSL_errC === 0) ? (mSL_errC = 2256;); // no body between parentheses after the parameters
+                    e = 0;
+                );
+                ((e > 0) && (mSL_lbN >= 62)) ? (mSL_errC = 2258; e = 0;); // too many lambdas in the text
+                (e > 0) ? (
+                    mSL_lbN += 1;
+                    nm = mSL_lbBase + mSL_lbN;
+                    mSL_lbSelfMark(q, e);
+                    // its place : the mark nm (the unit of "function")
+                    rgt = mSL_rptr[e];
+                    mSL_rptr[p] = rgt; (rgt > 0) ? (mSL_lptr[rgt] = p;);
+                    mSL_tyun[p] = mSL_tyNum; mSL_valu[p] = nm;
+                    // its definition after the HEAD : function nm ( ... ) [local( ... )] ( ... ) ;
+                    f2 = mSL_getChEnt(); i2 = mSL_getChEnt(); s2 = mSL_getChEnt();
+                    (mSL_errC === 0) ? (
+                        mSL_tyun[f2] = mSL_tyKeywrd; mSL_valu[f2] = mSL_ckwFunction; mSL_upos[f2] = mSL_upos[p];
+                        mSL_tyun[i2] = mSL_tyIdent; mSL_valu[i2] = nm; mSL_upos[i2] = mSL_upos[p];
+                        mSL_tyun[s2] = mSL_tySemiCol; mSL_valu[s2] = ';'; mSL_upos[s2] = mSL_upos[e];
+                        h = mSL_start; a = mSL_rptr[h];
+                        mSL_rptr[h] = f2; mSL_lptr[f2] = h;
+                        mSL_rptr[f2] = i2; mSL_lptr[i2] = f2;
+                        mSL_rptr[i2] = q; mSL_lptr[q] = i2;
+                        mSL_rptr[e] = s2; mSL_lptr[s2] = e;
+                        mSL_rptr[s2] = a; (a > 0) ? (mSL_lptr[a] = s2;);
+                    );
+                ) : (
+                    mSL_errPos = mSL_upos[p];
+                );
+            );
+        );
+        p = prv;
+    );
+);
+
+// The marks in the code of the unit u (a function, or the main code), once all the units are compiled and copied :
+// "push_num mark" gets the address of the code of the lambda (its name : the mark), or of u itself for "_"
+function mSL_lbPatch(u)
+local (ip, n, v, t, f, g)
+(
+    (u > 0) ? (
+        ip = u[mSL_CC_dpCode]; n = ip + u[mSL_CC_CodSize] - 1;
+        while (ip < n) (
+            ((u[ip] === mSL_K_pushNum) && mSL_lbIsMark(v = u[ip + 1])) ? (
+                (v === mSL_lbSelf) ? (
+                    u[ip + 1] = u;
+                ) : (
+                    t = 0; f = 0;
+                    while ((t === 0) && (f < mSL_F2CPt)) (
+                        g = mSL_F2CCode[f];
+                        ((g > 0) && (g[mSL_CC_Name] === v)) ? (t = g;);
+                        f += 1;
+                    );
+                    (t > 0) ? (u[ip + 1] = t;) : ((mSL_errC === 0) ? (mSL_errC = 2259;);); // (its code not found)
+                );
+                ip += 2;
+            ) : (
+                ip += 1;
+            );
+        );
+    );
+);
+
+
 function mSL_insert_file(fname)
 local (flg, p_start, p_end, p_HEAD, lex)
 (
@@ -4856,6 +5037,10 @@ local (flg, p_start, p_end, p_HEAD, lex)
             // We have read a thing
             (mSL_errC === 0) ? (
                 AA_tr += 1;
+                // (2026-11-19) the lambda expressions, "_" in the functions (see mSL_doLambdas)
+                mSL_doLambdas();
+            );
+            (mSL_errC === 0) ? (
                 // adapt some operations to context
                 mSL_mod_primitives(mSL_start);
 
@@ -4952,6 +5137,11 @@ local (p, q, state, ty, v, vty, i, leftanchor, left, ex1, ex2, ex3, ps, fd, id, 
         (state === 3) ? (
             (ty === mSL_tySemiCol) ? (
                 state = 1;
+            ) :
+            // (2026-11-19) an operator alone here did not find its operands ("2 + ;") : the rules reduced all the others
+            // (not "," : it stays alone in valid forms)
+            ((ty & mSL_tyOP) && (v !== ',')) ? (
+                mSL_errC = 2236; mSL_errPos = mSL_upos[p];
             ) :
             (ty === mSL_tyTAIL) ? (
                 (mSL_rptr[p] > 0) ? (
@@ -5161,10 +5351,20 @@ local (p, q, state, ty, v, vty, i, leftanchor, left, ex1, ex2, ex3, ps, fd, id, 
             );
 
             (mSL_errC === 0) ? (
-                // now we expect a ";"
+                // now we expect a ";" (2026-11-19 : or the end of the text, see below)
+                ((ex3 > 0) && (mSL_tyun[ex3] === mSL_tyTAIL)) ? (
+                    // (the last definition of the text, without ";" : the mSL Console, "function f(x) (x + 3)")
+                    mSL_lbIsMark(mSL_valu[id]) ? 0 : mSL_enterGCode(mSL_valu[id], 0, mSL_tyIdent, 0);
+                    mSL_F2CList[mSL_F2CPt] = fd; mSL_F2CPt += 1; AAA_toComp = fd;
+                    // the TAIL is kept : chain the left anchor to it
+                    p = ex3;
+                    mSL_lptr[p] = leftanchor;
+                    (leftanchor > 0) ? (mSL_rptr[leftanchor] = p);
+                    state = 2;
+                ) :
                 ((ex3 > 0) && (mSL_tyun[ex3] === mSL_tySemiCol)) ? (
-                    // syntax ok -- we define the function name
-                    mSL_enterGCode(mSL_valu[id], 0, mSL_tyIdent, 0);
+                    // syntax ok -- we define the function name (2026-11-19 : not the one of a lambda, see mSL_doLambdas)
+                    mSL_lbIsMark(mSL_valu[id]) ? 0 : mSL_enterGCode(mSL_valu[id], 0, mSL_tyIdent, 0);
                     // Add this in the list of functions to compile...
                     mSL_F2CList[mSL_F2CPt] = fd; mSL_F2CPt += 1; AAA_toComp = fd;
                     // Now we can suppress the node from the list
@@ -5223,6 +5423,8 @@ local (p, q, state, ty, v, vty, i, leftanchor, left, ex1, ex2, ex3, ps, fd, id, 
 
     );
 );
+
+
 
 
 
@@ -5408,11 +5610,15 @@ local (flg, lex, endgen, fptr, fn, sz, loc_baseAVars, loc_baseOVars, loc_cstStri
             mSL_updateGlobals(mSL_baseAVars, mSL_GlbFlg);
             mSL_updateGlobals(mSL_baseOVars, mSL_OwnFlg);
             mSL_basePVars = 0;
+            // (2026-11-19) the names "ext" of the previous compilations (mSL_cpExt : see above)
+            i = 0; loop(mSL_cpExtN, mSL_enterGCode(mSL_cpExt[i], mSL_ExtFlg, mSL_tyIdent, 0); i += 1;);
         ) : (
             mSL_baseAVars = 0;
             mSL_baseOVars = 0;
             mSL_basePVars = 0;
         );
+        mSL_cpExtN = 0; // (given for one compilation only)
+        mSL_lbN = 0; // (the lambdas of this text, see mSL_doLambdas)
 
         // Type of code : "program" or "function"
         ((cpflgs & 1) === 0) ? (
@@ -5585,6 +5791,11 @@ local (flg, lex, endgen, fptr, fn, sz, loc_baseAVars, loc_baseOVars, loc_cstStri
 
 
     (mSL_errC === 0) ? (
+        // (2026-11-19) the lambda expressions, "_" in the functions (see mSL_doLambdas)
+        mSL_doLambdas();
+    );
+
+    (mSL_errC === 0) ? (
         //AA_tr += 1;
         // adapt some operations to context
         mSL_mod_primitives(mSL_start);
@@ -5626,6 +5837,12 @@ local (flg, lex, endgen, fptr, fn, sz, loc_baseAVars, loc_baseOVars, loc_cstStri
             mSL_main_cod = mSL_CpyObj2Mem(mSL_cod);
             fn = mSL_main_cod[mSL_CC_Name];
             (fn != 0) ? mSL_Set_G_Value(fn, mSL_main_cod);
+        );
+
+        // (2026-11-19) the marks of the lambdas and of "_" : the addresses of the codes (see mSL_doLambdas)
+        (mSL_errC === 0) ? (
+            fptr = 0; while (fptr < mSL_F2CPt) (mSL_lbPatch(mSL_F2CCode[fptr]); fptr += 1;);
+            mSL_lbPatch(mSL_main_cod);
         );
 
         // Let's create appropriate vars tables

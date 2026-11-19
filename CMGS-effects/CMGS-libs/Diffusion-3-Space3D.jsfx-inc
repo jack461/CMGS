@@ -54,8 +54,8 @@
     In the view : left drag = rotate, wheel = zoom, clic = select, right clic = options ;
     key 'h' : the gains and levels as balls, or as crosses and halos (s3d_style, as in the live screen).
 
-    The speakers are always those of the configuration of Diffusion (HP_Positions, scaled into [-1, 1] : the largest
-    coordinate becomes 1) ; the gains shown : the power that the projector sends to each speaker (the largest one is 1),
+    The speakers are always those of the configuration of Diffusion (HP_Positions, in the cube [-1, 1] by the frame of
+    hppos : hp_Cube ; no frame : the largest coordinate becomes 1) ; the gains shown : the power that the projector sends to each speaker (the largest one is 1),
     the levels : those of the outputs (HP_Power).
     Layouts : drop a GRM Spaces file on the window (.lay : one layout, .ala : a library) : it becomes the library of the
     editors (Diffusion-3-Edit : "Load a layout of the library" ; dropped on a module "Edit A" ... "Edit D", the layout
@@ -82,6 +82,7 @@ sx_lgdark = 0;              // the state of s3d_gdark for this view
 sx_lbg = 0;                 // its background : 0 black, 1 that of the live screen (key '/' over the box)
 sx_spkHP = 1;               // the speakers are those of the configuration of Diffusion (sx_SpkHP)
 sx_hppos = -1;              // the HP_Positions they come from
+sx_hpseq = -1;              // and hp_Seq (2026-11-18 : their frame, size, activations changed)
 sx_hpcf = -1;               // the configuration of the gains (sx_ConfGains, in HP_Model)
 sx_edReq = 0;               // a load of the points of an editor "Edit A" ... "D" asked : the editor + 1 (ed_Frame)
 sx_edSrc = 0;               // 0 speakers, 1 sources (no more asked since the views "Space A" ... "D" : ed_Frame)
@@ -473,32 +474,49 @@ function sx_SetView(v)
     (s3d_az = s3d_Az3D; s3d_el = s3d_El3D; s3d_dist = s3d_Dist3D;);
 );
 
-// the speakers of the configuration of Diffusion (HP_Positions : number, x, y, z ; the largest coordinate becomes 1) ;
-// a number without position stays at the center
+// The sizes of the views (2026-11-18 : the balls of the speakers, of the sources, the crosses of the gains ; the menu of
+// the views, mSL_ui_Space3D : s3d_kSpk, s3d_kSrc, s3d_kX), shared by the views "Space A" ... "D" and the HP box of the
+// live screen, saved with the project (@serialize, after the other records : the older projects keep 1)
+function sx_KOk(v)
+(
+    ((v >= 0.2) && (v <= 5)) ? v : 1;
+);
+function sx_Serialize()
+(
+    (file_avail(0) >= 0) ? (
+        // reading
+        (file_avail(0) > 0) ? (
+            memset(ser_hdr, 0, 4);
+            load_mem(0, ser_hdr, 4);
+            (ser_hdr[0] === 's3dk') ? (
+                s3d_kSpk = sx_KOk(ser_hdr[1]); s3d_kSrc = sx_KOk(ser_hdr[2]); s3d_kX = sx_KOk(ser_hdr[3]);
+            );
+        );
+    ) : (
+        // writing
+        ser_hdr[0] = 's3dk'; ser_hdr[1] = s3d_kSpk; ser_hdr[2] = s3d_kSrc; ser_hdr[3] = s3d_kX;
+        save_mem(0, ser_hdr, 4);
+    );
+);
+
+// the speakers of the configuration of Diffusion (HP_Positions : number, x, y, z ; in the cube [-1, 1] : hp_Cube, by
+// the frame of hppos, 2026-11-18) ; a number without position stays at the center
 function sx_SpkHP()
 local(c, i, n, m, e)
 (
-    sx_spkHP = 1; sx_hppos = HP_Positions; sx_hpcf = -1;
+    sx_spkHP = 1; sx_hppos = HP_Positions; sx_hpseq = hp_Seq; sx_hpcf = -1;
     strcpy(#sx_spkname, "Diffusion");
     memset(s3d_spk, 0, SX_MAXSPK * s3d_st);
     s3d_nspk = 0;
     (HP_Positions > 0) ? (
         c = HP_Positions[-1];
-        m = 0; i = 0;
-        while (i < c) (
-            n = HP_Positions[i];
-            ((n >= 1) && (n <= SX_MAXSPK)) ? (
-                m = max(m, max(abs(HP_Positions[i+1]), max(abs(HP_Positions[i+2]), abs(HP_Positions[i+3]))));
-            );
-            i += 4;
-        );
-        m = (m > 0) ? 1 / m : 1;
+        m = hp_Old();
         i = 0;
         while (i < c) (
             n = HP_Positions[i];
             ((n >= 1) && (n <= SX_MAXSPK)) ? (
                 e = s3d_spk + (n - 1) * s3d_st;
-                e[s3d_fx] = HP_Positions[i+1] * m; e[s3d_fy] = HP_Positions[i+2] * m; e[s3d_fz] = HP_Positions[i+3] * m;
+                hp_Cube(i, m, e + s3d_fx);
                 s3d_nspk = max(s3d_nspk, n);
             );
             i += 4;
@@ -553,7 +571,7 @@ local(hp, k, m)
 function sx_Update()
 local(k)
 (
-    (HP_Positions !== sx_hppos) ? sx_SpkHP(); // a new configuration
+    ((HP_Positions !== sx_hppos) || (hp_Seq !== sx_hpseq)) ? sx_SpkHP(); // a new configuration (or its frame, size, activations)
     (currentpro[prx_spv] > 0) ? sx_SpGains(currentpro[prx_fident] - 1) : sx_ConfGains();
     k = 0; loop(s3d_nspk, s3d_spk[k * s3d_st + s3d_fl] = max(0, min(1, HP_Power[k] / 15)); k += 1;);
 );
@@ -666,7 +684,7 @@ local(lst, g, u, i, o, w, k, n, m, e, q, c)
 function sx_Show(pk)
 local(pp, w, n, k, e, pos)
 (
-    (HP_Positions !== sx_hppos) ? sx_SpkHP();
+    ((HP_Positions !== sx_hppos) || (hp_Seq !== sx_hpseq)) ? sx_SpkHP();
     pp = projectors + pk * projsize;
     (pp[prx_spv] > 0) ? sx_SpGains(pk) : sx_Direct(pp);
     k = 0; loop(s3d_nspk, s3d_spk[k * s3d_st + s3d_fl] = max(0, min(1, HP_Power[k] / 15)); k += 1;);

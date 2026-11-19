@@ -38,6 +38,10 @@
 */
 ed_tbEnd = -(10^30);    // after the last word
 ed_tbtbl = ed_tbn = ed_tbptr = ed_tberr = ed_tbmask = 0; // (ed_tbmask : the editors named in the table, 2 ^ e)
+d3_errLogged = 0; // (2026-11-19) 1 : the error of the analysis is already in the log (see d3_Settings)
+// (2026-11-19) the first word of the settings of Interstys : more than 8 characters, its symbol can not be written back
+// (mSL_symbol2) ; recognized for the message of the error 0298
+d3_kwInterstys = mSL_symbol("Interstys");
 ed_tbdrop = -1;         // the module Edit where a file was dropped (its first block goes there)
 ed_mslTgt = -1; ed_mslT = 0; // set by the drop of an mSL file (Diffusion-3, @gfx) : the module Edit under the mouse, the time
 ed_tkEdit = mSL_symbol("Edit");
@@ -54,6 +58,8 @@ function ed_Tb_Err(code, msg)
         ed_tberr = code;
         sprintf(#ed_tbm, "ERR: %04d    Diffusion settings (word %d) : %s", code, ed_tbptr, msg);
         mSL_log(SysLogBox, #ed_tbm);
+        mSL_ErrNote(code, msg); // (2026-11-19, for "? n" in the mSL Console)
+        d3_errLogged = 1;
     );
     code;
 );
@@ -195,6 +201,213 @@ function ed_Tb_Stage() local(e, f, g)
 );
 
 
+/*
+    hppos (2026-11-18) : the positions of the speakers, written in the frame the most convenient for the person who
+    describes the installation, its real dimensions, the activation of each speaker :
+
+        hppos  frame 0 1  size 8.9 12.5 4.5
+               1 < 0.1841 1 0,  2 < 0.4952 1 0,  ...  4 < 1 0.7909 0 Off,  ... ;
+
+    frame a b : the cube of the coordinates (a < b, the same for the 3 axes : 0 1, -1 1, -5 5 ...) ; frame Metres (or
+    Meters) : the coordinates in metres, in [0, X] x [0, Y] x [0, Z] (the size is then needed) ; no frame : the former
+    rule (the coordinates in [-5, 5], "the largest becomes 1"). size X Y Z : the real dimensions of the cube, in metres
+    (its homothety ; none : a cube). Off after a position : an inactive speaker (the spatial laws leave it out ; On, the
+    default). The statements add up : the speakers given are added, or replace those of the same numbers (several hppos
+    can build a layout, as the sequences of 16 speakers of a file .am64) ; "hppos clear" empties the layout first (its
+    positions, frame, size, activations ; the keyword "clear" of the configuration too). A number without "<" changes only
+    its activation ("hppos 4 Off, 12 Off ;", settings(`hppos, 4, `Off)) ; frame and size alone change those of the layout
+    ("hppos size 8.9 12.5 4.5 ;"). An hppos ends at ";", at the end of the words, or at the next keyword of the
+    configuration (settings(`hppos, 2, `Off, `hppos, 4, `Off)). The values are kept as written (HP_Positions : number, x, y, z), the
+    frame and the size in hp_Geo (0 the mode : 0 none, 1 a b, 2 Metres ; 1 2 a b ; 3 4 5 X Y Z, 0 : none), the
+    activations in hp_Act (1 ... 128) : saved with the project (Diffusion-3-Configurations, record 9), written back by
+    the exports. The coordinates must stay in the frame (2426 ; no frame : [-5, 5]).
+*/
+
+// the frame of the geometry g as a text (s) : "a b", "Metres", "none"
+function hp_FrText(s, g)
+(
+    (g[0] === 1) ? sprintf(s, "%g %g", g[1], g[2]) : (g[0] === 2) ? strcpy(s, "Metres") : strcpy(s, "none");
+    s;
+);
+
+// the position x y z of the speaker n in the frame of the geometry g ? 0, or 2426 (logged)
+function hp_Check(g, n, x, y, z)
+local(m, e, ok)
+(
+    m = g[0]; e = 0.000001;
+    ok = (m === 1) ? ((x >= g[1] - e) && (x <= g[2] + e) && (y >= g[1] - e) && (y <= g[2] + e) && (z >= g[1] - e) && (z <= g[2] + e)) :
+         (m === 2) ? ((x >= -e) && (x <= g[3] + e) && (y >= -e) && (y <= g[4] + e) && (z >= -e) && (z <= g[5] + e)) :
+         ((abs(x) <= 5 + e) && (abs(y) <= 5 + e) && (abs(z) <= 5 + e));
+    ok ? 0 : (
+        (m === 1) ? sprintf(#hp_w2, "[%g, %g]", g[1], g[2]) :
+        (m === 2) ? sprintf(#hp_w2, "[0, %g] x [0, %g] x [0, %g]", g[3], g[4], g[5]) : strcpy(#hp_w2, "[-5, 5]");
+        sprintf(#hp_w, "ERR: 2426    hppos : the speaker %d (%g %g %g) is outside the frame %s", n, x, y, z, #hp_w2);
+        mSL_log(SysLogBox, #hp_w);
+        sprintf(#hp_w, "speaker %d (%g %g %g), frame %s", n, x, y, z, #hp_w2);
+        mSL_ErrNote(2426, #hp_w); // (2026-11-19, for "? n" in the mSL Console)
+        d3_errLogged = 1;
+        2426;
+    );
+);
+
+// the speakers in the log : their count, the frame, the size, the inactive ones
+function hp_Log()
+local(i, n, off)
+(
+    n = off = 0;
+    (HP_Positions > 0) ? (
+        i = 0;
+        while (i < HP_Positions[-1]) (
+            ((HP_Positions[i] >= 1) && (HP_Positions[i] <= 128)) ? (
+                n += 1;
+                (hp_Act[HP_Positions[i]] === 0) ? off += 1;
+            );
+            i += 4;
+        );
+    );
+    (hp_Geo[3] > 0) ? sprintf(#hp_w3, "%g %g %g", hp_Geo[3], hp_Geo[4], hp_Geo[5]) : strcpy(#hp_w3, "none");
+    sprintf(#hp_w, "hppos : %d speakers, frame %s, size %s, %d inactive", n, hp_FrText(#hp_w2, hp_Geo), #hp_w3, off);
+    mSL_log(SysLogBox, #hp_w);
+);
+
+// The end of hppos : the entries read (tw : ne entries of 6 words : n, x, y, z, its activation (1 On, 0 Off, -1 not
+// given), 1 when its position is given), the frame and the size given (hp_GeoT : as hp_Geo, its word 7 : the parts given,
+// 1 frame, 2 size, 4 clear). The layout : the current one (none after clear), the positions given added (or replacing
+// those of the same numbers), the frame and the size given ; a speaker given with its position is active, but Off.
+// Checks : frame Metres needs a size (2425), every position of the layout in its frame (2426). Returns 0 (applied, a line
+// in the log), or the error (nothing changed)
+function hp_End(tw, ne)
+local(i, e, c, pos, g, err, blk, ip, clr, old)
+(
+    err = 0; pos = 0; c = 0;
+    clr = hp_GeoT[7] & 4;
+    old = clr ? 0 : HP_Positions; // (the positions kept : none after clear)
+    (old > 0) ? (i = 0; while (i < old[-1]) ( (old[i] >= 1) ? c = max(c, old[i]); i += 4; ););
+    i = 0; loop(ne, e = tw + 6 * i; e[5] ? (pos += 1; c = max(c, e[0]);); i += 1;);
+    // the new geometry : the current one (none after clear), with the parts given
+    g = hp_GeoR;
+    clr ? memset(g, 0, 8) : memcpy(g, hp_Geo, 8);
+    (hp_GeoT[7] & 1) ? (g[0] = hp_GeoT[0]; g[1] = hp_GeoT[1]; g[2] = hp_GeoT[2];);
+    (hp_GeoT[7] & 2) ? (g[3] = hp_GeoT[3]; g[4] = hp_GeoT[4]; g[5] = hp_GeoT[5];);
+    ((g[0] === 2) && ((g[3] <= 0) || (g[4] <= 0) || (g[5] <= 0))) ? err = 2425; // frame Metres : the size is needed
+    // the new positions : those kept, then those given
+    blk = old;
+    (!err && (pos > 0)) ? (
+        blk = mSL_Dyn_Alloc((c+1)*4, 'hpps', mSL_StM_FlClear);
+        (blk > 0) ? (
+            (old > 0) ? memcpy(blk, old, min(old[-1], (c+1)*4));
+            i = 0;
+            loop(ne,
+                e = tw + 6 * i;
+                e[5] ? (ip = e[0] * 4; blk[ip] = e[0]; blk[ip+1] = e[1]; blk[ip+2] = e[2]; blk[ip+3] = e[3];);
+                i += 1;
+            );
+        ) : (
+            err = 2428; // hppos : no memory for the positions
+        );
+    );
+    // every position of the layout in its frame
+    (!err && (blk > 0)) ? (
+        i = 0;
+        while ((i < blk[-1]) && !err) (
+            (blk[i] >= 1) ? (err = hp_Check(g, blk[i], blk[i+1], blk[i+2], blk[i+3]));
+            i += 4;
+        );
+    );
+    !err ? (
+        (blk !== HP_Positions) ? (
+            // protect it from the garbage collector (it was freed, then reused : garbage HP numbers ; 0 : none)
+            (mm_usr_prot_hpps > 0) ? mm_usr_prot[mm_usr_prot_hpps] = blk;
+            HP_Positions = blk;
+        );
+        clr ? memset(hp_Act, 1, 129);
+        i = 0;
+        loop(ne,
+            e = tw + 6 * i;
+            (e[4] >= 0) ? (hp_Act[e[0]] = e[4]) : (e[5] ? (hp_Act[e[0]] = 1));
+            i += 1;
+        );
+        memcpy(hp_Geo, g, 8);
+        hp_Seq += 1;
+        sp_defSeq += 1; // (the speakers of the spatial projectors : sp_Gfx)
+        hp_Log();
+    ) : (
+        ((blk > 0) && (blk !== old)) ? mSL_Dyn_Free(blk); // (the new block, not used)
+    );
+    err;
+);
+
+// (2026-11-19) The explanation of an error of the analysis of the settings (codes 0202 ... 0299 : written 202 ... before,
+// as in CMGS-Erreurs.tsv ; 0269, 0297, 0298 : the former 69 ; 0299 : the former 99)
+function d3_StErrMsg(c)
+(
+    (c === 0202) ? "this configuration number is already used" :
+    (c === 0203) ? "conf : a configuration number is expected" :
+    (c === 0204) ? "a channel number is expected" :
+    (c === 0206) ? "a \">\" is expected" :
+    (c === 0207) ? "actions : a line number in [1, 16] is expected" :
+    (c === 0208) ? "actions : a command number in [0, 256] is expected" :
+    (c === 0209) ? "a volume is expected after dB" :
+    (c === 0210) ? "remove : conf or prop is expected" :
+    (c === 0211) ? "group : a group number is expected" :
+    (c === 0212) ? "remove conf : a configuration number is expected" :
+    (c === 0213) ? "this configuration is not defined" :
+    (c === 0214) ? "pad : too many configurations" :
+    (c === 0215) ? "group : too many configurations" :
+    (c === 0216) ? "vol : an incorrect volume" :
+    (c === 0217) ? "vadj : an incorrect volume adjustment" :
+    (c === 0218) ? "morph : an incorrect switch time" :
+    (c === 0219) ? "opmod : an incorrect mode" :
+    (c === 0220) ? "rdelay : an incorrect random delay" :
+    (c === 0222) ? "scene : a scene number is expected" :
+    (c === 0223) ? "prop : this preset number is already used" :
+    (c === 0224) ? "prop : a preset number is expected" :
+    (c === 0225) ? "prop n : a \"(\" is expected" :
+    (c === 0226) ? "prop n ( ... ) : an unknown keyword" :
+    (c === 0227) ? "prop n ( ... ) : a keyword, \",\", \";\" or \")\" is expected" :
+    (c === 0228) ? "prop : a morph value is expected" :
+    (c === 0229) ? "prop : a random delay value is expected" :
+    (c === 0230) ? "prop : this configuration is not defined" :
+    (c === 0231) ? "prop : a configuration number is expected" :
+    (c === 0233) ? "defaultconf : a configuration number is expected" :
+    (c === 0234) ? "prop pad / sgi : a scene number is expected" :
+    (c === 0235) ? "pload : a projector number is expected" :
+    (c === 0236) ? "pload : this projector preset is not defined" :
+    (c === 0237) ? "pload : a projector preset number is expected" :
+    (c === 0238) ? "remove prop : a preset number is expected" :
+    (c === 0239) ? "prop color : a color number is expected" :
+    (c === 0240) ? "actions : a color in [0, 15] is expected after /" :
+    (c === 0250) ? "hppos : a speaker number (1 ... 128), frame, size or \";\" is expected" :
+    (c === 0251) ? "hppos : \"<\", On or Off is expected after a speaker number" :
+    (c === 0252) ? "hppos : the x position is expected, a number" :
+    (c === 0253) ? "hppos : the y position is expected, a number" :
+    (c === 0254) ? "hppos : the z position is expected, a number" :
+    (c === 0255) ? "hppos : On, Off, \",\" or \";\" is expected" :
+    (c === 0259) ? "invert : a configuration defined before (not this one) is expected" :
+    (c === 0269) ? "internal : an unknown state of the analyzer" :
+    (c === 0297) ? "an unexpected character" :
+    (c === 0298) ? "an unknown keyword" :
+    (c === 0299) ? "internal : the analyzer stopped" :
+    (c === 2423) ? "hppos frame : \"a b\" (a < b) or Metres is expected" :
+    (c === 2424) ? "hppos size : three numbers X Y Z, > 0, are expected" :
+    (c === 2425) ? "hppos frame Metres : the size is needed" :
+    (c === 2427) ? "hppos : too many entries" :
+    (c === 2428) ? "hppos : no memory for the positions" :
+    (c === 2439) ? "a color in [0, 0xFFFFFF] is expected" :
+    (c === 2470) ? "trajectory : a number in [1, 128] is expected" :
+    (c === 2471) ? "trajectory : a \"name\", closed, open or \":\" is expected" :
+    (c === 2472) ? "trajectory : a coordinate in [-10, 10] is expected (or more than 1024 points)" :
+    (c === 2473) ? "trajectory : \",\" or \";\" is expected after a point" :
+    (c === 2492) ? "source : a number in [1, 255] is expected" :
+    (c === 2493) ? "source : \":\" is expected after its number" :
+    (c === 2494) ? "source : a point number in [1, 128] followed by \"<\" is expected (or too many points)" :
+    (c === 2495) ? "source : a coordinate in [-1, 1] is expected" :
+    (c === 2496) ? "source : \",\" or \";\" is expected after a point" :
+    (c === 2497) ? "space : this source is not defined (before)" :
+    (c === 2498) ? "space : a source number in [0, 255] is expected" :
+    "see ? n in the mSL Console";
+);
+
 // The analysis of "settings" and "D3_config" : the words tbl[0 ... itc-1] (a data block, or the arguments) ; returns 0,
 // or the first error
 function d3_Settings(tbl, itc)
@@ -202,6 +415,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
 (
     // the blocks Edit : nothing read yet ; a file dropped on a module Edit : its first block goes there
     ed_tberr = 0; ed_tbmask = 0;
+    d3_errLogged = 0; // (an error already written in the log : a block Edit, hppos 2426)
     ed_tbdrop = ((ed_mslTgt >= 0) && (time_precise() - ed_mslT < 10)) ? ed_mslTgt : -1;
     ed_mslTgt = -1;
     xErr = 0;
@@ -239,7 +453,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
 
 
                 //===0===//
-                xErr=99;
+                xErr = 0299; // (2026-11-19 : was 99) the analyzer stopped (state 0)
                 //===0===//
 
 
@@ -308,6 +522,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     ) :
                     (curcod === kxw_hppos) ? (
                         c = 0; px = tmpwork;
+                        memset(hp_GeoT, 0, 8); // (the frame and the size given by this hppos : none yet)
                         state = 54; un = 0;
                     ) :
                     (curcod === kxw_source) ? (
@@ -358,11 +573,11 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                         // pcnf = ptconfs + memarea;
                         state = 3; un = 0;
                     ) : (
-                        xErr = 202; // the conf. number is already used
+                        xErr = 0202; // the conf. number is already used
                     );
                 ) : (
                     // syntax error
-                    xErr = 203;
+                    xErr = 0203;
                 );
                 //===2===//
 
@@ -428,10 +643,10 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                         );
                         state = 1;
                     ) : (
-                        xErr = 259; // invert : a configuration defined before (not this one) is expected
+                        xErr = 0259; // invert : a configuration defined before (not this one) is expected
                     );
                 ) : (
-                    xErr = 204; // a channel. number is expected
+                    xErr = 0204; // a channel. number is expected
                 );
                 //===4===//
 
@@ -443,7 +658,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                 ((un === 'char') && (curcod === '>')) ? (
                     un = 0; state = 6;
                 ) : (
-                    xErr = 206; // a ">" is expected
+                    xErr = 0206; // a ">" is expected
                 );
                 //===5===//
 
@@ -481,7 +696,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     // Close the configuration
                     rstate = 1; state = 10; un = 0;
                 ) : (
-                    xErr = 204; // a channel. number is expected
+                    xErr = 0204; // a channel. number is expected
                 );
                 //===6===//
 
@@ -654,7 +869,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     state = 12; un = 0;
                     slsignal = 1;
                 ) : (
-                    xErr = 211; // a group number is expected
+                    xErr = 0211; // a group number is expected
                 );
                 //===11===//
 
@@ -677,7 +892,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                         currgrpv[ptgrp] = curcod; ptgrp += 1; grpcnt += 1;
                         state = 13; un = 0;
                     ) : (
-                        xErr = 213; // conf. not defined
+                        xErr = 0213; // conf. not defined
                         lEre = curcod;
                     );
                 ) : (
@@ -703,11 +918,11 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                         currgrpv[ptgrp] = curcod; ptgrp += 1; lstcnf = curcod; grpcnt += 1;
                         un = 0;
                     ) : (
-                        xErr = 215; // too many confs
+                        xErr = 0215; // too many confs
                         lEre = curcod;
                     );
                     ) : (
-                    xErr = 213; // conf. not defined
+                    xErr = 0213; // conf. not defined
                     lEre = curcod;
                     );
                 ) : (
@@ -728,7 +943,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     slsignal = 1;
                     un = 0;
                 ) : (
-                    xErr = 216; //  incorrect volume value
+                    xErr = 0216; //  incorrect volume value
                     lEre = curcod;
                 );
                 state = 1;
@@ -746,7 +961,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     slsignal = 1;
                     un = 0;
                 ) : (
-                    xErr = 217; //  incorrect volume adjustement
+                    xErr = 0217; //  incorrect volume adjustement
                     lEre = curcod;
                 );
                 state = 1;
@@ -764,7 +979,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     slsignal = 1;
                     un = 0;
                 ) : (
-                    xErr = 218; //  incorrect switch time value
+                    xErr = 0218; //  incorrect switch time value
                     lEre = curcod;
                 );
                 state = 1;
@@ -782,7 +997,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     slsignal = 1;
                     un = 0;
                 ) : (
-                    xErr = 219; //  incorrect opmod
+                    xErr = 0219; //  incorrect opmod
                     lEre = curcod;
                 );
                 state = 1;
@@ -800,7 +1015,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     slsignal = 1;
                     un = 0;
                 ) : (
-                    xErr = 220; //  incorrect random delay
+                    xErr = 0220; //  incorrect random delay
                     lEre = curcod;
                 );
                 state = 1;
@@ -821,7 +1036,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     sliderchange(sldconfscnD);
                     slsignal = 1;
                 ) : (
-                    xErr = 222; // a scene number is expected
+                    xErr = 0222; // a scene number is expected
                     lEre = curcod;
                 );
                 state = 1;
@@ -842,13 +1057,13 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     (c != 0) ? (
                         // enter the conf. number
                         (padcnt >= paddfsize) ? (
-                            xErr = 214; // too much machins
+                            xErr = 0214; // too much machins
                         ) : (
                             paddef[padcnt] = curcod; padcnt += 1;
                         );
                         un = 0;
                     ) : (
-                        xErr = 213; // conf. not defined
+                        xErr = 0213; // conf. not defined
                     );
                 ) : (
                     state = 1; // done
@@ -925,7 +1140,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     defaultconf = curcod; un = 0; state = 1;
                 ) : (
                     // syntax error
-                    xErr = 233;
+                    xErr = 0233;
                 );
                 //===25===//
 
@@ -948,7 +1163,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     un = 0; sign = -1; // stay in state 26
                 ) : (
                     // syntax error
-                    xErr = 209;  // a volume is expected after "dB"
+                    xErr = 0209;  // a volume is expected after "dB"
                 );
                 //===26===//
 
@@ -977,7 +1192,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     un = 0; state = 44;
                 ) : (
                     // syntax error
-                    xErr = 210;  // an identifier is expected after "remove"
+                    xErr = 0210;  // an identifier is expected after "remove"
                 );
                 //===28===//
 
@@ -996,7 +1211,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     );
                     un = 0; state = 1;
                 ) : (
-                    xErr = 212;  // a configuration number is expected after "remove conf"
+                    xErr = 0212;  // a configuration number is expected after "remove conf"
                 );
                 //===29===//
 
@@ -1045,11 +1260,11 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                         ptpro = ptconfs;
                         state = 32; un = 0;
                     ) : (
-                        xErr = 223; // the preset. number is already used
+                        xErr = 0223; // the preset. number is already used
                     );
                 ) : (
                     // syntax error
-                    xErr = 224;
+                    xErr = 0224;
                 );
                 //===31===//
 
@@ -1064,7 +1279,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     un = 0; state = 33;
                 ) : (
                     // syntax error
-                    xErr = 225;
+                    xErr = 0225;
                 );
                 //===32===//
 
@@ -1138,7 +1353,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     ) :
                     (
                         // syntax error
-                        xErr = 226;
+                        xErr = 0226;
                     );
                 ) :
                 ((un === 'char') && (curcod === ')')) ? (
@@ -1149,7 +1364,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     un = 0;
                 ) : (
                     // syntax error
-                    xErr = 227;
+                    xErr = 0227;
                 );
                 //===33===//
 
@@ -1183,7 +1398,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     un = 0; state = 33;
                 ) : (
                     // syntax error
-                    xErr = 228; // a "morph" value is exoected
+                    xErr = 0228; // a "morph" value is exoected
                 );
                 //===35===//
 
@@ -1198,7 +1413,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     un = 0; state = 33;
                 ) : (
                     // syntax error
-                    xErr = 229; // a "random delay" value is expected
+                    xErr = 0229; // a "random delay" value is expected
                 );
                 //===36===//
 
@@ -1227,12 +1442,12 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                         ptpro[addprx] = curcod;
                     ) : (
                         // syntax error
-                        xErr = 230; // This configuration is undefined
+                        xErr = 0230; // This configuration is undefined
                     );
                     un = 0; state = 33;
                 ) : (
                     // syntax error
-                    xErr = 231; // a configuration number is expected
+                    xErr = 0231; // a configuration number is expected
                 );
                 //===37===//
 
@@ -1247,7 +1462,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     px = (curcod - 1) * groupsize; un = 0; state = 39;
                 ) : (
                     // syntax error
-                    xErr = 234; // a scene number is expected
+                    xErr = 0234; // a scene number is expected
                 );
                 //===38===//
 
@@ -1302,7 +1517,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     un = 0; state = 43;
                 ) : (
                     // syntax error
-                    xErr = 235; // a projector number is expected
+                    xErr = 0235; // a projector number is expected
                 );
                 //===42===//
 
@@ -1319,10 +1534,10 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                         projectorload(ptpro, proprerefs[curcod]);
                         un = 0; state = 1;
                     ) : (
-                        xErr = 236; // projector preset undefined
+                        xErr = 0236; // projector preset undefined
                     );
                 ) : (
-                    xErr = 237; // projector preset number expected
+                    xErr = 0237; // projector preset number expected
                 );
                 //===43===//
 
@@ -1343,7 +1558,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     );
                     un = 0; state = 1;
                 ) : (
-                    xErr = 238;  // a preset number is expected after "remove prop"
+                    xErr = 0238;  // a preset number is expected after "remove prop"
                 );
                 //===44===//
 
@@ -1365,7 +1580,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     state = 46; un = 0;
                 ) : (
                     // syntax error
-                    xErr = 207;
+                    xErr = 0207;
                 );
                 //===45===//
 
@@ -1403,7 +1618,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                         sign = 1;
                     );
                 ) : (
-                    xErr = 208
+                    xErr = 0208
                 );
                 //===47===//
 
@@ -1507,7 +1722,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     un = 0; state = 33;
                 ) : (
                     // syntax error
-                    xErr = 239; // a color number is expected
+                    xErr = 0239; // a color number is expected
                 );
                 //===51===//
 
@@ -1544,7 +1759,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                     un = 0;
                 ) : (
                     // syntax error
-                    xErr = 240; // a color number is expected
+                    xErr = 0240; // a color number is expected
                 );
                 state = 52;
                 //===53===//
@@ -1554,16 +1769,39 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
 
 
                 //===54===//
-                // Expect an integer HP number
+                // hppos (2026-11-18) : a HP number (an entry : "n < x y z [On|Off]" its position, "n On|Off" only its
+                // activation), the key clear, frame or size, or the end (";", the end of the words, a keyword : hp_End)
                 ((un === 'intg') && (curcod > 0) && (curcod <= 128)) ? (
-                    px[0] = curcod; px += 1;
-                    c = max(c, curcod); // keep high HP num
+                    (px + 6 <= tmpwork + tmpwasize) ? (
+                        px[0] = curcod; px[1] = 0; px[2] = 0; px[3] = 0; px[4] = -1; px[5] = 0;
+                        un = 0;
+                        state = 55;
+                    ) : (
+                        xErr = 2427; // hppos : too many entries
+                    );
+                ) :
+                ((un === 'idnt') && (curcod === kxw_clear)) ? (
+                    hp_GeoT[7] |= 4; // hppos clear : the layout emptied first
                     un = 0;
+                ) :
+                ((un === 'idnt') && (curcod === kxw_frame)) ? (
+                    un = 0; state = 66;
+                ) :
+                ((un === 'idnt') && (curcod === kxw_size)) ? (
+                    un = 0; ip = 0; state = 67;
+                ) :
+                ((un === 'char') && (curcod === ';')) ? (
+                    xErr = hp_End(tmpwork, (px - tmpwork) / 6);
+                    un = 0; state = 1;
+                ) :
+                ((un === 'feof') || ((un === 'idnt') && (d3_IsKeyword(curcod) || (curcod === ed_tkEdit)))) ? (
+                    // the end of the words, or the next keyword (read again by the state 1)
+                    xErr = hp_End(tmpwork, (px - tmpwork) / 6);
+                    state = 1;
                 ) : (
                     // syntax error
-                    xErr = 250; // a HP number is expected
+                    xErr = 0250; // a HP number is expected
                 );
-                state = 55;
                 //===54===//
 
 
@@ -1571,14 +1809,20 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
 
 
                 //===55===//
-                // Expect the "<" sign
+                // hppos : "<" (its position follows), or On | Off (only its activation)
                 ((un === 'char') && (curcod === '<')) ? (
+                    px[5] = 1;
                     un = 0;
+                    state = 56;
+                ) :
+                ((un === 'idnt') && ((curcod === kxw_On) || (curcod === kxw_Off))) ? (
+                    px[4] = (curcod === kxw_On) ? 1 : 0;
+                    un = 0;
+                    state = 59;
                 ) : (
                     // syntax error
-                    xErr = 251; // "<" missing
+                    xErr = 0251; // "<" missing
                 );
-                state = 56;
                 //===55===//
 
 
@@ -1586,13 +1830,13 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
 
 
                 //===56===//
-                // Expect a number in -5 +5
-                (((un === 'intg') || (un === 'numb')) && (curcod >= -5) && (curcod <= 5)) ? (
-                    px[0] = curcod; px += 1;
+                // hppos : x (any number : its range, that of the frame, is checked at the end by hp_End)
+                ((un === 'intg') || (un === 'numb')) ? (
+                    px[1] = curcod;
                     un = 0;
                 ) : (
                     // syntax error
-                    xErr = 252; // "x" position missing
+                    xErr = 0252; // "x" position missing
                 );
                 state = 57;
                 //===56===//
@@ -1602,13 +1846,13 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
 
 
                 //===57===//
-                // Expect a number in -5 +5
-                (((un === 'intg') || (un === 'numb')) && (curcod >= -5) && (curcod <= 5)) ? (
-                    px[0] = curcod; px += 1;
+                // hppos : y (any number : its range, that of the frame, is checked at the end by hp_End)
+                ((un === 'intg') || (un === 'numb')) ? (
+                    px[2] = curcod;
                     un = 0;
                 ) : (
                     // syntax error
-                    xErr = 253; // "y" position missing
+                    xErr = 0253; // "y" position missing
                 );
                 state = 58;
                 //===57===//
@@ -1618,13 +1862,13 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
 
 
                 //===58===//
-                // Expect a number in -5 +5
-                (((un === 'intg') || (un === 'numb')) && (curcod >= -5) && (curcod <= 5)) ? (
-                    px[0] = curcod; px += 1;
+                // hppos : z (any number : its range, that of the frame, is checked at the end by hp_End)
+                ((un === 'intg') || (un === 'numb')) ? (
+                    px[3] = curcod;
                     un = 0;
                 ) : (
                     // syntax error
-                    xErr = 254; // "z" position missing
+                    xErr = 0254; // "z" position missing
                 );
                 state = 59;
                 //===58===//
@@ -1634,31 +1878,30 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
 
 
                 //===59===//
-                // Expect the "," sign
+                // hppos : On | Off (the activation of this speaker), "," (the next entry) or ";" (the end : hp_End)
+                ((un === 'idnt') && ((curcod === kxw_On) || (curcod === kxw_Off))) ? (
+                    px[4] = (curcod === kxw_On) ? 1 : 0;
+                    un = 0;
+                ) :
                 ((un === 'char') && (curcod === ',')) ? (
+                    px += 6;
                     un = 0;
                     state = 54; // go wait next entry
                 ) :
                 ((un === 'char') && (curcod === ';')) ? (
-                    // Build the result array.
-                    HP_Positions = mSL_Dyn_Alloc((c+1)*4, 'hpps', mSL_StM_FlClear);
-                    // protect it from the garbage collector (it was freed, then reused : garbage HP numbers)
-                    (mm_usr_prot_hpps > 0) ? mm_usr_prot[mm_usr_prot_hpps] = HP_Positions;
-                    sp_defSeq += 1; // (the speakers of the spatial projectors : sp_Gfx)
-                    pt = tmpwork;
-                    while (pt < px) (
-                        ip = pt[0] * 4; // 1st elt. is HP number
-                        HP_Positions[ip] = pt[0];
-                        HP_Positions[ip+1] = pt[1];
-                        HP_Positions[ip+2] = pt[2];
-                        HP_Positions[ip+3] = pt[3];
-                        pt += 4;
-                    );
+                    px += 6;
+                    xErr = hp_End(tmpwork, (px - tmpwork) / 6);
                     un = 0;
+                    state = 1;
+                ) :
+                ((un === 'feof') || ((un === 'idnt') && (d3_IsKeyword(curcod) || (curcod === ed_tkEdit)))) ? (
+                    // the end of the words, or the next keyword (read again by the state 1)
+                    px += 6;
+                    xErr = hp_End(tmpwork, (px - tmpwork) / 6);
                     state = 1;
                 ) : (
                     // syntax error
-                    xErr = 255; // "," or ";" extected
+                    xErr = 0255; // "," or ";" extected
                 );
                 //===59===//
 
@@ -1773,9 +2016,64 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                 ) : (
 
 
+                (state<67) ? (
+
+
                 //===66===//
-                xErr=66;
+                // hppos frame (2026-11-18) : a b (the cube of the coordinates, a < b, the same for the 3 axes : 0 1, -1 1,
+                // -5 5 ...), or Metres (or Meters : the coordinates in metres, in [0, X] x [0, Y] x [0, Z] : the size)
+                ((un === 'intg') || (un === 'numb')) ? (
+                    hp_GeoT[1] = curcod;
+                    un = 0; state = 68;
+                ) :
+                ((un === 'idnt') && ((curcod === kxw_Metres) || (curcod === kxw_Meters))) ? (
+                    hp_GeoT[0] = 2; hp_GeoT[7] |= 1;
+                    un = 0; state = 54;
+                ) : (
+                    xErr = 2423; // hppos frame : "a b" (a < b) or Metres expected
+                );
                 //===66===//
+
+
+                ) : (state<68) ? (
+
+
+                //===67===//
+                // hppos size : X Y Z (the real dimensions of the cube, in metres : its homothety ; each > 0)
+                (((un === 'intg') || (un === 'numb')) && (curcod > 0)) ? (
+                    hp_GeoT[3 + ip] = curcod; ip += 1;
+                    un = 0;
+                    (ip >= 3) ? (hp_GeoT[7] |= 2; state = 54;);
+                ) : (
+                    xErr = 2424; // hppos size : three numbers X Y Z, > 0, expected
+                );
+                //===67===//
+
+
+                ) : (state<69) ? (
+
+
+                //===68===//
+                // hppos frame : b (> a)
+                (((un === 'intg') || (un === 'numb')) && (curcod > hp_GeoT[1])) ? (
+                    hp_GeoT[0] = 1; hp_GeoT[2] = curcod; hp_GeoT[7] |= 1;
+                    un = 0; state = 54;
+                ) : (
+                    xErr = 2423; // hppos frame : "a b" (a < b) or Metres expected
+                );
+                //===68===//
+
+
+                ) : (
+
+
+                //===69===//
+                // (2026-11-19 : was 69) no state : 98 an unknown keyword, 97 an unexpected character, else internal
+                xErr = (state === 98) ? 0298 : (state === 97) ? 0297 : 0269;
+                //===69===//
+
+
+                );
 
 
                 );););
@@ -1788,12 +2086,29 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
         );
 
         (xErr) ? (
-            sprintf(#s, "State %d - %d/%d - Input: %s Type: %s", state, ptr, itc, mSL_edit_value(#u, curcod),
-                mSL_edit_value(#u2, mSL_v_type));
+            trx ? (
+                sprintf(#s, "State %d - %d/%d - Input: %s Type: %s", state, ptr, itc, mSL_edit_value(#u, curcod),
+                    mSL_edit_value(#u2, mSL_v_type));
                 mSL_log(SysLogBox, #s);
-
-            sprintf(#s, "Settings end - xErr = %d  ptr = %d / itc = %d", xErr, ptr, itc);
+            );
+            // (2026-11-19) the error in the log, as in Interstys : its code, the word, its explanation (not twice : a
+            // block Edit, hppos 2426 wrote it) ; the word noted for "? n" (mSL Console)
+            !d3_errLogged ? (
+                (un === 'feof') ? (strcpy(#d3_sew, "(the end)"); c = itc + 1;) : (
+                    (un === 'char') ? sprintf(#d3_sew, "%c", curcod) :
+                    (curcod === d3_kwInterstys) ? strcpy(#d3_sew, "Interstys") : mSL_edit_value(#d3_sew, curcod);
+                    c = ptr;
+                );
+                ((xErr === 0298) && (curcod === d3_kwInterstys)) ? (
+                    sprintf(#s, "ERR: %04d    Diffusion-3 settings (word %d) : Interstys : settings of Interstys, not of Diffusion-3",
+                        xErr, c);
+                ) : (
+                    sprintf(#s, "ERR: %04d    Diffusion-3 settings (word %d) : %s : %s", xErr, c, #d3_sew, d3_StErrMsg(xErr));
+                );
                 mSL_log(SysLogBox, #s);
+                sprintf(#s, "word %d : %s", c, #d3_sew);
+                mSL_ErrNote(xErr, #s);
+            );
         );
 
 

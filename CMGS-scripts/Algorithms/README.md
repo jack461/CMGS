@@ -48,9 +48,14 @@ instance précédente, qui n'existe pas encore. C'est sans conséquence.
 | `Matrix-Anneau` | Un anneau : chaque écho passe au haut-parleur voisin, le son tourne (Ring) |
 | `Matrix-Ondule` | Une traîne qui ondule : les retards modulés lentement, déphasés d'une ligne à l'autre |
 | `Matrix-Vrille` | Une vrille métallique : des retards courts modulés à vitesse audio |
+| `Matrix-Maille` | Un maillage : chaque écho passe aux haut-parleurs voisins dans l'espace (Mesh, `Global speakers`) |
 
 Chaque recette se compose de trois effets : `pre` (l'entrée et le bus d'essai), `fdn` (la Matrix),
 `post` (le mélange sec et traité vers la sortie) ; `Matrix-Souffle` y ajoute un LFO.
+
+Le mode `Mesh` (une Matrix, un Shimmer, une Reverb) relie chaque ligne à ses `nearest` plus proches voisines dans
+l'espace : les positions des haut-parleurs se donnent par `settings(data( Global speakers x y z x y z ... ))`, sauvées
+avec le projet ; sans elles, les lignes sont en rang.
 
 ## Les recettes du Flanger et du Chorus (retards modulés)
 
@@ -98,6 +103,21 @@ Les effets sont `pre`, `ph` (le Phaser) et `post`. Le son direct passe dans le P
 
 Les effets sont `pre`, `sh` (le Shimmer) et `post` (le son sec et le son traité : `dry`, `wet`). `thick` règle
 le nombre de lignes du réseau (8 et plus : une traîne dense, même en stéréo).
+
+## Les recettes de la Reverb (le Matrix avec pré-retard, premières réflexions et diffuseurs)
+
+| Fichier | Ce qu'il fait |
+|---|---|
+| `Reverb-Salle` | Une salle de concert : une réverbération naturelle, ample et chaude ; le point de départ des autres |
+| `Reverb-Cathedrale` | Une nef : des retards trois fois plus longs, neuf secondes, des aigus vite éteints, 32 lignes |
+| `Reverb-Boite` | Une boîte qui se referme : la traîne coupée net dès que le son s'arrête (`tailmode Gate`) |
+| `Reverb-Gel` | Un espace gelé : cinq minutes de traîne ; la cellule Loop sur Freeze la fige tout à fait |
+| `Reverb-Spirale` | Une spirale : un LFO lent module la taille (`mod Size`), la traîne glisse comme une bande |
+| `Reverb-Respire` | Une respiration : chaque attaque fait monter la traîne, coupée au sommet (`tailmode Swell`) |
+| `Reverb-Nuage` | Un nuage : taille × 8, 300 ms de pré-retard, 64 lignes, plus aucun écho distinct |
+
+Une Reverb a les clés de la Matrix et les siennes : `predelay`, `size`, `diffuse`, `stages`, `density`, `early`,
+`bass`, et la traîne `tailmode Normal|Gate|Swell` avec `time` (ms) et `thresh` (dB, le seuil de l'entrée).
 
 ## Les recettes du Noise (bruits, impulsions, applications chaotiques)
 
@@ -155,7 +175,11 @@ Un Math lit une source A (`source`, ou `src1`) et une source B facultative (`src
 | `Ring-Gong` | Des gongs : le modulateur en anneau, un son métallique, inharmonique ; chaque canal a sa porteuse |
 | `Ring-Glisse` | Un glissement : le spectre descend de quelques Hz (Down) et dérive au rythme d'un LFO lent |
 | `Ring-Tourne` | Un tournoiement : un trémolo (AM) dont la crête passe d'un haut-parleur au suivant |
+| `Ring-Cloches` | Des cloches : la phase du son modulée (PM), chaque partiel entouré de raies inharmoniques |
+| `Ring-Trille` | Un trille : le spectre entier saute de ± indice × vitesse Hz au rythme d'un carré (FM) |
+| `Ring-Vibre` | Une vibration : les fréquences tremblent au hasard, différemment sur chaque canal (FM, Random) |
 
 Un Ring multiplie sa source A par une porteuse : la source B si elle est branchée (`src2`), sinon son oscillateur
 (`freq`, `wave`, `detune` et `spread` d'un canal au suivant). Modes : `Ring`, `AM` (`amount`), `Up` et `Down` (le
-décaleur de fréquence).
+décaleur de fréquence), `PM` et `FM` (la phase ou la fréquence de A modulée par la porteuse : `index`, en radians ; en
+FM, la déviation vaut `index` × `freq` Hz ; `amount` multiplie l'indice).

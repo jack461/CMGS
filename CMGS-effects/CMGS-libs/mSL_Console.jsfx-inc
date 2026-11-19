@@ -1,0 +1,887 @@
+/*
+    mSL_Console.jsfx-inc  (2026-11-18 ; modes, help, menu, columns, incremental context : 2026-11-19)
+    The module "mSL Console" of the CMGS applications : a line typed in the module, compiled and run at once, as a
+    dropped file (the compile list of the host : doMslCompile).
+
+    The module : at the bottom, the line typed (its color : the mode) ; above it, the last lines of the System Log (the
+    newest one at the bottom, in 1 to 4 columns ; the wheel scrolls back). A clic in the line gives it the keyboard : it
+    then gets all the keys (GM_ktext, see GM_key_frame in mSL_ui_LibJJ : the other modules and the commands of the
+    plugin see none) ; a clic elsewhere, or Esc, gives them back.
+        Enter       runs the line ; its first character may choose the mode, which stays until the next change (the
+                    rest of the line, if any, runs in the new mode) :
+            > text      mSL with traces (violet) : the line is written in the log ("> text"), then the value of its
+                        last expression ("= value" ; none when the line ends with ";" or "}")
+            . text      mSL, silent (green) : neither the line nor its value (its prints and its errors remain) ;
+                        a "." followed by a digit is a number (.5 * x), not a change of mode
+            < text      settings (orange) : the text of a settings(data( text )) ("< text" in the log)
+            = expr      the value of an expression, in any mode
+            ? / ? n     the help of the console in the log / the explanation of the error n (CMGS-data/CMGS-Erreurs.tsv,
+                        read in REAPER/Data) ; the mode does not change
+        Up, Down    the last lines run (MCON_NH)
+        Left, Right, Home, End, Backspace, Del : edit the line
+    A right clic in the module (without Shift : Shift + right clic is the Studio menu) : the menu of the modes,
+    Immediate / Incremental, the context, the columns, the help.
+    Immediate : each line is compiled alone, its variables do not last after it. Incremental : the variables declared by
+    the lines ("var", "loc" : their tables, kept from the garbage collector in 2 entries of mm_usr_prot ; "ext" : their
+    names) are known by the next lines (mSL_compile, flag 2, as the evaluator's compile), until "Clear the context". The
+    functions too : the name of a function is a global variable, its value the code (a lambda has no name : it stays
+    only if a variable holds it, see mSL_doLambdas). A line still running (a wait) when the next one is compiled : what
+    it changes after that is lost for the context.
+    Over the module, when the line has not the keyboard : '+' (or '='), '-' change its height.
+
+    The file has two parts, selected by the preprocessor variable "mcon_part" (as mSL_Panes) :
+        mcon_part = 1 : in @init, after mSL_Utilities (the System Log), mSL_Strings, mSL_Comp_lib and the host's
+                        doMslCompile, BEFORE its mSL_load_file_inGFX and its dispatcher (they call mcon_CpFlags,
+                        mcon_Started, mcon_End) : the state, the run of a line, the help, the context
+        mcon_part = 2 : in @init, after mSL_Panes part 1 (keepBlockInfos) : the module (show_Console)
+    The lines shown (2026-11-19) : the own lines of the console (mcon_box : what is typed, and everything its lines
+    write in the System Log while they are compiled and run, see mSL_logTee in mSL_log), or the whole System Log
+    (menu). Everything stays in the System Log too (the export 'p'). Not followed : the threads a line creates.
+    The host :
+        - declares the module and calls show_Console(blockId) in show_Module ;
+        - its mSL_load_file_inGFX : the name #mcon_src is the line itself (not a file), compiled with mcon_CpFlags() ;
+          at its end mcon_LoadEnd(ent) (ent : the thread started, 0 if it failed ; mSL_main_cod still set)
+              con = mcon_LoadStart(fname);  (1 : the line of the console, 2 : a file dropped on it)
+              (con === 1) ? (fhd = -2;) : fhd = GM_file_open(fname, FFlagsmSL);
+              ((fhd >= 0) || (fhd === -2)) ? ( ... mSL_compile(max(-1, fhd), -1, (con === 1) ? fname : -1,
+                                                                 (con === 1) ? mcon_CpFlags() : 0)
+              ... at the very end (after its error message) : con ? mcon_LoadEnd(ent);
+        - its drop loop : mcon_DropCheck(name) for each .mSL file, name as it will be compiled ;
+        - its dispatcher : mcon_Tee(SchX) before the run of a thread, mSL_logTee = 0 after it (and after its end or its
+          error) ; at the end of a thread (mSL_RC_Stop) mcon_End(SchX, 1), on an error mcon_End(SchX, 0) ;
+        - after its list mm_usr_prot : mcon_prot = mm_usr_prot_ptr; mm_usr_prot_ptr += 2; (both entries 0)
+          (mcon_prot < 0 : no incremental mode).
+*/
+
+<? mcon_part != 1 ? _suppress = 1; ?>
+
+//====== mSL CONSOLE : THE STATE, THE RUN OF A LINE ======
+MCON_NH = 32;               // the lines kept for Up / Down
+MCON_LMAX = 1000;           // the length of a line, at most
+MCON_NX = 64;               // the names "ext" kept by the context, at most
+mcon_hist = make_array(MCON_NH);
+// (permanent strings of mSL_Strings ; mcon_hmax : those obtained, never the string 0 ; none if the array is missing)
+mcon_hmax = 0;
+(mcon_hist > 0) ? while ((mcon_hmax < MCON_NH) && ((mcon_hist[mcon_hmax] = mSL_Str_Perm()) > 0)) (mcon_hmax += 1;);
+mcon_hn = 0;                // the lines kept
+mcon_hp = 0;                // the line shown by Up / Down (mcon_hn : the line being typed, #mcon_save)
+#mcon_line = "";            // the line typed
+#mcon_src = "";             // the line compiled (the host compiles it as a file : see above)
+#mcon_save = "";            // the line being typed, while Up / Down show the others
+mcon_cur = 0;               // the cursor (0 ... strlen)
+mcon_off = 0;               // the first character shown
+mcon_foc = 0;               // 1 : the line has the keyboard
+mcon_busy = 0;              // 1 : a line waits in the compile list (set to 0 by the host when it takes it)
+mcon_bt = 0;                // when it was sent (10 s at most)
+mcon_Hgt = 320;             // the height of the module (keys '+', '-')
+mcon_scr = 0;               // the lines of the log scrolled back (the wheel)
+mcon_lseen = -1;            // the last line of the log shown (a new one : the display is refreshed)
+mcon_mode = 0;              // 0 : mSL with traces ('>'), 1 : mSL silent ('.'), 2 : settings ('<')
+mcon_inc = 0;               // 0 : Immediate, 1 : Incremental (the variables of the lines stay)
+mcon_cols = 1;              // the columns of the log (1 ... 4)
+mcon_val = 0;               // 1 : the value of the line sent is shown at its end
+mcon_isinc = 0;             // 1 : the line sent is compiled in the context
+MCON_NT = 8;                // the threads of lines followed at once (their entry, their process number, mcon_val)
+mcon_tE = make_array(MCON_NT); mcon_tP = make_array(MCON_NT); mcon_tV = make_array(MCON_NT);
+((mcon_tE > 0) && (mcon_tP > 0) && (mcon_tV > 0)) ? (memset(mcon_tE, 0, MCON_NT); memset(mcon_tP, 0, MCON_NT); memset(mcon_tV, 0, MCON_NT););
+mcon_tN = 0;                // (the next slot taken when none is free)
+mcon_ctxA = mcon_ctxO = 0;  // the context : the tables of the variables "var" and "loc" of the last line compiled
+mcon_ext = make_array(MCON_NX); // and the names declared "ext"
+mcon_extN = 0;
+mcon_prot = -1;             // (the host) the 2 entries of mm_usr_prot that keep mcon_ctxA, mcon_ctxO
+mcon_view = 0;              // the lines shown : 0 the own lines of the console (mcon_box), 1 the whole System Log
+// (2026-11-19) a .mSL file dropped on the console : it runs and becomes its context (its tables of identifiers shared)
+#mcon_drop = "";            // its name, as the host compiles it (mcon_DropCheck, from the drop loop of the host)
+mcon_dropT = 0;             // when (30 s at most until its compilation)
+mcon_adoptF = 0;             // 1 : the file being compiled is adopted (mcon_LoadStart -> mcon_LoadEnd)
+#mcon_adf = "";             // its name
+#mcon_ctxName = "";         // the name of the file that gave the context ("" : the lines typed)
+mcon_rx = mcon_ry = mcon_rw = mcon_rh = 0; mcon_visT = 0; // the rectangle of the module (pixels), when it was drawn
+MCON_NN = 256;              // "? vars" ... : the names listed, at most
+mcon_nm = make_array(MCON_NN); mcon_nf = make_array(MCON_NN);
+
+// (2026-11-19) The own lines of the console : what is typed, and everything its lines write in the System Log while
+// they are compiled and run (mSL_logTee, see mSL_log) ; a ring as SysLogBox, but its strings are permanent strings of
+// the pool (mcon_ring : their numbers, box[7] ; see mSL_logStr) : a series of files dropped meanwhile does not push
+// them away. (A first version used 200 named strings made by a printf of the preprocessor : in the GamePlayer the ring
+// had only 2 strings, the lines vanished at once.)
+MCON_NL = 160;              // the lines kept, at most
+mcon_ring = make_array(MCON_NL);
+mcon_box = make_array(10);
+// (2026-11-19) all the arrays obtained ? make_array gives 0 when the static memory is full (options:maxmem of the
+// plugin) : the console must then never write at the address 0 (in the GamePlayer : the work areas wa128 ..., the
+// lines became "Helvetica", the string 0) ; it shows the System Log, without its own lines nor its lists of names
+mcon_okmem = (mcon_hist > 0) && (mcon_tE > 0) && (mcon_tP > 0) && (mcon_tV > 0) && (mcon_ext > 0) && (mcon_nm > 0)
+    && (mcon_nf > 0) && (mcon_ring > 0) && (mcon_box > 0);
+mcon_ringN = 0;
+mcon_okmem ? (
+    while ((mcon_ringN < MCON_NL) && ((mcon_ring[mcon_ringN] = mSL_Str_Perm()) > 0)) (strcpy(mcon_ring[mcon_ringN], ""); mcon_ringN += 1;);
+    mcon_box[0] = "mSL Console Box";
+    mcon_box[1] = 0;                                    // (no named strings in a row)
+    mcon_box[2] = max(2, mcon_ringN);                      // their count
+    mcon_box[3] = 0;                                    // the next one
+    mcon_box[4] = 100; mcon_box[5] = 1; mcon_box[6] = 6;
+    mcon_box[7] = mcon_ring;                            // the numbers of the strings (see mSL_logStr)
+    mcon_box[8] = 0;                                    // 1 : the ring was filled once
+    mcon_box[9] = "conlog";
+    (mcon_ringN < 2) ? (mcon_okmem = 0;);                  // (no strings in the pool)
+);
+// (2026-11-19 : the counter of these strings was first named as MCON_NL, case aside - EEL2 names ignore the case - and
+// set it to 0 : no string, the lines became "Helvetica", the string 0)
+!mcon_okmem ? (
+    MCON_NT = MCON_NX = MCON_NN = 0; mcon_hmax = 0; mcon_box = 0; mcon_view = 1;
+    ((mcon_ring > 0) && (mcon_box > 0)) ? (
+        strcpy(#mcon_t, "mSL Console : no permanent string left in the pool : it shows the System Log, without its own lines");
+    ) : (
+        sprintf(#mcon_t, "mSL Console : not enough static memory (raise options:maxmem ; error %04d) : it shows the System Log, without its own lines nor its lists of names", mSL_StM_Err);
+    );
+    mSL_log(SysLogBox, #mcon_t);
+);
+
+// A line of the console : in the System Log and in its own lines
+function mcon_Log(str)
+local(t)
+(
+    t = mSL_logTee; mSL_logTee = mcon_box; // (0 : no own lines, see mcon_okmem)
+    mSL_log(SysLogBox, str);
+    mSL_logTee = t;
+);
+
+// The string s without its spaces (and controls : the end of a line read) at both ends
+function mcon_Trim(s)
+local(n, i, j)
+(
+    n = strlen(s); i = 0;
+    while ((i < n) && (str_getchar(s, i, 'cu') <= 32)) (i += 1;);
+    j = n;
+    while ((j > i) && (str_getchar(s, j - 1, 'cu') <= 32)) (j -= 1;);
+    strcpy_substr(#mcon_tr, s, i, j - i);
+    strcpy(s, #mcon_tr);
+);
+
+// The line typed is emptied (after a run)
+function mcon_Clear()
+(
+    strcpy(#mcon_line, ""); mcon_cur = mcon_off = 0;
+    mcon_scr = 0;
+);
+
+// The line kept for Up / Down (not twice the same one in a row ; the oldest one goes away)
+function mcon_HistAdd()
+local(i)
+(
+    ((mcon_hn === 0) || (strcmp(mcon_hist[mcon_hn - 1], #mcon_line) != 0)) ? (
+        ((mcon_hn === mcon_hmax) && (mcon_hn > 0)) ? (
+            i = 0; loop(mcon_hmax - 1, strcpy(mcon_hist[i], mcon_hist[i + 1]); i += 1;);
+            mcon_hn -= 1;
+        );
+        (mcon_hn < mcon_hmax) ? (strcpy(mcon_hist[mcon_hn], #mcon_line); mcon_hn += 1;);
+    );
+    mcon_hp = mcon_hn;
+);
+
+// A value in the log : "= value" (a string between quotes, a function by its name, a symbol by its name, a number)
+function mcon_ShowVal(v)
+(
+    mSL_isString(v) ? (
+        sprintf(#mcon_v, "= \"%s\"", v);
+    ) :
+    ((v === floor(v)) && (v > 2) && (v < 0x7FFFFFFF) && (v[-2] === mSL_CC_KeyCKod)) ? (
+        // (a function : its code ; a lambda has no name, see mSL_doLambdas)
+        mSL_lbIsMark(v[mSL_CC_Name]) ? (
+            strcpy(#mcon_v, "= function (lambda)");
+        ) : (
+            mSL_id2Str(v[mSL_CC_Name], #mcon_v2);
+            sprintf(#mcon_v, "= function %s", #mcon_v2);
+        );
+    ) : (
+        mSL_edit_value(#mcon_v2, v);
+        sprintf(#mcon_v, "= %s", #mcon_v2);
+    );
+    mcon_Log(#mcon_v);
+);
+
+// The explanation of the error k, from CMGS-data/CMGS-Erreurs.tsv (code <TAB> applications <TAB> explanation)
+function mcon_ErrHelp(k)
+local(fh, found, n, j, nt)
+(
+    sprintf(#mcon_code, "%04d", k);
+    fh = file_open("CMGS-data/CMGS-Erreurs.tsv");
+    (fh < 0) ? (
+        mcon_Log("? The list of the errors is not found (REAPER/Data/CMGS-data/CMGS-Erreurs.tsv)");
+    ) : (
+        found = 0;
+        while (!found && file_avail(fh)) (
+            file_string(fh, #mcon_h);
+            ((strncmp(#mcon_h, #mcon_code, 4) === 0) && (str_getchar(#mcon_h, 4) === 9)) ? (
+                found = 1;
+                mcon_Trim(#mcon_h);
+                n = strlen(#mcon_h);
+                j = 5; while ((j < n) && (str_getchar(#mcon_h, j) !== 9)) (j += 1;);
+                strcpy_substr(#mcon_h2, #mcon_h, 5, j - 5);      // the applications
+                strcpy_from(#mcon_h3, #mcon_h, min(n, j + 1));   // the explanation
+                sprintf(#mcon_h4, "? %s (%s) : %s", #mcon_code, #mcon_h2, #mcon_h3);
+                mcon_Log(#mcon_h4);
+            );
+        );
+        file_close(fh);
+        !found ? (
+            sprintf(#mcon_h4, "? %s : no error with this code", #mcon_code);
+            mcon_Log(#mcon_h4);
+        );
+    );
+    // (2026-11-19) the detail noted when this error was detected last (see mSL_ErrNote : an identifier, a word ...)
+    ((nt = mSL_ErrNoteGet(k)) > 0) ? (
+        sprintf(#mcon_h4, "?   the last one : %s", nt);
+        mcon_Log(#mcon_h4);
+    );
+);
+
+// (2026-11-19) "? vars", "? locs", "? exts" (kind 0, 1, 2) : the names of the variables of the context (var, loc), or
+// the external ones of the application (ext : mSL_EXTab, shared by all its programs), sorted, in columns ; "name()" :
+// its value is a function
+function mcon_ListNames(kind)
+local(t, n, ip, lg, v, i, j, a, f, w, per, k, ln)
+(
+    n = 0;
+    (kind === 2) ? (
+        ip = 0;
+        loop(mSL_EXSiz,
+            (((a = mSL_EXTab[2 * ip]) != 0) && (n < MCON_NN)) ? (mcon_nm[n] = a; mcon_nf[n] = 0; n += 1;);
+            ip += 1;
+        );
+    ) : (
+        t = (kind === 0) ? mcon_ctxA : mcon_ctxO;
+        while ((t > 0) && (t[t[-1] - 2] === mSL_Fwrd_Link)) (t = t[t[-1] - 1];); // (its forward chain)
+        (t > 0) ? (
+            ip = 0; lg = t[-1] - 2;
+            while ((ip < lg) && (t[ip] != 0) && (n < MCON_NN)) (
+                mcon_nm[n] = t[ip]; v = t[ip + 1];
+                mcon_nf[n] = (v === floor(v)) && (v > 2) && (v < 0x7FFFFFFF) && (v[-2] === mSL_CC_KeyCKod);
+                n += 1; ip += 2;
+            );
+        );
+    );
+    // sorted (insertion, by the names, case ignored) ; the longest one gives the width of the columns
+    i = 1;
+    while (i < n) (
+        a = mcon_nm[i]; f = mcon_nf[i]; mSL_id2Str(a, #mcon_s1);
+        j = i - 1;
+        while ((j >= 0) && (mSL_id2Str(mcon_nm[j], #mcon_s2); stricmp(#mcon_s2, #mcon_s1) > 0)) (
+            mcon_nm[j + 1] = mcon_nm[j]; mcon_nf[j + 1] = mcon_nf[j]; j -= 1;
+        );
+        mcon_nm[j + 1] = a; mcon_nf[j + 1] = f;
+        i += 1;
+    );
+    w = 4; i = 0; loop(n, mSL_id2Str(mcon_nm[i], #mcon_s1); w = max(w, strlen(#mcon_s1) + 2 * mcon_nf[i]); i += 1;);
+    w = min(w + 2, 18); per = max(1, floor(72 / w));
+    sprintf(#mcon_ln, "? %s : %d name%s", (kind === 0) ? "vars" : (kind === 1) ? "locs" : "exts", n, (n > 1) ? "s" : "");
+    (kind === 2) ? (
+        strcat(#mcon_ln, " (external : shared by all the programs of the application)");
+    ) :
+    (mcon_ctxA <= 0) ? (
+        strcat(#mcon_ln, " : no context (Incremental mode and a line run, or a file dropped here)");
+    ) :
+    (strlen(#mcon_ctxName) > 0) ? (
+        strcat(#mcon_ln, " (the context of the console : "); strcat(#mcon_ln, #mcon_ctxName); strcat(#mcon_ln, ")");
+    ) : (
+        strcat(#mcon_ln, " (the context of the console)");
+    );
+    mcon_Log(#mcon_ln);
+    i = 0;
+    while (i < n) (
+        strcpy(#mcon_ln, "?   ");
+        k = 0;
+        while ((k < per) && (i < n)) (
+            mSL_id2Str(mcon_nm[i], #mcon_s1);
+            mcon_nf[i] ? strcat(#mcon_s1, "()");
+            strcat(#mcon_ln, #mcon_s1);
+            (k < per - 1) ? (ln = strlen(#mcon_s1); while (ln < w) (strcat(#mcon_ln, " "); ln += 1;););
+            k += 1; i += 1;
+        );
+        mcon_Log(#mcon_ln);
+    );
+);
+
+// '?' : s, the text after it : nothing, the help of the console ; a number, the explanation of an error
+function mcon_Help(s)
+local(n, i, k, d, c)
+(
+    n = strlen(s); i = 0;
+    while ((i < n) && (str_getchar(s, i, 'cu') <= 32)) (i += 1;);
+    (i >= n) ? (
+        mcon_Log("? mSL Console : Enter runs the line ; its first character may choose the mode, which stays :");
+        mcon_Log("?   > text : mSL with traces (violet) : the line, then the value of its last expression (none after a final ; or })");
+        mcon_Log("?   . text : mSL, silent (green) : neither the line nor its value (its prints and its errors remain)");
+        mcon_Log("?   < text : settings (orange) : the content of a settings(data( ... )), e.g. < hppos 3 Off");
+        mcon_Log("?   = expr : the value of an expression, in any mode");
+        mcon_Log("?   ? : this help ; ? n : the explanation of the error n (e.g. ? 3418) ; ? vars, ? locs, ? exts : the names");
+        mcon_Log("?   A .mSL file dropped here runs, and becomes the context : the lines typed share its variables");
+        mcon_Log("?   Up, Down : the last lines ; Esc, or a clic elsewhere : the keys go back to the plugin");
+        mcon_Log("?   Right clic : the menu (the modes, Immediate / Incremental, the context, the columns)");
+        mcon_Log("?   Immediate : each line forgets its variables ; Incremental : the variables (var, loc, ext) stay, until Clear the context");
+    ) : (
+        strcpy_from(#mcon_hw, s, i); mcon_Trim(#mcon_hw);
+        ((stricmp(#mcon_hw, "vars") === 0) || (stricmp(#mcon_hw, "var") === 0)) ? mcon_ListNames(0) :
+        ((stricmp(#mcon_hw, "locs") === 0) || (stricmp(#mcon_hw, "loc") === 0)) ? mcon_ListNames(1) :
+        ((stricmp(#mcon_hw, "exts") === 0) || (stricmp(#mcon_hw, "ext") === 0)) ? mcon_ListNames(2) : (
+            k = d = 0;
+            while ((i < n) && ((c = str_getchar(s, i, 'cu')) >= '0') && (c <= '9')) (k = k * 10 + c - '0'; i += 1; d += 1;);
+            while ((i < n) && (str_getchar(s, i, 'cu') <= 32)) (i += 1;);
+            ((d > 0) && (d <= 4) && (i >= n)) ? (
+                mcon_ErrHelp(k);
+            ) : (
+                mcon_Log("? alone : the help ; ? n : the explanation of the error n (e.g. ? 3418) ; ? vars, ? locs, ? exts : the names");
+            );
+        );
+    );
+);
+
+// The table of variables t at the end of its forward chain (see mSL_fwdChain)
+function mcon_Fwd(t)
+(
+    while ((t > 0) && (t[t[-1] - 2] === mSL_Fwrd_Link)) (t = t[t[-1] - 1];);
+    t;
+);
+
+// The variables of the context
+function mcon_CtxCount()
+local(t, n, ip, lg)
+(
+    n = mcon_extN;
+    ((t = mcon_Fwd(mcon_ctxA)) > 0) ? (ip = 0; lg = t[-1] - 2; while ((ip < lg) && (t[ip] != 0)) (n += 1; ip += 2;););
+    ((t = mcon_Fwd(mcon_ctxO)) > 0) ? (ip = 0; lg = t[-1] - 2; while ((ip < lg) && (t[ip] != 0)) (n += 1; ip += 2;););
+    n;
+);
+
+// The context forgotten (the garbage collector frees its tables)
+function mcon_CtxClear()
+(
+    mcon_ctxA = mcon_ctxO = 0; mcon_extN = 0;
+    strcpy(#mcon_ctxName, "");
+    (mcon_prot >= 0) ? (mm_usr_prot[mcon_prot] = mm_usr_prot[mcon_prot + 1] = 0;);
+);
+
+// (host) The flags of mSL_compile for the line of the console : 2 (the variables of the context) in the incremental
+// mode, when a context exists ; the tables (mSL_baseAVars, mSL_baseOVars) and the names "ext" (mSL_cpExt) are then set
+function mcon_CpFlags()
+local(r)
+(
+    r = 0;
+    (mcon_isinc && (mcon_prot >= 0) && (mcon_ctxA > 0) && (mcon_ctxO > 0)) ? (
+        mSL_baseAVars = mcon_ctxA = mcon_Fwd(mcon_ctxA);
+        mSL_baseOVars = mcon_ctxO = mcon_Fwd(mcon_ctxO);
+        mSL_basePVars = 0;
+        mSL_cpExt = mcon_ext; mSL_cpExtN = mcon_extN;
+        r = 2;
+    );
+    r;
+);
+
+// (host) A thread started for the line of the console (mSL_main_cod : its code) : noted, for its value ; incremental,
+// its tables become the context, with the names "ext" of the symbol table of this compilation
+// the slot of the thread of a line (its entry ent, its process number unchanged), or -1
+function mcon_Find(ent)
+local(k, r)
+(
+    r = -1; k = 0;
+    (ent > 0) ? (
+        while ((r < 0) && (k < MCON_NT)) (
+            ((mcon_tE[k] === ent) && (SchedPid[ent] === mcon_tP[k])) ? (r = k;);
+            k += 1;
+        );
+    );
+    r;
+);
+
+function mcon_Started(ent)
+local(ip, n, k)
+(
+    // a free slot (or one whose thread is not there any more ; else the next one in turn ; none : see mcon_okmem)
+    (MCON_NT > 0) ? (
+        k = 0; while ((k < MCON_NT) && (mcon_tE[k] > 0) && (SchedPid[mcon_tE[k]] === mcon_tP[k])) (k += 1;);
+        (k >= MCON_NT) ? (k = mcon_tN; mcon_tN = (mcon_tN + 1) % MCON_NT;);
+        mcon_tE[k] = ent; mcon_tP[k] = SchedPid[ent]; mcon_tV[k] = mcon_val;
+    );
+    (mcon_isinc && (mcon_prot >= 0) && (mSL_main_cod > 0)) ? (
+        mcon_ctxA = mSL_main_cod[mSL_CC_GlbTab];
+        mcon_ctxO = mSL_main_cod[mSL_CC_OwnTab];
+        mm_usr_prot[mcon_prot] = mcon_ctxA; mm_usr_prot[mcon_prot + 1] = mcon_ctxO;
+        ip = n = 0;
+        loop(mSL_GCSiz,
+            ((n < MCON_NX) && (mSL_GCTab[ip] != 0) && (mSL_GCTyp[ip] === mSL_tyIdent)
+                && ((mSL_GCCod[ip] & mSL_FlgMask) === mSL_ExtFlg)) ? (
+                mcon_ext[n] = mSL_GCTab[ip]; n += 1;
+            );
+            ip += 1;
+        );
+        mcon_extN = n;
+    );
+);
+
+// (host) The end of a thread (ok : at its exit ; 0 : an error) : the thread of the line, its value if asked
+function mcon_End(ent, ok)
+local(k)
+(
+    ((k = mcon_Find(ent)) >= 0) ? (
+        (ok && mcon_tV[k]) ? mcon_ShowVal(mSL_ExitValue);
+        mcon_tE[k] = mcon_tP[k] = 0;
+    );
+);
+
+// (host) The dispatcher, before the run of the thread of the entry ent : the thread of a line of the console writes in
+// its own lines too (the host sets mSL_logTee to 0 after the run, its end or its error)
+function mcon_Tee(ent)
+(
+    mSL_logTee = (mcon_Find(ent) >= 0) ? mcon_box : 0;
+);
+
+// (host) The drop loop, for a .mSL file (name : as it will be compiled) : dropped on the console (the mouse in its
+// rectangle, drawn less than 1 s ago), it will become its context when it is compiled (mcon_LoadStart)
+function mcon_DropCheck(name)
+(
+    ((time_precise() - mcon_visT < 1) && (mouse_x >= mcon_rx) && (mouse_y >= mcon_ry)
+        && (mouse_x < mcon_rx + mcon_rw) && (mouse_y < mcon_ry + mcon_rh)) ? (
+        strcpy(#mcon_drop, name); mcon_dropT = time_precise();
+    );
+);
+
+// (host) mSL_load_file_inGFX, at its start : 1 if fname is the line of the console (taken : mcon_busy 0), 2 if it is a
+// file dropped on the console (it will become its context), else 0 ; 1 and 2 : what the compilation writes goes into
+// the own lines of the console too (the host compiles a file 2 as any file : the string only for 1)
+function mcon_LoadStart(fname)
+(
+    (fname === #mcon_src) ? (mcon_busy = 0; mSL_logTee = mcon_box; 1) :
+    ((mcon_dropT > 0) && (time_precise() - mcon_dropT < 30) && (strcmp(fname, #mcon_drop) === 0)) ? (
+        mcon_dropT = 0; mcon_adoptF = 1; strcpy(#mcon_adf, fname);
+        mSL_logTee = mcon_box;
+        2;
+    ) : 0;
+);
+
+// The name of a file without its folders
+function mcon_BaseName(src, dst)
+local(n, i)
+(
+    n = strlen(src); i = n;
+    while ((i > 0) && (str_getchar(src, i - 1) !== '/') && (str_getchar(src, i - 1) !== 92)) (i -= 1;);
+    strcpy_from(dst, src, i);
+);
+
+// A file dropped on the console, compiled, its thread ent started : followed (its prints, its errors in the own lines,
+// no value), its tables become the context (Incremental), shared by the lines typed next
+function mcon_Adopt(ent)
+local(n)
+(
+    mcon_val = 0;
+    mcon_isinc = (mcon_prot >= 0);
+    mcon_Started(ent);
+    mcon_isinc ? (
+        mcon_inc = 1;
+        mcon_BaseName(#mcon_adf, #mcon_ctxName);
+        n = mcon_CtxCount();
+        sprintf(#mcon_t, "? Context : %s (%d name%s) : the lines typed share its variables (? vars, ? locs, ? exts)",
+            #mcon_ctxName, n, (n > 1) ? "s" : "");
+        mcon_Log(#mcon_t);
+    ) : (
+        mcon_Log("? This application keeps no context : the file runs, its variables are not shared");
+    );
+);
+
+// (host) mSL_load_file_inGFX, at its very end, for the line of the console (ent : its thread, 0 if the compilation
+// failed) : the thread followed ; a failed compilation : its position (#dbg_trace2 : the host writes it in the System
+// Log later) in the own lines ; the copy stops
+function mcon_LoadEnd(ent)
+(
+    (ent > 0) ? (
+        mcon_adoptF ? mcon_Adopt(ent) : mcon_Started(ent);
+    ) : (
+        (strlen(#dbg_trace2) > 0) ? mSL_logRing(mcon_box, #dbg_trace2);
+    );
+    mcon_adoptF = 0;
+    mSL_logTee = 0;
+);
+
+// 1 if the line s is the definition of a function : "function", then a name (not "(" : a lambda)
+function mcon_IsDef(s)
+local(n, i, c)
+(
+    n = strlen(s); i = 8;
+    (strncmp(s, "function", 8) === 0) ? (
+        while ((i < n) && (str_getchar(s, i, 'cu') <= 32)) (i += 1;);
+        c = (i < n) ? str_getchar(s, i, 'cu') : 0;
+        (i > 8) && (((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) || (c === '_'));
+    ) : 0;
+);
+
+// A line to run (s : without the character of a mode) : written in the log (not silent), then given to the compile list
+// of the host, mSL or settings
+function mcon_Exec(s)
+local(frc, k, c)
+(
+    frc = (str_getchar(s, 0) === '=');
+    (frc || (mcon_mode !== 2)) ? (
+        (mcon_mode !== 1) ? (sprintf(#mcon_t, "> %s", s); mcon_Log(#mcon_t););
+        frc ? (
+            strcpy_from(#mcon_src, s, 1);
+            mcon_Trim(#mcon_src);
+            mcon_val = 1;
+        ) : (
+            strcpy(#mcon_src, s);
+            // the value of its last expression : with traces, unless the line ends with ";" or "}", or is the
+            // definition of a function ("function f(x) (x + 3)" : nothing to show ; not a lambda, "function (x) ...")
+            k = strlen(s) - 1;
+            c = (k >= 0) ? str_getchar(s, k) : ';';
+            mcon_val = (mcon_mode === 0) && (c !== ';') && (c !== '}') && !mcon_IsDef(s);
+        );
+        mcon_isinc = mcon_inc;
+    ) : (
+        sprintf(#mcon_t, "< %s", s); mcon_Log(#mcon_t);
+        sprintf(#mcon_src, "settings(data( %s ));", s);
+        mcon_val = mcon_isinc = 0;
+    );
+    // (doMslCompile refuses an empty string : "=" alone)
+    (strlen(#mcon_src) > 0) ? (
+        mcon_busy = 1; mcon_bt = time_precise();
+        doMslCompile(#mcon_src);
+    );
+);
+
+// Enter : '?' (the help), or the line, after the character of a mode
+function mcon_Run()
+local(n, c, c1, i)
+(
+    n = strlen(#mcon_line);
+    (n > 0) ? (
+        c = str_getchar(#mcon_line, 0);
+        c1 = (n > 1) ? str_getchar(#mcon_line, 1) : 0;
+        (c === '?') ? (
+            mcon_HistAdd();
+            strcpy_from(#mcon_w, #mcon_line, 1);
+            mcon_Help(#mcon_w);
+            mcon_Clear();
+        ) :
+        (mcon_busy && (time_precise() - mcon_bt < 10)) ? (
+            mcon_Log("mSL Console : the previous line is not compiled yet");
+        ) : (
+            mcon_HistAdd();
+            i = 0;
+            (c === '>') ? (mcon_mode = 0; i = 1;) :
+            ((c === '.') && !((c1 >= '0') && (c1 <= '9'))) ? (mcon_mode = 1; i = 1;) :
+            (c === '<') ? (mcon_mode = 2; i = 1;);
+            strcpy_from(#mcon_w, #mcon_line, i);
+            mcon_Trim(#mcon_w);
+            (strlen(#mcon_w) > 0) ? mcon_Exec(#mcon_w);
+            mcon_Clear();
+        );
+    );
+);
+
+// A key typed in the line (it has the keyboard)
+function mcon_Key(c)
+local(n)
+(
+    n = strlen(#mcon_line);
+    ((c >= 32) && (c < 127)) ? (
+        (n < MCON_LMAX) ? (
+            strcpy_substr(#mcon_w, #mcon_line, 0, mcon_cur);
+            sprintf(#mcon_w2, "%c", c); strcat(#mcon_w, #mcon_w2);
+            strcpy_from(#mcon_w2, #mcon_line, mcon_cur); strcat(#mcon_w, #mcon_w2);
+            strcpy(#mcon_line, #mcon_w);
+            mcon_cur += 1;
+        );
+    ) :
+    (c === 8) ? ( // Backspace
+        (mcon_cur > 0) ? (
+            strcpy_substr(#mcon_w, #mcon_line, 0, mcon_cur - 1);
+            strcpy_from(#mcon_w2, #mcon_line, mcon_cur); strcat(#mcon_w, #mcon_w2);
+            strcpy(#mcon_line, #mcon_w);
+            mcon_cur -= 1;
+        );
+    ) :
+    (c === 'del') ? (
+        (mcon_cur < n) ? (
+            strcpy_substr(#mcon_w, #mcon_line, 0, mcon_cur);
+            strcpy_from(#mcon_w2, #mcon_line, mcon_cur + 1); strcat(#mcon_w, #mcon_w2);
+            strcpy(#mcon_line, #mcon_w);
+        );
+    ) :
+    (c === 'left') ? (mcon_cur = max(0, mcon_cur - 1);) :
+    (c === 'rght') ? (mcon_cur = min(n, mcon_cur + 1);) :
+    (c === 'home') ? (mcon_cur = 0;) :
+    (c === 'end') ? (mcon_cur = n;) :
+    (c === 'up') ? (
+        (mcon_hp > 0) ? (
+            (mcon_hp === mcon_hn) ? strcpy(#mcon_save, #mcon_line);
+            mcon_hp -= 1;
+            strcpy(#mcon_line, mcon_hist[mcon_hp]); mcon_cur = strlen(#mcon_line);
+        );
+    ) :
+    (c === 'down') ? (
+        (mcon_hp < mcon_hn) ? (
+            mcon_hp += 1;
+            strcpy(#mcon_line, (mcon_hp === mcon_hn) ? #mcon_save : mcon_hist[mcon_hp]); mcon_cur = strlen(#mcon_line);
+        );
+    ) :
+    (c === 13) ? mcon_Run() :
+    (c === 27) ? (mcon_foc = 0; GM_ktext = 0;);
+);
+
+<? _suppress = 0; ?>
+
+
+
+<? mcon_part != 2 ? _suppress = 1; ?>
+
+//====== mSL CONSOLE : THE MODULE ======
+
+// The color of k (0 '>' violet, 1 '.' green, 2 '<' orange, 3 the help : blue) on the background of the text of color
+// rgb : light colors for a light text (a dark background), dark ones for a dark text
+function mcon_Col(k, rgb)
+local(lt)
+(
+    lt = (0.299 * ((rgb >> 16) & 255) + 0.587 * ((rgb >> 8) & 255) + 0.114 * (rgb & 255)) > 128;
+    (k === 0) ? (lt ? 0xDF73FF : 0x8A2BE2) :    // Heliotrope / Blue Violet
+    (k === 1) ? (lt ? 0x32CD32 : 0x228B22) :    // Limegreen / Forest Green
+    (k === 2) ? (lt ? 0xFF8C00 : 0xB15124) :    // Dark Orange / Brownish Orange
+    (lt ? 0x87B5EB : 0x2A52BE);                 // a light blue / Cerulean Blue
+);
+
+// The mode of the line typed (for its color) : the one its first character announces ('>', '.' not before a digit,
+// '<' ; 3 : '?', the help), or the current one
+function mcon_NextMode()
+local(c, c1)
+(
+    c = str_getchar(#mcon_line, 0);
+    c1 = (strlen(#mcon_line) > 1) ? str_getchar(#mcon_line, 1) : 0;
+    (c === '>') ? 0 :
+    ((c === '.') && !((c1 >= '0') && (c1 <= '9'))) ? 1 :
+    (c === '<') ? 2 :
+    (c === '?') ? 3 : mcon_mode;
+);
+
+// The line typed (the current rect) : a clic gives it the keyboard and places the cursor ; its text in the color of
+// the mode
+function mcon_Input()
+local(n, t, c, rgb, rs, cx0, cy0, cx1, cy1, fv, fh, fc, lt, hc)
+(
+    ui_push();
+        ui_align(0, 0.5);
+        ui_jstyle ? (
+            // (2026-11-19) "soft" look : the line in inverse video, as the single cell of a pad over the whole width :
+            // the color of the text of the theme, faded into the background around it (uix_jsoft_zone) ; the text in
+            // the dark colors of the modes on a light fill (the light ones on a dark fill)
+            rs = uix_drawconfig_current[9];
+            cx0 = floor(ui_left() * rs); cy0 = floor(ui_top() * rs); cx1 = floor(ui_right() * rs); cy1 = floor(ui_bottom() * rs);
+            uix_setgfxfont();
+            fv = max(1, floor((cy1 - cy0 - gfx_texth) / 2) - rs); // (the fill : the height of the text + 2 rs)
+            fh = max(1, floor(min(ui_jpad_fade * rs, (cx1 - cx0) / 10)));
+            fc = (ui_jcolor_text >= 0) ? ui_jcolor_text : 0xD0D0D0;
+            uix_jsoft_zone(cx0, cy0, cx1, cy1, cx0 + fh, cy0 + fv, cx1 - fh, cy1 - fv, fc);
+            lt = (0.299 * ((fc >> 16) & 255) + 0.587 * ((fc >> 8) & 255) + 0.114 * (fc & 255)) > 128;
+            rgb = lt ? 0x000000 : 0xFFFFFF; // (the reference of mcon_Col : a dark text on a light fill)
+            hc = lt ? 0x6E6E6E : 0x9A9A9A;  // the hint
+        ) : (
+            control_background_inset(0);
+            // (the color of the text set by the theme on this background)
+            rgb = (uix_drawconfig_current[0] << 16) | (uix_drawconfig_current[1] << 8) | uix_drawconfig_current[2];
+            hc = Col_Inactive;
+        );
+        n = strlen(#mcon_line);
+        mcon_cur = max(0, min(n, mcon_cur));
+        ui_mouse_down(1) ? (
+            mcon_foc = 1;
+            strcpy_from(#mcon_w, #mcon_line, mcon_off);
+            mcon_cur = min(n, mcon_off + uix_control_closest_substring_width(#mcon_w, ui_mouse_x() - ui_padding_x()));
+            uix_control_cursortimeoffset = time_precise();
+        );
+        ui_mouse_down_outside(1) ? (mcon_foc = 0; GM_ktext = 0;);
+        mcon_foc ? (
+            GM_ktext = 2; // (the keys : for this frame and the next one ; see GM_key_frame)
+            c = uix_latestchar;
+            (c > 0) ? (
+                uix_latestchar = 0; // (one key per frame, as GM_key_take)
+                mcon_Key(c);
+                uix_control_cursortimeoffset = time_precise();
+                n = strlen(#mcon_line);
+            );
+            ui_GFXdoNow |= 4; // (the cursor blinks)
+        );
+        ui_push();
+            // (2026-11-19) only the horizontal padding : the vertical one (2 x 8) left less than the height of the text
+            // (texth + 8 - 16 : the text went up, its bottom cut)
+            ui_pad(-1, 0);
+            ui_font_refresh();
+            // the characters shown : from mcon_off, the cursor visible
+            mcon_off = max(0, min(mcon_off, mcon_cur));
+            strcpy_substr(#mcon_w, #mcon_line, mcon_off, mcon_cur - mcon_off);
+            while ((mcon_off < mcon_cur) && (ui_text_width(#mcon_w) > ui_width() - 4)) (
+                mcon_off += 1;
+                strcpy_substr(#mcon_w, #mcon_line, mcon_off, mcon_cur - mcon_off);
+            );
+            gfx_x = ui_left_retina();
+            gfx_y = ui_top_retina() + (ui_height_retina() - gfx_texth) / 2;
+            ((n === 0) && !mcon_foc) ? (
+                // a hint
+                ui_pcolor(hc);
+                gfx_drawstr("mSL : click here, type, Enter runs it  (? : the help ; right clic : the menu)",
+                    0, ui_left_retina() + ui_width_retina(), ui_top_retina() + ui_height_retina());
+            ) : (
+                // (2026-11-19) the color of the mode, or of the one its first character announces ('?' : the help)
+                ui_pcolor(mcon_Col(mcon_NextMode(), rgb));
+                gfx_drawstr(#mcon_w);
+                mcon_foc ? (
+                    t = time_precise() - uix_control_cursortimeoffset;
+                    ((t - floor(t)) < 0.5) ? gfx_line(gfx_x, gfx_y, gfx_x, gfx_y + gfx_texth);
+                );
+                strcpy_from(#mcon_w, #mcon_line, mcon_cur);
+                gfx_drawstr(#mcon_w, 0, ui_left_retina() + ui_width_retina(), ui_top_retina() + ui_height_retina());
+            );
+        ui_pop();
+        !ui_jstyle ? control_finish_inset();
+    ui_pop();
+);
+
+// The color of a line of the log s : "> " (a line run) and "= " (a value) violet, "< " (settings) orange, "? " (the
+// help) blue, "ERR" red ; rgb : the color of the text
+function mcon_LineCol(s, rgb)
+(
+    ((strncmp(s, "> ", 2) === 0) || (strncmp(s, "= ", 2) === 0)) ? ui_pcolor(mcon_Col(0, rgb)) :
+    (strncmp(s, "< ", 2) === 0) ? ui_pcolor(mcon_Col(2, rgb)) :
+    (strncmp(s, "? ", 2) === 0) ? ui_pcolor(mcon_Col(3, rgb)) :
+    (strncmp(s, "ERR", 3) === 0) ? ui_pcolor(Col_P6) : ui_pcolor(rgb);
+);
+
+// The last lines of the System Log (the current rect), the newest one at the bottom of the first column, on the left
+// just above the line typed (mcon_cols : the older ones go on at the bottom of the column on the right)
+function mcon_Lines()
+local(box, siz, n, k, ptr, h, flg, c, cw, gap, rgb, x)
+(
+    box = (mcon_view || !mcon_okmem) ? SysLogBox : mcon_box; siz = box[2];
+    n = box[8] ? siz - 1 : box[3]; // the lines written (box[3] : the next one)
+    (box[3] !== mcon_lseen) ? (mcon_lseen = box[3]; ui_GFXdoNow |= 4;);
+    // the wheel : back in the log
+    (ui_hover() && (uix_scroll_y != 0)) ? (
+        mcon_scr = max(0, min(n - 1, mcon_scr + ((uix_scroll_y > 0) ? 3 : -3)));
+        uix_scroll_y = 0;
+        ui_GFXdoNow |= 4;
+    );
+    ui_pad(3, 0);
+    rgb = ui_jcolor_text;
+    gap = 12;
+    cw = (ui_width() - gap * (mcon_cols - 1)) / mcon_cols;
+    k = mcon_scr;
+    ptr = (box[3] + 2 * siz - 1 - mcon_scr) % siz;
+    c = 0;
+    while ((c < mcon_cols) && (k < n)) (
+        ui_split_left((c < mcon_cols - 1) ? cw : ui_width());
+            flg = 1;
+            while (flg && (k < n)) (
+                strcpy(#mcon_t, mSL_logStr(box, ptr));
+                (strlen(#mcon_t) === 0) ? strcpy(#mcon_t, " ");
+                h = ui_wraptext_height(#mcon_t) + 2;
+                (ui_height() >= h) ? (
+                    ui_split_bottom(h);
+                        ui_align(0, 0.5);
+                        mcon_LineCol(#mcon_t, rgb);
+                        ui_wraptext(#mcon_t);
+                    ui_pop();
+                    ptr = (ptr + siz - 1) % siz; k += 1;
+                ) : (
+                    flg = 0;
+                );
+            );
+        ui_pop();
+        (c < mcon_cols - 1) ? (
+            // the gap between two columns, a thin line in its middle
+            ui_split_left(gap);
+                ui_pcolor(Col_Inactive);
+                x = ui_left_retina() + floor(ui_width_retina() / 2);
+                gfx_line(x, ui_top_retina() + 2, x, ui_top_retina() + ui_height_retina() - 3);
+            ui_pop();
+        );
+        c += 1;
+    );
+);
+
+// The menu of the console (a right clic) : the modes, Immediate / Incremental, the context, the columns, the help
+// (gfx_showmenu : the separators and the title of the sub-menu are not counted, the grayed items are)
+function mcon_Menu()
+local(m, n)
+(
+    n = mcon_CtxCount();
+    strcpy(#mcon_mnu, (mcon_mode === 0) ? "!" : ""); strcat(#mcon_mnu, "mSL with traces  ( > )|");
+    strcat(#mcon_mnu, (mcon_mode === 1) ? "!" : ""); strcat(#mcon_mnu, "mSL, silent  ( . )|");
+    strcat(#mcon_mnu, (mcon_mode === 2) ? "!" : ""); strcat(#mcon_mnu, "Settings  ( < )||");
+    strcat(#mcon_mnu, mcon_inc ? "" : "!"); strcat(#mcon_mnu, "Immediate : each line forgets its variables|");
+    strcat(#mcon_mnu, (mcon_prot < 0) ? "#" : (mcon_inc ? "!" : "")); strcat(#mcon_mnu, "Incremental : the variables stay|");
+    strcat(#mcon_mnu, (n > 0) ? "" : "#");
+    sprintf(#mcon_mnw, "Clear the context (%d variable%s)||>Columns|", n, (n > 1) ? "s" : ""); strcat(#mcon_mnu, #mcon_mnw);
+    strcat(#mcon_mnu, (mcon_cols === 1) ? "!1|" : "1|");
+    strcat(#mcon_mnu, (mcon_cols === 2) ? "!2|" : "2|");
+    strcat(#mcon_mnu, (mcon_cols === 3) ? "!3|" : "3|");
+    strcat(#mcon_mnu, (mcon_cols === 4) ? "<!4||" : "<4||");
+    strcat(#mcon_mnu, mcon_view ? "!" : ""); strcat(#mcon_mnu, "Show the whole System Log (else : the console only)||");
+    strcat(#mcon_mnu, "Help  ( ? )");
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#mcon_mnu);
+    uix_menu_end(m > 0); // (see ui-lib : the clic that closed the menu is not seen by the controls)
+    ((m >= 1) && (m <= 3)) ? (mcon_mode = m - 1;) :
+    (m === 4) ? (mcon_inc = 0;) :
+    (m === 5) ? (mcon_inc = 1;) :
+    (m === 6) ? (mcon_CtxClear(); mcon_Log("? The context of the console is cleared");) :
+    ((m >= 7) && (m <= 10)) ? (mcon_cols = m - 6;) :
+    (m === 11) ? (mcon_view = !mcon_view; mcon_scr = 0; mcon_lseen = -1;) :
+    (m === 12) ? (mcon_Help(""););
+    ui_GFXdoNow |= 4;
+);
+
+// The module "mSL Console"
+function show_Console(blockId)
+local(hneed, hmin, zzmi, hi, n)
+(
+    hi = ui_texth() + (ui_jstyle ? 18 : 12); // (the "soft" look : room for the halo of the line typed)
+    hmin = hi * 3 + ui_jd_ctgr + 8;
+    hneed = max(hmin, min(mcon_Hgt, ui_height()));
+    (ui_height() >= hmin) ? (
+        ui_split_top(hneed);
+            zzmi = ui_hover();
+            keepBlockInfos(blockId);
+            // (its rectangle in pixels : a file dropped on it, see mcon_DropCheck)
+            mcon_rx = ui_left_retina(); mcon_ry = ui_top_retina(); mcon_rw = ui_width_retina(); mcon_rh = ui_height_retina();
+            mcon_visT = time_precise();
+            (zzmi && !mcon_foc) ? (
+                (GM_key_take('+') || GM_key_take('=')) ? (mcon_Hgt = min(1200, max(hmin, hneed) + 40); ui_GFXdoNow |= 4;) :
+                GM_key_take('-') ? (mcon_Hgt = max(hmin, hneed - 40); ui_GFXdoNow |= 4;);
+            );
+            // a right clic (Shift + right clic : the Studio menu)
+            (ui_click(2) && !(mouse_cap & 8)) ? mcon_Menu();
+            (zzmi || mcon_foc) ? (
+                ui_push();
+                    ui_color(Col_Frame);
+                    ui_border();
+                ui_pop();
+            );
+            strcpy(#mcon_title, (mcon_mode === 0) ? "mSL Console : mSL with traces" :
+                (mcon_mode === 1) ? "mSL Console : mSL, silent" : "mSL Console : settings");
+            mcon_inc ? (
+                n = mcon_CtxCount();
+                (strlen(#mcon_ctxName) > 0) ? (
+                    sprintf(#mcon_tw, ", context %s (%d name%s)", #mcon_ctxName, n, (n > 1) ? "s" : "");
+                ) : (
+                    sprintf(#mcon_tw, ", incremental (%d variable%s)", n, (n > 1) ? "s" : "");
+                );
+                strcat(#mcon_title, #mcon_tw);
+            );
+            control_group(#mcon_title);
+            ui_pad(0, ui_cg_pad_top, 0, ui_cg_pad_bottom);
+            ui_split_bottom(hi);
+                ui_pad(4, 2, 4, 2);
+                mcon_Input();
+            ui_pop();
+            mcon_Lines();
+        ui_pop();
+    );
+);
+
+<? _suppress = 0; ?>

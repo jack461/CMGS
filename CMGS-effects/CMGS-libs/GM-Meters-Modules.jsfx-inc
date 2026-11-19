@@ -7,7 +7,9 @@
     only), its first channel and its count of channels (the channels that exist only), the settings of its engine. The
     limiters run first (A ... D, in place), then the VU meters (they show what goes on) ; a limiter delays its channels by
     its anticipation, and the other channels of its source (2026-11-17) by the same delay, unchanged : all the channels
-    stay synchronized (see fm_Follow ; no plugin delay compensation is declared).
+    stay synchronized (see fm_Follow ; no plugin delay compensation is declared) ; or (2026-11-18, the setting "Others",
+    fm_sOth : Bypass) the other channels go on unchanged, not delayed : limiters on separate channels with the same
+    anticipation work in parallel (the latency once), those in Pass in series (their latencies add up for all the channels).
 
     The host : sets fm_HasIn (1 : the inputs can be chosen), includes GM-Meters then this file in @init, and calls
         @init (static memory, after ui_setup) : fm_Init() ; then protects fm_ptr from the garbage collector (mm_usr_prot)
@@ -25,6 +27,7 @@ FM_NM = 2 * FM_NV; // all of them (0 ... 3 : the VU meters, 4 ... 7 : the limite
 FM_SW = 16; // words of the settings of a module (fm_st)
 fm_sOn = 0; fm_sSrc = 1; fm_sFirst = 2; fm_sCnt = 3; // On, the source (0 the inputs, 1 the outputs), the first channel, the count
 fm_sEng = 4; // the settings of the engine (VU meter : 6 words, Limiter : 8 words, see GM-Meters)
+fm_sOth = 12; // a limiter : the other channels of its source, 0 Pass (delayed as much : synchronized), 1 Bypass (not delayed)
 fm_sHgt = 15; // the height of the display (0 : fm_GraphH ; keys '+' and '-', the mouse over the module : see fm_Keys)
 fm_GraphH = 200; fm_GraphHMin = 60; fm_GraphHMax = 1200; fm_GraphHStep = 20; // (2026-11-17 : it took all the height left)
 fm_ain = fm_aout = 0; // the counts of channels of the host (fm_Gfx)
@@ -79,6 +82,7 @@ function fm_Check() local(k, st, e)
             e[3] = max(0, min(100, e[3])); e[4] = max(-12, min(24, e[4])); e[5] = max(-12, min(24, e[5]));
             e[6] = max(0.1, min(lm_MaxAtt, e[6])); e[7] = max(1, min(1000, e[7]));
         );
+        st[fm_sOth] = (k >= FM_NV) ? (st[fm_sOth] !== 0) : 0; // (saved before : 0, Pass)
         st[fm_sHgt] = (st[fm_sHgt] > 0) ? max(fm_GraphHMin, min(fm_GraphHMax, 0|st[fm_sHgt])) : 0; // (saved before : 0)
         k += 1;
     );
@@ -152,9 +156,10 @@ function fm_Block() local(k, wn, a)
 /*
     @sample, after a limiter (the area e) of the channels buf[f ... f+n-1] : the other channels of its source (buf[0 ...
     avail-1], at most the m of its area) go through delay lines of the same delay (the engine writes at wp - 1 and reads
-    at wp - ds : a delay of ds - 1 samples), unchanged
+    at wp - ds : a delay of ds - 1 samples), unchanged ; "pass" 0 (Bypass) : the delay lines are written, not read (the
+    channels not delayed ; the lines stay up to date : Pass again goes on without old samples)
 */
-function fm_Follow(e, buf, avail, f, n) local(fo, m, bl, w0, rp, c, j, pb)
+function fm_Follow(e, buf, avail, f, n, pass) local(fo, m, bl, w0, rp, c, j, pb)
 (
     fo = e + lm_Size(e[lm_N]); m = fo[0];
     (m > 0) ? (
@@ -165,7 +170,7 @@ function fm_Follow(e, buf, avail, f, n) local(fo, m, bl, w0, rp, c, j, pb)
         loop(avail,
             (((c < f) || (c >= f + n)) && (j < m)) ? (
                 pb = fo + 1 + j * bl;
-                pb[w0] = buf[c]; buf[c] = pb[rp];
+                pb[w0] = buf[c]; pass ? (buf[c] = pb[rp]);
                 j += 1;
             );
             c += 1;
@@ -174,7 +179,7 @@ function fm_Follow(e, buf, avail, f, n) local(fo, m, bl, w0, rp, c, j, pb)
 );
 
 // @sample : the modules on the source "kind" (0 the inputs, 1 the outputs), the samples buf[0 ... avail-1] : the
-// limiters (changed in place ; the other channels delayed as much), then the VU meters
+// limiters (changed in place ; the other channels delayed as much, or not : Bypass), then the VU meters
 function fm_Sample(kind, buf, avail) local(k, st, e, f, n)
 (
     k = FM_NV;
@@ -184,7 +189,7 @@ function fm_Sample(kind, buf, avail) local(k, st, e, f, n)
             f = st[fm_sFirst]; n = min(e[lm_N], avail - f);
             (n > 0) ? (
                 lm_Sample(st + fm_sEng, e, buf + f, 1, buf + f, n, 0);
-                fm_Follow(e, buf, avail, f, n);
+                fm_Follow(e, buf, avail, f, n, st[fm_sOth] === 0);
             );
         );
         k += 1;
@@ -349,6 +354,15 @@ function fm_Cell(k, c, ev) local(st, e, rc, sh, d, j, m, n, r, av)
     ((k < FM_NV) && (c === 10)) ? (
         ((n = fm_Eng(k)) > 0) ? (n[vu_Clr] = 1);
     ) :
+    ((k >= FM_NV) && (c === 7)) ? (
+        // the other channels of the source : Pass (delayed as much) or Bypass (not delayed)
+        rc ? (
+            r = vu_ListMenu("Others: Pass (delayed)|Others: Bypass (not delayed)", 2, st[fm_sOth]);
+            (r >= 0) ? (st[fm_sOth] = r);
+        ) : (
+            st[fm_sOth] = !st[fm_sOth];
+        );
+    ) :
     (((j = fm_DragRange(k, c)) >= 0) && sh && !rc) ? (
         st[j] = fm_DefVal(k, j); // (a cell of values : Shift + left clic = its default value)
     );
@@ -364,7 +378,9 @@ function fm_Cell(k, c, ev) local(st, e, rc, sh, d, j, m, n, r, av)
             the next one, Shift : the previous one ; right clic : menu), 8 the sample time, 9 the highlighted channel
             (drags), 10 clear the peaks, 11 the state (channels, memory) ; the display : left clic, clear the peaks ; right
             clic, the menu of the plugin
-        Limiter : 4 the gain reduction (its max since the last frame), 5 the latency (the anticipation), 6 the state ; 8 ...
+        Limiter : 4 the gain reduction (its max since the last frame), 5 the latency (the anticipation), 6 the state, 7 the
+            other channels of the source, Pass or Bypass (left clic : the other one ; right clic : menu ; gray : no other
+            channel) ; 8 ...
             15 its settings (drags ; Shift + left clic : the default value) : limit, pre-gain, volume out, attack (the
             anticipation), release, distortion, zoom, channels displayed ; the display : the response of the soft
             clipper, the history of the loudest channels and of the peak envelope
@@ -449,6 +465,9 @@ local(h1, hd, hv, hneed, zz, zzmi, dr, st, e, n, i, vu, nm, v)
                     fm_padColrs[4] = (v > 0.1) ? Color_Goldenrod : Color_Limegreen;
                     sprintf(fm_padLabs[5], "Latency %.1f ms", lm_Latency(e));
                     fm_padColrs[5] = Col_P1;
+                    strcpy(fm_padLabs[7], st[fm_sOth] ? "Others: Bypass" : "Others: Pass");
+                    fm_padColrs[7] = ((n > 0) && (((st[fm_sSrc] === 0) ? fm_ain : fm_aout) <= n)) ? Col_Inactive :
+                        (st[fm_sOth] ? Col_P2 : Col_P3);
                     sprintf(fm_padLabs[8], "Limit %.1f dB", e[0]);
                     sprintf(fm_padLabs[9], "Pre-gain %.1f dB", e[4]);
                     sprintf(fm_padLabs[10], "Volume %.1f dB", e[5]);

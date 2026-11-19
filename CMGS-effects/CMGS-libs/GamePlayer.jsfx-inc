@@ -3433,6 +3433,8 @@ local (j, i, tmp, bln, blu, blockStrSpace, blockThemeBlack, blockThemeTron, bloc
     MM2 = blockDispNames[blockMemory2] = "Memory 2"; // 35
     blockDynPars = (itdsp += 1);
     blockDispNames[blockDynPars] = "Dynamic Play Parameters"; // 36
+    blockConsole = (itdsp += 1);
+    blockDispNames[blockConsole] = "mSL Console"; // 37 (2026-11-19, see mSL_Console ; the user modules follow : + 1)
 
     blockUsrFirst = itdsp+1;
     // Add users modules
@@ -8814,6 +8816,10 @@ A_mSL_LCTab = mSL_buildLCTab(i__mem, size, aprime);
 A_mSL_EXTab = mSL_buildEXTab(47);
 // Provide a common external symbol table for the compiler - "ptr" declarations
 A_mSL_PTTab = mSL_buildPTTab(47);
+// (2026-11-19) the tables of the values of the variables "ext" and "ptr" kept by the garbage collector (as in
+// Diffusion-3) : a function or a block held only by an "ext" variable (ext fib = fibo ; Ex-0003, Ex-0004) was freed
+mm_usr_prot[mm_usr_prot_ptr] = A_mSL_EXTab; mm_usr_prot_ptr += 1;
+mm_usr_prot[mm_usr_prot_ptr] = A_mSL_PTTab; mm_usr_prot_ptr += 1;
 
 // Build the compiler
 AAAAC_6 = mSL_make_compiler(C_compArea, C_compSize);
@@ -8858,6 +8864,13 @@ mm_highblocks[0] = 'High'; mm_highblocks[1] = '_Mem';
 
 // The Garbage Collector
 <? include("CMGS-libs/mSL_Garbage_Collector.jsfx-inc"); ?>
+
+// The module "mSL Console", part 1 (2026-11-19) : the state, the run of a line, its context (mcon_LoadStart,
+// mcon_CpFlags, mcon_LoadEnd, mcon_Tee and mcon_End are called by mSL_load_file_inGFX and mSL_run_slice ; part 2, the
+// module : in @gfx, after keepBlockInfos)
+<? mcon_part = 1; include("CMGS-libs/mSL_Console.jsfx-inc"); ?>
+// 2 slots for the context of the mSL Console (its incremental mode : the tables of its variables, see mSL_Console)
+mcon_prot = mm_usr_prot_ptr; mm_usr_prot[mcon_prot] = mm_usr_prot[mcon_prot + 1] = 0; mm_usr_prot_ptr += 2;
 
 
 // mSL_define_global("GM_Pad", padStPVals); // define an array
@@ -15815,11 +15828,14 @@ local (tstrt)
         SchX = -1;
     ) : (
         tstrt = time_precise() + timeD;
+        // (2026-11-19) no error left by another work (a compilation that failed ...) : it would stop this thread
+        mSL_errX = mSL_errC = mSL_errM = 0;
         mSL_active_Thread = SchedThrdPt[SchX]; // the thread
         ((SchedStatus[mSL_dispatch_entry] & SchmSLThrUsed) != SchmSLThrUsed) ? (
             (mSL_errX === 0) ? mSL_errX = 3381; // thread not noted active ?
         );
         mSL_load_thread(mSL_active_Thread);
+        mcon_Tee(SchX); // (the thread of a line of the mSL Console : what it writes goes into its own lines too)
         mSL_max_TOS = mSL_active_Thread[mSL_THR_basePhStack];
 
         (mSL_errX != 0) ? (
@@ -15854,6 +15870,7 @@ local (tstrt)
             ) :
             (mSL_CodeStop === mSL_RC_Stop) ? (
                 // finished, free the thread
+                mcon_End(SchX, 1); // (a line of the mSL Console : its value, mSL_ExitValue)
                 freeSchedThread(SchX);
                 // SchedStatus[SchX] &= SchThrNotUsed;
                 // SchedInsertTail(SchedInactPts, SchX, SchETypeThrd);
@@ -15879,6 +15896,7 @@ local (tstrt)
             (
                 //AAAAAAAA_Errx = mSL_errX;
                 thread_error(mSL_active_Thread, mSL_errX, mSL_CodeStop);
+                mcon_End(SchX, 0); // (a line of the mSL Console : no value)
                 // SchedStatus[SchX] &= SchThrNotUsed;
                 // SchedInsertTail(SchedInactPts, SchX, SchETypeThrd);
                 // sprintf(#uuu, "End of evaluation [%d]  CR: %d  Err: %d", SchX, mSL_CodeStop, mSL_errX);
@@ -15900,6 +15918,7 @@ local (tstrt)
             mm_cyc_mm[mm_cyc_ptr] += mSL_ICount;
         );
         mm_dur_mm[mm_cyc_ptr] += time_precise() + timeD - tstrt;
+        mSL_logTee = 0; // (see mcon_Tee)
     );
     mSL_active_Thread = -1;
     SchX;
@@ -18934,6 +18953,7 @@ while (g__efi) (
         // at the end of @gfx. #efs : the first one, in the scripts directory of the project ("./...") if possible.
         (dropMslCnt < dropMslSiz) ? (
             strcpy(dropMslNames[dropMslCnt], g__efs); dropMslCnt += 1;
+            mcon_DropCheck(g__efs); // (dropped on the mSL Console : it becomes its context, see mSL_Console)
             (dropMslCnt === 1) ? (
                 (strlen(#D_GM_Project_Path_SCRplus) > 0) && match(#D_GM_Project_Path_SCRplus, g__efs) ? (
                     strcpy_from(#s, g__efs, strlen(#D_GM_Project_Path_SCRplus)-1);
@@ -19037,11 +19057,11 @@ local (fhd, lct, el, flg, i1, i2, l1, l2)
 
 // Read & Compile a mSL script file
 function mSL_load_file_inGFX(fname)
-local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_start, mSL_load_end)
+local (fhd, ent, thrd, s, con, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_start, mSL_load_end)
 (
     mSL_load_start = gfxStartTime;
     mSL_errX = mSL_errC = mSL_errM = 0;
-    ent = 0; fhd = -1;
+    ent = 0; fhd = -1; con = 0;
     //(mSL_errC === 0) ? (
     //    SchedListEmpty(SchedInactPts) ? (
     //        mSL_errC = 2406; // can't get a thread
@@ -19051,15 +19071,18 @@ local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_
     (FlagsTbVals[Flgs_GFXTrcs] & 4) ? (sprintf(#gfxu, "::-> Trying \"%s\"  %d", fname, mSL_errC); mSL_log(SysLogBox, #gfxu););
 
     (mSL_errC === 0) ? (
-        fhd = GM_file_open(fname, FFlagsmSL);
-        ((fhd >= 0)) ? (
-            (FlagsTbVals[Flgs_Inits] & 2) ? (
+        // (2026-11-19) a line of the module "mSL Console" (mSL_Console) : the string #mcon_src itself, not a file
+        con = mcon_LoadStart(fname); // (its compilation writes in the own lines of the console too)
+        (con === 1) ? (fhd = -2;) : fhd = GM_file_open(fname, FFlagsmSL); // (2 : a file dropped on the console, see mcon_Adopt)
+        ((fhd >= 0) || (fhd === -2)) ? (
+            // (2026-11-19 : not for a line of the mSL Console : no file opened, #tmpFname is the last one)
+            ((FlagsTbVals[Flgs_Inits] & 2) && (con !== 1)) ? (
                 sprintf(#gfxu, "::-> Using \"%s\"", #tmpFname); mSL_log(SysLogBox, #gfxu);
             );
             // get a free thread
             (ent = getNewThread()) ? (
                 thrd = SchedThrdPt[ent];
-                AAAAAAAA_01_cp_rtc = mSL_compile(fhd, -1, -1, 0); // we add the input in the memory
+                AAAAAAAA_01_cp_rtc = mSL_compile(max(-1, fhd), -1, (con === 1) ? fname : -1, (con === 1) ? mcon_CpFlags() : 0); // (the console : see mcon_CpFlags) // we add the input in the memory
                 0 ? (sprintf(#gfxu, "::-> Compiled: %d lines", mSL_C_numLine); mSL_log(SysLogBox, #gfxu););
                 fhd = -1; // file has been closed by the compiler
                 (mSL_errC === 0) ? (
@@ -19128,6 +19151,9 @@ local (fhd, ent, thrd, s, mSL_baseAVars, mSL_baseOVars, mSL_basePVars, mSL_load_
         sprintf(#gfxu, "ERR: %d    can't compile \"%s\".", mSL_errX, fname);
         mSL_log(SysLogBox, #gfxu);
     );
+    con ? mcon_LoadEnd(ent); // (a line of the console : its thread followed, its value, its context ; the copy stops)
+    // (2026-11-19) the error is written : it must not stay, the dispatcher would stop with it the threads that run
+    mSL_errX = mSL_errC = mSL_errM = 0;
     ent;
 );
 
@@ -19315,6 +19341,9 @@ local(i)
         );
     );
 );
+
+// The module "mSL Console", part 2 (2026-11-19) : the module (functions only ; after keepBlockInfos ; part 1 : @init)
+<? mcon_part = 2; include("CMGS-libs/mSL_Console.jsfx-inc"); ?>
 
 
 
@@ -27066,6 +27095,9 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in, x
                 ) :
                 (igb === blockPreset) ? (
                     show_Presets();
+                ) :
+                (igb === blockConsole) ? (
+                    show_Console(blockConsole); // (the module "mSL Console")
                 ) :
                 //((igb >= blockUsrFirst) && (igb <= blockUsrLast) && (blockUsrChecks[igb - blockUsrFirst])) ? (
                 ((igb >= blockUsrFirst) && (igb <= blockUsrLast)) && (blockUsrChecks[blockUsrNum[igb - blockUsrFirst]]) ? (

@@ -2,14 +2,15 @@
 
   python3 -I CMGS-aux/tools/md2odt/make_errors_md.py
 
-Reads CMGS-Erreurs-intro.md (the text before the lists) and CMGS-Erreurs.tsv (code <TAB> application <TAB>
-explanation), writes CMGS-Manuel-P4.md : the intro, then one table per range of codes. The widths of the columns
+Reads CMGS-Erreurs-intro.md (the text before the lists) and CMGS-data/CMGS-Erreurs.tsv (code <TAB> application <TAB>
+explanation ; in CMGS-data since 2026-11-19 : the mSL Console reads it at run time, "? n"), writes CMGS-Manuel-P4.md : the intro, then one table per range of codes. The widths of the columns
 (8 / 22 / 70 %) come from the dashes of the separator line (pandoc pipe tables, long lines). Then build the part and
 insert it into the manual (insert_part.py "Partie IV —"), see the head of insert_part.py.
 """
 import os
 T = os.path.dirname(os.path.abspath(__file__)) + '/'
-rows = [l.rstrip('\n').split('\t') for l in open(T + 'CMGS-Erreurs.tsv', encoding='utf-8') if l.strip()]
+E = os.path.normpath(T + '../../../CMGS-data/CMGS-Erreurs.tsv')
+rows = [l.rstrip('\n').split('\t') for l in open(E, encoding='utf-8') if l.strip()]
 rows.sort(key=lambda r: int(r[0]))
 
 def cell(t):
