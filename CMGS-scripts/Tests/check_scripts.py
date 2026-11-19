@@ -63,7 +63,7 @@ ALLOWED_ERR = re.compile(r'//\s*Allowed\s+error\s+(\d+)')
 SERIES = {'1': 'Interstys', '2': 'GamePlayer', '3': 'Diffusion3'}
 SERIES_NAME = re.compile(r'^Ex-(\d)\d{3}\.mSL$')
 LOG_PLUGIN = re.compile(r'^syslog-(.+?)-\d{4}-')
-COMPILE_FAIL = re.compile(r'^ERR:\s*\d+\s+can.t compile "(.*)"')
+COMPILE_FAIL = re.compile(r'^ERR:\s*\d+\s+(?:-\s+)?can.t compile "(.*)"')  # (Diffusion-3 : "ERR: 2236 - can't compile")
 ERROR_LINE = re.compile(r'^(?:ERR:\s*(\d+)|\*\*\* ERR:.*?Error:\s*(-?\d+))')
 
 
