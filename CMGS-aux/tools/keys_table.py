@@ -27,12 +27,16 @@ LIBS = os.path.join(CMGS, 'CMGS-effects', 'CMGS-libs')
 
 # The variables that hold a key in the keyboard handlers
 KEY_VARS = r'(key|u_ch|ch|zzch|k|KeyedT|Keyed|gwk|xx|inKey)'
+# Variables that hold a key only in some functions of a file (too common elsewhere : string parsing...) : the line typed
+# in the mSL Console (mcon_Key(c))
+FILE_KEY_VARS = {'mSL_Console.jsfx-inc': (r'(c)', {'mcon_Key'})}
 # Files (or parts of names) that are not keyboard code : parsers, archives, generated files
 SKIP = ('mSL_Comp_lib', 'Diffusion-3-XML', 'mSL_Utilities', 'ZZZ', 'unused', 'The_Obsolete',
         'Diffusion-3-Set-Table', 'Diffusion-3-Utils', 'mSL_string_list', 'mSL_ui_Menus', 'mSL_GM_Vars', 'mSL_FR_Vars')
 # Functions that compare such variables with characters but do not handle keys (string parsing...)
 NOT_KEYS = {('GamePlayer.jsfx-inc', f) for f in ('getClipName', 'rebuildAllaliases', 'installClipSet',
-            'SetClipsList', 'updClSel')} | {('FilePlayer.jsfx-inc', 'checkRCB')} | \
+            'SetClipsList', 'updClSel', 'clDirResolve')} | {('FilePlayer.jsfx-inc', 'checkRCB')} | \
+           {('Interstys.jsfx-inc', 'its_Rd_SegMenu')} | \
            {('mSL_ui_LibJJ.jsfx-inc', f) for f in ('GM_key_frame', 'GM_key_end', 'GM_key_peek', 'GM_key_take',
                                                    'GM_key_take_in', 'GM_key_mods')}
 READERS = set()
@@ -46,6 +50,7 @@ SHARED = {
     'ScriptMaster_Utilities.jsfx-inc': ['ScriptMaster', 'Interstys'],
     'mSL_System_Keys.jsfx-inc': ['FilePlayer', 'ScriptMaster', 'Diffusion-3', 'Interstys'],
     'ui-lib-JJ-GUI.jsfx-inc': PLUGINS,                    # GM_Tab_Keys (Tab, Shift + Tab), GM_Size_Keys (Cmd + - + 0)
+    'mSL_Console.jsfx-inc': PLUGINS,                      # the module mSL Console (2026-11-19)
 }
 
 # Levels, in the order they see the key during a frame : each level only gets the keys the previous ones left
@@ -82,6 +87,11 @@ HANDLERS = {
     ('Interstys.jsfx-inc', 'show_Line_Pad'): ('module', 'Line'),
     ('Interstys.jsfx-inc', 'show_Writer_Pad'): ('module', 'Writer'),
     ('Interstys.jsfx-inc', 'its_Wave_Keys'): ('module', 'forme d\'onde (Line, Reader, Writer)'),
+    ('Interstys.jsfx-inc', 'its_FxGraph_Keys'): ('module', 'Effect : hauteur du graphique (VU meter, Limiter)'),
+    ('Interstys.jsfx-inc', 'show_Effect_Pad'): ('module', 'Effect'),
+    ('Interstys.jsfx-inc', 'show_Curves_Pad'): ('module', 'Curves'),
+    ('mSL_Console.jsfx-inc', 'show_Console'): ('module', 'mSL Console (la ligne de saisie n\'a pas le clavier)'),
+    ('mSL_Console.jsfx-inc', 'mcon_Key'): ('editor', 'mSL Console : la ligne de saisie, quand elle a le clavier (toutes les touches lui vont)'),
     ('GamePlayer.jsfx-inc', 'do_Generic_Commands'): ('tab', 'commandes d\'onglet'),
     ('GamePlayer.jsfx-inc', 'genericItemsPos'): ('pane', 'largeur des colonnes'),
     ('GamePlayer.jsfx-inc', 'show_Generator'): ('module', 'Generator'),
@@ -166,6 +176,8 @@ def key_name(lit):
 
 LIT = r"('\\''|'[^']{1,4}'|0x[0-9A-Fa-f]+|\d+)"
 CMP = re.compile(r"\b" + KEY_VARS + r"\s*(===|!==|==|!=|>=|<=|>|<)\s*" + LIT)
+FILE_CMP = {f: (re.compile(r"\b" + v + r"\s*(===|!==|==|!=|>=|<=|>|<)\s*" + LIT), fns)
+            for f, (v, fns) in FILE_KEY_VARS.items()}
 TAKE = re.compile(r"\b(GM_key_take(?:_in)?)\s*\(\s*" + LIT + r"\s*\)")
 FN = re.compile(r'^\s*function\s+([A-Za-z_][\w.]*)\s*\(')
 MODS = re.compile(r'(shfCap|cmdCap|altCap|ctlCap|winCap|GM_key_mods\(\)\s*[=!&]+=?\s*\w+|Kmouse_cap\s*[=!&]+=?\s*\w+|ui_jmouse_cap\s*[=!&]+=?\s*\w+|'
@@ -262,6 +274,7 @@ def extract():
             if (f, ctx) in NOT_KEYS or ctx in READERS: continue
             code = l.split('//')[0]
             found = list(CMP.finditer(code))
+            if f in FILE_CMP and ctx in FILE_CMP[f][1]: found += list(FILE_CMP[f][0].finditer(code))
             takes = list(TAKE.finditer(code))
             if not found and not takes: continue
             ind = len(l) - len(l.lstrip())
@@ -276,6 +289,8 @@ def extract():
             for v in lo:
                 if v in hi:
                     a, b = lo[v].group(3), hi[v].group(3)
+                    # (xx between two numbers : a range of menu items, not of keys)
+                    if v == 'xx' and (a[0] != "'" or b[0] != "'"): continue
                     rows.append(dict(base, var=v, key=key_name(a) + '..' + key_name(b),
                                      val=('range', lit_value(a), lit_value(b)),
                                      act=action_of(lines, n, code, max(lo[v].end(), hi[v].end()))))
