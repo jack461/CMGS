@@ -27,6 +27,11 @@
                     Cmd + Shift = s3d_mix (0 ... 1, see s3d_mkmorph) ; the value is shown during the drag
                     s3d_mtarget = 1 : Shift, Cmd and Alt drags act on the group of sources instead of the trajectory :
                     Shift = size (s3d_gsc), Cmd = yaw (horizontal) and pitch (vertical), Alt = roll (horizontal)
+                    s3d_plmode = 1 (2026-11-19, set by the host : the placement of one trajectory, Diffusion-3) : the
+                    host puts the placement into s3d_tsc, s3d_trx, s3d_trz, s3d_ttx ... before s3d_mouse and takes it
+                    back after ; Cmd + Alt (horizontal) = the inclination around y, s3d_try, instead of the speed ;
+                    the Cmd tilt goes to +- 2 pi ; s3d_mtarget is ignored ; s3d_draw draws the trajectory in gold and,
+                    during a drag of the placement, the line #s3d_plLbl (written by the host)
                 sources : s3d_place_sources(lay, n, spread) : the sources of the layout "lay" (x, y, z in [-1,1]) around
                     the group center, scaled by spread * s3d_gsc, rotated by s3d_groll (around y), s3d_gpitch
                     (around x), s3d_gyaw (around z), in the room frame (s3d_grel = 0) or in the frame of the
@@ -39,7 +44,7 @@
                     s3d_style = 1 : the gains are shown as crosses, the levels as halos (instead of balls)
                     sizes (2026-11-18, menu "Size of ...") : s3d_kSpk the balls of the speakers, s3d_kSrc those of the
                     sources (and the group center), s3d_kX the crosses (or the balls) of the gains : factors, 1 by
-                    default, x 0.25 ... x 4 in the menu (s3d_kval) ; the host may save them
+                    default, x 0.25 ... x 4 in the menu (s3d_kval : 25 values since 2026-11-19) ; the host may save them
                 trajectories : s3d_mktraj(kind, cx, cy, cz, r) ; s3d_trjpos(u) : the point at u (0..1) of the path
                     s3d_mkmorph(ka, kb, w, cx, cy, cz, r) : interpolation between two trajectories (w = 0 : ka, 1 : kb)
                     kind "File" : a trajectory given by s3d_settraj (read with s3d_load_lay from a GRM Spaces
@@ -115,6 +120,7 @@ local(k, a, b)
     s3d_poly = base;                        base += 24;   // a polygon of 12 points (s3d_disc)
     memset(s3d_spk, 0, base - s3d_spk);
     s3d_nspk = s3d_nsrc = s3d_ntrj = 0;
+    s3d_plmode = 0; s3d_try = 0; strcpy(#s3d_plLbl, ""); // (a placement, see s3d_mouse : 2026-11-19)
     s3d_trjclosed = 1;
     s3d_nftrj = 0; s3d_ftclosed = 1;
     s3d_gon = 0; s3d_gx = s3d_gy = s3d_gz = 0;
@@ -658,7 +664,7 @@ local(k, e, ax, s, p, q, r, od, bx, by, bz)
 
     // the trajectory
     ((s3d_opt & s3d_oTraj) && (s3d_ntrj > 1)) ? (
-        gfx_set(0.95, 0.1, 0.1, 0.9);
+        s3d_plmode ? gfx_set(1, 0.78, 0.15, 0.95) : gfx_set(0.95, 0.1, 0.1, 0.9); // (a placement : gold)
         k = 0;
         loop(s3d_ntrj - 1 + (s3d_trjclosed != 0),
             p = s3d_trj + 3 * k;
@@ -686,7 +692,12 @@ local(k, e, ax, s, p, q, r, od, bx, by, bz)
 
     s3d_selection();
 
-    // the value changed by the current drag
+    // the value changed by the current drag (a placement : the line #s3d_plLbl written by the host)
+    (s3d_plmode && (s3d_dmode >= 2) && ((s3d_dmode <= 4) || (s3d_dmode === 8))) ? (
+        gfx_set(1, 0.85, 0.4, 1);
+        gfx_x = 10; gfx_y = 8;
+        gfx_drawstr(#s3d_plLbl);
+    ) :
     (s3d_dmode >= 4) ? (
         (s3d_dmode === 4) ? sprintf(#s3d_lbl, "Size x %.2f", s3d_tsc) :
         (s3d_dmode === 5) ? sprintf(#s3d_lbl, "Speed %.2f turns / min", s3d_speed) :
@@ -732,11 +743,12 @@ local(k, e, d, bd)
 );
 
 
-// The sizes (2026-11-18) : the factor i (0 ... s3d_kN - 1) : x 0.25 ... x 4, by steps of sqrt(2) (i = 4 : 1)
-s3d_kN = 9;
+// The sizes (2026-11-18) : the factor i (0 ... s3d_kN - 1) : x 0.25 ... x 4 ; 2026-11-19 : 25 values (finer), by steps
+// of 2^(1/6) (about 12 %), i = 12 : 1 (the 9 values before, by steps of sqrt(2), are among them)
+s3d_kN = 25;
 function s3d_kval(i)
 (
-    2 ^ ((i - 4) / 2);
+    2 ^ ((i - 12) / 6);
 );
 // the sub-menu "title" of a size (the factor cur checked), added to #s3d_mnu
 function s3d_kmenu(title, cur)
@@ -746,7 +758,7 @@ local(i, v)
     i = 0;
     loop(s3d_kN,
         v = s3d_kval(i);
-        sprintf(#s3d_kit, "|%s%sx %.2g", (i === s3d_kN - 1) ? "<" : "", (abs(cur - v) < 0.001) ? "!" : "", v);
+        sprintf(#s3d_kit, "|%s%sx %.2f", (i === s3d_kN - 1) ? "<" : "", (abs(cur - v) < 0.001) ? "!" : "", v);
         strcat(#s3d_mnu, #s3d_kit);
         i += 1;
     );
@@ -808,7 +820,12 @@ local(mx, my, inside, used, dx, dy, f, v, b)
             (abs(mouse_x - s3d_mx0) + abs(mouse_y - s3d_my0) > 3) ? s3d_moved = 1;
             s3d_moved ? (
                 dx = mouse_x - s3d_lmx; dy = mouse_y - s3d_lmy;
-                ((mouse_cap & 20) === 20) ? (
+                (((mouse_cap & 20) === 20) && s3d_plmode) ? (
+                    // a placement (s3d_plmode, set by the host) : Cmd + Alt = the inclination around y (s3d_try)
+                    s3d_dmode = 8;
+                    s3d_try = max(-2 * $pi, min(2 * $pi, s3d_try - dx * 0.01));
+                    s3d_tchanged = 1;
+                ) : ((mouse_cap & 20) === 20) ? (
                     // Cmd + Alt : speed ; quadratic scale, fine near 0
                     v = sign(s3d_speed) * sqrt(abs(s3d_speed) / 240);
                     v = max(-1, min(1, v + dx * 0.002));
@@ -818,7 +835,7 @@ local(mx, my, inside, used, dx, dy, f, v, b)
                     // Cmd + Shift : mix of the trajectories A and B
                     s3d_mix = max(0, min(1, s3d_mix + dx * 0.003));
                     s3d_dmode = 6;
-                ) : (s3d_mtarget && (mouse_cap & 28)) ? (
+                ) : (s3d_mtarget && !s3d_plmode && (mouse_cap & 28)) ? (
                     // the group of sources
                     s3d_dmode = 7;
                     (mouse_cap & 8) ? (
@@ -842,7 +859,7 @@ local(mx, my, inside, used, dx, dy, f, v, b)
                     s3d_dmode = 3;
                     // Cmd : rotate the trajectory (horizontal : around z ; vertical : tilt)
                     s3d_trz -= dx * 0.01;
-                    s3d_trx = max(-$pi, min($pi, s3d_trx + dy * 0.01));
+                    s3d_trx = s3d_plmode ? max(-2 * $pi, min(2 * $pi, s3d_trx + dy * 0.01)) : max(-$pi, min($pi, s3d_trx + dy * 0.01));
                     s3d_tchanged = 1;
                 ) : (mouse_cap & 8) ? (
                     s3d_dmode = 4;

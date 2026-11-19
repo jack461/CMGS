@@ -32,7 +32,8 @@
           the points outside go to its walls (Undo : after Free again) (left : the other one ; right : menu)
         15 Bary on / off : the barycentre of the selection shown, its coordinates in the column (both clics)
         16 Proj on / off : the projections of the current point (or of the barycentre) shown (both clics)
-        17 Action (both clics : menu : rename, clear, copy another Edit, load the speakers of Diffusion or the source of
+        17 Action (both clics : menu : rename, clear, normalize (2026-11-19 : the barycentre at the origin, then the
+          largest size in the room, see ed_Normalize), copy another Edit, load the speakers of Diffusion or the source of
           the projector of the last view "Space",
           load a layout of its library, export the configuration : mSL settings (to load again), .lay, hppos, trajectory
           .xml)
@@ -2002,28 +2003,76 @@ local(st, n)
     );
 );
 
+// Normalize the configuration e (2026-11-19, menu Action) : its barycentre goes to the origin (a trajectory : the
+// barycentre of its path, the mean of the points of ed_Path as the views "Space" compute it, curves included ; else
+// the mean of its points), then a homothety centred on the origin, nothing else changed (the bends are vectors : they
+// follow, the curves keep their shape), makes it fit best in the room : its largest coordinate (of the path, curves
+// included) becomes 1 ; kept for Undo
+function ed_Normalize(e)
+local(st, n, m, k, p, q, gx, gy, gz, mx, f, tr)
+(
+    st = ed_St(e); n = st[ed_sN];
+    (n < 1) ? (
+        sprintf(#ed_lg, "Edit %c : no point to normalize", 'A' + e);
+        mSL_log(SysLogBox, #ed_lg);
+    ) : (
+        tr = (st[ed_sKind] === 2) && (n >= 2);
+        m = tr ? ed_Path(e, ed_pth, SP_MAXTRJ) : 0;
+        gx = gy = gz = 0;
+        tr ? (
+            k = 0; loop(m, q = ed_pth + 3 * k; gx += q[0]; gy += q[1]; gz += q[2]; k += 1;);
+            gx /= m; gy /= m; gz /= m;
+        ) : (
+            k = 0; loop(n, p = ed_P(e, k); gx += p[0]; gy += p[1]; gz += p[2]; k += 1;);
+            gx /= n; gy /= n; gz /= n;
+        );
+        // the largest coordinate once moved
+        mx = 0;
+        tr ? (
+            k = 0;
+            loop(m, q = ed_pth + 3 * k; mx = max(mx, max(abs(q[0] - gx), max(abs(q[1] - gy), abs(q[2] - gz)))); k += 1;);
+        ) : (
+            k = 0;
+            loop(n, p = ed_P(e, k); mx = max(mx, max(abs(p[0] - gx), max(abs(p[1] - gy), abs(p[2] - gz)))); k += 1;);
+        );
+        f = (mx > 0.000001) ? 1 / mx : 1;
+        ed_Keep(e);
+        k = 0;
+        loop(n,
+            p = ed_P(e, k);
+            p[0] = ed_LimP(e, (p[0] - gx) * f); p[1] = ed_LimP(e, (p[1] - gy) * f); p[2] = ed_LimP(e, (p[2] - gz) * f);
+            p[4] *= f; p[5] *= f; p[6] *= f;
+            k += 1;
+        );
+        sprintf(#ed_lg, "Edit %c : normalized : the barycentre (%.3f, %.3f, %.3f) moved to the origin, ratio %.4f",
+            'A' + e, gx, gy, gz, f);
+        mSL_log(SysLogBox, #ed_lg);
+    );
+);
+
 // The menu Action
 function ed_ActMenu(e)
 local(st, c, f)
 (
     st = ed_St(e);
-    sprintf(#ed_mnu, "Rename...|Clear all the points||%sCopy Edit A|%sCopy Edit B|%sCopy Edit C|%sCopy Edit D||Load the speakers of Diffusion (hppos)|Load the source of the projector of the last view Space|Load a layout of the library (files dropped)...|Copy the path into the library of trajectories (same name, or free)||Export : configuration (mSL settings, to load again)|Export : layout of GRM Spaces (.lay)|Export : speakers of Diffusion (hppos, .mSL)|Export : trajectory of GRM Spaces (.xml)",
+    sprintf(#ed_mnu, "Rename...|Clear all the points|Normalize : the barycentre at the origin, the largest size in the room [-1, 1]||%sCopy Edit A|%sCopy Edit B|%sCopy Edit C|%sCopy Edit D||Load the speakers of Diffusion (hppos)|Load the source of the projector of the last view Space|Load a layout of the library (files dropped)...|Copy the path into the library of trajectories (same name, or free)||Export : configuration (mSL settings, to load again)|Export : layout of GRM Spaces (.lay)|Export : speakers of Diffusion (hppos, .mSL)|Export : trajectory of GRM Spaces (.xml)",
         (e === 0) ? "#" : "", (e === 1) ? "#" : "", (e === 2) ? "#" : "", (e === 3) ? "#" : "");
     gfx_x = mouse_x; gfx_y = mouse_y;
     c = gfx_showmenu(#ed_mnu);
     prv_MenuEnd(c > 0);
     (c === 1) ? ed_Prompt(e) :
     (c === 2) ? (ed_Keep(e); st[ed_sN] = 0; st[ed_sCur] = -1;) :
-    ((c >= 3) && (c <= 6) && (c - 3 !== e)) ? (
-        f = c - 3;
+    (c === 3) ? ed_Normalize(e) :
+    ((c >= 4) && (c <= 7) && (c - 4 !== e)) ? (
+        f = c - 4;
         ed_Keep(e); ed_Copy(e, f);
         (strlen(ed_nm[e]) === 0) ? strcpy(ed_nm[e], ed_nm[f]);
     ) :
-    (c === 7) ? (
+    (c === 8) ? (
         ed_Keep(e); ed_Load(e, s3d_spk + s3d_fx, s3d_nspk, s3d_st, 0);
         (strlen(ed_nm[e]) === 0) ? strcpy(ed_nm[e], #sx_spkname);
     ) :
-    (c === 8) ? (
+    (c === 9) ? (
         // the source of the projector of the last view "Space" drawn (2026-11-11 : the sources belong to the projectors,
         // see Diffusion-3-Spatial)
         f = 0|serialBlock[Pr7_PrjSpace + sp_lastPrj];
@@ -2035,15 +2084,15 @@ local(st, c, f)
             mSL_log(SysLogBox, #ed_lg);
         );
     ) :
-    (c === 9) ? (
+    (c === 10) ? (
         f = ed_LibMenu(e);
         (f >= 0) ? ed_LibLoad(e, f);
     ) :
-    (c === 10) ? ed_ToLib(e, -1) :
-    (c === 11) ? ed_Export(e, 3) :
-    (c === 12) ? ed_Export(e, 0) :
-    (c === 13) ? ed_Export(e, 1) :
-    (c === 14) ? ed_Export(e, 2);
+    (c === 11) ? ed_ToLib(e, -1) :
+    (c === 12) ? ed_Export(e, 3) :
+    (c === 13) ? ed_Export(e, 0) :
+    (c === 14) ? ed_Export(e, 1) :
+    (c === 15) ? ed_Export(e, 2);
 );
 
 // A clic on the cell c of the pad of the configuration e
