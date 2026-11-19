@@ -24,9 +24,10 @@ indique le plug-in qui le produit (« tous » : les bibliothèques communes, en 
 tous les plug-ins).
 
 **Erreurs de scripts.** Une erreur de **compilation** est signalée avec le numéro de la ligne et la position dans la
-ligne où le compilateur s'est arrêté. Une erreur d'**exécution** arrête le processus qui l'a commise (et, par défaut,
-les autres processus du plug-in : voir la Partie III). Un script peut signaler lui-même une erreur par la fonction
-`error(n)` : le code affiché est alors **10000 + n**.
+ligne où le compilateur s'est arrêté. Une erreur d'**exécution** arrête le processus qui l'a commise, et lui seul
+(sauf en mode de mise au point, après `` call(`errLock, 1); `` : voir le § 13.3). Un script peut signaler lui-même une
+erreur par la fonction `error(n)` : le code affiché est alors **10000 + n**. Dans la console mSL (§ 8.6), `? n`
+donne l'explication de l'erreur n et le détail de sa dernière occurrence (l'identificateur en cause, le mot refusé…).
 
 **Erreurs internes.** Les erreurs marquées « erreur interne » ou « erreur système » ne devraient pas se produire :
 elles révèlent un défaut du logiciel ou une mémoire endommagée. Si l'une d'elles apparaît, notez les circonstances,
@@ -114,12 +115,12 @@ plus utilisés : ils concernaient les anciens fichiers de configuration séparé
 | 0238 | Diffusion-3 | Table de diffusion : numéro de préset attendu après remove prop. |
 | 0239 | Diffusion-3 | Table de diffusion : numéro de couleur attendu (color). |
 | 0240 | Diffusion-3 | Table de diffusion : numéro de couleur attendu (color). |
-| 0250 | Diffusion-3 | Table de diffusion : numéro de haut-parleur attendu (hppos). |
-| 0251 | Diffusion-3 | Table de diffusion : « < » attendu (hppos). |
-| 0252 | Diffusion-3 | Table de diffusion : position x, y ou z attendue, entre −5 et 5 (hppos). |
-| 0253 | Diffusion-3 | Table de diffusion : position x, y ou z attendue, entre −5 et 5 (hppos). |
-| 0254 | Diffusion-3 | Table de diffusion : position x, y ou z attendue, entre −5 et 5 (hppos). |
-| 0255 | Diffusion-3 | Table de diffusion : « , » ou « ; » attendu (hppos). |
+| 0250 | Diffusion-3 | Table de diffusion : numéro de haut-parleur (1 à 128), frame, size ou « ; » attendu (hppos). |
+| 0251 | Diffusion-3 | Table de diffusion : « < », On ou Off attendu après un numéro de haut-parleur (hppos). |
+| 0252 | Diffusion-3 | Table de diffusion : position x attendue, un nombre (hppos ; le cadre est vérifié à la fin : 2426). |
+| 0253 | Diffusion-3 | Table de diffusion : position y attendue, un nombre (hppos ; le cadre est vérifié à la fin : 2426). |
+| 0254 | Diffusion-3 | Table de diffusion : position z attendue, un nombre (hppos ; le cadre est vérifié à la fin : 2426). |
+| 0255 | Diffusion-3 | Table de diffusion : On, Off, « , » ou « ; » attendu (hppos). |
 | 0257 | Game Master | Liste d'actions trop longue. |
 | 0258 | Game Master | Liste d'actions : adresse incorrecte (trop basse). |
 | 0259 | Diffusion-3 | Table de diffusion : invert : une diffusion déclarée avant (et pas celle-ci) est attendue. |
@@ -127,6 +128,10 @@ plus utilisés : ils concernaient les anciens fichiers de configuration séparé
 | 0261 | Game Master | Action inconnue (non reconnue). |
 | 0262 | Game Master | Macro-définition : symbole introuvable. |
 | 0263 | Game Master | Action inconnue. |
+| 0269 | Diffusion-3 | Table de diffusion : état inconnu de l'analyseur (erreur interne). |
+| 0297 | Diffusion-3 | Table de diffusion : caractère inattendu. |
+| 0298 | Diffusion-3 | Table de diffusion : mot-clé inconnu. |
+| 0299 | Diffusion-3 | Table de diffusion : l'analyseur s'est arrêté (erreur interne). |
 | 0311 | Game Master | Configuration de haut-parleurs : numéro de configuration trop élevé. |
 | 0312 | Game Master | Configuration de haut-parleurs : nombre de HP incorrect. |
 | 0313 | Game Master | Configuration de haut-parleurs : identification de configuration invalide. |
@@ -277,6 +282,8 @@ plus utilisés : ils concernaient les anciens fichiers de configuration séparé
 | 1629 | tous | Écriture indexée hors d'un bloc (indice négatif ou trop grand), ou hors de la partie utilisée de la pile. |
 | 1630 | tous | Écriture indexée dans quelque chose qui n'est pas un bloc (par exemple un tableau non défini, qui vaut 0). |
 | 1631 | tous | `poke` : arguments ou adresse incorrects. |
+| 1632 | tous | `settings` (ou `table`) appelé sans argument. |
+| 1633 | tous | `settings` : plus de 1024 arguments (utiliser un bloc `data`). |
 | 1666 | tous | Les mots 0 à 7 de la mémoire ont été modifiés (erreur grave, mémoire endommagée). |
 | 1667 | tous | Les mots 0 à 7 de la mémoire ont été modifiés (erreur grave, mémoire endommagée). |
 | 1668 | tous | Les mots 0 à 7 de la mémoire ont été modifiés (erreur grave, mémoire endommagée). |
@@ -327,16 +334,22 @@ plus utilisés : ils concernaient les anciens fichiers de configuration séparé
 | 2233 | tous | Erreur de syntaxe dans une déclaration `var`, `loc`, `ptr`, `ext` ou `function`. |
 | 2234 | tous | Caractère invalide dans un `data`. |
 | 2235 | tous | Erreur dans une instruction `import`. |
+| 2236 | tous | Opérateur sans ses opérandes : une expression incomplète (par exemple « 2 + ; »). |
 | 2251 | tous | Erreur dans la définition d'une fonction (`function`). |
 | 2252 | tous | Erreur dans la définition d'une fonction (`function`). |
 | 2253 | tous | Erreur dans la définition d'une fonction (`function`). |
 | 2254 | tous | Erreur dans la définition d'une fonction (`function`). |
 | 2255 | tous | Erreur dans les paramètres d'une fonction (un « ; » n'est permis que dans la forme variadique `(n; args)`). |
+| 2256 | tous | Lambda-expression (`function (x) (…)`) : son corps doit suivre ses paramètres (et ses groupes `local(…)`), entre parenthèses. |
+| 2257 | tous | Lambda-expression (`function (x) (…)`) : une parenthèse ouverte n'est pas fermée. |
+| 2258 | tous | Trop de lambda-expressions dans un même texte (62 au plus). |
+| 2259 | tous | Lambda-expression : son code compilé n'est pas trouvé (erreur interne du compilateur). |
 | 2301 | tous | Identificateur trop long. |
 | 2302 | tous | Erreur lexicale (caractère ou suite de caractères non reconnus). |
+| 2303 | tous | Compilateur : \` suivi d'un caractère qui ne donne pas une ponctuation (erreur interne). |
 | 2331 | tous | Erreur de syntaxe dans une expression entre parenthèses. |
 | 2332 | tous | Erreur de syntaxe dans des crochets. |
-| 2333 | tous | Indexation : un identificateur est attendu avant les crochets. |
+| 2333 | tous | Indexation : il faut un identificateur ou une expression avant les crochets. |
 | 2334 | tous | Erreur dans une construction `gmem[…]`. |
 | 2335 | tous | Erreur de syntaxe dans un appel de fonction. |
 | 2336 | tous | Erreur de syntaxe dans un `while`. |
@@ -361,6 +374,12 @@ plus utilisés : ils concernaient les anciens fichiers de configuration séparé
 | 2419 | tous | Pas de table des variables pointeurs (erreur interne). |
 | 2420 | tous | Pas de table des variables propres (erreur interne). |
 | 2421 | tous | Appel de fonction : le nombre d'arguments ne correspond pas au nombre de paramètres. |
+| 2423 | Diffusion-3 | hppos frame : deux nombres a b (a < b) ou Metres attendus. |
+| 2424 | Diffusion-3 | hppos size : trois nombres X Y Z attendus (les dimensions en mètres, positives). |
+| 2425 | Diffusion-3 | hppos frame Metres : les dimensions sont nécessaires (size X Y Z). |
+| 2426 | Diffusion-3 | hppos : la position d'un haut-parleur sort du cadre (frame a b : [a, b] ; Metres : [0, X] × [0, Y] × [0, Z] ; sans frame : [−5, 5]) ; le log donne le haut-parleur. |
+| 2427 | Diffusion-3 | hppos : trop d'entrées. |
+| 2428 | Diffusion-3 | hppos : mémoire insuffisante pour les positions. |
 | 2438 | Diffusion-3 | D3_config : l’argument n’est pas une liste de mots (data(…)). |
 | 2439 | Diffusion-3 | Couleur attendue, de 0 à 0xFFFFFF (bgcolor). |
 | 2440 | Diffusion-3 | Fichier de configuration non trouvé. |
@@ -416,7 +435,7 @@ plus utilisés : ils concernaient les anciens fichiers de configuration séparé
 | 2703 | Interstys | Effet : source incorrecte. |
 | 2704 | Interstys | Effet : une source recouvre la sortie. |
 | 2705 | Interstys | Effet : pas de source (le déclencheur d'un Random, les entrées A et B d'un Math ou d'un Ring sont facultatifs). |
-| 2706 | Interstys | Effet : type pas (encore) exécuté. |
+| 2706 | Interstys | Effet : type sans traitement (None, ou inconnu). |
 | 2716 | Interstys | Les paramètres d'Interstys dépassent sa plage de numéros. |
 | 2717 | Interstys | Les clés des effets dépassent la taille des tableaux d'un bloc (erreur interne). |
 | 2718 | Interstys | Table : trop de clés. |
@@ -442,6 +461,7 @@ plus utilisés : ils concernaient les anciens fichiers de configuration séparé
 | 2740 | Interstys | Lien MIDI : la cible est une action : pas de « min » ni de « max ». |
 | 2741 | Interstys | Lien MIDI : options incompatibles (pickup, pas, courbe, vitesse) pour ce mode. |
 | 2742 | Interstys | Lien MIDI : « rate » n'est possible que pour un cc (bouton, fader), pas pour une note. |
+| 2743 | Interstys | Lien MIDI : une cible Bank (Prev, Next ou n) est dans toutes les banques : pas de « bank n ». |
 | 2750 | Interstys | Table : un nom de bloc est attendu (Line, Writer, Reader, Effect, Global, Control, Curve, Algorithm, Instance, Set, Dump, Check, Free, Display, Remove, Clear, Export, Tab…). |
 | 2751 | Interstys | Table : « Line », « Writer », « Reader » ou « Effect » attendu. |
 | 2752 | Interstys | Table : identificateur incorrect (un numéro ou un nom). |
@@ -548,8 +568,8 @@ plus utilisés : ils concernaient les anciens fichiers de configuration séparé
 | 3415 | tous | Compilateur : type inconnu. |
 | 3416 | tous | Identificateur non déclaré. |
 | 3417 | tous | Identificateur non déclaré. |
-| 3418 | tous | Identificateur non déclaré. |
-| 3419 | tous | Identificateur non déclaré. |
+| 3418 | tous | Identificateur non déclaré (lu comme valeur) ; « ? 3418 » dans la console mSL donne son nom et sa position. |
+| 3419 | tous | Identificateur non déclaré (affecté : il manque var, loc ou ext) ; « ? 3419 » dans la console mSL donne son nom et sa position. |
 | 3420 | tous | Identificateur non déclaré. |
 | 3422 | tous | Compilateur : structure interne incorrecte. |
 | 3555 | tous | Appel de fonction invalide. |

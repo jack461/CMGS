@@ -24,9 +24,10 @@ indique le plug-in qui le produit (« tous » : les bibliothèques communes, en 
 tous les plug-ins).
 
 **Erreurs de scripts.** Une erreur de **compilation** est signalée avec le numéro de la ligne et la position dans la
-ligne où le compilateur s'est arrêté. Une erreur d'**exécution** arrête le processus qui l'a commise (et, par défaut,
-les autres processus du plug-in : voir la Partie III). Un script peut signaler lui-même une erreur par la fonction
-`error(n)` : le code affiché est alors **10000 + n**.
+ligne où le compilateur s'est arrêté. Une erreur d'**exécution** arrête le processus qui l'a commise, et lui seul
+(sauf en mode de mise au point, après `` call(`errLock, 1); `` : voir le § 13.3). Un script peut signaler lui-même une
+erreur par la fonction `error(n)` : le code affiché est alors **10000 + n**. Dans la console mSL (§ 8.6), `? n`
+donne l'explication de l'erreur n et le détail de sa dernière occurrence (l'identificateur en cause, le mot refusé…).
 
 **Erreurs internes.** Les erreurs marquées « erreur interne » ou « erreur système » ne devraient pas se produire :
 elles révèlent un défaut du logiciel ou une mémoire endommagée. Si l'une d'elles apparaît, notez les circonstances,

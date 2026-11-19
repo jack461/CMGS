@@ -2,6 +2,7 @@
 
   python3 insert_part.py target.fodt fragment.fodt "Partie II —" out.fodt [prefix]
   python3 insert_part.py target.fodt fragment.fodt "before:Le langage en détail" out.fodt [prefix]
+  python3 insert_part.py target.fodt fragment.fodt "sub:2:Fichiers, préréglages et exports" out.fodt [prefix]
 
 target.fodt   the manual (edited by its author : never regenerated)
 fragment.fodt the new chapters, made by the same chain (pandoc --toc, layout.py, LibreOffice export to .fodt)
@@ -11,6 +12,10 @@ fragment.fodt the new chapters, made by the same chain (pandoc --toc, layout.py,
               ("Partie II" also matches "Partie III").
 "before:T"    the chapters of the fragment are INSERTED before the chapter heading (level 1) whose text is T ;
               nothing is replaced.
+"sub:N:T"     (2026-11-19) sections or subsections : the fragment, from its first heading of level N to the end of
+              its text, is INSERTED before the heading (of any level) whose text is T ; nothing is replaced. The
+              fragment starts with the headings of its context (a chapter "# ...", a section "## ..." for
+              subsections), which are not taken.
 prefix        added to the names of the automatic styles of the fragment (default "x2_"), to keep them apart.
 
 The named styles and fonts used by the fragment must exist in the target (reported if not). Update the table of
@@ -34,8 +39,9 @@ def office_text(doc):
 # ---- the chapters of the fragment : from the first level-1 heading to the end of its text
 fa, fb = office_text(frg)
 fbody = frg[fa:fb]
-m = re.search(r'<text:h\b[^>]*text:outline-level="1"', fbody)
-assert m, 'no chapter in the fragment'
+flevel = part.split(':')[1] if part.startswith('sub:') else '1'
+m = re.search(r'<text:h\b[^>]*text:outline-level="%s"' % flevel, fbody)
+assert m, 'no heading of level %s in the fragment' % flevel
 chapters = fbody[m.start():].rstrip()
 
 # ---- the automatic styles of the fragment that the chapters use (renamed)
@@ -87,7 +93,14 @@ if missing or missing_fonts:
 
 ta, tb = office_text(tgt)
 tbody = tgt[ta:tb]
-if part.startswith('before:'):
+if part.startswith('sub:'):
+    # ---- insert sections (or subsections) before a heading of any level
+    title = ' '.join(part.split(':', 2)[2].split())
+    heads = [mm for mm in re.finditer(r'<text:h\b[^>]*>(.*?)</text:h>', tbody, re.S)
+             if ' '.join(re.sub(r'<[^>]+>', '', mm.group(1)).split()) == title]
+    assert len(heads) == 1, 'heading not found (or found twice): ' + title
+    start = end = heads[0].start()
+elif part.startswith('before:'):
     # ---- insert the chapters before a chapter heading
     title = ' '.join(part[len('before:'):].split())
     heads = [mm for mm in re.finditer(r'<text:h\b[^>]*text:outline-level="1"[^>]*>(.*?)</text:h>', tbody, re.S)
@@ -103,8 +116,9 @@ else:
     start = parts[i].end()
     end = parts[i + 1].start() if i + 1 < len(parts) else len(tbody.rstrip())
 old = tbody[start:end]
-print('replaced : %d characters, %d chapter(s) ; inserted : %d chapter(s), %d automatic styles'
-      % (len(old), len(re.findall(r'text:outline-level="1"', old)), len(re.findall(r'text:outline-level="1"', chapters)), len(used)))
+print('replaced : %d characters, %d chapter(s) ; inserted : %d chapter(s), %d heading(s), %d automatic styles'
+      % (len(old), len(re.findall(r'text:outline-level="1"', old)), len(re.findall(r'text:outline-level="1"', chapters)),
+         len(re.findall(r'<text:h\b', chapters)), len(used)))
 tbody = tbody[:start] + '\n' + chapters + '\n' + tbody[end:]
 out = tgt[:ta] + tbody + tgt[tb:]
 out = out.replace('</office:automatic-styles>', new_defs + '</office:automatic-styles>', 1)

@@ -7,7 +7,7 @@ explanation ; in CMGS-data since 2026-11-19 : the mSL Console reads it at run ti
 (8 / 22 / 70 %) come from the dashes of the separator line (pandoc pipe tables, long lines). Then build the part and
 insert it into the manual (insert_part.py "Partie IV —"), see the head of insert_part.py.
 """
-import os
+import os, re
 T = os.path.dirname(os.path.abspath(__file__)) + '/'
 E = os.path.normpath(T + '../../../CMGS-data/CMGS-Erreurs.tsv')
 rows = [l.rstrip('\n').split('\t') for l in open(E, encoding='utf-8') if l.strip()]
@@ -15,6 +15,8 @@ rows.sort(key=lambda r: int(r[0]))
 
 def cell(t):
     t = t.replace('`set(`pval, …)`', '`` set(`pval, …) ``').replace('`thread(`new, …)`', '`` thread(`new, …) ``')
+    # (2026-11-19) a lone backquote (2303 : "` suivi d'un caractère") would open a code span over the next rows
+    t = re.sub(r'(?<![`\w])`(?=\s)', r'\\`', t)
     return t.replace('|', '\\|')
 
 secs = [(100, 999, 'Codes 0100 à 0999'), (1000, 1999, 'Codes 1000 à 1999'), (2000, 2999, 'Codes 2000 à 2999'),
