@@ -2,7 +2,8 @@
 
     ========================== The modules "Projector A" ... "H", "Projectors" and "Global" ===========================
 
-    The settings of Diffusion that the native sliders give, shown as pads in modules of the Studio menu :
+    The settings of Diffusion (until 2026-11-20 : also the native sliders, now gone), shown as pads in modules of the
+    Studio menu :
         - "Projector A" ... "Projector H" (the views ; until 2026-11-09 : "Projector view 1" ... "8") : the settings of
           one projector (status, operating mode, scene, group, item, morphing time, blur, random delay, Hyper Slider and
           its ambitus, new random configuration, volume, the diffusions of its inputs and outputs, indiff and outdiff
@@ -13,8 +14,11 @@
         - "Projectors" : the summary of all the projectors (projucnt = PRJ_CNT : 16), one cell each (show_Projectors_Pad) ;
         - "Global" (until 2026-11-09 : "Diffusion", same module number) : the global settings (input and output channels,
           current projector, changes Run / Hold / Freeze, volume responsivity, error indicator, configuration files,
-          debug mode), the faders Volume and Volume adjustment, and one fader per projector : its volume (show_Global_Pad).
-    The volume of a projector (dB, -120 : silence) is not a native slider : it is saved with the project
+          the generic sliders Ctl shown or hidden ; until 2026-11-20 : the debug mode), the faders Volume and Volume
+          adjustment, and one fader per projector : its volume (show_Global_Pad). The global settings (volume,
+          adjustment, responsivity, input and output channels) and the current projector are saved with the project
+          (gl_Serialize ; until 2026-11-20 : by the native sliders).
+    The volume of a projector (dB, -120 : silence) is saved with the project
     (serialBlock[Pr7_PrjVol + p - 1]), @gfx writes it there directly, @block makes its linear target (prv_PVolBlock),
     @sample reaches it smoothly (about 50 ms) ; it multiplies the level of the status (Active / Mute, see updpstatus).
     The Studio menu shows "Projectors" and the views in the sub-menu "Projectors" (pns_GrpTtl, see pns_Host_Modules).
@@ -23,11 +27,11 @@
     fine adjustment (1/10, up = more ; in the column of the cell, only fine, in its row, only coarse) ;
     Shift + left clic = the default value ; the left clic alone does nothing.
 
-    Changing a setting of a projector makes it the current projector, as with the native sliders (slider 1) ; not its
-    volume.
+    Changing a setting of a projector makes it the current projector (as the native slider 1 did) ; not its volume.
     The modules run in @gfx, the settings are applied by @block : @gfx posts a request (prv_Request : one slot
-    per kind of setting, the last value wins), @block applies it (prv_Block) as a move of the native slider
-    would (sliderevent(1)) : first the change of the current projector, then the setting.
+    per kind of setting, the last value wins), @block applies it (prv_Block, prv_Apply) : first the change of the
+    current projector, then the variable of the setting (sldvol ...), then sliderevent(1). A request marks the project
+    as changed (gl_Gfx : until 2026-11-20 the native sliders did it).
 
     Included twice in @init (prv_part) : part 1 after mSL_Panes part 1 and the module Space 3D (sx_Nth, s3d_atof),
     while make_array allocates static memory ; part 2 after sliderevent (prv_Apply calls it).
@@ -44,7 +48,8 @@ prv_rVol = 13; prv_rVadj = 14; prv_rResp = 15; prv_rInp = 16; prv_rOut = 17; prv
 prv_rFreeze = 20;
 prv_rPVol = 21;             // (the volume of a projector : not a request, see prv_Request)
 prv_rConf = 22;             // a configuration chosen in the cell Config (prv_Apply : its scene / group / item, or as it is)
-PRV_NREQ = 23;
+prv_rCtl = 23;              // the generic sliders Ctl 1 ... NB_GSL shown (1) or hidden (0) in the panel of REAPER (togglesliders)
+PRV_NREQ = 24;
 prv_prj = make_array(PRV_NREQ);     // the projector (1 ... ; 0 : a global setting)
 prv_val = make_array(PRV_NREQ);     // the value
 prv_seq = make_array(PRV_NREQ);     // incremented by @gfx when the request is posted
@@ -52,12 +57,18 @@ prv_done = make_array(PRV_NREQ);    // the last sequence applied by @block
 
 // the drag of a numeric cell (@gfx only, see prv_Drag) : its setting and projector
 prv_dreq = prv_dprj = 0;
+// a request posted (prv_Request) : the project marked as changed 1 s later (gl_Gfx)
+prv_dirty = prv_dirtyT = 0;
+// the global settings saved with the project (gl_Serialize) ; prv_glOld : an older project read (gl_Gfx)
+GL_NSV = 6;
+prv_glsv = make_array(16);
+prv_glOld = 0;
 
 prv_StatNames = "Off|Active|Mute|Solo";
 prv_ModeNames = "Off|Manual|Random 1|Random 2|Random 4|Random 8|Random 16|Hyper Slider";
 prv_ModeShort = "Off|Man.|Rnd 1|Rnd 2|Rnd 4|Rnd 8|Rnd 16|Hyper"; // (the cells of the module "Projectors")
 prv_N16 = "1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16";
-// "Projector 1|Projector 2|...", projucnt items (as slider 1)
+// "Projector 1|Projector 2|...", projucnt items
 strcpy(#prv_PList, "Projector 1");
 i__k = 2; loop(projucnt - 1, sprintf(#prv_it, "|Projector %d", i__k); strcat(#prv_PList, #prv_it); i__k += 1;);
 prv_Projs = #prv_PList;
@@ -126,6 +137,7 @@ strcpy(#glb_lab, "");
 // (the volume of a projector, prv_rPVol : written at once where it is saved, @block reads it at each block : prv_PVolBlock)
 function prv_Request(k, p, v)
 (
+    (k !== prv_rCtl) ? (prv_dirty = 1; prv_dirtyT = time_precise();); // (the sliders shown or hidden : not saved)
     (k === prv_rPVol) ? (
         ((p >= 1) && (p <= projucnt)) ? serialBlock[Pr7_PrjVol + p - 1] = v;
     ) : (
@@ -143,7 +155,7 @@ local(p)
     p;
 );
 
-// A setting of the projector p : the slider (sv) for the current projector, else its saved field
+// A setting of the projector p : its variable (sv) for the current projector, else its saved field
 function prv_Get(p, fld, sv)
 local(v)
 (
@@ -640,9 +652,11 @@ local(rc, m, v)
         (m >= 0) ? prv_Request(prv_rFile, 0, m + 1);
     ) :
     (c === 7) ? (
-        // the debug mode (the sliders Debug 1 ... 4) : left = on <-> off
-        m = rc ? prv_Menu("Debug off|Debug on", 2, dbgmod ? 1 : 0) : dbgmod ? 0 : 1;
-        (m >= 0) ? dbgmod = m;
+        // the generic sliders Ctl 1 ... NB_GSL in the panel of REAPER (as the key 'S' ; 2026-11-20, instead of the debug
+        // mode) : left = shown <-> hidden
+        v = (statsldrs > 0) ? 1 : 0;
+        m = rc ? prv_Menu("Sliders Ctl hidden|Sliders Ctl shown", 2, v) : 1 - v;
+        ((m >= 0) && (m != v)) ? prv_Request(prv_rCtl, 0, m);
     );
 );
 
@@ -659,12 +673,50 @@ function prv_GainText()
     #glb_txt;
 );
 
+// The global settings of the module "Global" and the current projector, saved with the project (@serialize, the last
+// record ; 2026-11-20 : until then the native sliders, the older projects start with the default values) : 'glb1', the
+// count, 0, 0, then the current projector (1 ...), the volume, the adjustment (dB), the responsivity (s), the input and
+// output channels ; read : the variables, applied by @block (slsignal : sliderevent, the channels : updtchcnt) ; no
+// record : an older project (prv_glOld : its generic sliders set to 0 by gl_Gfx)
+function gl_Serialize()
+local(n, ok)
+(
+    (file_avail(0) >= 0) ? (
+        // reading
+        ok = 0;
+        (file_avail(0) > 0) ? (
+            memset(ser_hdr, 0, 4);
+            load_mem(0, ser_hdr, 4);
+            ((ser_hdr[0] === 'glb1') && ((n = ser_hdr[1]) >= GL_NSV) && (n <= 16)) ? (
+                ok = 1;
+                load_mem(0, prv_glsv, n);
+                slprjcurD = max(0, min(projucnt - 1, floor(prv_glsv[0] + 0.5) - 1));
+                sldvol = max(sldvolmin, min(sldvolmax, prv_glsv[1]));
+                sldvad = max(sldvadmin, min(sldvadmax, prv_glsv[2]));
+                sldvolswtim = max(0.01, min(60, prv_glsv[3]));
+                channelsinpD = max(0, min(126, floor(prv_glsv[4] + 0.5) - 2));
+                channelsoutD = max(0, min(126, floor(prv_glsv[5] + 0.5) - 2));
+                slsignal = 1;
+            );
+        );
+        !ok ? prv_glOld = 1;
+    ) : (
+        // writing
+        ser_hdr[0] = 'glb1'; ser_hdr[1] = GL_NSV; ser_hdr[2] = 0; ser_hdr[3] = 0;
+        save_mem(0, ser_hdr, 4);
+        prv_glsv[0] = slprjcur; prv_glsv[1] = sldvol; prv_glsv[2] = sldvad; prv_glsv[3] = sldvolswtim;
+        prv_glsv[4] = channelsinpD + 2; prv_glsv[5] = channelsoutD + 2;
+        save_mem(0, prv_glsv, GL_NSV);
+    );
+);
+
 /*
     The module "Global" (until 2026-11-09 : "Diffusion") : the global settings
     line 1 (8 cells) : 0 input channels, 1 output channels (a menu, both clics), 2 the current projector (left clic : the
     next one ; right clic : a menu), 3 the changes Run / Hold / Freeze (prv_FrzState ; left clic : Run <-> Freeze ; right
     clic : a menu), 4 the volume responsivity (a potentiometer), 5 the error indicator (left clic : clear), 6 the
-    configuration files (a menu, both clics), 7 the debug mode (left clic : on <-> off)
+    configuration files (a menu, both clics), 7 the generic sliders Ctl 1 ... NB_GSL in the panel of REAPER (left clic :
+    shown <-> hidden ; until 2026-11-20 : the debug mode)
     the faders Volume (sldvol) and Volume adjustment (sldvad), the global gain (glvol, going to glnewvol), and one fader per
     projector, its volume (dB, prv_rPVol ; 2 columns when the pane is wide enough). The faders (slider_ctl) : right clic =
     0 dB, double clic = the default, clic on the value = type it.
@@ -705,14 +757,14 @@ local(h1, h2, h3, h4, hl, hneed, zzmi, zz, c, dr, nc, nr, nf, col, i, p, r, v)
                 sprintf(pad_GLB_Labs[4], "Resp. %.2f s", sldvolswtim);
                 lErr ? sprintf(pad_GLB_Labs[5], "Error %04d", lErr) : strcpy(pad_GLB_Labs[5], "No error");
                 sprintf(pad_GLB_Labs[6], "File %d", cconf);
-                strcpy(pad_GLB_Labs[7], dbgmod ? "Debug on" : "Debug off");
+                strcpy(pad_GLB_Labs[7], (statsldrs > 0) ? "Sliders shown" : "Sliders hidden");
                 pad_GLB_Colrs[0] = pad_GLB_Colrs[1] = Col_P2;
                 pad_GLB_Colrs[2] = Color_Limegreen;
                 pad_GLB_Colrs[3] = (v === 0) ? Color_Limegreen : (v === 1) ? Col_P7 : Col_P6;
                 pad_GLB_Colrs[4] = Col_P1;
                 pad_GLB_Colrs[5] = lErr ? Col_P6 : Col_Inactive;
                 pad_GLB_Colrs[6] = Col_InfoA;
-                pad_GLB_Colrs[7] = dbgmod ? Col_P2 : Col_Inactive;
+                pad_GLB_Colrs[7] = (statsldrs > 0) ? Col_P2 : Col_Inactive;
                 zz = control_jpad(pad_GLB);
                 c = ui_jpad_cell_at();
                 dr = prv_Drag(blockId, c, prv_GlbReq(c), 0);
@@ -724,7 +776,7 @@ local(h1, h2, h3, h4, hl, hneed, zzmi, zz, c, dr, nc, nr, nf, col, i, p, r, v)
                 );
             ui_pop();
 
-            // the faders Volume and Adjust (the native sliders 3 and 4)
+            // the faders Volume and Adjust (until 2026-11-20 : also the native sliders 3 and 4)
             (ui_height() >= h2) ? (
                 ui_split_top(h2);
                     ui_pad(1,3,1,0);
@@ -1003,13 +1055,13 @@ local(i, k, s0, r)
     r;
 );
 
-// Apply a request (@block) : first the change of the current projector, then the setting, as a move of the native slider
+// Apply a request (@block) : first the change of the current projector, then the variable of the setting, then
+// sliderevent (until 2026-11-20 : as a move of the native slider)
 function prv_Apply(k, p, v)
 local(pos)
 (
     ((p > 0) && (p != slprjcur)) ? (
         slprjcurD = p - 1;
-        sliderchange(slprjcurD);
         sliderevent(1);
         projUI = currentpro; // (the projector of the AKAI APCmini : its leds, as its buttons do)
         zzrefreshUI |= refresh_all;
@@ -1022,7 +1074,6 @@ local(pos)
         pos = prv_ConfPos(v);
         (pos >= 0) ? (
             sldconfscnD = floor(pos / 256); sldconfgrpD = floor(pos / 16) % 16; sldconfitmD = pos % 16;
-            sliderchange(sldconfscnD); sliderchange(sldconfgrpD); sliderchange(sldconfitmD);
             itemchange = 1;
             currentpro[prx_prvchoice] = -2; // (loaded again, even at the same place)
         ) : ((v > 0) && (v < conflsize) && (conflist[v] > 0)) ? (
@@ -1032,30 +1083,31 @@ local(pos)
             currentpro[prx_iochg] = 1; // (the Hyper Slider : its sequence built again)
         );
     );
-    (k === prv_rStat) ? (slprjstat = v; sliderchange(slprjstat);) :
-    (k === prv_rMode) ? (sldopmod = v; sliderchange(sldopmod);) :
-    (k === prv_rScene) ? (sldconfscnD = v - 1; sliderchange(sldconfscnD);) :
-    (k === prv_rGroup) ? (sldconfgrpD = v - 1; sliderchange(sldconfgrpD);) :
-    (k === prv_rItem) ? (sldconfitmD = v - 1; sliderchange(sldconfitmD);) :
-    (k === prv_rMorph) ? (sldcmrphtim = v; sliderchange(sldcmrphtim);) :
-    (k === prv_rBlur) ? (sldblur = v; sliderchange(sldblur);) :
-    (k === prv_rDelay) ? (sldrndch = v; sliderchange(sldrndch);) :
-    (k === prv_rHyper) ? (sldhypersl = v; sliderchange(sldhypersl);) :
-    (k === prv_rAmbit) ? (sldhypambi = v; sliderchange(sldhypambi);) :
+    (k === prv_rStat) ? (slprjstat = v;) :
+    (k === prv_rMode) ? (sldopmod = v;) :
+    (k === prv_rScene) ? (sldconfscnD = v - 1;) :
+    (k === prv_rGroup) ? (sldconfgrpD = v - 1;) :
+    (k === prv_rItem) ? (sldconfitmD = v - 1;) :
+    (k === prv_rMorph) ? (sldcmrphtim = v;) :
+    (k === prv_rBlur) ? (sldblur = v;) :
+    (k === prv_rDelay) ? (sldrndch = v;) :
+    (k === prv_rHyper) ? (sldhypersl = v;) :
+    (k === prv_rAmbit) ? (sldhypambi = v;) :
     (k === prv_rChange) ? (sldaction = 2;) :
-    (k === prv_rVol) ? (sldvol = v; sliderchange(sldvol);) :
-    (k === prv_rVadj) ? (sldvad = v; sliderchange(sldvad);) :
-    (k === prv_rResp) ? (sldvolswtim = v; sliderchange(sldvolswtim);) :
-    (k === prv_rInp) ? (channelsinpD = v - 2; sliderchange(channelsinpD);) :
-    (k === prv_rOut) ? (channelsoutD = v - 2; sliderchange(channelsoutD);) :
+    (k === prv_rVol) ? (sldvol = v;) :
+    (k === prv_rVadj) ? (sldvad = v;) :
+    (k === prv_rResp) ? (sldvolswtim = v;) :
+    (k === prv_rInp) ? (channelsinpD = v - 2;) :
+    (k === prv_rOut) ? (channelsoutD = v - 2;) :
     (k === prv_rClear) ? (sldaction = 1;) :
     (k === prv_rFile) ? (sldaction = v + 2;) :
     (k === prv_rFreeze) ? (
         // the changes (module "Global") : 0 Run, 1 Hold, 2 Freeze ; as the button "H" of the AKAI (its color : refresh_04)
         changeallowed = (v === 0); interpallowed = (v !== 2);
         zzrefreshUI |= refresh_04;
-    );
-    ((k !== prv_rCurrent) && (k !== prv_rFreeze)) ? sliderevent(1);
+    ) :
+    (k === prv_rCtl) ? togglesliders(v);
+    ((k !== prv_rCurrent) && (k !== prv_rFreeze) && (k !== prv_rCtl)) ? sliderevent(1);
 );
 
 // The volumes of the projectors (@block) : serialBlock[Pr7_PrjVol + p - 1] (dB, written by @gfx, saved with the project)
@@ -1076,6 +1128,22 @@ local(pp, i, v, solo, st)
         pp[prx_vtgt] = v;
         (pp[prx_vcur] === Undef) ? pp[prx_vcur] = v; // (created : at once)
         pp += projsize; i += 1;
+    );
+);
+
+// Each run of @gfx (2026-11-20) : the project marked as changed for REAPER (an undo point : sliderchange(-1), as ui-lib
+// does) once the requests posted stopped for 1 s (a drag : one mark ; until then the native sliders did it) ; after
+// the read of an older project (prv_glOld, gl_Serialize), the generic sliders set to 0 (REAPER gave them the values of
+// the old native sliders 1 ... 23 : gsl_Zero)
+function gl_Gfx()
+(
+    prv_glOld ? (
+        prv_glOld = 0;
+        gsl_Zero();
+    );
+    (prv_dirty && (time_precise() - prv_dirtyT > 1)) ? (
+        prv_dirty = 0;
+        sliderchange(-1);
     );
 );
 

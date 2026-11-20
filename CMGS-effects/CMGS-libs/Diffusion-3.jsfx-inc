@@ -114,7 +114,7 @@ timedir = 1;
 
 timew = timez + 60 * 5;
 
-// Some Sliders related values
+// The ranges of some settings (until 2026-11-20 : of the native sliders)
 // Volume
 sldvolmin = -120;
 sldvolmax = 0;
@@ -137,7 +137,18 @@ sldopmodmax = 7;
 sldhypamax = 2;
 HYP_AMAX = 32;
 
-firstslakous = 27; // first acousmonium slider
+// The settings that the native sliders held until 2026-11-20, now plain variables (the generic sliders Ctl 1 ... NB_GSL
+// drive nothing yet) : the current projector (slprjcurD : 0 ...) and its settings, copied to and from the projector by
+// sliderevent ; the global settings of the module "Global" (volume, adjustment, responsivity, input and output channels :
+// 2 + channelsinpD, 2 + channelsoutD), saved with the project with the current projector (gl_Serialize, see
+// Diffusion-3-Projectors) ; sldaction : an action asked (1 Clear, 2 Change, 2 + n File n), done by sliderevent
+slprjcurD = 0; slprjstat = 1;
+sldvol = 0; sldvad = 0; sldvolswtim = 3;
+channelsinpD = channelsoutD = 126;
+sldconfscnD = sldconfgrpD = sldconfitmD = 0;
+sldcmrphtim = 8; sldblur = 0; sldopmod = 1; sldaction = 0;
+sldrndch = sldrndchdef; sldhypersl = 0.5; sldhypambi = 2;
+
 freeword =  - 138462547 / 256; // used as "free word in the allocatable memory"
 endmark =   - 178395621 / 256; // endmark for variable sized areas
 
@@ -200,10 +211,9 @@ rejectedChSiz = 16;
 xmlstacksize = 64;
 currscene = 1; // current scene
 epsadj = 0.0001; // adj. epsilon.
-prevsliderssiz = 128; // manage up to 128 sliders
 midirsize = 65538; // MIDI Buffer (quite large)
 midiwasize = 65538; // Work area for MIDI controlers management
-midictrlsize = 16; // size of a controller size for MIDI handling
+midictrlsize = 17; // size of a controller block for MIDI handling (mctlstatus ... mctlreq)
 midictrlcnt = 128; // number of useful controllers
 actchin = 128;
 actchout = 128;
@@ -212,7 +222,7 @@ workmatsize = 32; // size of display/debug workarea
 tmpwasize = 1024; // temporary work area for "analyse"
 projsize = 96; // size of a projector
 projcnt = 64; // number of available projectors
-projucnt = <? printf("%d", PRJ_CNT); ?>; // number of used projectors (PRJ_CNT, Diffusion-3.jsfx : the choices of slider 1)
+projucnt = <? printf("%d", PRJ_CNT); ?>; // number of used projectors (PRJ_CNT, Diffusion-3.jsfx)
 akouscnt = 4; // Number of different akousmonii
 akousmax = 24; // max size of an akousmonium
 projareasize = projsize * projcnt; //
@@ -927,14 +937,13 @@ paddef = firstgroup;
 midirbuf = make_array(midirsize); // midi buffer For receiving a (large) Midi message
 midiwa = make_array(midiwasize);
 // Area for MIDI controllers management : from CC 0 to CC 127
-midictrlref = make_array(midictrlcnt); // slider to CC number if available
-midictrlwa = make_array(midictrlsize * midictrlcnt);  // 16 * 128
+midictrlref = make_array(midictrlcnt); // CC number -> its control block, if paired (midipairctlsl)
+midictrlwa = make_array(midictrlsize * midictrlcnt);  // 17 * 128
 // various work areas
 workmat = make_array(workmatsize);
 rejectedChars = make_array(rejectedChSiz);
 xmlstack = make_array(xmlstacksize);
 tmpwork = make_array(tmpwasize);
-prevsliders = make_array(prevsliderssiz); // previous values of sliders
 sincos = make_array(sincossize); // sin/cos area
 // dispboxes, dispalloc_a, box_list, box_vals : allocated in mSL_Live_Screen.jsfx-inc
 defaultprojector = make_array(projsize);
@@ -1492,7 +1501,7 @@ slprjcur = slprjcurD + 1;
 ptmalloc = 0;
 ptmemend = 0;
 slsignal = 1;
-statsldrs = -2; // show by default
+statsldrs = -2; // the generic sliders Ctl 1 ... NB_GSL : hidden at the start (togglesliders(0), graphinit)
 prevgraph = 0;
 statgraph = 1; // shown by default
 statclock = 1; // show by default
@@ -1558,11 +1567,10 @@ lastsldconfgrp = lastsldconfitm = lastsldconfscn = 1;
 itemchange = 1;
 glincr = 0.0001;
 hypermode = 0;
-ptxx = firstgroup;
 frompad = 0;
 glprvflg = pflgso = 0;
 blockcnt = 0;
-// Currently displayed sliders
+// the last values applied to the current projector (changmorph, switchdelaytim, changblur)
 dispsldcmrphtim = -1;
 dispsldrndch = -1;
 dispsldcblur = -1;
@@ -1594,9 +1602,6 @@ u__zx0 = 0;
 historypnt = 0; // last recorded number
 historycnt = 0;
 histstart = 0;
-flagdbg = 1;
-dbgmod = 1; // mode debug
-prvdbgmod = -1;
 actreload = 0;
 doreload = 0;
 actch = min(chmax, num_ch); // actual number of channels
@@ -2382,14 +2387,13 @@ function updmainp()
 );
 
 
-// The blur of a projector (0 ... 100 : the dry and wet parts) ; its slider if it is the current projector (or sld)
+// The blur of a projector (0 ... 100 : the dry and wet parts) ; sldblur too if it is the current projector (or sld)
 // (2026-11-11 : moved here from after the morphing functions, the module Configurations calls it : cg_Restore)
 function changblur(proj, newval, sld)
 (
     newval = max(0, min(100, floor(newval)));
     ((proj === currentpro) || sld) ? (
         dispsldcblur = sldblur = newval;
-        sliderchange(sldblur);
     );
     (newval != proj[prx_blurval]) ? (
         proj[prx_blurval] = newval;
@@ -2419,9 +2423,8 @@ local (lcrndmod, lcrndgrp, lchypmod, lctstmod, lcakousmod, lcopmod) // LoCall XX
     proj[prx_prflgopmd] = proj[prx_flgopmod];
     proj[prx_flgopmod] = lcrndgrp | lcrndmod | lchypmod | lctstmod | lcakousmod;
     ((updt)|| (proj === currentpro)) ? (
-        // Update slider and global variables related to currentpro
+        // Update the global variables related to currentpro
         sldopmod = newmode;
-        sliderchange(sldopmod);
         opmod = lcopmod;
         rndmod = lcrndmod; rndgrp = lcrndgrp; hypmod = lchypmod; tstmod = lctstmod; akousmod = lcakousmod;
     );
@@ -2476,7 +2479,6 @@ local (exmode,stat)
     ((updt) || (proj === currentpro)) ? (
         slprjstat = newmode;
         projsmd = 1;
-        sliderchange(slprjstat);
     );
 
 );
@@ -2766,7 +2768,7 @@ memoryBox2[19] = blockMemory2;
 <? include("CMGS-libs/Diffusion-3-Spatial.jsfx-inc"); ?>
 <? include("CMGS-libs/Diffusion-3-Space3D.jsfx-inc"); ?>
 
-// The modules "Global", "Projector A" ... "H" and "Projectors" : the settings of the native sliders (part 2 : after sliderevent)
+// The modules "Global", "Projector A" ... "H" and "Projectors" : the settings of the projectors (part 2 : after sliderevent)
 <? prv_part = 1; include("CMGS-libs/Diffusion-3-Projectors.jsfx-inc"); ?>
 
 // A text file written by CMGS-auxiliary.eel in the folder Data of the project (the exports of the modules "Edit")
@@ -2955,9 +2957,34 @@ GMW2("Init MAIN");
 
 
 
+// The MIDI controls of the settings (see mididclsld ; until 2026-11-20 : native sliders) : the value of the setting k
+// (prv_rResp, prv_rScene, prv_rMorph, prv_rBlur, prv_rDelay, prv_rHyper, prv_rAmbit) for the current projector, its
+// variable ; midictlset : changes it (then slsignal = 1 : sliderevent applies it)
+function midictlget(k)
+(
+    (k === prv_rResp) ? sldvolswtim :
+    (k === prv_rScene) ? sldconfscnD + 1 :
+    (k === prv_rMorph) ? sldcmrphtim :
+    (k === prv_rBlur) ? sldblur :
+    (k === prv_rDelay) ? sldrndch :
+    (k === prv_rHyper) ? sldhypersl :
+    (k === prv_rAmbit) ? sldhypambi : 0;
+);
+function midictlset(k, v)
+(
+    (k === prv_rResp) ? sldvolswtim = v :
+    (k === prv_rScene) ? sldconfscnD = max(0, min(15, v - 1)) :
+    (k === prv_rMorph) ? sldcmrphtim = v :
+    (k === prv_rBlur) ? sldblur = v :
+    (k === prv_rDelay) ? sldrndch = v :
+    (k === prv_rHyper) ? sldhypersl = v :
+    (k === prv_rAmbit) ? sldhypambi = v;
+);
+
+
 // Signal a change somewhere that should reflect in the graphic display
 // 1 to 16 is related with the corresponding projector number
-// 16 + n is related to slider "n"
+// 16 + n is related to the old native slider "n" (20 : the volume adjustment ; 32 : a MIDI control, par : its CC)
 // (executed by @gfx, see live_requests ; cproj : the current projector when the change was signaled)
 function live_signal_change(obj, par, cproj)
 local (Err, projnum, ctlblock, ctlname, ctlslid, box, bxid, ppro, s, w)
@@ -3045,9 +3072,9 @@ local (Err, projnum, ctlblock, ctlname, ctlslid, box, bxid, ppro, s, w)
         //===19===//
     ):((obj<21)?(
         //===20===//
-        bxid = 4; // Slider 4
+        bxid = 4; // (the old native slider 4)
         sprintf(#xidt, "%s", "Vol Adjust");
-        sprintf(#xval, "%.1f dB", slider(4));
+        sprintf(#xval, "%.1f dB", sldvad);
         box = mk_display_box(bxid, #xval, #xidt, 135, (bx__2strings|bx__boxaround|bx__drawhfrbox|bx__drawctls), 6, 4,
                             -1, -1, bx_extraw, 28, bx_crdate, timez, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
         (box > 0) ? (
@@ -3120,7 +3147,7 @@ local (Err, projnum, ctlblock, ctlname, ctlslid, box, bxid, ppro, s, w)
         //===32===//
         ctlblock = midictrlref[par];
         ctlname = ctlblock[mctlslname];
-        ctlslid = ctlblock[mctlslider];
+        ctlslid = ctlblock[mctlslot];
         projnum = cproj;
         (ctlblock[mctlflags] & ctrlown) ? (
             bxid = (projnum << 8) | ctlslid;
@@ -3129,7 +3156,7 @@ local (Err, projnum, ctlblock, ctlname, ctlslid, box, bxid, ppro, s, w)
             bxid = ctlslid;
             sprintf(#xidt, "%s", ctlname); // common control
         );
-        sprintf(#xval, "%.2f", slider(ctlslid));
+        sprintf(#xval, "%.2f", midictlget(ctlblock[mctlreq]));
         box = mk_display_box(bxid, #xval, #xidt, 135, (bx__2strings|bx__boxaround|bx__drawhfrbox|bx__drawctls), 6, 4,
                             -1, -1, bx_extraw, 22, bx_crdate, timez, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
         (box > 0) ? (
@@ -3296,51 +3323,10 @@ local (ptpr, ptq)
 );
 
 
-function fillworkmat(src)
-local (i, d, p)
-(
-    d = 0;
-    i = 0; loop(4,
-        p = i * 128;
-        loop(8,
-            workmat[d] = src[p];
-            d += 1; p+= 1;
-        );
-        i += 1;
-    );
-);
-
-
-// Allow to see, as displayed variables, the contents of a memory block
-function showmem(code, addr, p1, p2)
-local ()
-(
-    aacv0 = aazt0 = code; aacv1 = aazt1 = addr;
-    aadv00 = addr[0+p1]; aadv01 = addr[1+p1]; aadv02 = addr[2+p1]; aadv03 = addr[3+p1];
-    aadv04 = addr[4+p1]; aadv05 = addr[5+p1]; aadv06 = addr[6+p1]; aadv07 = addr[7+p1];
-    aadv08 = addr[8+p1]; aadv09 = addr[9+p1]; aadv10 = addr[10+p1]; aadv11 = addr[11+p1];
-    aadv12 = addr[12+p1]; aadv13 = addr[13+p1]; aadv14 = addr[14+p1]; aadv15 = addr[15+p1];
-    aadv16 = addr[0+p2]; aadv17 = addr[1+p2]; aadv18 = addr[2+p2]; aadv19 = addr[3+p2];
-    aadv20 = addr[4+p2]; aadv21 = addr[5+p2]; aadv22 = addr[6+p2]; aadv23 = addr[7+p2];
-    aadv24 = addr[8+p2]; aadv25 = addr[9+p2]; aadv26 = addr[10+p2]; aadv27 = addr[11+p2];
-    aadv28 = addr[12+p2]; aadv29 = addr[13+p2]; aadv30 = addr[14+p2]; aadv31 = addr[15+p2];
-    aadv32 = addr[16+p2]; aadv33 = addr[17+p2]; aadv34 = addr[18+p2]; aadv35 = addr[19+p2];
-    aadv36 = addr[20+p2]; aadv37 = addr[21+p2]; aadv38 = addr[22+p2]; aadv39 = addr[23+p2];
-    aadv40 = addr[24+p2]; aadv41 = addr[25+p2]; aadv42 = addr[26+p2]; aadv43 = addr[27+p2];
-    aadv41 = addr[28+p2]; aadv42 = addr[29+p2]; aadv43 = addr[30+p2]; aadv44 = addr[31+p2];
-);
-function showmem(code, addr) (
-    showmem(code, addr, 0, 16);
-);
-function showmem(code, addr, pu) (
-    showmem(code, addr, 0, pu);
-);
-
 // uim_* allocator, box_recall, box_change : see mSL_Live_Screen.jsfx-inc
 
-// par == 1 : show sliders
-// par == 0 : hide sliders
-// par == -1 : toggle sliders
+// The generic sliders Ctl 1 ... NB_GSL (2026-11-20 : instead of the native sliders) in the panel of REAPER (key 'S',
+// action 2, the AKAI) : par == 1 : show them ; par == 0 : hide them ; par == -1 : toggle
 function togglesliders(par)
 local ()
 (
@@ -3348,28 +3334,14 @@ local ()
     par = (par !== 0) ? 1 : 0;
     (par != statsldrs) ? (
         statsldrs = par;
-        slider_show(slprjcurD, statsldrs);
-        slider_show(slprjstat, statsldrs);
-        slider_show(sldvol, statsldrs);
-        slider_show(sldvad, statsldrs);
-        slider_show(sldvolswtim, statsldrs);
-        slider_show(channelsinpD, statsldrs);
-        slider_show(channelsoutD, statsldrs);
-        slider_show(sldconfscnD, statsldrs);
-        slider_show(sldconfgrpD, statsldrs);
-        slider_show(sldconfitmD, statsldrs);
-        slider_show(sldcmrphtim, statsldrs);
-        slider_show(sldblur, statsldrs);
-        slider_show(sldopmod, statsldrs);
-        slider_show(sldaction, statsldrs);
-        slider_show(sldrndch, statsldrs); // (rndmod && statsldrs));
-        slider_show(sldhypersl, statsldrs); // (hypmod && statsldrs));
-        slider_show(sldhypambi, statsldrs); // (hypmod && statsldrs));
-        slider_show(sldbg1, statsldrs); // (dbgmod  && statsldrs));
-        slider_show(sldbg2, statsldrs); // (dbgmod  && statsldrs));
-        slider_show(sldbg3, statsldrs); // (dbgmod  && statsldrs));
-        slider_show(sldbg4, statsldrs); // (dbgmod  && statsldrs));
+        <? i = 0; loop(NB_GSL, printf("slider_show(slCtl%d, statsldrs); ", i+1); ((i % 8) == 7) && (i < NB_GSL-1) ? printf("\n        "); i += 1;); ?>
     );
+);
+
+// The generic sliders Ctl 1 ... NB_GSL set to 0, for REAPER too (gl_Gfx : an older project, see Diffusion-3-Projectors)
+function gsl_Zero()
+(
+    <? i = 0; loop(NB_GSL, printf("slCtl%d = 0; sliderchange(slCtl%d); ", i+1, i+1); ((i % 4) == 3) && (i < NB_GSL-1) ? printf("\n    "); i += 1;); ?>
 );
 
 // par == 1 : show graphics
@@ -3383,12 +3355,11 @@ function togglegraphics(par)
 
 function updtchcnt()
 (
-    // Update the sliders
+    // the input and output channels (module "Global"), at most the channels of the track
     (channelsinpD != prvchannelsinpD) ? (
         channelsinp = channelsinpD + 2;
         (channelsinp > actch) ? (channelsinp = actch; channelsinpD = channelsinp - 2; );
         actchin = prvchannelsinp = channelsinp;
-        sliderchange(channelsinpD);
         prvchannelsinpD = channelsinpD;
     );
     (channelsoutD != prvchannelsoutD) ? (
@@ -3396,7 +3367,6 @@ function updtchcnt()
         (channelsout > actch) ? (channelsout = actch; channelsoutD = channelsout - 2; );
         actchout = prvchannelsout = channelsout;
         sqivactchout = 1/max(1, sqrt(actchout)); // Approximation !
-        sliderchange(channelsoutD);
         prvchannelsoutD = channelsoutD;
     );
 );
@@ -3433,7 +3403,6 @@ local (kcf, knt)
             kcf = pcfdef; // par defaut...
         );
     );
-    // showmem(33, kcf);
     kcf; // return an always defined pointer
 );
 
@@ -3514,7 +3483,6 @@ local(pcf, src, dstx, tg, res, E4092, zv1, zv2, zv3, zv5, ind, oud, g, k, p, a, 
             );
         );
     );
-    // showmem(12, dest);
     zv5 = res;
 );
 
@@ -3611,7 +3579,7 @@ local (khpn, kcf, kra, krc, kct, knb, knt, kp, kxw, xscene, xgroup, xitem, ukpp,
             kct -= 1;
             ukct = kct;
         );
-        // Afficher / non les sliders modifiés ?
+        // mdsl : les variables du projecteur courant aussi (sldconfscn ...)
         (kcf != 0) ? (
             xscene = (kxw >> 8) + 1; xgroup = ((kxw >> 4) & 0xF) + 1; xitem = (kxw % 16) + 1;
             (mdsl) ? (
@@ -3621,9 +3589,6 @@ local (khpn, kcf, kra, krc, kct, knb, knt, kp, kxw, xscene, xgroup, xitem, ukpp,
                 sldconfgrpD = xgroup - 1;
                 sldconfitm = xitem;
                 sldconfitmD = xitem - 1;
-                sliderchange(sldconfscnD);
-                sliderchange(sldconfgrpD);
-                sliderchange(sldconfitmD);
             );
             sgipos = kxw;
             hpconfig = kcf;
@@ -3739,10 +3704,9 @@ function switch_scene(newval, sld)
 (
     sldconfscn = max(1, min(16,newval));
     prvsldconfscnD = sldconfscnD = sldconfscn-1;
-    sliderchange(sldconfscnD);
     currentpro[prx_svscene] = prvsldconfscn = sldconfscn;
     (sld && (lastsldconfscn != sldconfscn)) ? (
-        lastsldconfscn  = sldconfscn; // keep value of last manually modified sliderscele
+        lastsldconfscn  = sldconfscn; // keep value of last manually modified scene
         (akousmod) ? akouchange |= akouchconfs;
     );
     signal_change(currentpro[prx_fident], 4); // scene/group changed
@@ -3752,10 +3716,9 @@ function switch_group(newval, sld)
 (
     sldconfgrp = max(1, min(16,newval));
     prvsldconfgrpD = sldconfgrpD = sldconfgrp-1;
-    sliderchange(sldconfgrpD);
     currentpro[prx_svgroup] = prvsldconfgrp = sldconfgrp;
     (sld && (lastsldconfgrp != sldconfgrp)) ? (
-        lastsldconfgrp = sldconfgrp; // keep value of last manually modified slidergroup
+        lastsldconfgrp = sldconfgrp; // keep value of last manually modified group
         (akousmod) ? akouchange |= akouchconfs;
     );
     signal_change(currentpro[prx_fident], 4); // scene/group changed
@@ -3766,10 +3729,9 @@ function switch_item(newval, sld)
 (
     sldconfitm = max(1, min(16,newval));
     prvsldconfitmD = sldconfitmD = sldconfitm - 1;
-    sliderchange(sldconfitmD);
     currentpro[prx_savitem] = prvsldconfitm = sldconfitm;
     (sld && (lastsldconfitm != sldconfitm)) ? (
-        lastsldconfitm = sldconfitm; // keep value of last manually modified slideritem
+        lastsldconfitm = sldconfitm; // keep value of last manually modified item
         (akousmod) ? akouchange |= akouchconfs;
         itemchange = 1; // so we can load a new config
     );
@@ -3788,10 +3750,6 @@ function switch_sgi()
         confchng = 1; // Just for msg. display
         itemchange = 0;
         refreshUI |= sigcfchange;
-        ((sldconfscn === 1) && (sldconfgrp === 1) && (sldvol === -120)) ? (
-            (sldvad === -20) ? (dbgmod = 0; sldvad = 0; );
-            (sldvad === 20) ? (dbgmod = 1; sldvad = 0; );
-        );
     );
 );
 
@@ -3803,7 +3761,6 @@ local (csteps)
     newval = max(0.01, min(60, newval));
     ((proj === currentpro) || sld) ? (
         dispsldcmrphtim = sldcmrphtim = newval;
-        sliderchange(sldcmrphtim);
     );
     // Number of steps
     (newval != proj[prx_savpmrph]) ? (
@@ -3821,7 +3778,6 @@ function switchdelaytim(proj, newval, sld)
     newval = max(sldrndchmin, min(sldrndchmax, newval));
     ((proj === currentpro) || sld) ? (
         dispsldrndch = sldrndch = newval;
-        sliderchange(sldrndch);
     );
     (newval != proj[prx_prvdlay]) ? (
         proj[prx_prvdlay] = proj[prx_svrdlay] = newval;
@@ -3829,16 +3785,17 @@ function switchdelaytim(proj, newval, sld)
     );
 );
 
-// A slider has been modified.
+// The settings of the current projector or the global settings changed (since 2026-11-20 plain variables : the modules,
+// prv_Apply, the AKAI APCmini, the mSL settings, the load of a project, gl_Serialize ; until then the native sliders) :
+// they are applied (@block ; sld : a change asked by the user, 1, or by the program, 0)
 function sliderevent(sld)
-local (xuvol, prvp, xsl, asl, pflgs)
+local (xuvol, prvp, pflgs)
 (
     slsignal = 0;
     // Global projector
     (slprjcurD != prvslprjcurD) ? (
         slprjcur = slprjcurD + 1;
-        // Update all sliders according to new
-        // Save some values in previous "projector"
+        // Save some values in previous "projector" (none after a restore of the projectors : prvslprjcur = 0)
         (prvslprjcur > 0) ? (
             prvp = projectors + (prvslprjcur - 1) * projsize;
             prvp[prx_svscene] = sldconfscn;
@@ -3867,21 +3824,9 @@ local (xuvol, prvp, xsl, asl, pflgs)
         slprjstat = currentpro[prx_savprjst];
         sldhypersl = currentpro[prx_svhypsl];
         sldhypambi = currentpro[prx_svhypam];
-        // Sliders have changed
-        sliderchange(sldconfscnD);
-        sliderchange(sldconfgrpD);
-        sliderchange(sldconfitmD);
-        sliderchange(sldcmrphtim);
-        sliderchange(sldblur);
-        sliderchange(sldopmod);
-        sliderchange(sldrndch);
-        sliderchange(slprjstat);
-        sliderchange(sldhypersl);
-        sliderchange(sldhypambi);
         // Update prvslprjcur
         prvslprjcur = slprjcur;
         prvslprjcurD = slprjcurD;
-        sliderchange(slprjcurD);
         // Other values pertinent to current projector
         currentpro[prx_prsvopmod] = -1; // need to update opmodes
         timen = 0; // UI refresh signal
@@ -3957,17 +3902,6 @@ local (xuvol, prvp, xsl, asl, pflgs)
         glincr = 1 / (srate * max(0.01,sldvolswtim));
     );
 
-    // Global dbg
-    (dbgmod) ? (
-        ((sldbg1 != prvsldbg1) || (sldbg2 != prvsldbg2) || (sldbg3 != prvsldbg3) || (sldbg4 != prvsldbg4)) ? (
-            flagdbg = 1;
-            dbgaction1 = prvsldbg1 = sldbg1;
-            dbgaction2 = prvsldbg2 = sldbg2;
-            dbgaction3 = prvsldbg3 = sldbg3;
-            dbgaction4 = prvsldbg4 = sldbg4;
-        );
-    );
-
     // Hyper Slider moved
     (sldhypersl != currentpro[prx_prsvhypsl]) ? (
         currentpro[prx_prsvhypsl] = sldhypersl;
@@ -4040,7 +3974,6 @@ local ()
 
     // Create a default entry
     groupdefs[groupdefsize - 1] = conflsize-1; // so it uses default entry
-    // showmem(10, memarea);
 );
 
 
@@ -4068,7 +4001,7 @@ local (k)
 // ---------------------------------------
 mctlstatus = 0; // the status
 mctlnumber = 1; // the CC number
-mctlslider = 2; // the corresponding slider number
+mctlslot = 2; // the number of the control (until 2026-11-20 : its native slider), the id of its box in the Live screen
 mctlmin = 3; // minimum value
 mctlmax = 4; // maximum value
 mctlstep = 5; // step value
@@ -4079,9 +4012,10 @@ mctlflags = 9; // various flags
 mctlslprv = 10; // previous value
 mctrngval = 11; // range value
 mcttolval = 12; // tolerence value
-mctlslname = 13; // name of the slider (a string)
-mctlslcode = 14; // name code of the slider (a number)
+mctlslname = 13; // name of the control (a string)
+mctlslcode = 14; // name code of the control (a number)
 mctldefault = 15; // default value
+mctlreq = 16; // the setting (prv_rMorph ... : midictlget, midictlset ; 2026-11-20)
 // ---------------------------------------
 // internal flags
 ctrldec = 1; // it is declared
@@ -4095,20 +4029,17 @@ ctrlown = 4;  // each projector has its own
 //zzzdclpcnt2 = 0;
 //zzzdclpcnt3 = 0;
 
-//  Declare a MIDI controller associated to a REAPER Slider
-function mididclsld(slidernum, slname, minVal, maxVal, stepVal, type, default, flags)
+//  Declare a MIDI controller of a setting (req : prv_rMorph ..., see midictlget ; until 2026-11-20 : of a native
+//  slider) ; slot : the number of the control (the old native slider), the id of its box in the Live screen
+function mididclsld(slot, req, slname, minVal, maxVal, stepVal, type, default, flags)
 local (za, zzzslka)
 (
-    // ccn = floor(max(0, min(127, ccn)));
-    slidernum = floor(max(0, min(127, slidernum)));
-    //zzzslnum1 = slidernum;
-    za = midictrlwa + midictrlsize * slidernum; // address of the ctrl control block
-    //zzzza = za;
-    //zzzz3a = midictrlwa + midictrlsize * 3;
+    slot = floor(max(0, min(127, slot)));
+    za = midictrlwa + midictrlsize * slot; // address of the ctrl control block
     za[mctlstatus] = ctrldec;
-    //zzzz3a0 = zzzz3a[mctlstatus];
     za[mctlnumber] = -1;
-    za[mctlslider] = slidernum;
+    za[mctlslot] = slot;
+    za[mctlreq] = req;
     za[mctlslname] = slname;
     za[mctldefault] = default;
     za[mctlslcode] = zzzslka = mSL_symbol(slname);
@@ -4128,7 +4059,7 @@ local (za, zzzslka)
 );
 
 
-// Pair a MIDI ctrl number with a slider given by it name
+// Pair a MIDI ctrl number with a control given by its name
 function midipairctlsl(ccnum, slname)
 local (za, slk, i, t)
 (
@@ -4141,7 +4072,7 @@ local (za, slk, i, t)
     // zzzz3b0 = zzzz3b[mctlstatus];
     i = t = 0;
     while ((i < 128) && (t === 0)) (
-        za = midictrlwa + midictrlsize * i; // pointer to a slider def.
+        za = midictrlwa + midictrlsize * i; // pointer to a control def.
         (za[mctlstatus] & ctrldec) ? (
             // zzzdclpcnt2 += 1;
             (slk === za[mctlslcode]) ? (
@@ -4188,7 +4119,7 @@ local (za, sl, k, ty, w, x)
         zzzznew = newpos;
         // The controller has been declared & paired
         flags = za[mctlflags];
-        sl = za[mctlslider];
+        sl = za[mctlreq]; // the setting
         k = newpos / 127; // k in [0 ... 1]
         ty = za[mctltype];
         (ty === 1) ? (k = k * k;) :
@@ -4200,21 +4131,20 @@ local (za, sl, k, ty, w, x)
         w = floor(k * (za[mctlmax] - za[mctlmin]) / za[mctlstep] + 0.5) * za[mctlstep] + za[mctlmin];
         // zzzw = w;
         // zzzsl = sl;
-        x = slider(sl); // Valeur presente du slider
+        x = midictlget(sl); // Valeur presente du réglage
         // zzzx = x;
         // zzzprv = za[mctlslprv];
         // zzzeps = za[mcttolval];
         ((za[mctlslprv] === x) || (x === w)) ? (
-            // The last known value do correspond to actual slider
+            // The last known value do correspond to actual setting
             // update the "new" value
             //za[mctlprv] = newpos;
             za[mctlslprv] = w;
-            slider(sl) = w; // set the slider
-            sliderchange(2 ^sl);
+            midictlset(sl, w); // set the setting (applied by sliderevent)
             slsignal = 1;
             flags |= ctrlsync;
         ) :
-        // The actual value doesn't correspond to the slider value.
+        // The actual value doesn't correspond to the setting value.
         // Are we close enough to it ?
         ((zzzdi = abs(x - w)/(abs(x) + abs(w))) < za[mcttolval]) ? (
             // Set current position valid
@@ -4243,19 +4173,16 @@ doreload = 1;
 updprqueue();
 sliderevent(1); // called from "init"
 
-// The MIDI handling
-// Some useful sliders
-/*
-*/
-mididclsld(5,  "Vol.Resp.",  0.01, 60, 0.01, 2, 2, ctrlshow); // slider 3 : volume responsivity : sldvolswtim
-mididclsld(8,  "Scene",  0, 15, 1, 0, 1, ctrlshow|ctrlown); // slider 6 : scene number : sldconfscn
-mididclsld(21, "Rand.Delay", sldrndchmin, sldrndchmax, sldrndchinc, 2, sldrndchdef, ctrlshow|ctrlown); // random delay : sldrndch
-mididclsld(22, "Hyperslider",  0, 1, 0.001, 0, 0.5, ctrlshow|ctrlown); // slider 22 : hyper slider : sldhypersl
-mididclsld(23, "Ambitus", 2, HYP_AMAX, 1, 0, 2, ctrlshow|ctrlown); // slider 23, hyper slider ambitus : sldhypambi
-zzzz_dclmorph = mididclsld(11,  "Morph.Dur.",  0.01, 60, 0.01, 2, 8, ctrlshow|ctrlown); // slider 11 : morphing time : sldcmrphtim
-mididclsld(12,  "Blur",  0, 100, 1, 0, 0, ctrlshow|ctrlown); // slider 12 : blur: sldblur
+// The MIDI handling : the controls of some settings (the faders 1 ... 6 of the AKAI APCmini, midipairctlsl) ; the slot
+// (the number of the old native slider) : the id of the box in the Live screen
+mididclsld(5, prv_rResp, "Vol.Resp.",  0.01, 60, 0.01, 2, 2, ctrlshow); // volume responsivity : sldvolswtim
+mididclsld(8, prv_rScene, "Scene",  1, 16, 1, 0, 1, ctrlshow|ctrlown); // scene number : sldconfscnD + 1
+mididclsld(21, prv_rDelay, "Rand.Delay", sldrndchmin, sldrndchmax, sldrndchinc, 2, sldrndchdef, ctrlshow|ctrlown); // random delay : sldrndch
+mididclsld(22, prv_rHyper, "Hyperslider",  0, 1, 0.001, 0, 0.5, ctrlshow|ctrlown); // hyper slider : sldhypersl
+mididclsld(23, prv_rAmbit, "Ambitus", 2, HYP_AMAX, 1, 0, 2, ctrlshow|ctrlown); // hyper slider ambitus : sldhypambi
+zzzz_dclmorph = mididclsld(11, prv_rMorph, "Morph.Dur.",  0.01, 60, 0.01, 2, 8, ctrlshow|ctrlown); // morphing time : sldcmrphtim
+mididclsld(12, prv_rBlur, "Blur",  0, 100, 1, 0, 0, ctrlshow|ctrlown); // blur: sldblur
 
-// showmem(11, zzzz_dclmorph);
 
 function reset4095()
 (
@@ -4508,8 +4435,7 @@ local (a)
 
 
 @slider
-sliderevent(1); // called from "slider"
-slidersmod = 1;
+// (the generic sliders Ctl 1 ... NB_GSL drive nothing yet ; until 2026-11-20 the native sliders called sliderevent(1) here)
 
 
 
@@ -4581,7 +4507,8 @@ function x(ss) local (rr, ww)
 );
 
 // the configuration restored from the project (cg_Restore, @gfx) : the projectors choose their configurations again,
-// as after a load of the file
+// as after a load of the file ; the variables of the current projector (sldconfscn ...) taken again from it, none
+// saved into it (prvslprjcur = 0 ; until 2026-11-20 the native sliders, restored by REAPER, held them)
 cg_rsDone ? (
     cg_rsDone = 0;
     currentpro[prx_prvchoice] = -2;
@@ -4590,6 +4517,8 @@ cg_rsDone ? (
     akousmod ? akouchange = akouchconfs;
     hypchange = 1;
     actreload = 1;
+    prvslprjcur = 0; prvslprjcurD = -1;
+    sliderevent(0);
 );
 
 
@@ -4826,120 +4755,6 @@ sysSampBeatPosition = 0 | (b__u * sysTempo / 60);
     // Rebuild projectors queue
     updprqueue();  // Every second or so
     // MIDI_handle();
-
-    (dbgmod) ? (
-        (dbgaction1) ? (
-            b__dbk = dbgaction1 * 10000 + dbgaction2 * 100 + dbgaction3;
-            (dbgaction1 === 1) ? (
-                // show
-                (flagdbg || confchng) ? (
-                    ptxx  = getconf(ptxn = dbgaction2 + 16 * (sldconfgrp-1));
-                    flagdbg = 0;
-                );
-                showmem(ptxn, ptxx);
-            ) :
-            (dbgaction1 === 2) ? (
-                // Actions to show small zones of memory
-                (dbgaction2 === 0) ? (
-                    // show exec list
-                    ptxx = projlist;
-                ) :
-                (dbgaction2 === 1) ? (
-                    // show
-                    ptxx = dispboxes + dispboxsize * (dbgaction3 + 32 * dbgaction4); // display boxes
-                    b__dbk = 2000000 + (dbgaction3 + 32 * dbgaction4);
-                ) :
-                (dbgaction2 === 2) ? (
-                    // show
-                    ptxx = dispalloc_a + 32 * dbgaction3 + 1024 * dbgaction4; // libre
-                ) :
-                (dbgaction2 === 3) ? (
-                    ptxx = paddef; // 32 items du pad
-                ) :
-                (dbgaction2 === 4) ? (
-                    ptxx = historywa + 32 * dbgaction3;
-                ) :
-                (dbgaction2 === 5) ? (
-                    ptxx = midirbuf + 32 * dbgaction3;
-                ) :
-                (dbgaction2 === 6) ? (
-                    ptxx = midictrlwa + midictrlsize * dbgaction3; // MIDI Slider controller block
-                ) :
-                (dbgaction2 === 7) ? (
-                    ptxx = midictrlref + 32 * dbgaction3;
-                ) :
-                (dbgaction2 === 8) ? (
-                    ptxx = midiwa + 32 * dbgaction3;
-                ) :
-                (dbgaction2 === 9) ? (
-                    ptxx = inputs + 32 * dbgaction3;
-                ) :
-                (dbgaction2 === 10) ? (
-                    ptxx = outputs + 32 * dbgaction3;
-                ) :
-                (dbgaction2 === 11) ? (
-                    ptxx = currentpro + 8 * dbgaction3;
-                    b__dbk = dbgaction1 * 10000 + dbgaction3 * 100 + slprjcur;
-                ) :
-                (dbgaction2 === 12) ? (
-                    ptxx = firstgroup + 32 * dbgaction3;
-                ) :
-                (dbgaction2 === 13) ? (
-                    ptxx = 0 + 32 * dbgaction3;
-                ) :
-                (dbgaction2 === 14) ? (
-                    ptxx = tmpwork + 32 * dbgaction3;
-                );
-                showmem(b__dbk, ptxx);
-            ) :
-            (dbgaction1 === 3) ? (
-                ptxx = conflist + 32 * dbgaction2 + dbgaction3;
-                showmem(b__dbk, ptxx);
-            ) :
-            (dbgaction1 === 4) ? (
-                b__dbk = dbgaction1 * 100000 + 1024 * dbgaction2 + 32 * dbgaction3 + dbgaction4;
-                ptxx = memarea + 1024 * dbgaction2 + 32 * dbgaction3 + dbgaction4;
-                showmem(b__dbk, ptxx);
-            ) :
-            (dbgaction1 === 5) ? (
-                // Show contents of a projector
-                showmem(b__dbk, projectors + dbgaction2 * projsize + dbgaction3);
-            ) :
-            (dbgaction1 === 6) ? (
-                // List of 32 values from the used. coeff list
-                ptwp = projectors + dbgaction2 * projsize;
-                ptpu = ptwp[prx_pactl];
-                showmem(b__dbk, ptpu);
-            ) :
-            (dbgaction1 === 7) ? (
-                // List of 4 * 8 values from a consigne matrix
-                ptwp = projectors + dbgaction2 * projsize;
-                fillworkmat(ptwp[prx_pcons]);
-                showmem(b__dbk, workmat);
-            ) :
-            (dbgaction1 === 8) ? (
-                // List of 4 * 8 values from a output matrix
-                ptwp = projectors + dbgaction2 * projsize;
-                fillworkmat(ptwp[prx_poutp]);
-                showmem(b__dbk, workmat);
-            ) :
-            (dbgaction1 === 9) ? (
-                // List of 4 * 8 values from a coeff. matrix
-                ptwp = projectors + dbgaction2 * projsize;
-                fillworkmat(ptwp[prx_pcoeff]);
-                showmem(b__dbk, workmat);
-            ) :
-            (dbgaction1 === 10) ? (
-                // Show contents of memory
-                b__dbk = dbgaction2 * 1024 + dbgaction3 * 32;
-                showmem(b__dbk, b__dbk);
-            ) :
-            (dbgaction1 === 11) ? (
-                b__dbk = firstgroup + dbgaction2 * 1024 + dbgaction3 * 32;
-                showmem(b__dbk, b__dbk);
-            );
-        );
-    );
 
     flagupdchcnt ? (
         updtchcnt();
@@ -5208,52 +5023,13 @@ blkn = currentpro[prx_ptrconf];
 
 rndmod = pflgso & rndmodon;
 prevrndmod = glprvflg & rndmodon;
-(rndmod != prevrndmod) ? (
-    (rndmod && statsldrs) ? (
-        // Going in mode "random"
-        slider_show(sldrndch, 1);
-    ) : (
-        slider_show(sldrndch, 0);
-    );
-    sliderchange(sldrndch);
-);
 
 hypmod = pflgso & hypmodon;
 prvhypmod = glprvflg & hypmodon;
-(hypmod !== prvhypmod) ? (
-    (hypmod && statsldrs) ? (
-        hypmodcnt += 1;
-        // Going in mode "hyper slider"
-        slider_show(sldhypersl, 1);
-        slider_show(sldhypambi, 1);
-        currentpro[prx_flgopmod] |= hypamch;
-    ) : (
-        slider_show(sldhypersl, 0);
-        slider_show(sldhypambi, 0);
-    );
-    sliderchange(sldhypersl);
-    sliderchange(sldhypambi);
-);
-
-
-(dbgmod !== prvdbgmod) ? (
-    (dbgmod  && statsldrs) ? (
-        // Going in mode "debug"
-        slider_show(sldbg1, 1);
-        slider_show(sldbg2, 1);
-        slider_show(sldbg3, 1);
-        slider_show(sldbg4, 1);
-        flagdbg = 1;
-    ) : (
-        slider_show(sldbg1, 0);
-        slider_show(sldbg2, 0);
-        slider_show(sldbg3, 0);
-        slider_show(sldbg4, 0);
-    );
-    sliderchange(sldbg1);
-    sliderchange(sldbg2);
-    sliderchange(sldbg3);
-    sliderchange(sldbg4);
+((hypmod !== prvhypmod) && hypmod) ? (
+    // Going in mode "hyper slider" (until 2026-11-20 : only while the native sliders were shown)
+    hypmodcnt += 1;
+    currentpro[prx_flgopmod] |= hypamch;
 );
 
 
@@ -5547,9 +5323,12 @@ cg_Serialize();
 fm_Serialize();
 // The sizes of the balls and of the crosses of the views "Space A" ... "D" (see Diffusion-3-Space3D)
 sx_Serialize();
-// The placements of the trajectories A ... D of the spatial projectors (2026-11-19, see Diffusion-3-Spatial ; the last one :
-// the older projects end before it)
+// The placements of the trajectories A ... D of the spatial projectors (2026-11-19, see Diffusion-3-Spatial ; the older
+// projects end before it)
 sp_TpSerialize();
+// The global settings of the module "Global" and the current projector (2026-11-20, see Diffusion-3-Projectors ; until
+// then native sliders ; the last one : the older projects end before it)
+gl_Serialize();
 
 
 @gfx
@@ -5663,7 +5442,7 @@ local (ft)
     //HP_Views[2] = HP_Draw_Init(0);
     //HP_Views[3] = HP_Draw_Init(0);
 
-    togglesliders(1);
+    togglesliders(0); // (the generic sliders Ctl 1 ... NB_GSL : hidden ; key 'S' shows them)
     gxnotinited = 0;
 );
 
@@ -5801,7 +5580,7 @@ function do_live_actions() local(gwk, box)
 function do_Plugin_Keys()
 (
     GM_key_take('S') ? (
-        togglesliders(-1); // the native JSFX sliders (as Interstys ; 's' in the Live screen)
+        togglesliders(-1); // the generic sliders Ctl 1 ... NB_GSL in the panel of REAPER (as Interstys ; 's' in the Live screen)
     ) :
     GM_Tab_Keys(); // Tab, Shift + Tab : next, previous tabulation (see ui-lib-JJ-GUI)
 );
@@ -7342,6 +7121,9 @@ tr_EdSync();
 sp_Gfx();
 // the work areas of the modules "VU meter", "Limiter" (even when the window is closed : see GM-Meters-Modules)
 fm_Gfx(actchin, actchout);
+// the project marked as changed after the requests of the modules, the generic sliders of an older project set to 0
+// (see Diffusion-3-Projectors)
+gl_Gfx();
 
 
 //====== GRAPHIC EXECUTION START ======
