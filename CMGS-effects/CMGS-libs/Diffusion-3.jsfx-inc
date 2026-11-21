@@ -219,7 +219,8 @@ actchin = 128;
 actchout = 128;
 historysiz = 128; // history of used configurations
 workmatsize = 32; // size of display/debug workarea
-tmpwasize = 1024; // temporary work area for "analyse"
+tmpwasize = 34816; // temporary work area for "analyse" (2026-11-20 : 1024 before ; a configuration of 128 sources to
+                    // 128 outputs needs 33028 words, see Set_Table, error 0256)
 projsize = 96; // size of a projector
 projcnt = 64; // number of available projectors
 projucnt = <? printf("%d", PRJ_CNT); ?>; // number of used projectors (PRJ_CNT, Diffusion-3.jsfx)
@@ -744,12 +745,20 @@ SchedActive = 1; // scheduler activity
 // A block with all dynamic memory references used by "Diffusion 3"
 //
 mm_rem_siz = 256; // also serves for users defined actions
-mm_total_siz = mm_rem_siz + proprescnt + conflsize + actlsize;
+CF_NRET = 32; // (2026-11-20) the blocks of configurations replaced, freed later (see cf_Retire)
+mm_total_siz = mm_rem_siz + proprescnt + conflsize + actlsize + conflsize + CF_NRET;
 memadd = make_array(mm_total_siz);
 mm_rem_mm = memadd; memadd += mm_rem_siz; // A list of remanent/protected objects
 proprerefs = memadd; memadd += proprescnt; // area for projectors presets references
 conflist = memadd; memadd += conflsize; // list of configurations + size for pcdef config.
 actlist = memadd; memadd += actlsize; // list of actions
+// (2026-11-20) the library of the configurations : their weights as written and their names (see cf_W) ; the blocks
+// replaced, freed 3 s later (cf_Retire : their addresses here, the times in cf_retT) ; here, the GC keeps the blocks
+// they point to
+cf_wts = memadd; memadd += conflsize;
+cf_ret = memadd; memadd += CF_NRET;
+cf_retT = make_array(CF_NRET);
+cf_retW = 0;
 memset(mm_rem_mm, 0, mm_total_siz); // clear the area
 
 //====== GC ======
@@ -1657,6 +1666,7 @@ local (sik, pp)
     // All these are actual dynamically allocated memory blocks (but pcfdef, the last entry of the conflist, is static)
     // memset(conflist, 0, conflsize + 4); // Clear the conflist
     mSL_mfree_all(conflist, conflsize - 1);  //  Clear the conflist
+    mSL_mfree_all(cf_wts, conflsize - 1); // (2026-11-20 : their weights and names, see cf_W)
     // memset(proprerefs, 0, proprescnt); // Clear the projectors preset list
     mSL_mfree_all(proprerefs, proprescnt);  // Clear the projectors preset list
     memset(groupdefs, 0, groupdefsize); // Clear the continuum configs
@@ -2556,6 +2566,193 @@ function cf_Blk(n)
     ((n > 0) && (n < conflsize) && (conflist[n] > 0)) ? conflist[n] : 0;
 );
 
+/*
+    (2026-11-20) The library of the configurations : their weights as written, and their names
+    cf_wts[n] : the block 'cfwt' of the configuration n, or 0 (a configuration "invert", or one of an older project : its
+    weights are found again from its gains, see cf_WGains) :
+        [0] n, [1] its global volume (cglvol, "dB" : 1 = 0 dB), [2] the length L of its name, [3 ... 2 + L] its
+        characters, then its sources as in its block, with the weights instead of the gains : s, d, w, d, w, ..., -1,
+        s, ..., -1, then -2
+    The gains of the block of the configuration : g = sqrt(w / max(1, the sum of the weights of its source)) x its volume
+    (cf_Build, as Set_Table, state 10). Written by the configuration files (Set_Table), the module "Conf Editor", the
+    module "Configurations" (copy, renumber, rename, delete) ; saved with the project (record 10, Diffusion-3-
+    Configurations) ; freed by clearArea. Used in @gfx only (@block reads only the blocks of the gains).
+*/
+CF_NMLEN = 40;      // a name : 40 characters at most
+
+function cf_W(n)
+(
+    ((n > 0) && (n < conflsize - 1) && (cf_wts[n] > 0)) ? cf_wts[n] : 0;
+);
+
+// The length of the sources of a block of weights from r (its final -2 excluded)
+function cf_RLen(r)
+local(q)
+(
+    q = r;
+    while (q[0] > 0) ( q += 1; while (q[0] > 0) (q += 2;); q += 1; );
+    q - r;
+);
+
+// The size of the block of weights b
+function cf_WSize(b) ( 3 + b[2] + cf_RLen(b + 3 + b[2]) + 1; );
+
+// The name of the configuration n into the string s (empty : none) ; returns s
+function cf_Name(n, s)
+local(b, k)
+(
+    strcpy(s, "");
+    ((b = cf_W(n)) > 0) ? (
+        k = 0; loop(min(CF_NMLEN, b[2]), sprintf(#cf_ch, "%c", b[3 + k]); strcat(s, #cf_ch); k += 1;);
+    );
+    s;
+);
+
+// The weights of the configuration n forgotten
+function cf_FreeW(n)
+(
+    ((n > 0) && (n < conflsize - 1) && (cf_wts[n] > 0)) ? (mSL_Dyn_Free(cf_wts[n]); cf_wts[n] = 0;);
+);
+
+// A new block of weights for the configuration n : its volume vol, its name nm (a string ; 0 : none ; the quotes become
+// ', they would end the name in an export, | becomes /, it would cut a menu), its sources in src[0 ... len - 1] (s, d, w,
+// ..., -1, ... : the final -2 is added) ; it replaces the former one ; returns it (0 : no memory, the former one stays)
+function cf_NewW(n, vol, nm, src, len)
+local(b, l, k, c)
+(
+    l = (nm != 0) ? min(CF_NMLEN, strlen(nm)) : 0;
+    b = ((n > 0) && (n < conflsize - 1)) ? mSL_Dyn_Alloc(3 + l + max(0, len) + 1, 'cfwt', 0) : 0;
+    (b > 0) ? (
+        b[0] = n; b[1] = vol; b[2] = l;
+        k = 0; loop(l, c = str_getchar(nm, k, 'cu'); b[3 + k] = (c === '"') ? 39 : (c === '|') ? '/' : (c < 32) ? 32 : c; k += 1;);
+        (len > 0) ? memcpy(b + 3 + l, src, len);
+        b[3 + l + max(0, len)] = -2;
+        cf_FreeW(n);
+        cf_wts[n] = b;
+    );
+    b;
+);
+
+// The weights of the configuration n copied as those of m (none : m has none)
+function cf_CopyW(n, m)
+local(b, c, sz)
+(
+    ((b = cf_W(n)) > 0) ? (
+        sz = cf_WSize(b);
+        c = ((m > 0) && (m < conflsize - 1)) ? mSL_Dyn_Alloc(sz, 'cfwt', 0) : 0;
+        (c > 0) ? (memcpy(c, b, sz); c[0] = m; cf_FreeW(m); cf_wts[m] = c;);
+    ) : cf_FreeW(m);
+);
+
+// The weights of the configuration n found again from the gains of its block, when it has none ("invert", or a
+// configuration of a project older than 2026-11-20) : the volume v = the largest root of the sum of the squares of the
+// gains of one of its sources, the weights w = (g / v)^2 (cf_Build gives the same gains back : the sum of the weights of
+// each source is 1 at most) ; a source whose sum is 1 (normalized) : its weights multiplied so that the smallest one is 1,
+// those near an integer rounded (the same gains : "1 > 1 3, 2" gives 3 and 1 again) ; a new block of weights, without
+// name ; returns it (its block of weights if it has one ; 0 : not defined, or no memory)
+function cf_WGains(n)
+local(b, q, p, s, v, k, m, w, len)
+(
+    ((b = cf_W(n)) <= 0) ? (
+        ((n > 0) && (n < conflsize - 1) && ((q = conflist[n]) > 0)) ? (
+            // the volume
+            v = 0; p = q + 1;
+            while (p[0] > 0) (
+                p += 1; s = 0;
+                while (p[0] > 0) ( s += sqr(p[1]); p += 2; );
+                v = max(v, sqrt(s));
+                p += 1;
+            );
+            (v <= 0) ? (v = 1);
+            // the sources, their weights, into tmpwork (as Set_Table : see tmpwasize)
+            len = cf_RLen(q + 1);
+            (len <= tmpwasize) ? (
+                memcpy(tmpwork, q + 1, len);
+                p = tmpwork;
+                while (p[0] > 0) (
+                    p += 1; k = p; s = 0; m = 10^30;
+                    while (k[0] > 0) ( k[1] = sqr(k[1] / v); s += k[1]; (k[1] > 0) ? (m = min(m, k[1])); k += 2; );
+                    ((s > 0.999) && (m < 10^29)) ? (
+                        k = p;
+                        while (k[0] > 0) (
+                            w = k[1] / m;
+                            (abs(w - floor(w + 0.5)) < 0.001) ? (w = floor(w + 0.5));
+                            k[1] = w; k += 2;
+                        );
+                    );
+                    while (p[0] > 0) (p += 2;);
+                    p += 1;
+                );
+                b = cf_NewW(n, v, 0, tmpwork, len);
+            );
+        );
+    );
+    b;
+);
+
+// The block of the gains of the configuration n built from its weights wb (as Set_Table, state 10 : for each source,
+// the gains sqrt(w / max(1, the sum of its weights)) x the volume) ; returns it (0 : no memory) ; conflist unchanged
+function cf_Build(n, wb)
+local(r, len, b, q, p, sum, v)
+(
+    r = wb + 3 + wb[2];
+    len = cf_RLen(r);
+    b = mSL_Dyn_Alloc(1 + len + 2, 'conf', 0);
+    (b > 0) ? (
+        b[0] = n;
+        memcpy(b + 1, r, len);
+        b[1 + len] = -2; b[2 + len] = endmark;
+        v = wb[1];
+        q = b + 1;
+        while (q[0] > 0) (
+            q += 1; p = q; sum = 0;
+            while (p[0] > 0) ( sum += max(0, p[1]); p += 2; );
+            sum = max(1, sum);
+            while (q[0] > 0) ( q[1] = sqrt(max(0, q[1]) / sum) * v; q += 2; );
+            q += 1;
+        );
+    );
+    b;
+);
+
+// A block of gains no more in conflist, freed 3 s later (@gfx : cf_RetireGfx) : @block may still be reading it (a
+// projector, the history, the Hyper Slider) ; the ring full, its oldest block is freed at once
+function cf_Retire(o)
+(
+    (cf_ret[cf_retW] > 0) ? mSL_Dyn_Free(cf_ret[cf_retW]);
+    cf_ret[cf_retW] = o; cf_retT[cf_retW] = time_precise() + 3;
+    cf_retW = (cf_retW + 1) % CF_NRET;
+);
+function cf_RetireGfx()
+local(k, t)
+(
+    t = time_precise();
+    k = 0;
+    loop(CF_NRET,
+        ((cf_ret[k] > 0) && (t >= cf_retT[k])) ? (mSL_Dyn_Free(cf_ret[k]); cf_ret[k] = 0;);
+        k += 1;
+    );
+);
+
+// The configuration n defined, or replaced, by the block of gains b (@gfx) : the projectors that used the former block
+// take the new one by its number (the loop of the projectors : prx_iochg, -4, as after clearArea), the history follows,
+// the Hyper Slider builds its sequences again ; the former block is retired (cf_Retire)
+function cf_Replace(n, b)
+local(o, pp, k)
+(
+    o = conflist[n];
+    conflist[n] = b;
+    (o > 0) ? (
+        pp = projectors;
+        loop(akousmax, (pp[prx_ptrconf] === o) ? (pp[prx_ptrconf] = -4); pp += projsize;);
+        k = 0; loop(historysiz, (historywa[k] === o) ? (historywa[k] = b); k += 1;);
+        cf_Retire(o);
+    );
+    prvchcnf = -1; // (the cache of confload : a new block)
+    cf_reload = 1; // (the projectors load their configurations again : cf_IOBlock)
+    hypchange = 1;
+);
+
 // The outputs of the projector pro for the blur : those of its diffusion of the outputs (in cf_outl : count, 1/sqrt,
 // channels 0 ...), or all the outputs (prx_blout 0)
 function cf_OutList(pro)
@@ -2750,6 +2947,10 @@ function pns_Host_Modules(itdsp)
     // are saved)
     blockConsole = (itdsp += 1);
     blockDispNames[blockConsole] = "mSL Console";
+    // the editor of a configuration as a matrix (2026-11-20, see Diffusion-3-ConfEditor ; after "mSL Console" : the
+    // numbers of the modules are saved)
+    blockConfEd = (itdsp += 1);
+    blockDispNames[blockConfEd] = "Conf Editor";
     itdsp;
 );
 
@@ -2780,6 +2981,12 @@ memoryBox2[19] = blockMemory2;
 <? include("CMGS-libs/Diffusion-3-Trajectories.jsfx-inc"); ?>
 // The configuration saved with the project, the module "Configurations"
 <? include("CMGS-libs/Diffusion-3-Configurations.jsfx-inc"); ?>
+// The module "Conf Editor" (2026-11-20) : a configuration edited as a matrix (its weights), saved into the library of the
+// configurations (cf_W)
+<? include("CMGS-libs/Diffusion-3-ConfEditor.jsfx-inc"); ?>
+// The Live screen saved with the project and the presets (2026-11-20) : the box of the speakers, the clock, the boxes
+// shown (part 1 : @serialize, lv_Serialize ; part 2 in @gfx : the restore)
+<? lvs_part = 1; include("CMGS-libs/Diffusion-3-LiveSave.jsfx-inc"); ?>
 // The modules "VU meter A" ... "D" and "Limiter A" ... "D" : the engines of the plugins Multichannel_VU_meter and
 // SmoothMultiLimiter (GM-Meters) on the inputs or on the outputs (GM-Meters-Modules ; static memory)
 fm_HasIn = 1;
@@ -5327,8 +5534,13 @@ sx_Serialize();
 // projects end before it)
 sp_TpSerialize();
 // The global settings of the module "Global" and the current projector (2026-11-20, see Diffusion-3-Projectors ; until
-// then native sliders ; the last one : the older projects end before it)
+// then native sliders)
 gl_Serialize();
+// The module "Conf Editor" (2026-11-20, see Diffusion-3-ConfEditor ; the older projects end before it)
+ce_Serialize();
+// The Live screen : the box of the speakers, the clock, the boxes shown (2026-11-20, see Diffusion-3-LiveSave ; the last
+// one : the older projects end before it ; read : restored by @gfx when the Live screen is shown)
+lv_Serialize();
 
 
 @gfx
@@ -6414,6 +6626,13 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
                 (xx === '?') ? (
                     sx_SetView((sx_view + 1) % 4); // front, side, top, perspective
                 ) :
+                (xx === 'a') ? (
+                    s3d_basis(); s3d_LevelStart(5); // (2026-11-21) the levelling (as in the 3D views of the modules)
+                    ui_GFXdoNow |= 4;
+                ) :
+                (xx === '>') ? (
+                    s3d_PresSet((s3d_PresCur() + 1) % 6); // (2026-11-21) the presentation of the room
+                ) :
                 (xx === '$') ? (
                     s3d_opt = s3d_opt ~ s3d_oLevels; // the levels of the outputs
                 ) :
@@ -6891,7 +7110,7 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
 
 
         (mh_state === 5) ? (
-            // the camera of the HP box (Shift + left drag) : orbit (horizontal : azimuth, vertical : elevation, as
+            // the camera of the HP box (Shift + left drag) : orbit (2026-11-21 : as held in the hand, s3d_orbit, as
             // s3d_mouse) ; with Alt : the distance (up : closer) ; Shift and Alt may change during the drag
             (kl === 0) ? (
                 mh_state = 0; // left button released
@@ -6901,8 +7120,7 @@ local (ms_x, ms_y, mx, my, mw, mh, cycle, boxnb, bxn, box, ptpos, bxpos, val, i,
                     kopt ? (
                         s3d_dist = max(1.8, min(12, s3d_dist * exp(dy * 0.005)));
                     ) : (
-                        s3d_az -= dx * 0.008;
-                        s3d_el += dy * 0.008;
+                        s3d_orbit(dx, dy);
                         sx_view = sx_ViewOf(); // (front, side, top or perspective : key '?' goes on from it)
                     );
                     ui_GFXdoNow |= 4;
@@ -7022,6 +7240,9 @@ local (lpp, pval, upp, tladd, bval, bxn, box, del)
     gr_check();
 );
 
+// The Live screen saved with the project : its restore (lv_Frame, lv_Apply, lv_CamCopy ; see Diffusion-3-LiveSave)
+<? lvs_part = 2; include("CMGS-libs/Diffusion-3-LiveSave.jsfx-inc"); ?>
+
 //====== TABS AND PANES : HOST FUNCTIONS (see mSL_Panes.jsfx-inc) ======
 function do_GenericTabStart()
 (
@@ -7038,8 +7259,10 @@ function pns_LiveDisplay()
 (
     ui_Xtime_period = 0.0625; // refresh screen quite often
     colored_screen();
+    lv_Frame();         // a restore read by @serialize (see Diffusion-3-LiveSave)
     mouse_hover();      // the keys of the box under the mouse, then
     do_live_actions();  // the keys of the Live screen
+    lv_CamCopy();       // the camera of the box of the speakers, for @serialize
 );
 
 function show_Module(igb)
@@ -7091,6 +7314,9 @@ function show_Module(igb)
     ) :
     (igb === blockConsole) ? (
         show_Console(blockConsole);
+    ) :
+    (igb === blockConfEd) ? (
+        show_ConfEditor_Pad(blockConfEd);
     );
 );
 
@@ -7124,6 +7350,9 @@ fm_Gfx(actchin, actchout);
 // the project marked as changed after the requests of the modules, the generic sliders of an older project set to 0
 // (see Diffusion-3-Projectors)
 gl_Gfx();
+// the module "Conf Editor" : a load asked by the module "Configurations" ; the blocks of configurations replaced, freed
+// 3 s later (see Diffusion-3-ConfEditor, cf_Retire)
+ce_Frame();
 
 
 //====== GRAPHIC EXECUTION START ======

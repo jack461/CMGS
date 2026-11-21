@@ -25,7 +25,7 @@
         8 Restart           the motion from the start of the path (both clics)
     line 2, the motion :
         9 ... 12 A, B, C, D next trajectory                 the trajectories (Space 3D, Edit A ... D, library) ;
-                            (Alt : its placement starts ;   its placement, its reset ; a glide to it
+                            (Alt : its placement starts ;   its placement, its reset, normalize it ; a glide to it
                             during it : the end ; Cmd : a
                             glide to it, see sx_GlideTo)
        13 Mix               Shift : 0 % (trajectory A)      the chain (A B, A B C, A B C D), 0 ... 100 % along it
@@ -50,7 +50,7 @@
        18, 19, 20 X, Y, Z   Shift : 0                       the displacement of its barycentre (-2 ... 2)
        21 Size              Shift : x 1                     its size (around its barycentre)
        22, 23, 24 Incl.     Shift : 0                       its inclinations around x, y, z (-360 ... 360 degrees)
-       25 Reset A           the placement back to none      reset, copy the placement of another trajectory
+       25 Reset A           the placement back to none      reset, normalize, copy the placement of another trajectory
        26 Placing A         the end of the placement        the end, place another trajectory
     Reach, Level, Mix, Glide, Anim, Radius, Spread, Size, Yaw, Pitch, Roll : left drag = a potentiometer (ui_jdrag, see
     mSL_ui_Pads : horizontal for the whole range, in 300 pixels, 480 for Anim (-240 ... 240, a drag starts the
@@ -67,15 +67,24 @@
     The placements (2026-11-19, sp_tp of Diffusion-3-Spatial) : each trajectory A, B, C, D of a projector has its own (the
     displacement of its barycentre, its size, its inclinations around x, y, z), kept when its kind changes ; the mix
     interpolates them (the same kind in A and B : the trajectory turns, moves, grows along the mix). During a placement,
-    the view shows the trajectory placed alone (gold), the Shift / Cmd / Alt drags place it (Alt : displacement in the
-    plane of the screen ; Shift : size ; Cmd : inclinations around z (horizontal) and x (vertical) ; Cmd + Alt : around
-    y), the sources keep moving along the path of the projector.
+    the view shows the trajectory placed alone (gold) and its pivot (its barycentre, a red cross, 2026-11-21), the
+    Shift / Cmd / Alt drags place it, following the screen whatever the camera and the transform of the whole path
+    (2026-11-21 : Alt, displacement in the plane of the screen ; Shift + Alt, in depth ; Shift, size ; Cmd, turned as held
+    in the hand : horizontal around the vertical of the screen, vertical around its horizontal, the three inclinations
+    together ; Cmd + Alt, turned in the plane of the screen), the sources keep moving along the path of the projector.
     In the view : Cmd + Shift + horizontal drag = mix (continuous), Cmd + Alt + horizontal drag = speed (-240 ... 240) ;
-    (Mouse : Scene) the trajectory (as S, R, T in GRM Spaces) : Shift + drag = size, Cmd + drag = rotation,
-    Alt + drag = position ; (Mouse : Sources) the group : Shift + drag = size, Cmd + drag = yaw / pitch, Alt + drag = roll
-    In the view : left drag = rotate, wheel = zoom, clic = select, right clic = options ;
-    key 'h' : the gains and levels as balls, or as crosses and halos (s3d_style, as in the live screen ; 2026-11-19 :
-    crosses and halos at the start, the views do not save it).
+    (Mouse : Scene) the trajectory (as S, R, T in GRM Spaces) : Shift + drag = size, Cmd + drag = rotation (the side
+    near the eye follows the mouse), Alt + drag = position, Shift + Alt + vertical drag = in depth (up = farther) ;
+    (Mouse : Sources) the group : Shift + drag = size, Cmd + drag = yaw / pitch, Alt + drag = roll
+    In the view : left drag = rotate (2026-11-21 : as held in the hand, the room may lean), wheel = zoom, clic = select,
+    right clic = options ; the cursor of the mouse shows what a drag does (ui_cursor_zone8, for each combination of
+    Shift, Cmd and Alt).
+    Keys over the view : h the gains and levels as balls, or as crosses and halos (s3d_style, as in the live screen ;
+    2026-11-19 : crosses and halos at the start, the views do not save it) ; (2026-11-21, as in all the 3D views : Edit
+    A ... D, Conf Editor) > the presentation of the room (the far faces, the planes, the axes, the plane z at the height
+    of the trajectory, polar, nothing), v the next view (front, side, top, 3D), a the levelling (the face of the room
+    nearest to the bottom of the screen made horizontal), < the mouse Scene or Sources ; x the trajectory shown or
+    hidden, w the limit to the room.
 
     The speakers are always those of the configuration of Diffusion (HP_Positions, in the cube [-1, 1] by the frame of
     hppos : hp_Cube ; no frame : the largest coordinate becomes 1) ; the gains shown : the power that the projector sends to each speaker (the largest one is 1),
@@ -216,7 +225,7 @@ i__k = 0; loop(pad_S3D_Siz,
     The state of each view (sv_m + v * SV_S) : the camera, the mouse, the display options, the image ; sv_Swap exchanges
     it with the globals of Space 3D (before and after the view : the globals stay those of the HP box)
 */
-SV_S = 40;
+SV_S = 44;                  // (2026-11-21 : 40 -> 44, the roll of the camera and the presentation of the room)
 sv_m = make_array(SV_NV * SV_S);
 
 function sv_Swap(v)
@@ -263,6 +272,8 @@ local(m, t)
     t = m[37]; m[37] = s3d_changed; s3d_changed = t;
     t = m[38]; m[38] = s3d_tchanged; s3d_tchanged = t;
     t = m[39]; m[39] = sx_plc; sx_plc = t;
+    t = m[40]; m[40] = s3d_roll; s3d_roll = t;
+    t = m[41]; m[41] = s3d_pres; s3d_pres = t;
 );
 
 // the state of each view at the start : the camera of the 3D view, the options of s3d_init, its own image (the other
@@ -276,6 +287,7 @@ loop(SV_NV,
     i__m[33] = (i__k === 0) ? SX_IMG : SV_IMG1 + i__k - 1;
     i__m[34] = i__m[35] = 0; i__m[36] = 0; i__m[37] = i__m[38] = 0;
     i__m[39] = -1; // (no placement)
+    i__m[40] = 0; i__m[41] = 0; // (no roll ; the presentation : the far faces of the room)
     i__k += 1;
 );
 
@@ -398,6 +410,7 @@ local(n, k)
 // the view corresponding to the camera
 function sx_ViewOf()
 (
+    (s3d_roll != 0) ? 3 : // (2026-11-21 : a camera turned around the line of sight, see s3d_orbit)
     ((s3d_el > 1.5) && (s3d_az === 0)) ? 2 :
     ((s3d_el === 0) && (s3d_az === 0)) ? 0 :
     ((s3d_el === 0) && (abs(s3d_az - $pi / 2) < 0.0001)) ? 1 : 3;
@@ -514,6 +527,7 @@ local(k, e, g, i, n)
 function sx_SetView(v)
 (
     sx_view = v;
+    s3d_roll = 0;
     (v === 0) ? (s3d_az = 0; s3d_el = 0;) :
     (v === 1) ? (s3d_az = $pi / 2; s3d_el = 0;) :
     (v === 2) ? (s3d_az = 0; s3d_el = 1.55;) :
@@ -651,10 +665,11 @@ function sx_TrjSet(c, k)
 /*
     The placement of a trajectory (2026-11-19 ; its 7 values : see sp_tp, Diffusion-3-Spatial) : Alt + clic on its cell
     A, B, C, D (or its menu) starts it, a clic on the same cell (or on the cell 23 "Placing") ends it ; meanwhile the
-    cell is gold, the line 3 of the pad shows the 7 values, the view shows this trajectory alone (gold) and its
-    Shift / Cmd / Alt drags place it (s3d_plmode : Alt = the displacement in the plane of the screen, Shift = the size,
-    Cmd = the inclinations around z (horizontal) and x (vertical), Cmd + Alt = around y). The values change at once
-    (the motion follows) and stay with the cell.
+    cell is gold, the line 3 of the pad shows the 7 values, the view shows this trajectory alone (gold), its pivot (a
+    red cross) and its Shift / Cmd / Alt drags place it (s3d_plmode : Alt = the displacement in the plane of the screen,
+    Shift + Alt = in depth, Shift = the size, Cmd = turned as held in the hand, Cmd + Alt = turned in the plane of the
+    screen ; 2026-11-21 : they follow the screen, see s3d_plvec, s3d_plrot). The values change at once (the motion
+    follows) and stay with the cell.
 */
 // the placement of the trajectory t (0 ... 3) of the projector of the view
 function sx_TpQ(t) ( sp_TpQ(sx_curPrj - 1, t); );
@@ -670,6 +685,9 @@ local(q)
     s3d_tsc = q[sp_tpS]; s3d_trx = q[sp_tpRx]; s3d_try = q[sp_tpRy]; s3d_trz = q[sp_tpRz];
     s3d_ttx = q[sp_tpX]; s3d_tty = q[sp_tpY]; s3d_ttz = q[sp_tpZ];
     s3d_tchanged = 0;
+    // (2026-11-21) the transform of the whole path, the parent of the placement (s3d_plvec, s3d_plrot : the drags follow
+    // the screen)
+    s3d_pgs = sx_gsv[0]; s3d_pgrx = sx_gsv[1]; s3d_pgrz = sx_gsv[2];
 );
 // ... and back into the placement (limited ; changed : the path built again) ; the transform of the whole path again
 function sx_PlcOut()
@@ -737,6 +755,47 @@ local(i)
 (
     i = 0; loop(4, ((t < 0) || (t === i)) ? sp_TpReset(pk, i); i += 1;);
     sp_pSeq[pk] += 1;
+);
+
+// (2026-11-20) The placement of the trajectory t (0 ... 3) of the projector pk normalized : the barycentre of its points
+// (their mean) at the center of the cube, the size that brings its largest coordinate to 1 (the trajectory fits the
+// cube [-1, 1] and touches it), its inclinations kept. A point placed : c + d + s R (p - c) (c : the barycentre of the
+// shape, sp_Native ; d : the displacement ; s : the size ; R : the inclinations, sp_TpBlend), so with m the mean of
+// p - c : d = - c - s R m, s = 1 / the largest coordinate of R (p - c - m). The transform of the whole path (cell Reset :
+// "Reset the trajectory") applies after, as for any placement. None : nothing ; a single point : centered only.
+// Returns the count of points.
+function sx_PlNorm(pk, t)
+local(q, n, i, p, cx, cy, cz, mx, my, mz, ux, uy, uz, e, sz)
+(
+    q = sp_TpQ(pk, t);
+    sp_GSave(); // (sp_Native sets the transform of the whole path to the identity)
+    n = sp_Native(sx_TrjGet(sxc_A + t), sx_trjr);
+    sp_GRestore();
+    (n > 0) ? (
+        cx = sp_ncx; cy = sp_ncy; cz = sp_ncz;
+        mx = my = mz = 0;
+        i = 0; loop(n, p = s3d_trj + 3 * i; mx += p[0] - cx; my += p[1] - cy; mz += p[2] - cz; i += 1;);
+        mx /= n; my /= n; mz /= n;
+        memset(sp_wsl, 0, 4); sp_wsl[t] = 1;
+        sp_TpBlend(sp_TpQ(pk, 0), sp_wsl); // (sp_rm : its inclinations)
+        e = 0;
+        i = 0;
+        loop(n,
+            p = s3d_trj + 3 * i;
+            ux = p[0] - cx - mx; uy = p[1] - cy - my; uz = p[2] - cz - mz;
+            e = max(e, abs(sp_rm[0] * ux + sp_rm[1] * uy + sp_rm[2] * uz));
+            e = max(e, abs(sp_rm[3] * ux + sp_rm[4] * uy + sp_rm[5] * uz));
+            e = max(e, abs(sp_rm[6] * ux + sp_rm[7] * uy + sp_rm[8] * uz));
+            i += 1;
+        );
+        sz = (e > 0.000001) ? max(0.05, min(10, 1 / e)) : q[sp_tpS];
+        q[sp_tpS] = sz;
+        q[sp_tpX] = max(-2, min(2, - cx - sz * (sp_rm[0] * mx + sp_rm[1] * my + sp_rm[2] * mz)));
+        q[sp_tpY] = max(-2, min(2, - cy - sz * (sp_rm[3] * mx + sp_rm[4] * my + sp_rm[5] * mz)));
+        q[sp_tpZ] = max(-2, min(2, - cz - sz * (sp_rm[6] * mx + sp_rm[7] * my + sp_rm[8] * mz)));
+        sp_pSeq[pk] += 1;
+    );
+    n;
 );
 
 /*
@@ -1095,19 +1154,21 @@ local(m, k, rc, sh, pk, s, d)
     ((c >= sxc_A) && (c <= sxc_A + 3)) ? (
         // the trajectories A, B, C, D (sx_TrjMenu : the kinds ; C and D : in the chain of the mix, cell Mix) ; 2026-11-19 :
         // Alt + left = the placement of this trajectory starts (or ends) ; left, during its placement : it ends ; Cmd +
-        // left = a glide to this trajectory (sx_GlideTo)
+        // left = a glide to this trajectory (sx_GlideTo) ; 2026-11-20 : the menu normalizes its placement (sx_PlNorm)
         k = c - sxc_A;
         rc ? (
             strcpy(#sx_mnu, ""); sx_tmi = 0;
             sx_TrjMenu(sx_TrjGet(c));
-            sprintf(#sx_it, "||%sPlacement : position, inclinations, size (Alt + clic)|%sReset the placement||Glide to %c (Cmd + clic ; in %.3g s : cell Glide)",
-                (sx_plc === k) ? "!" : "", sp_TpIsId(sp_TpQ(pk, k)) ? "#" : "", 'A' + k, sx_gtime);
+            sprintf(#sx_it, "||%sPlacement : position, inclinations, size (Alt + clic)|%sReset the placement|%sNormalize the placement : the barycentre at the center, the size to fit the cube||Glide to %c (Cmd + clic ; in %.3g s : cell Glide)",
+                (sx_plc === k) ? "!" : "", sp_TpIsId(sp_TpQ(pk, k)) ? "#" : "", (sx_TrjGet(c) === 0) ? "#" : "",
+                'A' + k, sx_gtime);
             strcat(#sx_mnu, #sx_it);
             m = gfx_showmenu(#sx_mnu); uix_menu_end(m > 0);
             ((m >= 1) && (m <= sx_tmi)) ? sx_TrjSet(c, sx_tmap[m - 1]) :
             (m === sx_tmi + 1) ? (sx_plc = (sx_plc === k) ? -1 : k) :
             (m === sx_tmi + 2) ? sx_PlReset(pk, k) :
-            (m === sx_tmi + 3) ? sx_GlideTo(pk, k);
+            (m === sx_tmi + 3) ? sx_PlNorm(pk, k) :
+            (m === sx_tmi + 4) ? sx_GlideTo(pk, k);
         ) : (mouse_cap & 16) ? (
             sx_plc = (sx_plc === k) ? -1 : k;
         ) : (mouse_cap & 4) ? (
@@ -1193,19 +1254,22 @@ local(m, k, rc, sh, pk, s, d)
         );
     ) :
     // line 3 during a placement (2026-11-19) : its values (a drag : sx_Drag ; Shift + left : the reset ; right : a menu) ;
-    // Reset : left = the placement back to none ; right = a menu (reset, copy the placement of another trajectory) ;
+    // Reset : left = the placement back to none ; right = a menu (reset, normalize, copy the placement of another
+    // trajectory) ;
     // Place ("Placing A") : left = the end of the placement ; right = a menu (the end, place another trajectory)
     ((sx_plc >= 0) && (c >= sxc_PX) && (c <= sxc_PRz)) ? (
         rc ? sx_PlSet(c, sx_PlValMenu(c, sx_PlGet(c))) : sh ? sx_PlSet(c, (c === sxc_PS) ? 1 : 0);
     ) :
     ((sx_plc >= 0) && (c === sxc_Reset)) ? (
         rc ? (
-            sprintf(#sx_mnu, "Reset the placement of %c||#Copy the placement of|%sA|%sB|%sC|%sD", 'A' + sx_plc,
+            sprintf(#sx_mnu, "Reset the placement of %c|%sNormalize the placement of %c : the barycentre at the center, the size to fit the cube||#Copy the placement of|%sA|%sB|%sC|%sD",
+                'A' + sx_plc, (sx_TrjGet(sxc_A + sx_plc) === 0) ? "#" : "", 'A' + sx_plc,
                 (sx_plc === 0) ? "#" : "", (sx_plc === 1) ? "#" : "", (sx_plc === 2) ? "#" : "", (sx_plc === 3) ? "#" : "");
             m = gfx_showmenu(#sx_mnu); uix_menu_end(m > 0);
             (m === 1) ? sx_PlReset(pk, sx_plc) :
-            ((m >= 3) && (m <= 6) && (m - 3 !== sx_plc)) ? (
-                memcpy(sp_TpQ(pk, sx_plc), sp_TpQ(pk, m - 3), SP_TPW);
+            (m === 2) ? sx_PlNorm(pk, sx_plc) :
+            ((m >= 4) && (m <= 7) && (m - 4 !== sx_plc)) ? (
+                memcpy(sp_TpQ(pk, sx_plc), sp_TpQ(pk, m - 4), SP_TPW);
                 sp_pSeq[pk] += 1;
             );
         ) : (
@@ -1322,6 +1386,7 @@ local(h1, hv, hneed, zz, zzmi, x, y, w, h, dr, p, pk, s, pp, sp, i, q, g, st)
             control_group(#sx_title);
             ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
             sv_Swap(v);         // the camera, the mouse and the display options of the view
+            s3d_camId = v + 1;  // (its levelling, s3d_LevelStep : 1 ... 4 ; the HP box of the live screen : 5)
             sx_LoadP(pk);       // the settings of its projector
 
             ui_split_top(h1);
@@ -1437,12 +1502,28 @@ local(h1, hv, hneed, zz, zzmi, x, y, w, h, dr, p, pk, s, pp, sp, i, q, g, st)
             // the view
             ui_pad(2, 3, 2, 2);
             x = ui_left_retina(); y = ui_top_retina(); w = ui_width_retina(); h = ui_height_retina(); // (screen pixels)
-            GM_key_take_in('h') ? (s3d_style = !s3d_style; ui_GFXdoNow |= 4;); // balls, or crosses and halos
+            // the keys over the view (2026-11-21 : as in all the 3D views, the editors Edit A ... D, the Conf Editor : > the
+            // presentation of the room, v the next view, a the levelling, < the mode of the mouse ; here also x the
+            // trajectory shown, w the limit to the room, h the balls or the crosses and halos)
+            GM_key_take_in('h') ? (s3d_style = !s3d_style; ui_GFXdoNow |= 4;) :
+            GM_key_take_in('<') ? (s3d_mtarget = !s3d_mtarget; ui_GFXdoNow |= 4;) :
+            GM_key_take_in('>') ? (s3d_PresSet((s3d_PresCur() + 1) % 6); ui_GFXdoNow |= 4;) :
+            GM_key_take_in('x') ? (s3d_opt = s3d_opt ~ s3d_oTraj; ui_GFXdoNow |= 4;) :
+            GM_key_take_in('w') ? (s3d_opt = s3d_opt ~ s3d_oClamp; ui_GFXdoNow |= 4;) :
+            GM_key_take_in('v') ? (sx_SetView((sx_view + 1) % 4); ui_GFXdoNow |= 4;) :
+            GM_key_take_in('a') ? (s3d_level(); ui_GFXdoNow |= 4;);
             s3d_hostcap = 1; s3d_mcap = uix_mouse_cap(); // (the buttons without the "ghost" ones, see ui-lib)
             // (a placement : the Shift / Cmd / Alt drags place the trajectory, see sx_PlcIn ; drawn in gold)
             s3d_plmode = (sx_plc >= 0);
             s3d_plmode ? sx_PlcIn();
             s3d_mouse(x, y, w, h, uix_scroll_y) ? (uix_scroll_y = 0; ui_GFXdoNow |= 4;);
+            (s3d_lvId === v + 1) ? ui_GFXdoNow |= 4; // (the levelling going on)
+            // (2026-11-21) the cursor of a drag (s3d_dmode) : the orbit, a fist ; the trajectory turned (a placement, its
+            // inclinations ; the group of sources, its yaw and pitch), two fists ; a translation, 4 arrows ; in depth,
+            // up - down ; a size, a fist up - down ; the speed, the mix, the roll of the group, left - right
+            (s3d_dmode > 0) ? ui_cursor_drag((s3d_dmode === 1) ? 2 : ((s3d_dmode === 3) || (s3d_dmode === 8)) ? 11 :
+                (s3d_dmode === 2) ? 8 : (s3d_dmode === 9) ? 12 : (s3d_dmode === 4) ? 9 :
+                (s3d_dmode === 7) ? ((mouse_cap & 8) ? 9 : (mouse_cap & 4) ? 11 : 5) : 5);
             s3d_plmode ? (sx_PlcOut(); sx_PlLabel(););
             s3d_menued ? uix_menu_end(s3d_mres > 0);
             s3d_changed ? (s3d_changed = 0; sx_view = sx_ViewOf(););
@@ -1456,10 +1537,24 @@ local(h1, hv, hneed, zz, zzmi, x, y, w, h, dr, p, pk, s, pp, sp, i, q, g, st)
             sx_glNow = 0;
             sx_StoreP(pk);      // the settings, back to the projector
             sx_Show(pk);
+            // (2026-11-21) the height of the plane z of the presentations : that of the barycentre of the trajectory shown
+            // (0 without) ; a placement : its pivot (the barycentre placed, sp_MkBlend), a red cross
+            s3d_presZ = 0;
+            (s3d_ntrj > 0) ? (i = 0; loop(s3d_ntrj, s3d_presZ += s3d_trj[3 * i + 2]; i += 1;); s3d_presZ /= s3d_ntrj;);
+            s3d_pvOn = s3d_plmode; s3d_pvx = sp_pvx; s3d_pvy = sp_pvy; s3d_pvz = sp_pvz;
             s3d_draw(x, y, w, h);
+            // (2026-11-21) the cursors of the view, a kind for each combination of Shift, Cmd and Alt (as s3d_mouse) : an
+            // open hand (the orbit) ; Shift, a fist up - down (the size) ; Cmd, two fists (the trajectory, a placement,
+            // the group of sources turned) ; Alt, 4 arrows (it moves ; the group of sources : its roll, left - right) ;
+            // Shift + Alt, up - down (in depth ; the group of sources : its size) ; Cmd + Shift (the mix), Cmd + Alt (the
+            // speed), left - right ; a placement : Cmd + Alt, two fists (turned in the plane of the screen)
+            s3d_plmode ? ui_cursor_zone8(x, y, w, h, 1, 9, 11, 5, 8, 12, 11, 11) :
+            s3d_mtarget ? ui_cursor_zone8(x, y, w, h, 1, 9, 11, 5, 5, 9, 5, 5) :
+                          ui_cursor_zone8(x, y, w, h, 1, 9, 11, 5, 8, 12, 5, 5);
             s3d_plmode = 0;
             (sx_anim || (sp_fitP >= 0) || !sp || sp_glOn[pk]) ? ui_GFXdoNow |= 4; // keep the animation going (direct : the morphings ; a glide)
             sv_Swap(v);
+            s3d_camId = 5; // (the globals : those of the HP box)
         ui_pop();
     );
 );

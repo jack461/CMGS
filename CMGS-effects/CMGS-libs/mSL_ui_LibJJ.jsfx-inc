@@ -625,6 +625,81 @@ ui_jcolor_border = -1;
 ui_jcolor_error = 0xC62D42;
 ui_jcolor_active = 0x119358;
 
+/*
+    (2026-11-21) The cursor of the mouse : zones declared while a frame is drawn (ui_cursor_zone8, ui_cursor_zone : screen
+    pixels, as mouse_x and mouse_y ; the last one declared wins ; a kind for each combination of the modifiers held :
+    Shift, Cmd, Alt), a kind during a drag (ui_cursor_drag : until the buttons are released) ; chosen at each run of
+    @gfx, even without a new frame (the mouse moved alone draws no frame : the zones of the last frame drawn), given to
+    gfx_setcursor when it changes (REAPER keeps it for the window). The kinds (uix_cursor_set) : 0 the arrow, 1 an open
+    hand (a view to move), 2 a fist (it moves), 3 a brush (Sow), 4 an eraser, 5 a hand with arrows left - right (a value
+    dragged left - right), 6 a border moved left - right, 7 a border moved up - down, 8 four arrows (a place moved), 9 a
+    fist with arrows up - down (a value dragged up - down), 10 a hand with + (a point added), 11 two fists (an object
+    turned), 12 arrows up - down (in depth). Their array : ui_lib_JJ_GUI_init (uix_cz ; 0 : none ; UIX_CZS words per
+    zone : its rectangle, then its 8 kinds).
+    gfx_setcursor(id) in a JSFX (tested 2026-11-21) : the names are ignored (those of the .cur files, those of the REAPER
+    themes, with the id 0 or not) ; an id : a system cursor (32512 arrow, 32649 hand, 32646 4 arrows, 32644 left - right,
+    32645 up - down ; 32515 cross : none on macOS), or a cursor of REAPER (its resource : SWELL_Register_Cursor_Resource in
+    the binary of REAPER 7, read 2026-11-21 ; e.g. 185 pencil, 189 sm_up_down, 429 hand, 430 alt-drag-fist-left, 450
+    size-border, 453 alt-border-fists, 472 eraser, 473 brush, 515 touch_select, 533 extmix_resize, 613 vertical_drag,
+    614 horizontal_drag, 1009 zoom).
+*/
+UIX_CZMAX = 1024; UIX_CZS = 12; uix_cz = 0; uix_czN = 0; uix_czDrag = 0; uix_czCur = -1;
+
+// A zone x, y, w, h (screen pixels) : its kind for each combination of the modifiers held : k0 none, k1 Shift, k2 Cmd,
+// k3 Shift + Cmd, k4 Alt, k5 Shift + Alt, k6 Cmd + Alt, k7 Shift + Cmd + Alt (-1 : k0)
+function ui_cursor_zone8(x, y, w, h, k0, k1, k2, k3, k4, k5, k6, k7)
+local(z)
+(
+    ((uix_cz > 0) && (uix_czN < UIX_CZMAX) && (w > 0) && (h > 0)) ? (
+        z = uix_cz + UIX_CZS * uix_czN;
+        z[0] = x; z[1] = y; z[2] = x + w; z[3] = y + h;
+        z[4] = k0; z[5] = (k1 < 0) ? k0 : k1; z[6] = (k2 < 0) ? k0 : k2; z[7] = (k3 < 0) ? k0 : k3;
+        z[8] = (k4 < 0) ? k0 : k4; z[9] = (k5 < 0) ? k0 : k5; z[10] = (k6 < 0) ? k0 : k6; z[11] = (k7 < 0) ? k0 : k7;
+        uix_czN += 1;
+    );
+);
+
+// A zone : the kind k, ks with Shift alone (-1 : k ; the other combinations : k)
+function ui_cursor_zone(x, y, w, h, k, ks) ( ui_cursor_zone8(x, y, w, h, k, ks, k, k, k, k, k, k); );
+
+// The kind k during a drag (called while it goes on ; forgotten when the buttons are released)
+function ui_cursor_drag(k) ( uix_czDrag = k; );
+
+function uix_cursor_set(k)
+(
+    (k === 1) ? gfx_setcursor(429) :    // (hand : open)
+    (k === 2) ? gfx_setcursor(430) :    // (alt-drag-fist-left : a fist)
+    (k === 3) ? gfx_setcursor(473) :    // (brush)
+    (k === 4) ? gfx_setcursor(472) :    // (eraser)
+    (k === 5) ? gfx_setcursor(614) :    // (horizontal_drag)
+    (k === 8) ? gfx_setcursor(32646) :
+    (k === 9) ? gfx_setcursor(613) :    // (vertical_drag)
+    (k === 10) ? gfx_setcursor(515) :   // (touch_select)
+    (k === 11) ? gfx_setcursor(453) :   // (alt-border-fists : two fists)
+    (k === 12) ? gfx_setcursor(189) :   // (sm_up_down)
+    (k === 6) ? gfx_setcursor(32644) :
+    (k === 7) ? gfx_setcursor(32645) :
+    gfx_setcursor(32512);
+);
+
+// The cursor of this run of @gfx (must_do_gfx) : the drag, else the zone under the mouse (the last one declared ; the
+// kind of the modifiers held), else the arrow
+function uix_cursor_frame()
+local(k, i, z, f, m)
+(
+    !(mouse_cap & 67) ? (uix_czDrag = 0);
+    k = uix_czDrag; f = (k > 0);
+    // (the word of the zone : 4 + Shift 1 + Cmd 2 + Alt 4)
+    m = 4 + ((mouse_cap & 8) ? 1 : 0) + ((mouse_cap & 4) ? 2 : 0) + ((mouse_cap & 16) ? 4 : 0);
+    i = uix_czN - 1;
+    while (!f && (i >= 0)) (
+        z = uix_cz + UIX_CZS * i;
+        ((mouse_x >= z[0]) && (mouse_x < z[2]) && (mouse_y >= z[1]) && (mouse_y < z[3])) ? (k = z[m]; f = 1;);
+        i -= 1;
+    );
+    (k !== uix_czCur) ? (uix_cursor_set(k); uix_czCur = k;);
+);
+
 // Should we execute now the graphic part of the plug-in ?
 //   ui_XFlags explains the reasons why we should do it
 //
@@ -633,6 +708,7 @@ local (R, prev_mouse_buttons, frame_count, prev_unix_time, prev_gfx_w, prev_gfx_
 (
     // Get our start time
     ui_j_UnixTime = time_precise();
+    uix_cursor_frame(); // (2026-11-21) the cursor of the mouse : the zones of the last frame drawn
     // local variables keep previous status of mouse buttons, unix time, plug-in size, etc.
     (ui_GFXdoNow != 0) ? ( ui_XGdNCnt += 1; );
     (ui_XlocDoNow != 0) ? ( ui_XGIntCnt += 1; );
@@ -659,6 +735,7 @@ local (R, prev_mouse_buttons, frame_count, prev_unix_time, prev_gfx_w, prev_gfx_
     ;
     (R != 0) ? ( ui_XUsrCnt += 1; ) ;
     R |= ui_XlocDoNow;
+    R ? (uix_czN = 0); // (a frame is drawn : its cursor zones are declared again)
     ui_GFXdoNow = 0; // reset external requests
     ui_XlocDoNow = max(0, ui_XlocDoNow-1); // update internal flags
     prev_gfx_w = gfx_w; prev_gfx_h = gfx_h;

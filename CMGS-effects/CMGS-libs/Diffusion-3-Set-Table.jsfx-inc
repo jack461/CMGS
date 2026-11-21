@@ -383,6 +383,7 @@ function d3_StErrMsg(c)
     (c === 0253) ? "hppos : the y position is expected, a number" :
     (c === 0254) ? "hppos : the z position is expected, a number" :
     (c === 0255) ? "hppos : On, Off, \",\" or \";\" is expected" :
+    (c === 0256) ? "conf : the configuration is too large (more than 34000 words)" :
     (c === 0259) ? "invert : a configuration defined before (not this one) is expected" :
     (c === 0269) ? "internal : an unknown state of the analyzer" :
     (c === 0297) ? "an unexpected character" :
@@ -562,6 +563,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                 //===2===//
                 // found : "conf"
                 cglvol = 1; // default global value
+                strcpy(#cf_pnm, ""); // (2026-11-20) its name : none
                 // expect a configuration number in [1 ... conflsize]
                 ((un === 'intg') && (curcod > 0) && (curcod < conflsize)) ? (
                     //This is a conf. number
@@ -587,6 +589,12 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
 
                 //===3===//
                 state = 4; // consider the ":" optional
+                (un === 'strg') ? (
+                    // (2026-11-20) "conf n "name" dB v : ..." : its name (optional, before dB and ":"), kept in the
+                    // library of the configurations with its weights (see cf_W, state 10)
+                    strcpy(#cf_pnm, curcod);
+                    un = 0; state = 3;
+                ) :
                 ((un === 'char') && (curcod === ':')) ? (
                     un = 0;
                 ) :
@@ -601,6 +609,9 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
 
                 //===4===//
                 // expect an input channel number in [1 chinmax]
+                ((un === 'intg') && (ptconfs - tmpwork > tmpwasize - 8)) ? (
+                    xErr = 0256; // (2026-11-20) the configuration is too large (tmpwork)
+                ) :
                 ((un === 'intg') && (curcod >= 1) && (curcod <= chinmax)) ? (
                     // Keep the channel number
                     ptconfs[0] = curcod; ptconfs += 1;
@@ -622,7 +633,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                             while (pt[0] > 0) (
                                 i = pt[0]; pt += 1;
                                 while (pt[0] > 0) (
-                                    (pt[0] === c) ? (
+                                    ((pt[0] === c) && (ptconfs - tmpwork < tmpwasize - 8)) ? (
                                         !sz ? ( ptconfs[0] = c; ptconfs += 1; sz = 1; );
                                         ptconfs[0] = i; ptconfs[1] = pt[1] * cglvol; ptconfs += 2;
                                     );
@@ -641,10 +652,16 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                             ptaddr[0] = px;
                             memcpy(px, tmpwork, ptconfs - tmpwork);
                         );
+                        cf_FreeW(cfnumb); // (2026-11-20 : no weights as written ; found again from its gains, cf_WGains)
                         state = 1;
                     ) : (
                         xErr = 0259; // invert : a configuration defined before (not this one) is expected
                     );
+                ) :
+                ((un === 'idnt') || (un === 'feof') || ((un === 'char') && (curcod === ';'))) ? (
+                    // (2026-11-21) an empty configuration (no source : silence ; e.g. "copy" of the module Conf Editor,
+                    // exported as it is) : closed, the unit kept for the state 1 (a keyword, the end, a stray ";")
+                    rstate = 1; state = 10;
                 ) : (
                     xErr = 0204; // a channel. number is expected
                 );
@@ -668,6 +685,9 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
 
                 //===6===//
                 // expect a channel number in [1 chmax]
+                ((un === 'intg') && (ptconfs - tmpwork > tmpwasize - 8)) ? (
+                    xErr = 0256; // (2026-11-20) the configuration is too large (tmpwork)
+                ) :
                 ((un === 'intg') && (curcod >= 1) && (curcod <= chmax)) ? (
                     // Keep the channel number
                     ptconfs[0] = curcod; ptconfs += 1;
@@ -796,6 +816,9 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                 //===9===//
                 // current channel is already closed
                 // expect a input channel number in [1 chinmax]
+                ((un === 'intg') && (ptconfs - tmpwork > tmpwasize - 8)) ? (
+                    xErr = 0256; // (2026-11-20) the configuration is too large (tmpwork)
+                ) :
                 ((un === 'intg') && (curcod >= 1) && (curcod <= chinmax)) ? (
                     // Keep the channel number
                     ptconfs[0] = curcod; ptconfs += 1;
@@ -823,6 +846,9 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                 //===10===//
                 // close the current configuration
                 ptend = ptconfs; // point to conf end
+                // (2026-11-20) its weights as written, its name, its volume : the library of the configurations (cf_W ;
+                // before the normalization below)
+                cf_NewW(cfnumb, cglvol, #cf_pnm, tmpwork + 1, ptend - tmpwork - 1);
                 pt = tmpwork + 1; // point to conf. start, after the conf. number
                 // set end conf marker
                 ptconfs[0] = -2; ptconfs += 1;
@@ -1202,6 +1228,7 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                         mSL_Dyn_Free(conflist[curcod]);
                         conflist[curcod] = 0;
                     );
+                    cf_FreeW(curcod); // (2026-11-20 : its weights and its name)
                     un = 0; state = 1;
                 ) : (
                     xErr = 0212;  // a configuration number is expected after "remove conf"

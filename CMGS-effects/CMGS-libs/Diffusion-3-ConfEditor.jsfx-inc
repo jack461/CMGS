@@ -1,0 +1,2680 @@
+/*
+    Diffusion-3-ConfEditor.jsfx-inc
+
+    The module "Conf Editor" of Diffusion 3 (2026-11-20 ; step 2 : the matrix ; step 3 : the 3D view ; step 4 : Simplify ;
+    2026-11-21 : the ring, the separator) :
+    a configuration (conf) edited as a matrix of N inputs (its sources : the rows) x P outputs (the columns), 1 ... 128
+    each. A cell holds the weight of the input on the output, as in a configuration file ("conf 41 : 1 > 3 2" : the
+    weight 2 of the input 1 on the output 3) ; 0 : an empty cell. The gains of the configuration (cf_Build, as Set_Table) :
+    for each input, g = sqrt(w / max(1, the sum of its weights)) x the volume of the configuration (dB).
+    The ring (2026-11-21) : the numbers of the configurations edited, one after the other (64 at most) ; each one has a
+    number (its own, or for a new one the highest one free below "copy" : ce_NewNum). The editor holds the current one,
+    saved with the project (ce_Serialize) : its weights (the cells beyond N or P are kept, not saved in the configuration),
+    its number, its name, its volume, and the ring. Saved (Save ; or when another one of the ring is edited, if it
+    changed), it goes into the library of the configurations (cf_W : its weights as written, its name) and the projectors
+    that use it take it at once (cf_Replace) ; an empty matrix : a configuration without source (silence). The ring empty :
+    it gets "copy", 4094 (4095 is the default configuration of Diffusion), empty if not defined, saved and edited as the
+    others : Copy puts the configuration edited into it, Paste puts it into the configuration edited, Clear copies the
+    configuration into it before it empties it (Paste : back to it). A configuration loaded (Load, the current projector,
+    the module "Configurations" : its menu "Edit in the module Conf Editor") : its entry of the ring, else a new entry
+    after the current one. A snapshot (the first one : the matrix of the current projector now, ce_Adopt) : a new
+    configuration of the ring, its weights found from the gains.
+
+    The pad (two lines of 8 ; a third one : the settings of Simplify) :
+        0 the configuration : its number and its name (left : the next one of the ring ; Shift + left : the previous one ;
+          right : menu : new (empty, from a configuration, a snapshot of the current projector), load a configuration
+          (first "Named" : those with a name, in the order of their names), load that of the current projector ; save,
+          save as (a number : a copy, the new current one ; a name may follow), rename (its number and / or its name :
+          "325 tutti HP", "325", "tutti HP", "" no name ; another number : a move, the groups, the projectors, the
+          diffusions, the default configuration follow) ; copy, paste, clear ; add, subtract a configuration x the factor,
+          multiply by it, normalize (as the cell 3) ; remove from the ring ; delete (for good))
+        1 In N : the count of inputs (potentiometer 1 ... 128 ; Shift + left : 2 ; right : menu)
+        2 Out P : the count of outputs (potentiometer 1 ... 128 ; Shift + left : the speakers ; right : menu)
+        3 Factor f (2026-11-21) : the common factor (potentiometer 0.1 ... 10, logarithmic ; Shift + left : 1 ; right :
+          menu : values, another one (a prompt : 0.7071, "-3 dB"), then add a configuration x f (its weights added to
+          those of the configuration edited ; its inputs and outputs too), subtract one x f (at least 0), multiply the
+          weights by f, normalize (each input, the current one, the whole matrix : ce_Normalize, its rules) ; all kept for
+          Undo ; e.g. "upper ring" copied (New from...), then "middle ring" x 0.5 added : a new configuration)
+        4 the mode : Sow (green), Adjust (blue) (left : the other one ; right : menu ; key < over the module : the other
+          one)
+        5 Simplify : the line 3 shown or hidden (left) ; right : menu (simplify now all the inputs, the current one ;
+          the line 3)
+        6 Undo, or Redo : the last change (one level)
+        7 Ring k/n : the current entry of the ring, its size (both clics : menu : its configurations, go to one ; remove
+          the current one)
+        8 In i : the current input (left : the next one, Shift + left : the previous one ; right : menu of the row)
+        9 Out j : the current output (the same ; right : menu of the column)
+        10 w : the weight of the current cell (potentiometer 0 ... 32 ; Shift + left : 0 ; right : menu)
+        11 its gain (dB ; information)
+        12 dB : the volume of the configuration (potentiometer -40 ... 20 ; Shift + left : 0 ; right : menu)
+        13 the size of the cells : Fit (the whole matrix), or a size (left : Fit / the last size ; right : menu)
+        14 Clear (both clics : menu : the cell, the row, the column, all)
+        15 3D view : shown or hidden (left ; key v over the module) ; right : the menu of the view
+    line 3 (step 4, cell 5) : Simplify (ce_SimCompute : its rules)
+        16 Share x % : the outputs below x % of the power of their input removed (potentiometer 0 ... 50 ; Shift + left
+           : Off ; right : menu)
+        17 Max k : at most k outputs per input, the strongest ones (potentiometer 0 ... 32, 0 : Off ; Shift + left : Off ;
+           right : menu)
+        18 Round r : the weights rounded (the smallest one 1, the others to multiples of r : Off, 1, 0.5, 0.25, 0.1 ;
+           left : the next one, Shift + left : the previous one ; right : menu)
+        19 All inputs, or Input i : the inputs simplified (left : the other choice ; right : menu)
+        20 Preview : in the matrix, the weights removed (a red cross) and changed (a blue frame ; the new value in the
+           info line) ; in the 3D view, the halos removed (a red edge) and their new size (a blue circle) (both clics)
+        21 Apply (both clics ; kept for Undo)
+        22 the counts : - the weights removed, ~ the weights changed
+        23 Close : the line 3 hidden
+    The settings, the line 3 and the preview are saved with the project.
+    The matrix : the inputs at the left, the outputs at the top (grey : an output without speaker, hppos ; red : an
+    inactive speaker) ; a cell : its weight (when it fits), its color : its gain ; the current input : its row lit ; the
+    current cell : a white frame.
+    The 3D view (step 3, at the right of the matrix or below it ; its own camera) : the speakers of Diffusion (hppos, in
+    the cube [-1, 1] : hp_Cube) and, for the current input only, a halo on each output that it feeds : its radius grows
+    with the gain of the cell (the volume apart ; or relative to the strongest one : menu), its weight next to the
+    number. The current cell is the current halo (gold, a white edge, the ball ringed) ; the cell under the mouse in the
+    matrix rings its speaker, the speaker under the mouse in the view frames its cell. A ball : orange, a weight ; blue
+    grey, none ; red, an inactive speaker ; faint, beyond the outputs of the matrix (not editable).
+    Mouse in the view : clic on a speaker (or in its halo) : its cell becomes the current one ; then Sow : + 1 (Shift :
+        - 1) ; Adjust : Shift + clic, 0 ; drag from a speaker (both modes) : its weight (as in the matrix) ; drag from
+        nothing : the orbit ; wheel : the zoom ; right clic : on a speaker, the menu of its cell ; elsewhere, the menu of
+        the view (views, halos, numbers, weights, grid, sizes, the place and the share of the view, hide it)
+    The separator between the matrix and the view (invisible : the gap between them ; a faint line under the mouse) : a
+        left drag changes the share of the view (10 ... 90 %).
+    Mouse : left clic on a number : the current input (row) or output (column) ; right clic : its menu ; wheel : the
+        rows (Shift : the columns ; Cmd : the size of the cells) ; Shift + right clic : the Studio menu
+        (2026-11-21) left drag from the number of an input (an output) onto that of another one : the two rows (columns)
+        exchanged ; Shift + left drag : the row (column) copied onto the other one, its weights replaced ; released
+        elsewhere : nothing ; beyond the rows (columns) shown : they scroll ; kept for Undo
+        Sow    : clic on a cell = + 1 (it becomes the current one) ; drag : + 1 on each cell crossed (once per drag) ;
+                 Shift : - 1 instead (at least 0)
+        Adjust : drag from a cell : its weight (as the potentiometers : horizontal coarse, 1 per 20 pixels ; vertical
+                 fine, 1/10, up = more) ; clic : the current cell ; Shift + clic : 0
+        right clic on a cell : its menu (values, the row, the column)
+    Keys over the module : < or a : the other mode ; z Undo (then Redo) ; arrows (no modifier) : the current cell ; +
+        (or =) and - : + 1, - 1 on the current cell ; e (empty), Backspace, Delete : the current cell cleared ; v : the
+        3D view shown or hidden.
+    Alt held, the mouse over the module : around the speaker of the current output, a blue halo : the power that it
+        receives from all the inputs (the sum of the squares of its gains, the volume apart ; relative : to the output
+        that receives the most), its value (dB, the volume included) in the view and in the info line of the matrix.
+    Errors 2501 ... 2509 (2507 : the factor).
+    Everything runs in @gfx (ce_Serialize in @serialize). Included in @init after Diffusion-3-Configurations (cf_*,
+    prv_Menu, sx_Nth, s3d_* of mSL_ui_Space3D, hp_Cube, ed_Fmt, ed_CamSave), while make_array allocates static memory.
+    The images : 99 the matrix, 89 the 3D view.
+*/
+
+CE_MAX = 128;                       // the inputs and the outputs, at most
+CE_IMG = 99;                        // the offscreen image of the matrix
+ui_reserve_image(CE_IMG);
+ce_w = make_array(CE_MAX * CE_MAX); // the weights : ce_w[i * CE_MAX + j], the input i + 1 on the output j + 1
+ce_u = make_array(CE_MAX * CE_MAX + 8); // the undo buffer : [0] N, [1] P, [2] the volume, then the weights
+ce_tmp = make_array(CE_MAX * (2 * CE_MAX + 2) + 8); // work : Undo ; the sources of a configuration (128 x 258 words at most)
+ce_vis = make_array(CE_MAX * CE_MAX); // the cells sown by a drag (its number : ce_did)
+ce_spk = make_array(CE_MAX + 1);    // the outputs : 1 a speaker (hppos), 2 an inactive one, 0 none (ce_SpkScan)
+ce_map = make_array(4200);          // the configurations of the menu (ce_LoadMenu)
+ce_sf = make_array(48);             // the fields saved with the project (ce_Serialize : @serialize)
+ce_N = 2; ce_P = 8;                 // the inputs, the outputs
+ce_vol = 1;                         // the volume of the configuration (dB : 20 log10)
+ce_num = 0;                         // its number (0 : none yet, before the ring is checked : ce_RingCheck)
+strcpy(#ce_name, "");               // its name
+ce_row = 0; ce_col = 0;             // the current cell (its input, its output : 0 ...)
+ce_mode = 0;                        // 0 Sow, 1 Adjust
+ce_fac = 1;                         // (2026-11-21) the common factor (0.1 ... 10) : Add, Subtract, Multiply
+ce_uSt = 0;                         // 0 : nothing to undo ; 1 : the undo buffer holds the previous state (Undo) ; 2 : Redo
+ce_cs = 0; ce_csL = 20;             // the size of the cells (units of the display ; 0 : Fit) ; the last size chosen
+ce_r0 = ce_c0 = 0;                  // the first row, the first column shown
+ce_dirty = 0;                       // changed since it was loaded or saved
+// the options of the 3D view (0 : the defaults) : hidden, below the matrix (else at its right), the halos relative to
+// the strongest one (else the gains), no numbers, no weights, no grid (until 2026-11-21 : now ce_pres, read from it in the
+// older projects)
+ce_oNo3D = 1; ce_oBelow = 2; ce_oRel = 4; ce_oNoNum = 8; ce_oNoW = 16; ce_oNoGrid = 32;
+ce_opt = 0;
+ce_LoadReq = 0;                    // a configuration to load (the module "Configurations" : ce_Frame)
+ce_pend = 0;                        // the prompt : 1 Rename, 2 Save as (ce_Parse : ce_pD, ce_pN, ce_pHas, #ce_pnm)
+strcpy(#ce_prm, ""); strcpy(#ce_ptl, ""); strcpy(#ce_pnm, ""); strcpy(#ce_anm, "");
+ce_pD = ce_pN = ce_pHas = 0;
+// (2026-11-21) The ring : the numbers of the configurations edited (the current one : ce_num = ce_ring[ce_ri]) ; empty, it
+// gets "copy" (CE_COPY = 4094 : 4095 is the default configuration of Diffusion, pcfdef) ; a new configuration : a high
+// number (ce_NewNum) ; the requests of the module "Configurations" : a configuration deleted, renumbered (ce_RingCheck)
+CE_COPY = conflsize - 2;
+CE_RMAX = 64;
+ce_ring = make_array(CE_RMAX);
+ce_rn = 0; ce_ri = 0;
+ce_srt = make_array(conflsize);     // the named configurations, sorted (ce_LoadMenu)
+ce_DelReq = 0; ce_MovReq = 0; ce_MovTo = 0;
+ce_mi = ce_mo = 1; ce_rd = 0; ce_sni = 0;
+ce_spkHP = -1; ce_spkSeq = -1;      // the speakers scanned (HP_Positions, hp_Seq)
+// the geometry of the last frame (screen pixels, in the image) : the headers, the cells, the rows and columns shown
+ce_hw = ce_th = ce_ih = 0; ce_csz = 8; ce_vr = ce_vc = 1;
+ce_iw = ce_ih2 = 0;                 // the size of the image
+// the mouse : the left button (1 pressed in the matrix, -1 elsewhere, 0 up), the kind of the drag (1 sow, 2 adjust),
+// its sign (sow : + 1 or - 1), its number (ce_vis), the cell pressed, moved, the positions, the value at its start
+ce_md = ce_dk = 0; ce_dsg = 1; ce_did = 0; ce_dcell = -1; ce_dmoved = 0; ce_dmods = 0;
+ce_mx0 = ce_my0 = ce_lmx = ce_lmy = 0; ce_dv0 = ce_dacc = 0; ce_seen = 0;
+ce_hr = ce_hc = -1;                 // the cell under the mouse (-1 : none)
+// (2026-11-21) a row or a column dragged by its number (ce_dk 3, 4) : its index, the destination under the mouse (-1 :
+// none), a copy (Shift at the press ; else an exchange), the time of the last scroll near the edges
+ce_hsrc = 0; ce_htgt = -1; ce_hcp = 0; ce_hT = 0;
+ce_pk = 0;                          // a drag of the cell w of the pad : the undo buffer filled
+ce_SizeList = "8|10|12|14|16|20|24|28|32|40|48";
+ce_WList = "0|0.25|0.5|1|1.5|2|3|4|5|6|8|10|12|16";
+ce_dBList = "-24|-18|-12|-9|-6|-3|-2|-1|0|1|2|3|6|12";
+ce_NList = "1|2|3|4|5|6|8|10|12|16|24|32|48|64|96|128";
+ce_FList = "0.1|0.2|0.25|0.333|0.5|0.7071|1|1.4142|1.5|2|3|4|5|10"; // (the factors : 14)
+
+// The 3D view (step 3) : its offscreen image ; the positions of the speakers 1 ... 128 (ce_SpkScan) ; per speaker, in the
+// last frame (for the mouse) : x, y, depth (0 : not shown), the radius of its ball, of its halo (0 : none) ; the order of
+// drawing (far first), ce_no speakers shown
+CE_IMG3 = 89;
+ui_reserve_image(CE_IMG3);
+ce_pos = make_array(CE_MAX * 3);
+ce_scr = make_array(CE_MAX * 5);
+ce_ord = make_array(CE_MAX);
+ce_no = 0;
+// its camera (as the views of Space 3D : azimuth, elevation, distance), the sizes of the halos and of the balls (s3d_kval :
+// 12, x 1), its share of the module (the width ; below the matrix : the height) : saved with the project ; the size of
+// its image, the state of the hysteresis of its grid (s3d_colors)
+ce_az = s3d_Az3D; ce_el = s3d_El3D; ce_dist = s3d_Dist3D;
+ce_roll = 0;    // (2026-11-21) its roll (s3d_roll, as all the 3D views ; s3d_orbit, the levelling : its id 6)
+ce_pres = 0;    // (2026-11-21) the presentation of the room (s3d_grids : 0 the far faces ... 5 nothing ; key '>')
+ce_kH = 12; ce_kS = 12;
+ce_split = 0.5;
+ce_3w = ce_3h = 0; ce_gdark = 0;
+// (2026-11-21) the places of the matrix and of the view in the last frame (ce_Layout : screen pixels) ; the separator
+// between them (ce_Sep) : under the mouse, dragged, the frame where it was handled
+ce_lwm = ce_lhm = ce_lx3 = ce_ly3 = ce_lw3 = ce_lh3 = 0;
+ce_sepOn = ce_sepD = ce_sepSeen = 0;
+// the mouse in the view : the left button (1 pressed in the view, -1 elsewhere), the drag (1 orbit, 2 a weight), moved,
+// the modifiers at the press, the output pressed, the positions, the weight at the start of the drag ; the speaker under
+// the mouse (its output, -1 : none)
+ce_m3 = ce_d3 = ce_moved3 = ce_mods3 = 0; ce_p3 = -1; ce_seen3 = 0;
+ce_3x0 = ce_3y0 = ce_3lx = ce_3ly = ce_3v0 = ce_3acc = 0;
+ce_h3 = -1;
+// Alt held over the module : the power received by each output from all the inputs (ce_ColPowers : the volume apart),
+// the count of its inputs, the largest power ; the state of Alt (ce_Frame : a new frame when it changes)
+ce_alt = 0; ce_altPrev = 0;
+ce_cp = make_array(CE_MAX);
+ce_cn = make_array(CE_MAX);
+ce_cpMax = 0;
+
+// Simplify (step 4) : the share of the power of an input below which an output is removed (%, 0 : Off), the outputs
+// kept per input at most (0 : Off), the rounding of the weights (ce_RStep : Off, 1, 0.5, 0.25, 0.1), the inputs (0 all,
+// 1 the current one) ; the line 3 of the pad shown, the preview ; the result of ce_SimCompute : the weights, the counts
+ce_sShare = 5; ce_sMax = 0; ce_sRi = 1; ce_sCur = 0; ce_simOn = 0; ce_simPrev = 1;
+ce_prv = 0;                         // the preview shown in this frame (the line 3 and Preview)
+ce_sim = make_array(CE_MAX * CE_MAX);
+ce_sRem = ce_sChg = ce_sRows = 0;
+ce_ShList = "Off|1|2|3|5|10|15|20|25|33|50";
+ce_KList = "Off|1|2|3|4|5|6|8|12|16";
+ce_RList = "Off|1|0.5|0.25|0.1";
+
+// the pad : 3 lines of 8 (the line 3 shown with Simplify)
+pad_CET_Siz = 24;
+pad_CET = make_jpad(ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values, 3, 8, pad_CET_Siz);
+pad_CET_Labs = pad_CET + pad_CET[ui_jpad_labs];
+pad_CET_Colrs = pad_CET + pad_CET[ui_jpad_clrs];
+i__k = 0; loop(pad_CET_Siz, pad_CET_Colrs[i__k] = Col_Inactive; pad_CET_Labs[i__k] = ""; i__k += 1;);
+
+
+//====== The weights
+
+function ce_Wt(i, j) ( ce_w[i * CE_MAX + j]; );
+
+// The sum of the weights of the input i (its P outputs), the count of its outputs used (ce_ro)
+function ce_RowSum(i)
+local(j, s, p)
+(
+    s = 0; ce_ro = 0; p = ce_w + i * CE_MAX;
+    j = 0; loop(ce_P, (p[j] > 0) ? (s += p[j]; ce_ro += 1;); j += 1;);
+    s;
+);
+
+// The gain of the cell (i, j) : sqrt(w / max(1, the sum of the weights of its input)) x the volume
+function ce_Gain(i, j)
+local(w)
+(
+    w = ce_Wt(i, j);
+    (w > 0) ? sqrt(w / max(1, ce_RowSum(i))) * ce_vol : 0;
+);
+
+// Keeps the editor in its undo buffer, before a change (its weights : src, a copy made before them changed ; ce_Keep :
+// the weights now)
+function ce_KeepFrom(src)
+(
+    ce_u[0] = ce_N; ce_u[1] = ce_P; ce_u[2] = ce_vol;
+    memcpy(ce_u + 8, src, CE_MAX * CE_MAX);
+    ce_uSt = 1;
+);
+function ce_Keep() ( ce_KeepFrom(ce_w); );
+
+// Exchanges the editor and its undo buffer : Undo, then Redo
+function ce_Undo()
+local(n, p, v)
+(
+    (ce_uSt > 0) ? (
+        n = ce_u[0]; p = ce_u[1]; v = ce_u[2];
+        ce_u[0] = ce_N; ce_u[1] = ce_P; ce_u[2] = ce_vol;
+        memcpy(ce_tmp, ce_u + 8, CE_MAX * CE_MAX);
+        memcpy(ce_u + 8, ce_w, CE_MAX * CE_MAX);
+        memcpy(ce_w, ce_tmp, CE_MAX * CE_MAX);
+        ce_N = max(1, min(CE_MAX, n)); ce_P = max(1, min(CE_MAX, p)); ce_vol = v;
+        ce_row = min(ce_row, ce_N - 1); ce_col = min(ce_col, ce_P - 1);
+        ce_uSt = (ce_uSt === 1) ? 2 : 1;
+        ce_dirty = 1;
+    );
+);
+
+// The weight of the cell (i, j) set to v (at least 0 ; 3 decimals)
+function ce_Set(i, j, v)
+(
+    ((i >= 0) && (i < CE_MAX) && (j >= 0) && (j < CE_MAX)) ? (
+        ce_w[i * CE_MAX + j] = max(0, floor(v * 1000 + 0.5) / 1000);
+        ce_dirty = 1;
+    );
+);
+
+// The row i (the input), the column j (the output) or all the cells cleared (kept for Undo)
+function ce_ClearRow(i) ( ce_Keep(); memset(ce_w + i * CE_MAX, 0, CE_MAX); ce_dirty = 1; );
+function ce_ClearCol(j)
+local(i)
+(
+    ce_Keep();
+    i = 0; loop(CE_MAX, ce_w[i * CE_MAX + j] = 0; i += 1;);
+    ce_dirty = 1;
+);
+function ce_ClearAll() ( ce_Keep(); memset(ce_w, 0, CE_MAX * CE_MAX); ce_dirty = 1; );
+
+// (2026-11-21) The row i (an input) exchanged with the row t, or copied onto it (cp : its former weights lost) ; kept for
+// Undo ; t becomes the current row
+function ce_RowMove(i, t, cp)
+local(a, b)
+(
+    ((i >= 0) && (i < CE_MAX) && (t >= 0) && (t < CE_MAX) && (i !== t)) ? (
+        ce_Keep();
+        a = ce_w + i * CE_MAX; b = ce_w + t * CE_MAX;
+        cp ? memcpy(b, a, CE_MAX) : (memcpy(ce_tmp, b, CE_MAX); memcpy(b, a, CE_MAX); memcpy(a, ce_tmp, CE_MAX););
+        ce_row = t; ce_dirty = 1;
+    );
+);
+
+// The column j (an output) exchanged with the column t, or copied onto it (cp) ; kept for Undo ; t becomes the current
+// column
+function ce_ColMove(j, t, cp)
+local(i, a, v)
+(
+    ((j >= 0) && (j < CE_MAX) && (t >= 0) && (t < CE_MAX) && (j !== t)) ? (
+        ce_Keep();
+        i = 0;
+        loop(CE_MAX,
+            a = ce_w + i * CE_MAX;
+            v = a[t]; a[t] = a[j]; !cp ? (a[j] = v);
+            i += 1;
+        );
+        ce_col = t; ce_dirty = 1;
+    );
+);
+
+// The count of speakers (the largest number of hppos) ; the outputs : ce_spk (1 a speaker, 2 inactive, 0 none) ; their
+// positions in the cube [-1, 1] : ce_pos (hp_Cube, as the views of Space 3D)
+function ce_SpkScan()
+local(c, i, n, m)
+(
+    ((HP_Positions !== ce_spkHP) || (hp_Seq !== ce_spkSeq)) ? (
+        ce_spkHP = HP_Positions; ce_spkSeq = hp_Seq;
+        memset(ce_spk, 0, CE_MAX + 1);
+        memset(ce_pos, 0, CE_MAX * 3);
+        ce_nspk = 0;
+        (HP_Positions > 0) ? (
+            c = HP_Positions[-1]; i = 0;
+            m = hp_Old();
+            while (i < c) (
+                n = HP_Positions[i];
+                ((n >= 1) && (n <= CE_MAX)) ? (
+                    ce_spk[n] = hp_Act[n] ? 1 : 2;
+                    hp_Cube(i, m, ce_pos + (n - 1) * 3);
+                    ce_nspk = max(ce_nspk, n);
+                );
+                i += 4;
+            );
+        );
+    );
+    ce_nspk;
+);
+
+// An error : logged ; its code
+function ce_Err(code, msg)
+(
+    sprintf(#ce_e, "ERR: %04d    Conf Editor : %s", code, msg);
+    mSL_log(SysLogBox, #ce_e);
+    code;
+);
+
+// The title of the configuration edited into s : "41 "name"", "New"
+function ce_Title(s)
+(
+    (ce_num > 0) ? sprintf(s, "%d", ce_num) : strcpy(s, "New");
+    (strlen(#ce_name) > 0) ? (sprintf(#ce_t2, " \"%s\"", #ce_name); strcat(s, #ce_t2););
+    s;
+);
+
+
+//====== The configurations : the ring, load, save (the ring : 2026-11-21)
+
+// The weights of the block wb (cf_W) read into dst (a matrix as ce_w ; the other cells : 0) ; ce_rd its sources, ce_mi
+// and ce_mo the largest input and output used (1 at least) ; ce_Read : into the editor
+function ce_ReadTo(wb, dst)
+local(q, s, d)
+(
+    memset(dst, 0, CE_MAX * CE_MAX);
+    ce_mi = ce_mo = 1; ce_rd = 0;
+    q = wb + 3 + wb[2];
+    while (q[0] > 0) (
+        s = q[0]; q += 1; ce_rd += 1;
+        while (q[0] > 0) (
+            d = q[0];
+            ((s <= CE_MAX) && (d <= CE_MAX)) ? (
+                dst[(s - 1) * CE_MAX + d - 1] += max(0, q[1]); // (an output written twice : the sum)
+                ce_mi = max(ce_mi, s); ce_mo = max(ce_mo, d);
+            );
+            q += 2;
+        );
+        q += 1;
+    );
+);
+function ce_Read(wb) ( ce_ReadTo(wb, ce_w); );
+
+// The matrix empty (no weight)
+function ce_Empty()
+local(i, n)
+(
+    n = 0; i = 0; loop(CE_MAX * CE_MAX, (ce_w[i] > 0) ? (n += 1); i += 1;);
+    n === 0;
+);
+
+// The configuration n loaded into the editor (its weights as written, else found again from its gains : cf_WGains) ;
+// kept for Undo ; an empty one (no source) keeps the inputs N ; returns 1 (0 : not defined)
+function ce_Load(n)
+local(wb)
+(
+    ((wb = cf_WGains(n)) > 0) ? (
+        ce_Keep();
+        ce_Read(wb);
+        (ce_rd > 0) ? (ce_N = ce_mi);
+        ce_P = max(ce_mo, min(CE_MAX, ce_SpkScan())); // (all the speakers shown)
+        ce_vol = (wb[1] > 0) ? wb[1] : 1;
+        cf_Name(n, #ce_name);
+        ce_num = n;
+        ce_row = ce_col = 0; ce_r0 = ce_c0 = 0;
+        ce_dirty = 0;
+        sprintf(#ce_e, "Conf Editor : the configuration %s loaded (%d inputs, %d outputs ; the ring : %d / %d)", ce_Title(#ce_t1),
+            ce_N, ce_P, ce_ri + 1, ce_rn);
+        mSL_log(SysLogBox, #ce_e);
+        1;
+    ) : (
+        ce_Err(2501, sprintf(#ce_t1, "the configuration %d is not defined", n));
+        0;
+    );
+);
+
+// The configuration n into the editor, as the current one of the ring : its weights (ce_Load) ; not defined : empty (a
+// new one ; "copy" : its name), the inputs and outputs kept ; no Undo
+function ce_Get(n)
+(
+    (conflist[n] > 0) ? ce_Load(n) : (
+        memset(ce_w, 0, CE_MAX * CE_MAX);
+        ce_num = n; ce_vol = 1;
+        strcpy(#ce_name, (n === CE_COPY) ? "copy" : "");
+        ce_row = ce_col = 0; ce_r0 = ce_c0 = 0;
+        ce_dirty = 0;
+    );
+    ce_uSt = 0;
+);
+
+// The editor stored as the configuration n (1 ... 4094) under the name nm : its weights and the name into the library
+// (cf_NewW), its gains (cf_Build) into conflist (cf_Replace : the projectors that use it take it) ; the rows and columns
+// beyond N and P, the empty rows : not stored ; an empty matrix : a configuration without source (silence) ; the editor
+// unchanged ; its sources : ce_sni ; returns 1 (0 : error)
+function ce_Store(n, nm)
+local(i, j, k, q, p, len, wb, b)
+(
+    ((n < 1) || (n > CE_COPY)) ? (
+        ce_Err(2502, "a configuration number in [1, 4094] is expected");
+        0;
+    ) : (
+        // the sources : s, d, w, ..., -1 (the inputs with weights)
+        q = ce_tmp; ce_sni = 0;
+        i = 0;
+        loop(ce_N,
+            p = ce_w + i * CE_MAX;
+            k = 0; j = 0; loop(ce_P, (p[j] > 0) ? (k += 1); j += 1;);
+            (k > 0) ? (
+                q[0] = i + 1; q += 1;
+                j = 0; loop(ce_P, (p[j] > 0) ? (q[0] = j + 1; q[1] = p[j]; q += 2;); j += 1;);
+                q[0] = -1; q += 1;
+                ce_sni += 1;
+            );
+            i += 1;
+        );
+        len = q - ce_tmp;
+        (((wb = cf_NewW(n, ce_vol, nm, ce_tmp, len)) <= 0) || ((b = cf_Build(n, wb)) <= 0)) ? (
+            ce_Err(2504, "no memory for the configuration");
+            0;
+        ) : (
+            cf_Replace(n, b);
+            1;
+        );
+    );
+);
+
+// The editor saved as the configuration n, under its name : it becomes n ; returns 1 (0 : error)
+function ce_Save(n)
+(
+    ce_Store(n, #ce_name) ? (
+        ce_num = n; ce_dirty = 0;
+        sprintf(#ce_e, "Conf Editor : saved as the configuration %s (%d input%s%s)", ce_Title(#ce_t1), ce_sni,
+            (ce_sni > 1) ? "s" : "", (ce_sni === 0) ? " : empty, a configuration without source" : "");
+        mSL_log(SysLogBox, #ce_e);
+        1;
+    ) : 0;
+);
+
+// Save (the menu of the cell 0) : under its number and its name, at once (the projectors that use it take it)
+function ce_SaveCur() ( ce_Save(ce_num); );
+
+// The configuration edited saved under its number when it changed : before another one is edited ; returns 1 (0 : an
+// error, the editor keeps it)
+function ce_Commit()
+(
+    ((ce_num >= 1) && (ce_num <= CE_COPY) && ce_dirty) ? ce_Save(ce_num) : 1;
+);
+
+// The place of the configuration n in the ring (-1 : not there)
+function ce_RFind(n)
+local(k, r)
+(
+    r = -1; k = 0;
+    while ((r < 0) && (k < ce_rn)) ( (ce_ring[k] === n) ? (r = k); k += 1; );
+    r;
+);
+
+// The configuration n inserted in the ring after the current one, and current ; returns 1 (0 : the ring is full)
+function ce_RInsert(n)
+local(k)
+(
+    (ce_rn >= CE_RMAX) ? (
+        ce_Err(2505, "the ring is full (64 configurations) : remove one first");
+        0;
+    ) : (
+        k = (ce_rn > 0) ? max(0, ce_ri + 1) : 0;
+        (k < ce_rn) ? memcpy(ce_ring + k + 1, ce_ring + k, ce_rn - k); // (memcpy : the areas may overlap)
+        ce_ring[k] = n; ce_rn += 1; ce_ri = k;
+        1;
+    );
+);
+
+// The entry k removed from the ring (the current one : then the next one, or the last one)
+function ce_RDel(k)
+(
+    ((k >= 0) && (k < ce_rn)) ? (
+        (k < ce_rn - 1) ? memcpy(ce_ring + k, ce_ring + k + 1, ce_rn - k - 1);
+        ce_rn -= 1;
+        (ce_ri > k) ? (ce_ri -= 1);
+        ce_ri = max(0, min(ce_rn - 1, ce_ri));
+    );
+);
+
+// The ring empty : it gets "copy" (4094 ; not defined : empty, named "copy")
+function ce_RFix()
+(
+    (ce_rn <= 0) ? (ce_rn = 0; ce_ri = 0; ce_RInsert(CE_COPY););
+);
+
+// The entry k of the ring edited (the current one saved before : ce_Commit)
+function ce_RGo(k)
+(
+    ((k >= 0) && (k < ce_rn) && (k !== ce_ri) && ce_Commit()) ? (
+        ce_ri = k;
+        ce_Get(ce_ring[k]);
+    );
+);
+
+// The next configuration of the ring (d = 1 : the left clic on the cell 0), or the previous one (d = -1 : Shift)
+function ce_RNext(d) ( (ce_rn > 1) ? ce_RGo((ce_ri + d + ce_rn) % ce_rn); );
+
+// A number for a new configuration : the highest one below "copy", neither defined nor in the ring (0 : none)
+function ce_NewNum()
+local(n)
+(
+    n = CE_COPY - 1;
+    while ((n >= 1) && ((conflist[n] > 0) || (ce_RFind(n) >= 0))) (n -= 1;);
+    max(0, n);
+);
+
+// The first configuration number neither defined nor in the ring, from n (0 : none)
+function ce_Free(n)
+(
+    n = max(1, n);
+    while ((n <= CE_COPY) && ((conflist[n] > 0) || (ce_RFind(n) >= 0))) (n += 1;);
+    (n <= CE_COPY) ? n : 0;
+);
+
+// The ring checked (each frame) : the deletions and renumberings of the module "Configurations" (ce_DelReq ; ce_MovReq ->
+// ce_MovTo : the ring and the editor follow) ; the ring empty (a project older than the ring : the configuration edited ;
+// 0, a new one : a number if it has weights) : "copy" ; its current entry : the configuration edited
+function ce_RingCheck()
+local(k, j, n, rl)
+(
+    (ce_DelReq > 0) ? (
+        // (deleted : out of the ring ; the current one : the next one, its work forgotten)
+        ((k = ce_RFind(ce_DelReq)) >= 0) ? (
+            (k === ce_ri) ? (ce_RDel(k); ce_RFix(); ce_Get(ce_ring[ce_ri]);) : ce_RDel(k);
+        );
+        ce_DelReq = 0;
+    );
+    (ce_MovReq > 0) ? (
+        n = ce_MovTo;
+        ((k = ce_RFind(ce_MovReq)) >= 0) ? (
+            // (n in the ring, not defined until now : its entry leaves it ; the current one : the editor takes n)
+            j = ce_RFind(n); rl = (j >= 0) && (j === ce_ri);
+            (j >= 0) ? (ce_RDel(j); k = ce_RFind(ce_MovReq););
+            ce_ring[k] = n;
+            rl ? (ce_ri = k; ce_Get(n););
+        );
+        (ce_num === ce_MovReq) ? (ce_num = n);
+        ce_MovReq = 0;
+    );
+    (ce_rn <= 0) ? (
+        ce_rn = ce_ri = 0;
+        ((ce_num >= 1) && (ce_num <= CE_COPY)) ? ce_RInsert(ce_num) :
+        (!ce_Empty() && ((n = ce_NewNum()) > 0)) ? (ce_RInsert(n); ce_num = n; ce_dirty = 1;) :
+        (ce_RFix(); ce_Get(CE_COPY););
+    ) :
+    (ce_ring[ce_ri] !== ce_num) ? (
+        ((ce_num < 1) || (ce_num > CE_COPY)) ? ce_Get(ce_ring[ce_ri]) :
+        ((k = ce_RFind(ce_num)) >= 0) ? (ce_ri = k) :
+        (ce_rn >= CE_RMAX) ? (ce_ring[ce_ri] = ce_num) : ce_RInsert(ce_num);
+    );
+);
+
+// The configuration n edited (Load, the current projector, the module "Configurations") : its entry of the ring, else a
+// new entry after the current one ; the current one saved before ; itself : loaded again (kept for Undo)
+function ce_Open(n)
+local(k)
+(
+    ((n >= 1) && (n <= CE_COPY)) ? (
+        (n === ce_num) ? ce_Load(n) :
+        ((k = ce_RFind(n)) >= 0) ? ce_RGo(k) :
+        (ce_rn >= CE_RMAX) ? ce_Err(2505, "the ring is full (64 configurations) : remove one first") :
+        ce_Commit() ? (ce_RInsert(n); ce_Get(n););
+    );
+);
+
+// A new configuration (its number : ce_NewNum), after the current one in the ring (saved before) : empty (src 0), or a
+// copy of the configuration src (New from... ; no name)
+function ce_New(src)
+local(n)
+(
+    ((n = ce_NewNum()) <= 0) ? ce_Err(2506, "no configuration number left for a new one") :
+    (ce_rn >= CE_RMAX) ? ce_Err(2505, "the ring is full (64 configurations) : remove one first") :
+    ce_Commit() ? (
+        ce_RInsert(n);
+        ((src > 0) && (conflist[src] > 0) && ce_Load(src)) ? (
+            ce_num = n; strcpy(#ce_name, ""); ce_dirty = 1; ce_uSt = 0;
+            sprintf(#ce_e, "Conf Editor : the new configuration %d, a copy of %d", n, src);
+        ) : (
+            ce_Get(n);
+            sprintf(#ce_e, "Conf Editor : the new configuration %d (empty)", n);
+        );
+        mSL_log(SysLogBox, #ce_e);
+    );
+);
+
+// (2026-11-21, the snapshots) A new configuration (ce_NewNum), after the current one in the ring (saved before), from a
+// matrix of gains mat[i * 128 + j] (the input i + 1 on the output j + 1 ; the current matrix of a projector : prx_poutp) :
+// the volume v = the largest root of the sum of the squares of the gains of an input, the weights w = (g / v)^2 (the same
+// gains again, see cf_WGains ; an input whose sum is 1 : the smallest weight 1, those near an integer rounded) ; the
+// gains below -80 dB ignored ; its name nm ; returns its number (0 : none)
+function ce_Adopt(mat, nm)
+local(n, i, j, p, q, s, v, m, w, ni, no)
+(
+    strcpy(#ce_anm, nm);
+    n = (mat > 0) ? ce_NewNum() : 0;
+    ((mat > 0) && (n <= 0)) ? ce_Err(2506, "no configuration number left for a new one");
+    ((n > 0) && (ce_rn >= CE_RMAX)) ? (ce_Err(2505, "the ring is full (64 configurations) : remove one first"); n = 0;);
+    ((n > 0) && !ce_Commit()) ? (n = 0);
+    (n > 0) ? (
+        memcpy(ce_tmp, mat, CE_MAX * CE_MAX); // (at once : @block may be changing it)
+        v = 0; i = 0;
+        loop(CE_MAX,
+            p = ce_tmp + i * CE_MAX; s = 0;
+            j = 0; loop(CE_MAX, (abs(p[j]) > 0.0001) ? (s += sqr(p[j])) : (p[j] = 0); j += 1;);
+            v = max(v, sqrt(s));
+            i += 1;
+        );
+        (v <= 0) ? (v = 1);
+        memset(ce_w, 0, CE_MAX * CE_MAX);
+        ni = no = 1;
+        i = 0;
+        loop(CE_MAX,
+            p = ce_tmp + i * CE_MAX; q = ce_w + i * CE_MAX;
+            s = 0; m = 10^30;
+            j = 0;
+            loop(CE_MAX,
+                (p[j] != 0) ? (w = sqr(p[j] / v); q[j] = w; s += w; m = min(m, w); ni = max(ni, i + 1); no = max(no, j + 1););
+                j += 1;
+            );
+            ((s > 0.999) && (m < 10^29)) ? (
+                j = 0;
+                loop(CE_MAX,
+                    (q[j] > 0) ? (w = q[j] / m; (abs(w - floor(w + 0.5)) < 0.001) ? (w = floor(w + 0.5)); q[j] = w;);
+                    j += 1;
+                );
+            );
+            i += 1;
+        );
+        ce_RInsert(n);
+        ce_N = ni; ce_P = max(no, min(CE_MAX, ce_SpkScan()));
+        ce_vol = v; ce_num = n;
+        strcpy(#ce_name, #ce_anm); (strlen(#ce_name) > CF_NMLEN) ? str_setlen(#ce_name, CF_NMLEN);
+        ce_row = ce_col = 0; ce_r0 = ce_c0 = 0;
+        ce_dirty = 1; ce_uSt = 0;
+        sprintf(#ce_e, "Conf Editor : the new configuration %s, a snapshot (%d inputs, volume %.1f dB)", ce_Title(#ce_t1), ni,
+            20 * log10(v));
+        mSL_log(SysLogBox, #ce_e);
+    );
+    n;
+);
+
+// Copy : the configuration edited (as it is now) into "copy" (4094, named "copy" ; not on "copy" itself) ; returns 1
+function ce_CopyTo()
+(
+    ((ce_num !== CE_COPY) && ce_Store(CE_COPY, "copy")) ? (
+        sprintf(#ce_e, "Conf Editor : %s copied into \"copy\" (%d)", ce_Title(#ce_t1), CE_COPY);
+        mSL_log(SysLogBox, #ce_e);
+        1;
+    ) : 0;
+);
+
+// Paste : "copy" into the configuration edited (its weights and its volume ; the inputs and the outputs extended to them ;
+// kept for Undo ; not on "copy" itself)
+function ce_Paste()
+local(wb)
+(
+    ((ce_num !== CE_COPY) && (conflist[CE_COPY] > 0) && ((wb = cf_WGains(CE_COPY)) > 0)) ? (
+        ce_Keep();
+        ce_Read(wb);
+        ce_N = max(ce_N, ce_mi); ce_P = max(ce_P, ce_mo);
+        ce_vol = (wb[1] > 0) ? wb[1] : 1;
+        ce_dirty = 1;
+        sprintf(#ce_e, "Conf Editor : \"copy\" pasted into %s", ce_Title(#ce_t1));
+        mSL_log(SysLogBox, #ce_e);
+    );
+);
+
+// Clear : all the cells 0 (kept for Undo), the configuration copied into "copy" before (Paste : back to it)
+function ce_ClearConf()
+(
+    ((ce_num === CE_COPY) || ce_CopyTo()) ? ce_ClearAll();
+);
+
+// (2026-11-21) The common factor ce_fac (the cell 3 : 0.1 ... 10) : Add, Subtract, Multiply
+
+// Add (sg 1) or Subtract (sg -1) : the weights of the configuration n x the factor added to those of the editor, or
+// subtracted from them (at least 0 ; 3 decimals) ; Add : the inputs and the outputs extended to those of n (the cells
+// beyond N and P, kept until now, cleared before : they are not in the configuration) ; n the one edited : its matrix
+// now (N x P) ; kept for Undo ; returns 1 (0 : n not defined)
+function ce_AddConf(n, sg)
+local(wb, i, j, n1, p1, a, v, ok)
+(
+    ok = 0;
+    (n === ce_num) ? (
+        memset(ce_tmp, 0, CE_MAX * CE_MAX);
+        i = 0; loop(ce_N, memcpy(ce_tmp + i * CE_MAX, ce_w + i * CE_MAX, ce_P); i += 1;);
+        ce_mi = ce_N; ce_mo = ce_P; ok = 1;
+    ) : ((n >= 1) && (n <= CE_COPY) && (conflist[n] > 0) && ((wb = cf_WGains(n)) > 0)) ? (
+        ce_ReadTo(wb, ce_tmp); ok = 1;
+    ) : (
+        ce_Err(2501, sprintf(#ce_t1, "the configuration %d is not defined", n));
+    );
+    ok ? (
+        ce_Keep();
+        n1 = (sg > 0) ? max(ce_N, ce_mi) : ce_N; p1 = (sg > 0) ? max(ce_P, ce_mo) : ce_P;
+        i = 0;
+        loop(n1,
+            j = 0;
+            loop(p1,
+                a = i * CE_MAX + j;
+                v = ((i < ce_N) && (j < ce_P)) ? ce_w[a] : 0;
+                ce_w[a] = max(0, floor((v + sg * ce_fac * ce_tmp[a]) * 1000 + 0.5) / 1000);
+                j += 1;
+            );
+            i += 1;
+        );
+        ce_N = n1; ce_P = p1; ce_dirty = 1;
+        (strlen(cf_Name(n, #ce_t3)) > 0) ? (sprintf(#ce_t2, " \"%s\"", #ce_t3); strcpy(#ce_t3, #ce_t2););
+        ed_Fmt(#ce_fs, ce_fac); ce_Title(#ce_t1); // (ce_Title uses #ce_t2)
+        sprintf(#ce_e, "Conf Editor : the configuration %d%s x %s %s %s", n, #ce_t3, #ce_fs,
+            (sg > 0) ? "added to" : "subtracted from", #ce_t1);
+        mSL_log(SysLogBox, #ce_e);
+    );
+    ok;
+);
+
+// Multiply : the weights of the editor (N x P) multiplied by the factor (3 decimals ; a weight stays at least 0.001) ;
+// kept for Undo
+function ce_Multiply()
+local(i, j, a)
+(
+    (abs(ce_fac - 1) > 0.000001) ? (
+        ce_Keep();
+        i = 0;
+        loop(ce_N,
+            j = 0;
+            loop(ce_P,
+                a = i * CE_MAX + j;
+                (ce_w[a] > 0) ? (ce_w[a] = max(0.001, floor(ce_w[a] * ce_fac * 1000 + 0.5) / 1000));
+                j += 1;
+            );
+            i += 1;
+        );
+        ce_dirty = 1;
+        ed_Fmt(#ce_fs, ce_fac); ce_Title(#ce_t1);
+        sprintf(#ce_e, "Conf Editor : the weights of %s multiplied by %s", #ce_t1, #ce_fs);
+        mSL_log(SysLogBox, #ce_e);
+    );
+);
+
+// Normalize : the weights made easy to read, the gains kept (but for a small rounding). The weights of a set of inputs
+// (one, or all of them with one factor) multiplied by f, then rounded to multiples of 1 / d : integers first (d = 1),
+// else halves, fifths, tenths (d = 2, 5, 10) ; f : the smallest weight becomes k = 1 ... 10 ; the first d, then the
+// first k, where no weight changes by more than CE_NTOL (relative) with the rounding (d = 10, k = 1 always fits). The
+// gains do not change with f (sqrt(w / the sum of the weights of the input), a sum of 1 at least : the smallest weight
+// is k) ; but an input whose weights sum below 1 has absolute weights (g = sqrt(w) x the volume) : then f = 1, they are
+// only rounded (and left as they are when no d fits).
+CE_NTOL = 0.05;
+ce_nf = 1; ce_nd = 1; ce_ne = 0;
+
+// The factor f (ce_nf), the denominator d (ce_nd) for the inputs i0 ... i1 - 1 (their P outputs), the largest change
+// (ce_ne) ; returns 1 (0 : no weight, or nothing fits)
+function ce_NormFind(i0, i1)
+local(i, j, p, mn, low, s, dd, d, k, kn, f, e, x, y, ok)
+(
+    mn = 10^30; low = 0;
+    i = i0;
+    loop(i1 - i0,
+        s = ce_RowSum(i);
+        ((s > 0) && (s < 0.9995)) ? (low = 1);
+        p = ce_w + i * CE_MAX;
+        j = 0; loop(ce_P, (p[j] > 0) ? (mn = min(mn, p[j])); j += 1;);
+        i += 1;
+    );
+    ok = 0;
+    (mn < 10^29) ? (
+        kn = low ? 1 : 10;
+        dd = 0;
+        while (!ok && (dd < 4)) (
+            d = (dd === 0) ? 1 : (dd === 1) ? 2 : (dd === 2) ? 5 : 10;
+            k = 1;
+            while (!ok && (k <= kn)) (
+                f = low ? 1 : k / mn;
+                e = 0;
+                i = i0;
+                loop(i1 - i0,
+                    p = ce_w + i * CE_MAX;
+                    j = 0;
+                    loop(ce_P,
+                        (p[j] > 0) ? (x = p[j] * f; y = floor(x * d + 0.5) / d; e = max(e, abs(y - x) / x););
+                        j += 1;
+                    );
+                    i += 1;
+                );
+                (e <= CE_NTOL) ? (ok = 1; ce_nf = f; ce_nd = d; ce_ne = e;);
+                k += 1;
+            );
+            dd += 1;
+        );
+    );
+    ok;
+);
+
+// The weights of the inputs i0 ... i1 - 1 multiplied by ce_nf and rounded to multiples of 1 / ce_nd ; returns the count
+// of the weights changed
+function ce_NormPut(i0, i1)
+local(i, j, p, y, c)
+(
+    c = 0;
+    i = i0;
+    loop(i1 - i0,
+        p = ce_w + i * CE_MAX;
+        j = 0;
+        loop(ce_P,
+            (p[j] > 0) ? (
+                y = max(0.001, floor(floor(p[j] * ce_nf * ce_nd + 0.5) / ce_nd * 1000 + 0.5) / 1000);
+                (abs(y - p[j]) > 0.0005) ? (c += 1);
+                p[j] = y;
+            );
+            j += 1;
+        );
+        i += 1;
+    );
+    c;
+);
+
+// Normalize (kept for Undo ; logged) : how 0 each input (its own factor), 1 the current input, 2 the whole matrix (one
+// factor for all the inputs)
+function ce_Normalize(how)
+local(i, c, r, nr, nk, em)
+(
+    memcpy(ce_tmp, ce_w, CE_MAX * CE_MAX); // (the weights before : the undo buffer, when they change)
+    c = nr = nk = em = 0;
+    (how === 2) ? (
+        ce_NormFind(0, ce_N) ? (c = ce_NormPut(0, ce_N); em = ce_ne; nr = ce_N;) : (nk = 1);
+    ) : (
+        i = (how === 1) ? ce_row : 0;
+        loop((how === 1) ? 1 : ce_N,
+            (ce_RowSum(i) > 0) ? (
+                ce_NormFind(i, i + 1) ? (
+                    ((r = ce_NormPut(i, i + 1)) > 0) ? (c += r; nr += 1; em = max(em, ce_ne););
+                ) : (nk += 1);
+            );
+            i += 1;
+        );
+    );
+    (c > 0) ? (
+        ce_KeepFrom(ce_tmp); ce_dirty = 1;
+        (how === 2) ? sprintf(#ce_t2, "the whole matrix x %s, multiples of 1/%d", ed_Fmt(#ce_t3, ce_nf), ce_nd) :
+        (how === 1) ? sprintf(#ce_t2, "the input %d x %s, multiples of 1/%d", ce_row + 1, ed_Fmt(#ce_t3, ce_nf), ce_nd) :
+            sprintf(#ce_t2, "each input : %d changed", nr);
+        sprintf(#ce_e, "Conf Editor : normalized (%s) : %d weight%s changed, the largest rounding %.1f %%", #ce_t2, c,
+            (c > 1) ? "s" : "", em * 100);
+    ) : (
+        strcpy(#ce_e, "Conf Editor : Normalize : nothing to change");
+    );
+    mSL_log(SysLogBox, #ce_e);
+    (nk > 0) ? (
+        (how === 2) ? strcpy(#ce_t2, "the matrix left as it is (an input") :
+            sprintf(#ce_t2, "%d input%s left as %s (inputs", nk, (nk > 1) ? "s" : "", (nk > 1) ? "they are" : "it is");
+        sprintf(#ce_e, "Conf Editor : Normalize : %s whose weights sum below 1 : absolute weights, too far from round values)", #ce_t2);
+        mSL_log(SysLogBox, #ce_e);
+    );
+);
+
+// The answer of a prompt parsed : a number first (digits, then a space or the end : ce_pD 1, its value ce_pN), then a
+// name (ce_pHas : given ; #ce_pnm : its quotes around removed, "" : no name ; the other quotes become ', | becomes /)
+function ce_Parse(s)
+local(l, k, d, c, v, e)
+(
+    l = strlen(s); k = 0;
+    while ((k < l) && (str_getchar(s, k, 'cu') <= 32)) (k += 1;);
+    v = d = 0;
+    while ((k + d < l) && ((c = str_getchar(s, k + d, 'cu')) >= '0') && (c <= '9')) (v = v * 10 + c - '0'; d += 1;);
+    ce_pD = (d > 0) && ((k + d >= l) || (str_getchar(s, k + d, 'cu') <= 32));
+    ce_pD ? (ce_pN = v; k += d;) : (ce_pN = 0);
+    while ((k < l) && (str_getchar(s, k, 'cu') <= 32)) (k += 1;);
+    e = l; while ((e > k) && (str_getchar(s, e - 1, 'cu') <= 32)) (e -= 1;);
+    ce_pHas = (e > k);
+    ((e - k >= 2) && (str_getchar(s, k, 'cu') === '"') && (str_getchar(s, e - 1, 'cu') === '"')) ? (k += 1; e -= 1;);
+    (e > k) ? strcpy_substr(#ce_pnm, s, k, e - k) : strcpy(#ce_pnm, "");
+    k = 0;
+    loop(strlen(#ce_pnm),
+        c = str_getchar(#ce_pnm, k, 'cu');
+        (c === '"') ? str_setchar(#ce_pnm, k, 39, 'cu') : (c === '|') ? str_setchar(#ce_pnm, k, '/', 'cu');
+        k += 1;
+    );
+    (strlen(#ce_pnm) > CF_NMLEN) ? str_setlen(#ce_pnm, CF_NMLEN);
+);
+
+// The answer of the prompt of the factor : a number (a comma : a point), or a number of dB ("-3 dB") ; in [0.1, 10],
+// else an error ; empty : nothing
+function ce_FacParse(s)
+local(l, k, e, c, v, db)
+(
+    l = strlen(s); k = 0;
+    while ((k < l) && (str_getchar(s, k, 'cu') <= 32)) (k += 1;);
+    (k < l) ? (
+        db = 0; e = k;
+        while (e < l) (
+            c = str_getchar(s, e, 'cu');
+            (c === ',') ? str_setchar(s, e, '.', 'cu') : ((c === 'd') || (c === 'D')) ? (db = 1);
+            e += 1;
+        );
+        v = s3d_atof(s, k, l);
+        db ? (v = 10 ^ (v / 20));
+        ((v >= 0.099999) && (v <= 10.000001)) ? (ce_fac = max(0.1, min(10, v))) :
+            ce_Err(2507, "a factor between 0.1 and 10 (-20 dB ... +20 dB) is expected");
+    );
+);
+
+// The prompts : 1 Rename (its number and / or its name), 2 Save as (a number, a name may follow), 3 the factor ;
+// ce_Prompted takes the answer (ce_Parse ; Save as : empty, nothing ; Rename : unchanged, nothing ; the factor :
+// ce_FacParse)
+function ce_Prompt(kind)
+local(f)
+(
+    ce_pend = kind;
+    (kind === 3) ? (
+        ed_Fmt(#ce_prm, ce_fac);
+        strcpy(#ce_ptl, "The common factor : 0.1 ... 10 (e.g. 0.7071), or dB (e.g. -3 dB)");
+    ) :
+    (kind === 1) ? (
+        sprintf(#ce_prm, "%d", ce_num);
+        (strlen(#ce_name) > 0) ? (strcat(#ce_prm, " "); strcat(#ce_prm, #ce_name););
+        strcpy(#ce_ptl, "Rename : its number and / or its name (e.g. 325 tutti HP ; \"\" : no name)");
+    ) : (
+        ((f = ce_Free(ce_num + 1)) <= 0) ? (f = ce_Free(1));
+        strcpy(#ce_prm, "");
+        sprintf(#ce_ptl, "Save as : a number (e.g. %d : free), a name may follow", f);
+    );
+    ui_screen_open("control.prompt");
+    ui_screen_arg(0, #ce_prm);
+    ui_screen_arg(1, #ce_ptl);
+);
+
+// A configuration n defined, other than the one edited, would be replaced : a confirmation ; returns 1 (replace it)
+function ce_Confirm(n)
+local(m)
+(
+    sprintf(#ce_mnu, "#The configuration %d is defined%s|Replace it|Cancel", n,
+        (strlen(cf_Name(n, #ce_t2)) > 0) ? sprintf(#ce_t3, " (\"%s\")", #ce_t2) : "");
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#ce_mnu);
+    prv_MenuEnd(m > 0);
+    m === 2;
+);
+
+// The editor became the configuration n, from o (Save as) : n current in the ring (its entry, else after o) ; o not
+// defined (never saved) leaves the ring ; the ring full : n takes the place of o
+function ce_RPut(n, o)
+local(i, k)
+(
+    i = ce_ri;
+    (conflist[o] <= 0) ? (ce_RDel(i); ce_ri = i - 1;);
+    ((k = ce_RFind(n)) >= 0) ? (ce_ri = k) :
+    (ce_rn >= CE_RMAX) ? (ce_ring[i] = n; ce_ri = i;) : ce_RInsert(n);
+);
+
+// Save as n (the prompt) : the configuration edited saved before (when it changed), then saved as n (its name : the one
+// given, else its own) ; n defined : replaced after a confirmation ; n becomes the current one of the ring (ce_RPut)
+function ce_SaveAs(n)
+local(o)
+(
+    ((n < 1) || (n > CE_COPY)) ? ce_Err(2502, "a configuration number in [1, 4094] is expected") :
+    (n === ce_num) ? (ce_pHas ? strcpy(#ce_name, #ce_pnm); ce_Save(n);) :
+    (((conflist[n] <= 0) || ce_Confirm(n)) && ce_Commit()) ? (
+        o = ce_num;
+        ce_pHas ? strcpy(#ce_name, #ce_pnm);
+        ce_Save(n) ? ce_RPut(n, o);
+    );
+);
+
+// Rename (the prompt) : its number and / or its name (ce_Parse) ; another number m (defined : replaced after a
+// confirmation) : the configuration edited saved as m, its former number deleted, a move : its places in the groups, the
+// projectors that use it, the diffusions of their inputs and outputs, the default configuration, the history follow ;
+// the ring too (m elsewhere in the ring : that entry leaves it)
+function ce_Rename()
+local(m, o, ob, nb, p, pp, k)
+(
+    m = ce_pD ? ce_pN : ce_num;
+    ((m < 1) || (m > CE_COPY)) ? ce_Err(2502, "a configuration number in [1, 4094] is expected") :
+    ((m !== ce_num) || (ce_pHas && (strcmp(#ce_pnm, #ce_name) !== 0))) ? (
+        ((m === ce_num) || (conflist[m] <= 0) || ce_Confirm(m)) ? (
+            ce_pHas ? strcpy(#ce_name, #ce_pnm);
+            o = ce_num; ob = conflist[o];
+            ce_Store(m, #ce_name) ? (
+                (m !== o) ? (
+                    nb = conflist[m];
+                    (ob > 0) ? (
+                        conflist[o] = 0;
+                        cf_FreeW(o);
+                        p = 0;
+                        loop(akousmax,
+                            pp = projectors + p * projsize;
+                            ((pp[prx_ptrconf] === ob) || ((pp[prx_ptrconf] === -4) && (pp[prx_numconf] === o))) ? (
+                                pp[prx_ptrconf] = -4; pp[prx_numconf] = m; // (its number gives the new block : cf_IOBlock)
+                            );
+                            (pp[prx_hypbase] === o) ? (pp[prx_hypbase] = m);
+                            ((0|serialBlock[Pr7_PrjInD + p]) === o) ? (serialBlock[Pr7_PrjInD + p] = m);
+                            ((0|serialBlock[Pr7_PrjOutD + p]) === o) ? (serialBlock[Pr7_PrjOutD + p] = m);
+                            p += 1;
+                        );
+                        k = 0; loop(groupdefsize - 1, (groupdefs[k] === o) ? (groupdefs[k] = m); k += 1;);
+                        k = 0; loop(historysiz, (historywa[k] === ob) ? (historywa[k] = nb); k += 1;);
+                        (defaultconf === o) ? (defaultconf = m);
+                        cf_Retire(ob);
+                        prvchcnf = -1; cf_reload = 1; hypchange = 1;
+                    );
+                    ((k = ce_RFind(m)) >= 0) ? ce_RDel(k);
+                    ce_ring[ce_ri] = m;
+                );
+                ce_num = m; ce_dirty = 0;
+                sprintf(#ce_e, "Conf Editor : %s%s", ce_Title(#ce_t1),
+                    (m !== o) ? sprintf(#ce_t3, " : the configuration %d renumbered", o) : " : renamed");
+                mSL_log(SysLogBox, #ce_e);
+            );
+        );
+    );
+);
+
+function ce_Prompted()
+(
+    ((ce_pend > 0) && !(ui_screen() == "control.prompt")) ? (
+        (ce_pend === 3) ? ce_FacParse(#ce_prm) : (
+            ce_Parse(#ce_prm);
+            (ce_pend === 1) ? ce_Rename() :
+            ce_pD ? ce_SaveAs(ce_pN) :
+            ce_pHas ? ce_Err(2502, "a configuration number in [1, 4094] is expected");
+        );
+        ce_pend = 0;
+        ui_GFXdoNow |= 4;
+    );
+);
+
+// The configuration n deleted from the library (as in the module "Configurations" : the projectors that use it keep their
+// matrix ; its places in the groups : a configuration not defined, see getconfux)
+function ce_Remove(n)
+local(b, p, pp)
+(
+    ((n >= 1) && (n <= CE_COPY) && ((b = conflist[n]) > 0)) ? (
+        conflist[n] = 0;
+        cf_FreeW(n);
+        p = 0;
+        loop(akousmax,
+            pp = projectors + p * projsize;
+            (pp[prx_ptrconf] === b) ? (pp[prx_ptrconf] = -3); // (its matrix stays until the next change)
+            (pp[prx_hypbase] === n) ? (pp[prx_hypbase] = 0);
+            p += 1;
+        );
+        hypchange = 1;
+    );
+);
+
+// Remove from the ring : the configuration edited saved (when it changed ; it stays in the library), then the next one of
+// the ring
+function ce_RRemove()
+(
+    ce_Commit() ? (
+        sprintf(#ce_e, "Conf Editor : %s removed from the ring", ce_Title(#ce_t1));
+        mSL_log(SysLogBox, #ce_e);
+        ce_RDel(ce_ri); ce_RFix();
+        ce_Get(ce_ring[ce_ri]);
+    );
+);
+
+// Delete the configuration : out of the ring and of the library (its work forgotten), then the next one of the ring
+function ce_DelCur()
+(
+    sprintf(#ce_e, "Conf Editor : the configuration %s deleted", ce_Title(#ce_t1));
+    mSL_log(SysLogBox, #ce_e);
+    ce_Remove(ce_num);
+    ce_RDel(ce_ri); ce_RFix();
+    ce_Get(ce_ring[ce_ri]);
+);
+
+// The menu of the ring (cell 7) : its configurations (the current one checked ; * changed ; not saved : not in the
+// library), go to one ; remove the current one
+function ce_RingMenu()
+local(k, n, m)
+(
+    sprintf(#ce_mnu, "#The ring : %d configuration%s edited (cell 0 : left clic the next one, Shift + left clic the previous one)",
+        ce_rn, (ce_rn > 1) ? "s" : "");
+    k = 0;
+    loop(ce_rn,
+        n = ce_ring[k];
+        (k === ce_ri) ? strcpy(#ce_t2, #ce_name) : cf_Name(n, #ce_t2);
+        sprintf(#ce_it, "|%s%d%s%s%s%s", (k === ce_ri) ? "!" : "", n, (strlen(#ce_t2) > 0) ? "  " : "", #ce_t2,
+            ((k === ce_ri) && ce_dirty) ? "  *" : "", (conflist[n] > 0) ? "" : "  (not saved)");
+        strcat(#ce_mnu, #ce_it);
+        k += 1;
+    );
+    sprintf(#ce_it, "||Remove %d from the ring", ce_num); strcat(#ce_mnu, #ce_it);
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#ce_mnu);
+    prv_MenuEnd(m > 0);
+    ((m >= 2) && (m < 2 + ce_rn)) ? ce_RGo(m - 2) : (m === 2 + ce_rn) ? ce_RRemove();
+);
+
+// The names of the blocks of weights a and b compared (the case of the letters ignored) : < 0, 0, > 0
+function ce_NmCmp(a, b)
+local(k, n, ca, cb, r)
+(
+    r = 0; k = 0; n = min(a[2], b[2]);
+    while ((r === 0) && (k < n)) (
+        ca = a[3 + k]; cb = b[3 + k];
+        ((ca >= 'A') && (ca <= 'Z')) ? (ca += 32);
+        ((cb >= 'A') && (cb <= 'Z')) ? (cb += 32);
+        r = ca - cb; k += 1;
+    );
+    (r === 0) ? a[2] - b[2] : r;
+);
+
+// The menu of the configurations : first "Named" (those with a name, in the order of their names : 100 at most), then all
+// of them (by hundreds in sub-menus when there are more than 40) ; the one edited checked ; their numbers in ce_map (from
+// the item 2) ; kind 0 : the one chosen edited (Load : ce_Open), 1 : a new configuration, its copy (New from... : ce_New),
+// 2 and 3 : its weights x the factor added to the configuration edited, subtracted from it (ce_AddConf)
+function ce_LoadMenu(kind)
+local(n, k, b, e, c, m, sub, i, nn, nl, j, v, w)
+(
+    ed_Fmt(#ce_fs, ce_fac);
+    (kind === 2) ? sprintf(#ce_mnu, "#Add to the configuration edited : a configuration x %s", #ce_fs) :
+    (kind === 3) ? sprintf(#ce_mnu, "#Subtract from the configuration edited : a configuration x %s", #ce_fs) :
+        strcpy(#ce_mnu, kind ? "#New configuration : a copy of" : "#Load a configuration into the editor (the ring)");
+    i = 2;
+    n = 0; k = 1; loop(conflsize - 2, (conflist[k] > 0) ? n += 1; k += 1;);
+    sub = (n > 40);
+    // the named ones (insertion sort : ce_NmCmp)
+    nn = 0; k = 1;
+    loop(CE_COPY, ((conflist[k] > 0) && ((w = cf_W(k)) > 0) && (w[2] > 0)) ? (ce_srt[nn] = k; nn += 1;); k += 1;);
+    j = 1;
+    loop(nn - 1,
+        v = ce_srt[j]; k = j;
+        while ((k > 0) && (ce_NmCmp(cf_wts[ce_srt[k - 1]], cf_wts[v]) > 0)) (ce_srt[k] = ce_srt[k - 1]; k -= 1;);
+        ce_srt[k] = v;
+        j += 1;
+    );
+    nl = min(nn, 100); // (the length of the menu)
+    (nl > 0) ? (
+        sprintf(#ce_it, "|>Named (%d)", nn); strcat(#ce_mnu, #ce_it);
+        j = 0;
+        loop(nl,
+            k = ce_srt[j];
+            cf_Name(k, #ce_t2);
+            c = str_getchar(#ce_t2, 0, 'cu'); // (the marks of gfx_showmenu at the start of a name : a space before)
+            sprintf(#ce_it, "|%s%s%s%s  (%d)", (j === nl - 1) ? "<" : "", (k === ce_num) ? "!" : "",
+                ((c === '#') || (c === '!') || (c === '<') || (c === '>')) ? " " : "", #ce_t2, k);
+            strcat(#ce_mnu, #ce_it); ce_map[i] = k; i += 1;
+            j += 1;
+        );
+    );
+    (n === 0) ? (
+        strcat(#ce_mnu, "|#No configuration defined"); ce_map[i] = 0; i += 1;
+    ) : (
+        b = 0;
+        while ((b < conflsize - 1) && (strlen(#ce_mnu) < 11000)) ( // (a string : 16 k at most, a hundred : 5 k)
+            e = min(conflsize - 2, b + 99);
+            c = 0; k = max(1, b); loop(e - max(1, b) + 1, (conflist[k] > 0) ? c += 1; k += 1;);
+            (c > 0) ? (
+                sub ? (sprintf(#ce_it, "|>%d ... %d", max(1, b), e); strcat(#ce_mnu, #ce_it););
+                k = max(1, b); m = 0;
+                loop(e - max(1, b) + 1,
+                    (conflist[k] > 0) ? (
+                        m += 1;
+                        sprintf(#ce_it, "|%s%s%d%s%s", (sub && (m === c)) ? "<" : "", (k === ce_num) ? "!" : "", k,
+                            (strlen(cf_Name(k, #ce_t2)) > 0) ? "  " : "", #ce_t2);
+                        strcat(#ce_mnu, #ce_it); ce_map[i] = k; i += 1;
+                    );
+                    k += 1;
+                );
+            );
+            b += 100;
+        );
+    );
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#ce_mnu);
+    prv_MenuEnd(m > 0);
+    ((m >= 2) && (m < i) && (ce_map[m] > 0)) ? (
+        (kind >= 2) ? ce_AddConf(ce_map[m], (kind === 2) ? 1 : -1) : kind ? ce_New(ce_map[m]) : ce_Open(ce_map[m]);
+    );
+);
+
+// The items of the common factor (the menus of the cells 0 and 3 : 6 items, ce_OpsDo) appended to #ce_mnu : Add,
+// Subtract a configuration x the factor, Multiply by it, Normalize (each input, the current one, the whole matrix)
+function ce_OpsItems()
+(
+    ed_Fmt(#ce_fs, ce_fac);
+    sprintf(#ce_it, "||Add a configuration x %s...|Subtract a configuration x %s...|%sMultiply the weights by %s", #ce_fs,
+        #ce_fs, (abs(ce_fac - 1) > 0.000001) ? "" : "#", #ce_fs);
+    strcat(#ce_mnu, #ce_it);
+    sprintf(#ce_it, "|>Normalize : round weights (integers, else halves, fifths, tenths)|Each input (its own factor)|The current input (In %d)|<The whole matrix (one factor)",
+        ce_row + 1);
+    strcat(#ce_mnu, #ce_it);
+);
+
+// The item k (0 ... 5) of ce_OpsItems
+function ce_OpsDo(k)
+(
+    (k === 0) ? ce_LoadMenu(2) :
+    (k === 1) ? ce_LoadMenu(3) :
+    (k === 2) ? ce_Multiply() :
+    ((k >= 3) && (k <= 5)) ? ce_Normalize(k - 3);
+);
+
+// The menu of the cell 3 : the factors (ce_FList, the nearest one checked), another value (a prompt), then the items of
+// the factor (ce_OpsItems)
+function ce_FacMenu()
+local(k, n, b, bd, d, m)
+(
+    sprintf(#ce_mnu, "#The common factor : %s (Add, Subtract, Multiply)", ed_Fmt(#ce_fs, ce_fac));
+    n = 14; b = -1; bd = 10^30;
+    k = 0;
+    loop(n,
+        sx_Nth(ce_FList, k, #ce_t2);
+        d = abs(s3d_atof(#ce_t2, 0, strlen(#ce_t2)) - ce_fac);
+        (d < bd) ? (bd = d; b = k;);
+        k += 1;
+    );
+    k = 0;
+    loop(n,
+        sx_Nth(ce_FList, k, #ce_t2);
+        sprintf(#ce_it, "|%s%s", ((k === b) && (bd < 0.0001)) ? "!" : "", #ce_t2);
+        strcat(#ce_mnu, #ce_it);
+        k += 1;
+    );
+    strcat(#ce_mnu, "|Other value... (e.g. 0.7071, -3 dB)");
+    ce_OpsItems();
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#ce_mnu);
+    prv_MenuEnd(m > 0);
+    ((m >= 2) && (m < 2 + n)) ? (sx_Nth(ce_FList, m - 2, #ce_t2); ce_fac = s3d_atof(#ce_t2, 0, strlen(#ce_t2));) :
+    (m === 2 + n) ? ce_Prompt(3) :
+    (m > 2 + n) ? ce_OpsDo(m - 3 - n);
+);
+
+// The menu of the configuration (right clic on the cell 0) : new (empty, from a configuration, a snapshot of the current
+// projector), load (ce_LoadMenu), load that of the current projector ; save, save as, rename ; copy, paste, clear ; add,
+// subtract a configuration x the factor, multiply, normalize (ce_OpsItems) ; remove from the ring, delete
+function ce_ConfMenu()
+local(m, p, cp, pc, sn, k, c)
+(
+    p = currentpro[prx_numconf];
+    cp = (ce_num !== CE_COPY);              // (Copy, Paste : not on "copy" itself)
+    pc = cp && (conflist[CE_COPY] > 0);
+    sn = (currentpro[prx_poutp] > 0);
+    sprintf(#ce_mnu, "#Configuration %s%s  (the ring : %d / %d)|New (empty)|New (from...)|%sNew (a snapshot : the matrix of the current projector P%d now)|Load a configuration...",
+        ce_Title(#ce_t1), ce_dirty ? " (changed)" : "", ce_ri + 1, ce_rn, sn ? "" : "#", slprjcur);
+    ((p > 0) && (p < conflsize - 1) && (conflist[p] > 0)) ?
+        sprintf(#ce_it, "|Load the configuration of the current projector (P%d : %d)", slprjcur, p) :
+        sprintf(#ce_it, "|#Load the configuration of the current projector (P%d : none)", slprjcur);
+    strcat(#ce_mnu, #ce_it);
+    sprintf(#ce_it, "||Save (%s)|Save as...|Rename... (its number and / or its name)", #ce_t1);
+    strcat(#ce_mnu, #ce_it);
+    sprintf(#ce_it, "||%sCopy (into \"copy\" : %d)|%sPaste (from \"copy\")|%s", cp ? "" : "#", CE_COPY, pc ? "" : "#",
+        cp ? "Clear (the configuration copied into \"copy\" before : Paste goes back to it)" : "Clear");
+    strcat(#ce_mnu, #ce_it);
+    ce_OpsItems();
+    (conflist[ce_num] > 0) ? (
+        k = cg_Places(ce_num); c = cg_Users(ce_num, 0, #ce_t3);
+        sprintf(#ce_t2, " (%d place%s in the groups ; projectors :%s)", k, (k === 1) ? "" : "s", c ? #ce_t3 : " none");
+    ) : strcpy(#ce_t2, " (not saved : it only leaves the ring)");
+    sprintf(#ce_it, "||Remove from the ring|>Delete the configuration|<Delete %s for good%s", #ce_t1, #ce_t2);
+    strcat(#ce_mnu, #ce_it);
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#ce_mnu);
+    prv_MenuEnd(m > 0);
+    (m === 2) ? ce_New(0) :
+    (m === 3) ? ce_LoadMenu(1) :
+    (m === 4) ? (sn ? (sprintf(#ce_t2, "P%d snapshot", slprjcur); ce_Adopt(currentpro[prx_poutp], #ce_t2);)) :
+    (m === 5) ? ce_LoadMenu(0) :
+    (m === 6) ? (((p > 0) && (p < conflsize - 1) && (conflist[p] > 0)) ? ce_Open(p)) :
+    (m === 7) ? ce_SaveCur() :
+    (m === 8) ? ce_Prompt(2) :
+    (m === 9) ? ce_Prompt(1) :
+    (m === 10) ? ce_CopyTo() :
+    (m === 11) ? ce_Paste() :
+    (m === 12) ? ce_ClearConf() :
+    ((m >= 13) && (m <= 18)) ? ce_OpsDo(m - 13) :
+    (m === 19) ? ce_RRemove() :
+    (m === 20) ? ce_DelCur();
+);
+
+// Each run of @gfx (even when the window is closed) : the ring checked (ce_RingCheck), a load asked by the module
+// "Configurations", the blocks of configurations replaced freed (cf_RetireGfx) ; a new frame when Alt is pressed or
+// released (the halo of the power received : the frames are drawn on events, a modifier alone is not one)
+function ce_Frame()
+(
+    ce_RingCheck();
+    (ce_LoadReq > 0) ? (
+        ce_Open(ce_LoadReq);
+        ce_LoadReq = 0;
+        ui_GFXdoNow |= 4;
+    );
+    cf_RetireGfx();
+    ((mouse_cap & 16) !== ce_altPrev) ? (ce_altPrev = mouse_cap & 16; ui_GFXdoNow |= 4;);
+);
+
+
+//====== Alt : the power received by the outputs ; Simplify (step 4)
+
+// The power received by each output from all the inputs (the volume apart : the sum of w / max(1, the sum of the
+// weights of its input)) into ce_cp, the count of its inputs into ce_cn ; returns the largest one (ce_cpMax)
+function ce_ColPowers()
+local(i, j, p, s)
+(
+    memset(ce_cp, 0, CE_MAX); memset(ce_cn, 0, CE_MAX);
+    i = 0;
+    loop(ce_N,
+        p = ce_w + i * CE_MAX;
+        s = max(1, ce_RowSum(i));
+        j = 0; loop(ce_P, (p[j] > 0) ? (ce_cp[j] += p[j] / s; ce_cn[j] += 1;); j += 1;);
+        i += 1;
+    );
+    ce_cpMax = 0; j = 0; loop(ce_P, ce_cpMax = max(ce_cpMax, ce_cp[j]); j += 1;);
+    ce_cpMax;
+);
+
+// The step of the rounding i (0 ... 4 : Off, 1, 0.5, 0.25, 0.1)
+function ce_RStep(i) ( (i === 1) ? 1 : (i === 2) ? 0.5 : (i === 3) ? 0.25 : (i === 4) ? 0.1 : 0; );
+
+// The matrix simplified into ce_sim (the inputs of the settings : all, or the current one ; the others, and the cells
+// beyond N and P, as they are). For each input, S the sum of its weights on the P outputs :
+//   1. the outputs whose share of its power (w / S) is below ce_sShare % removed ; the strongest ones always stay (equal
+//      weights stay together)
+//   2. at most ce_sMax outputs : the strongest ones (equal weights : the lower outputs first)
+//   3. its power kept (the gains are sqrt(w / max(1, sum))) : S >= 1, the sum left at least 1 ; S < 1, the sum S again
+//   4. the rounding (step r) : the ratios, the smallest weight 1, the others to the nearest multiple of r (at least r) ;
+//      S < 1 : then brought back to the sum S (the input keeps its level, its ratios are round)
+// The counts : ce_sRem the weights removed, ce_sChg those changed, ce_sRows the inputs changed ; returns the weights
+// removed or changed
+function ce_SimCompute()
+local(i, i0, i1, j, p, q, s, s2, mx, mn, c, th, r, jm, f, ch)
+(
+    memcpy(ce_sim, ce_w, CE_MAX * CE_MAX);
+    ce_sRem = ce_sChg = ce_sRows = 0;
+    i0 = ce_sCur ? ce_row : 0; i1 = ce_sCur ? ce_row + 1 : ce_N;
+    th = ce_sShare / 100; r = ce_RStep(ce_sRi);
+    i = i0;
+    loop(i1 - i0,
+        p = ce_w + i * CE_MAX; q = ce_sim + i * CE_MAX;
+        s = mx = c = 0;
+        j = 0; loop(ce_P, (q[j] > 0) ? (s += q[j]; mx = max(mx, q[j]); c += 1;); j += 1;);
+        (s > 0) ? (
+            // 1. the share of the power
+            (th > 0) ? (
+                j = 0;
+                loop(ce_P, ((q[j] > 0) && (q[j] < mx) && (q[j] / s < th)) ? (q[j] = 0; c -= 1;); j += 1;);
+            );
+            // 2. the strongest ones (the weakest removed first ; equal : the higher output first)
+            (ce_sMax > 0) ? (
+                while (c > ce_sMax) (
+                    jm = -1; mn = 10^30;
+                    j = 0; loop(ce_P, ((q[j] > 0) && (q[j] <= mn)) ? (mn = q[j]; jm = j;); j += 1;);
+                    (jm >= 0) ? (q[jm] = 0; c -= 1;) : (c = 0);
+                );
+            );
+            // 3. the power kept
+            s2 = 0; j = 0; loop(ce_P, (q[j] > 0) ? (s2 += q[j]); j += 1;);
+            f = (s2 <= 0) ? 1 : (s >= 1) ? ((s2 < 1) ? 1 / s2 : 1) : s / s2;
+            // 4. the rounding of the ratios (the smallest weight 1)
+            ((r > 0) && (s2 > 0)) ? (
+                mn = 10^30; j = 0; loop(ce_P, (q[j] > 0) ? (mn = min(mn, q[j])); j += 1;);
+                s2 = 0;
+                j = 0; loop(ce_P, (q[j] > 0) ? (q[j] = max(r, floor(q[j] / mn / r + 0.5) * r); s2 += q[j];); j += 1;);
+                f = (s >= 1) ? 1 : s / s2;
+            );
+            // the weights (3 decimals, as ce_Set) ; the counts
+            ch = 0;
+            j = 0;
+            loop(ce_P,
+                (q[j] > 0) ? (q[j] = max(0.001, floor(q[j] * f * 1000 + 0.5) / 1000));
+                (p[j] > 0) ? (
+                    (q[j] <= 0) ? (ce_sRem += 1; ch = 1;) :
+                    (abs(q[j] - p[j]) > 0.0011) ? (ce_sChg += 1; ch = 1;);
+                );
+                j += 1;
+            );
+            ce_sRows += ch;
+        );
+        i += 1;
+    );
+    ce_sRem + ce_sChg;
+);
+
+// The matrix simplified (kept for Undo) and logged ; cur : 1 the current input only, 0 all, -1 the setting ce_sCur
+function ce_SimApply(cur)
+local(o)
+(
+    o = ce_sCur; (cur >= 0) ? (ce_sCur = cur);
+    (ce_SimCompute() > 0) ? (
+        ce_Keep();
+        memcpy(ce_w, ce_sim, CE_MAX * CE_MAX);
+        ce_dirty = 1;
+        sprintf(#ce_e, "Conf Editor : simplified (%s) : %d weight%s removed, %d changed, %d input%s changed",
+            ce_sCur ? sprintf(#ce_t2, "the input %d", ce_row + 1) : "all the inputs", ce_sRem, (ce_sRem > 1) ? "s" : "",
+            ce_sChg, ce_sRows, (ce_sRows > 1) ? "s" : "");
+        ce_SimCompute(); // (the preview : nothing more to change)
+    ) : (
+        strcpy(#ce_e, "Conf Editor : Simplify : nothing to change");
+    );
+    mSL_log(SysLogBox, #ce_e);
+    ce_sCur = o;
+);
+
+
+//====== Saved with the project (after the module "Global", before the Live screen : the older projects end before it)
+
+// Its header 'cfe1', 40 fields (16 until the 3D view, 24 until Simplify : 2026-11-20, 32 until the ring : 2026-11-21 ; the
+// fields 25, 26 the roll of the camera and the presentation of the room, 27 the common factor, 2026-11-21 : 0 before), its
+// name, the weights of the N x P cells (row by row), the ring (its numbers ; before : the ring is made again, ce_RingCheck)
+function ce_Serialize()
+local(i, k, f, nf, rn)
+(
+    f = ce_sf;
+    (file_avail(0) >= 0) ? (
+        (file_avail(0) > 0) ? (
+            memset(ser_hdr, 0, 4);
+            load_mem(0, ser_hdr, 4);
+            nf = ser_hdr[1];
+            ((ser_hdr[0] === 'cfe1') && ((nf === 16) || (nf === 24) || (nf === 32) || (nf === 40))) ? (
+                memset(f, 0, 48);
+                load_mem(0, f, nf);
+                ce_N = max(1, min(CE_MAX, 0|f[0])); ce_P = max(1, min(CE_MAX, 0|f[1]));
+                ce_num = max(0, min(conflsize - 2, 0|f[2])); ce_mode = (f[3] === 1) ? 1 : 0;
+                ce_row = max(0, min(ce_N - 1, 0|f[4])); ce_col = max(0, min(ce_P - 1, 0|f[5]));
+                ce_vol = (f[6] > 0) ? min(10, f[6]) : 1;
+                ce_cs = max(0, min(64, 0|f[7])); ce_csL = max(8, min(64, (f[8] > 0) ? 0|f[8] : 20));
+                ce_r0 = max(0, 0|f[9]); ce_c0 = max(0, 0|f[10]);
+                ce_dirty = !!f[11]; ce_opt = 0|f[12];
+                // the 3D view : its camera, its sizes, its share (before : the defaults)
+                (nf >= 24) ? (
+                    ce_az = f[13]; ce_el = f[14]; ce_dist = max(1.8, min(12, f[15]));
+                    ce_kH = max(0, min(s3d_kN - 1, 0|f[16])); ce_kS = max(0, min(s3d_kN - 1, 0|f[17]));
+                    ce_split = max(0.1, min(0.9, f[18]));
+                ) : (
+                    ce_az = s3d_Az3D; ce_el = s3d_El3D; ce_dist = s3d_Dist3D; ce_kH = ce_kS = 12; ce_split = 0.5;
+                );
+                // (2026-11-21) the roll of its camera, its presentation of the room + 1 (before : 0, the grid or not)
+                ce_roll = 0; ce_pres = (ce_opt & ce_oNoGrid) ? 5 : 0;
+                (nf >= 40) ? (
+                    ce_roll = max(- $pi, min($pi, f[25]));
+                    (f[26] >= 1) ? (ce_pres = max(0, min(5, (0|f[26]) - 1)));
+                );
+                // (2026-11-21) the common factor (before : 0, then 1)
+                ce_fac = ((nf >= 40) && (f[27] > 0)) ? max(0.1, min(10, f[27])) : 1;
+                // Simplify : its settings, the line 3, the preview (before : the defaults)
+                (nf >= 32) ? (
+                    ce_sShare = max(0, min(50, f[19])); ce_sMax = max(0, min(32, 0|f[20]));
+                    ce_sRi = max(0, min(4, 0|f[21])); ce_sCur = (f[22] & 1) ? 1 : 0;
+                    ce_simOn = (f[22] & 2) ? 1 : 0; ce_simPrev = (f[22] & 4) ? 1 : 0;
+                ) : (
+                    ce_sShare = 5; ce_sMax = 0; ce_sRi = 1; ce_sCur = 0; ce_simOn = 0; ce_simPrev = 1;
+                );
+                file_string(0, #ce_name);
+                memset(ce_w, 0, CE_MAX * CE_MAX);
+                i = 0; loop(ce_N, load_mem(0, ce_w + i * CE_MAX, ce_P); i += 1;);
+                i = 0; loop(CE_MAX * CE_MAX, (!(ce_w[i] > 0)) ? (ce_w[i] = 0); i += 1;); // (no negative, no NaN)
+                ce_uSt = 0;
+                // the ring (its numbers checked ; its current entry : ce_RingCheck)
+                ce_rn = 0; ce_ri = 0;
+                (nf >= 40) ? (
+                    rn = max(0, min(CE_RMAX, 0|f[23]));
+                    (rn > 0) ? (
+                        load_mem(0, ce_ring, rn); // (compacted in place : the numbers out of range dropped)
+                        k = 0; loop(rn, ((ce_ring[k] >= 1) && (ce_ring[k] <= CE_COPY)) ? (ce_ring[ce_rn] = 0|ce_ring[k]; ce_rn += 1;); k += 1;);
+                    );
+                    ce_ri = max(0, min(ce_rn - 1, 0|f[24]));
+                );
+            );
+        );
+    ) : (
+        ser_hdr[0] = 'cfe1'; ser_hdr[1] = 40; ser_hdr[2] = CE_MAX; ser_hdr[3] = 0;
+        save_mem(0, ser_hdr, 4);
+        memset(f, 0, 48);
+        f[0] = ce_N; f[1] = ce_P; f[2] = ce_num; f[3] = ce_mode; f[4] = ce_row; f[5] = ce_col; f[6] = ce_vol;
+        f[7] = ce_cs; f[8] = ce_csL; f[9] = ce_r0; f[10] = ce_c0; f[11] = ce_dirty; f[12] = ce_opt;
+        f[13] = ce_az; f[14] = ce_el; f[15] = ce_dist; f[16] = ce_kH; f[17] = ce_kS; f[18] = ce_split;
+        f[19] = ce_sShare; f[20] = ce_sMax; f[21] = ce_sRi; f[22] = ce_sCur + 2 * ce_simOn + 4 * ce_simPrev;
+        f[23] = ce_rn; f[24] = ce_ri;
+        f[25] = ce_roll; f[26] = ce_pres + 1; f[27] = ce_fac;
+        save_mem(0, f, 40);
+        file_string(0, #ce_name);
+        i = 0; loop(ce_N, save_mem(0, ce_w + i * CE_MAX, ce_P); i += 1;);
+        (ce_rn > 0) ? save_mem(0, ce_ring, ce_rn);
+    );
+);
+
+
+//====== The matrix : geometry, mouse, drawing
+
+// The geometry for an image of w x h pixels : the headers (the numbers of the outputs at the top, of the inputs at the
+// left), the info line at the bottom, the size of the cells (Fit : the whole matrix, 3 ... 40 units), the rows and the
+// columns shown (the first ones kept in range)
+function ce_Geo(w, h)
+local(sc, aw, ah, cs)
+(
+    sc = ui_jscale();
+    gfx_measurestr("128", ce_tw, ce_tth);
+    ce_hw = ce_tw + 10; ce_th = ce_tth + 6; ce_ih = ce_tth + 8;
+    aw = max(8, w - ce_hw - 2); ah = max(8, h - ce_th - ce_ih);
+    cs = (ce_cs > 0) ? ce_cs * sc : min(40 * sc, floor(min(aw / ce_P, ah / ce_N)));
+    ce_csz = max(3, floor(cs));
+    ce_vc = max(1, min(ce_P, floor(aw / ce_csz)));
+    ce_vr = max(1, min(ce_N, floor(ah / ce_csz)));
+    ce_c0 = max(0, min(ce_P - ce_vc, ce_c0));
+    ce_r0 = max(0, min(ce_N - ce_vr, ce_r0));
+);
+
+// The current cell shown (the first row, column moved)
+function ce_Show()
+(
+    (ce_row < ce_r0) ? (ce_r0 = ce_row) : (ce_row >= ce_r0 + ce_vr) ? (ce_r0 = ce_row - ce_vr + 1);
+    (ce_col < ce_c0) ? (ce_c0 = ce_col) : (ce_col >= ce_c0 + ce_vc) ? (ce_c0 = ce_col - ce_vc + 1);
+);
+
+// The place (mx, my : in the image) : 1 a cell (ce_qr, ce_qc), 2 the number of an output (ce_qc), 3 that of an input
+// (ce_qr), 0 nothing
+function ce_At(mx, my)
+local(c, r)
+(
+    c = floor((mx - ce_hw) / ce_csz); r = floor((my - ce_th) / ce_csz);
+    ce_qc = ce_c0 + c; ce_qr = ce_r0 + r;
+    ((mx >= ce_hw) && (c < ce_vc) && (my >= ce_th) && (r < ce_vr)) ? 1 :
+    ((mx >= ce_hw) && (c < ce_vc) && (my >= 0) && (my < ce_th)) ? 2 :
+    ((mx >= 0) && (mx < ce_hw) && (my >= ce_th) && (r < ce_vr)) ? 3 : 0;
+);
+
+// Sow : + 1 (or - 1 : ce_dsg) on the cell (i, j), once per drag (ce_vis)
+function ce_Sow(i, j)
+local(k)
+(
+    ((i >= 0) && (i < ce_N) && (j >= 0) && (j < ce_P)) ? (
+        k = i * CE_MAX + j;
+        (ce_vis[k] !== ce_did) ? (
+            ce_vis[k] = ce_did;
+            ce_Set(i, j, ce_w[k] + ce_dsg);
+            ce_row = i; ce_col = j;
+        );
+    );
+);
+
+// The menu of the cell (i, j)
+function ce_CellMenu(i, j)
+local(m, v)
+(
+    sprintf(#ce_mnu, "#In %d > Out %d : weight %s|", i + 1, j + 1, ed_Fmt(#ce_t1, ce_Wt(i, j)));
+    strcat(#ce_mnu, ce_WList);
+    strcat(#ce_mnu, "||Clear the row (In ");
+    sprintf(#ce_t1, "%d)|Clear the column (Out %d)|Fill the row with 1|Fill the column with 1", i + 1, j + 1);
+    strcat(#ce_mnu, #ce_t1);
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#ce_mnu);
+    prv_MenuEnd(m > 0);
+    ((m >= 2) && (m <= 15)) ? (
+        sx_Nth(ce_WList, m - 2, #ce_t1);
+        v = s3d_atof(#ce_t1, 0, strlen(#ce_t1));
+        ce_Keep(); ce_Set(i, j, v);
+    ) :
+    (m === 16) ? ce_ClearRow(i) :
+    (m === 17) ? ce_ClearCol(j) :
+    (m === 18) ? (ce_Keep(); v = 0; loop(ce_P, ce_Set(i, v, 1); v += 1;);) :
+    (m === 19) ? (ce_Keep(); v = 0; loop(ce_N, ce_Set(v, j, 1); v += 1;););
+    ce_row = i; ce_col = j;
+);
+
+// The mouse in the matrix (x, y, w, h : screen pixels) ; returns 1 when the wheel was used
+function ce_Mouse(x, y, w, h, wheel)
+local(mx, my, inside, used, at, dx, dy, n, k, px, py, st, sc)
+(
+    used = 0;
+    mx = mouse_x - x; my = mouse_y - y;
+    inside = (mx >= 0) && (my >= 0) && (mx < w) && (my < h);
+    (ce_seen < gfx_executed - 1) ? (ce_md = 0); // (not drawn in the previous frame : no drag going on)
+    ce_seen = gfx_executed;
+    at = inside ? ce_At(mx, my) : 0;
+    ce_hr = ((at === 1) || (at === 3)) ? ce_qr : -1;
+    ce_hc = ((at === 1) || (at === 2)) ? ce_qc : -1;
+    uix_click1 ? (
+        (inside && !(uix_mcap & 2)) ? (
+            ce_md = 1; ce_dk = 0; ce_dmoved = 0; ce_dmods = mouse_cap;
+            ce_mx0 = ce_lmx = mouse_x; ce_my0 = ce_lmy = mouse_y;
+            (at === 1) ? (
+                ce_row = ce_qr; ce_col = ce_qc; ce_dcell = ce_qr * CE_MAX + ce_qc;
+                (ce_mode === 0) ? (
+                    // Sow : + 1 (Shift : - 1) here, then on each cell crossed
+                    ce_Keep();
+                    ce_did += 1; ce_dsg = (mouse_cap & 8) ? -1 : 1; ce_dk = 1;
+                    ce_Sow(ce_qr, ce_qc);
+                ) : (
+                    // Adjust : Shift + clic, 0 ; else a drag
+                    (mouse_cap & 8) ? (
+                        (ce_Wt(ce_qr, ce_qc) != 0) ? (ce_Keep(); ce_Set(ce_qr, ce_qc, 0););
+                    ) : (
+                        ce_dk = 2; ce_dv0 = ce_Wt(ce_qr, ce_qc); ce_dacc = 0;
+                    );
+                );
+            ) :
+            // a number : the current output (input) ; a drag : that column (row) exchanged with another one, or copied
+            // onto it (Shift)
+            (at === 2) ? (ce_col = ce_qc; ce_dk = 4; ce_hsrc = ce_qc; ce_htgt = -1; ce_hcp = !!(mouse_cap & 8);) :
+            (at === 3) ? (ce_row = ce_qr; ce_dk = 3; ce_hsrc = ce_qr; ce_htgt = -1; ce_hcp = !!(mouse_cap & 8););
+            ui_GFXdoNow |= 4;
+        ) : (
+            ce_md = -1;
+        );
+    ) : ((uix_mcap & 1) && (ce_md === 1)) ? (
+        // (Sow : a brush, - 1 an eraser ; a row moved : up and down, a column : left and right ; copied : a hand +)
+        ui_cursor_drag((ce_dk === 1) ? ((ce_dsg < 0) ? 4 : 3) : (ce_dk === 2) ? 5 :
+            (ce_dk === 3) ? (ce_hcp ? 10 : 9) : (ce_dk === 4) ? (ce_hcp ? 10 : 5) : 0);
+        dx = mouse_x - ce_lmx; dy = mouse_y - ce_lmy;
+        (!ce_dmoved && (abs(mouse_x - ce_mx0) + abs(mouse_y - ce_my0) > 3)) ? (
+            ce_dmoved = 1;
+            (ce_dk === 2) ? ce_Keep();
+        );
+        ((ce_dk === 1) && ((dx != 0) || (dy != 0))) ? (
+            // the cells crossed since the last frame (steps of half a cell)
+            n = max(1, ceil(2 * sqrt(dx * dx + dy * dy) / ce_csz));
+            k = 1;
+            loop(n,
+                px = ce_lmx - x + dx * k / n; py = ce_lmy - y + dy * k / n;
+                (ce_At(px, py) === 1) ? ce_Sow(ce_qr, ce_qc);
+                k += 1;
+            );
+            ui_GFXdoNow |= 4;
+        ) :
+        ((ce_dk === 2) && ce_dmoved) ? (
+            // horizontal coarse (1 per 20 pixels of the display), vertical fine (1/10, up = more)
+            sc = ui_jscale();
+            ce_dacc += (dx - 0.1 * dy) / (20 * sc);
+            (ce_dv0 + ce_dacc < 0) ? (ce_dacc = - ce_dv0);
+            ce_Set(floor(ce_dcell / CE_MAX), ce_dcell % CE_MAX, ce_dv0 + ce_dacc);
+            ui_GFXdoNow |= 4;
+        ) :
+        (ce_dk >= 3) ? (
+            // a row (a column) dragged : the destination, the number under the mouse ; beyond the rows (the columns)
+            // shown, they scroll
+            ce_htgt = ((ce_dk === 3) && (at === 3)) ? ce_qr : ((ce_dk === 4) && (at === 2)) ? ce_qc : -1;
+            (ce_dmoved && (time_precise() > ce_hT + 0.07)) ? (
+                ce_hT = time_precise();
+                (ce_dk === 3) ? (
+                    (my < ce_th) ? (ce_r0 = max(0, ce_r0 - 1)) : (my >= ce_th + ce_vr * ce_csz) ? (ce_r0 += 1);
+                ) : (
+                    (mx < ce_hw) ? (ce_c0 = max(0, ce_c0 - 1)) : (mx >= ce_hw + ce_vc * ce_csz) ? (ce_c0 += 1);
+                );
+            );
+            ui_GFXdoNow |= 4;
+        );
+        ce_lmx = mouse_x; ce_lmy = mouse_y;
+    ) : !(uix_mcap & 1) ? (
+        // a row (a column) dropped on the number of another one : exchanged, or copied (elsewhere : nothing)
+        ((ce_md === 1) && (ce_dk >= 3) && ce_dmoved) ? (
+            ce_htgt = ((ce_dk === 3) && (at === 3)) ? ce_qr : ((ce_dk === 4) && (at === 2)) ? ce_qc : -1;
+            ((ce_htgt >= 0) && (ce_htgt !== ce_hsrc)) ? (
+                (ce_dk === 3) ? ce_RowMove(ce_hsrc, ce_htgt, ce_hcp) : ce_ColMove(ce_hsrc, ce_htgt, ce_hcp);
+            );
+            ui_GFXdoNow |= 4;
+        );
+        ce_md = 0; ce_dk = 0; ce_htgt = -1;
+    );
+    // right clic : the menu of the cell, of the row, of the column (Shift + right clic : left to the host)
+    (uix_click2 && inside && !(mouse_cap & 8)) ? (
+        (at === 1) ? ce_CellMenu(ce_qr, ce_qc) :
+        (at === 2) ? (
+            ce_col = ce_qc;
+            st = prv_Menu("Clear the column|Fill the column with 1", 2, -1);
+            (st === 0) ? ce_ClearCol(ce_qc) : (st === 1) ? (ce_Keep(); k = 0; loop(ce_N, ce_Set(k, ce_qc, 1); k += 1;););
+        ) :
+        (at === 3) ? (
+            ce_row = ce_qr;
+            st = prv_Menu("Clear the row|Fill the row with 1", 2, -1);
+            (st === 0) ? ce_ClearRow(ce_qr) : (st === 1) ? (ce_Keep(); k = 0; loop(ce_P, ce_Set(ce_qr, k, 1); k += 1;););
+        );
+        ui_GFXdoNow |= 4;
+    );
+    // the wheel : the rows (Shift : the columns ; Cmd : the size of the cells)
+    (inside && (wheel != 0)) ? (
+        (mouse_cap & 4) ? (
+            st = (ce_cs > 0) ? ce_cs : max(3, floor(ce_csz / ui_jscale()));
+            ce_cs = max(4, min(64, st + ((wheel > 0) ? 2 : -2)));
+            ce_csL = max(8, ce_cs);
+        ) : (mouse_cap & 8) ? (
+            ce_c0 = max(0, ce_c0 + ((wheel > 0) ? -2 : 2));
+        ) : (
+            ce_r0 = max(0, ce_r0 + ((wheel > 0) ? -2 : 2));
+        );
+        used = 1;
+    );
+    used;
+);
+
+// Draws the matrix (x, y, w, h : screen pixels)
+function ce_Draw(x, y, w, h)
+local(od, i, j, r, c, cx, cy, cs, v, g, s, k, a, step, tw, th, ih, sg, q)
+(
+    od = gfx_dest;
+    w = max(16, w|0); h = max(16, h|0);
+    ((w != ce_iw) || (h != ce_ih2)) ? (gfx_setimgdim(CE_IMG, w, h); ce_iw = w; ce_ih2 = h;);
+    gfx_dest = CE_IMG;
+    gfx_mode = 0;
+    gfx_set(0.07, 0.075, 0.09, 1);
+    gfx_rect(0, 0, w, h);
+    ce_SpkScan();
+    ce_Geo(w, h);
+    cs = ce_csz;
+    // the current row lit
+    ((ce_row >= ce_r0) && (ce_row < ce_r0 + ce_vr)) ? (
+        gfx_set(0.25, 0.4, 0.7, 0.28);
+        gfx_rect(0, ce_th + (ce_row - ce_r0) * cs, ce_hw + ce_vc * cs, cs);
+    );
+    ((ce_col >= ce_c0) && (ce_col < ce_c0 + ce_vc)) ? (
+        gfx_set(0.25, 0.4, 0.7, 0.14);
+        gfx_rect(ce_hw + (ce_col - ce_c0) * cs, 0, cs, ce_th + ce_vr * cs);
+    );
+    // the cells : their color (the gain : orange), their weight (when it fits)
+    r = 0;
+    loop(ce_vr,
+        i = ce_r0 + r;
+        s = ce_RowSum(i);
+        c = 0;
+        loop(ce_vc,
+            j = ce_c0 + c;
+            v = ce_w[i * CE_MAX + j];
+            (v > 0) ? (
+                g = sqrt(v / max(1, s)); // (the volume apart)
+                cx = ce_hw + c * cs; cy = ce_th + r * cs;
+                gfx_set(1, 0.55, 0.15, 0.25 + 0.75 * g);
+                gfx_rect(cx + 1, cy + 1, max(1, cs - 1), max(1, cs - 1));
+                (cs >= ce_tth + 2) ? (
+                    ed_Fmt(#ce_cl, v);
+                    gfx_measurestr(#ce_cl, tw, th);
+                    (tw <= cs - 2) ? (
+                        gfx_set(1, 1, 1, 1);
+                        gfx_x = cx + floor((cs - tw) / 2) + 1; gfx_y = cy + floor((cs - th) / 2) + 1;
+                        gfx_drawstr(#ce_cl);
+                    );
+                );
+                // the preview of Simplify : removed, a red cross ; changed, a blue frame
+                ce_prv ? (
+                    q = ce_sim[i * CE_MAX + j];
+                    (q <= 0) ? (
+                        gfx_set(1, 0.15, 0.15, 1);
+                        gfx_line(cx + 1, cy + 1, cx + cs - 1, cy + cs - 1); gfx_line(cx + cs - 1, cy + 1, cx + 1, cy + cs - 1);
+                    ) : (abs(q - v) > 0.0011) ? (
+                        gfx_set(0.35, 0.75, 1, 1);
+                        gfx_rect(cx + 1, cy + 1, max(1, cs - 1), max(1, cs - 1), 0);
+                        (cs >= 8) ? gfx_rect(cx + 2, cy + 2, max(1, cs - 3), max(1, cs - 3), 0);
+                    );
+                );
+            );
+            c += 1;
+        );
+        r += 1;
+    );
+    // the grid (a stronger line every 8)
+    (cs >= 5) ? (
+        r = 0;
+        loop(ce_vr + 1,
+            a = (((ce_r0 + r) % 8) === 0) ? 0.45 : 0.18;
+            gfx_set(0.6, 0.65, 0.75, a);
+            gfx_line(ce_hw, ce_th + r * cs, ce_hw + ce_vc * cs, ce_th + r * cs);
+            r += 1;
+        );
+        c = 0;
+        loop(ce_vc + 1,
+            a = (((ce_c0 + c) % 8) === 0) ? 0.45 : 0.18;
+            gfx_set(0.6, 0.65, 0.75, a);
+            gfx_line(ce_hw + c * cs, ce_th, ce_hw + c * cs, ce_th + ce_vr * cs);
+            c += 1;
+        );
+    ) : (
+        gfx_set(0.6, 0.65, 0.75, 0.3);
+        gfx_rect(ce_hw, ce_th, ce_vc * cs, ce_vr * cs, 0);
+    );
+    // the numbers : one every step (they must not overlap)
+    step = 1; while (step * cs < ce_tw + 4) (step *= 2;);
+    c = 0;
+    loop(ce_vc,
+        j = ce_c0 + c;
+        ((j === ce_col) || (((j + 1) % step) === 0) || (step === 1)) ? (
+            sg = ce_spk[j + 1];
+            (j === ce_col) ? gfx_set(1, 0.85, 0.3, 1) : (sg === 1) ? gfx_set(0.85, 0.9, 1, 1) :
+                (sg === 2) ? gfx_set(1, 0.4, 0.4, 1) : gfx_set(0.5, 0.5, 0.55, 1);
+            sprintf(#ce_cl, "%d", j + 1);
+            gfx_measurestr(#ce_cl, tw, th);
+            gfx_x = ce_hw + c * cs + floor((cs - tw) / 2); gfx_y = 3;
+            gfx_drawstr(#ce_cl);
+        );
+        c += 1;
+    );
+    step = 1; while (step * cs < ce_tth) (step *= 2;);
+    r = 0;
+    loop(ce_vr,
+        i = ce_r0 + r;
+        ((i === ce_row) || (((i + 1) % step) === 0) || (step === 1)) ? (
+            ce_RowSum(i);
+            (i === ce_row) ? gfx_set(1, 0.85, 0.3, 1) : (ce_ro > 0) ? gfx_set(0.6, 1, 0.6, 1) : gfx_set(0.75, 0.78, 0.85, 1);
+            sprintf(#ce_cl, "%d", i + 1);
+            gfx_measurestr(#ce_cl, tw, th);
+            gfx_x = ce_hw - tw - 5; gfx_y = ce_th + r * cs + floor((cs - th) / 2);
+            gfx_drawstr(#ce_cl);
+        );
+        r += 1;
+    );
+    // the cell under the mouse (a thin frame), the current cell (white)
+    ((ce_hr >= ce_r0) && (ce_hr < ce_r0 + ce_vr) && (ce_hc >= ce_c0) && (ce_hc < ce_c0 + ce_vc)) ? (
+        gfx_set(1, 1, 1, 0.5);
+        gfx_rect(ce_hw + (ce_hc - ce_c0) * cs, ce_th + (ce_hr - ce_r0) * cs, cs + 1, cs + 1, 0);
+    );
+    ((ce_row >= ce_r0) && (ce_row < ce_r0 + ce_vr) && (ce_col >= ce_c0) && (ce_col < ce_c0 + ce_vc)) ? (
+        gfx_set(1, 1, 1, 1);
+        cx = ce_hw + (ce_col - ce_c0) * cs; cy = ce_th + (ce_row - ce_r0) * cs;
+        gfx_rect(cx, cy, cs + 1, cs + 1, 0);
+        (cs >= 6) ? gfx_rect(cx - 1, cy - 1, cs + 3, cs + 3, 0);
+    );
+    // a row (a column) dragged by its number : the source framed, the destination lit (exchange : blue ; copy : green)
+    ((ce_md === 1) && (ce_dk >= 3) && ce_dmoved) ? (
+        (ce_dk === 3) ? (
+            ((ce_hsrc >= ce_r0) && (ce_hsrc < ce_r0 + ce_vr)) ? (
+                gfx_set(1, 1, 1, 0.85);
+                gfx_rect(0, ce_th + (ce_hsrc - ce_r0) * cs, ce_hw + ce_vc * cs + 1, cs + 1, 0);
+            );
+            ((ce_htgt >= 0) && (ce_htgt !== ce_hsrc) && (ce_htgt >= ce_r0) && (ce_htgt < ce_r0 + ce_vr)) ? (
+                cy = ce_th + (ce_htgt - ce_r0) * cs;
+                ce_hcp ? gfx_set(0.3, 1, 0.4, 0.3) : gfx_set(0.35, 0.6, 1, 0.3);
+                gfx_rect(0, cy, ce_hw + ce_vc * cs, cs);
+                ce_hcp ? gfx_set(0.3, 1, 0.4, 1) : gfx_set(0.35, 0.6, 1, 1);
+                gfx_rect(0, cy, ce_hw + ce_vc * cs + 1, cs + 1, 0);
+                gfx_rect(1, cy + 1, ce_hw + ce_vc * cs - 1, cs - 1, 0);
+            );
+        ) : (
+            ((ce_hsrc >= ce_c0) && (ce_hsrc < ce_c0 + ce_vc)) ? (
+                gfx_set(1, 1, 1, 0.85);
+                gfx_rect(ce_hw + (ce_hsrc - ce_c0) * cs, 0, cs + 1, ce_th + ce_vr * cs + 1, 0);
+            );
+            ((ce_htgt >= 0) && (ce_htgt !== ce_hsrc) && (ce_htgt >= ce_c0) && (ce_htgt < ce_c0 + ce_vc)) ? (
+                cx = ce_hw + (ce_htgt - ce_c0) * cs;
+                ce_hcp ? gfx_set(0.3, 1, 0.4, 0.3) : gfx_set(0.35, 0.6, 1, 0.3);
+                gfx_rect(cx, 0, cs, ce_th + ce_vr * cs);
+                ce_hcp ? gfx_set(0.3, 1, 0.4, 1) : gfx_set(0.35, 0.6, 1, 1);
+                gfx_rect(cx, 0, cs + 1, ce_th + ce_vr * cs + 1, 0);
+                gfx_rect(cx + 1, 1, cs - 1, ce_th + ce_vr * cs - 1, 0);
+            );
+        );
+    );
+    // the scroll : the parts not shown
+    gfx_set(1, 0.85, 0.3, 0.8);
+    (ce_r0 > 0) ? (gfx_x = 2; gfx_y = ce_th - ce_tth - 2; gfx_drawstr("^"););
+    (ce_r0 + ce_vr < ce_N) ? (gfx_x = 2; gfx_y = ce_th + ce_vr * cs - ce_tth; gfx_drawstr("v"););
+    (ce_c0 + ce_vc < ce_P) ? (gfx_x = ce_hw + ce_vc * cs + 3; gfx_y = 3; gfx_drawstr(">"););
+    // the info line : the cell under the mouse (or the current one), its input, the configuration
+    ((ce_hr >= 0) && (ce_hc >= 0)) ? (i = ce_hr; j = ce_hc;) : (i = ce_row; j = ce_col;);
+    s = ce_RowSum(i); k = ce_ro;
+    v = ce_Wt(i, j); g = ce_Gain(i, j);
+    sprintf(#ce_info, "In %d > Out %d : weight %s", i + 1, j + 1, ed_Fmt(#ce_t1, v));
+    (v > 0) ? (sprintf(#ce_t2, ", gain %.1f dB", 20 * log10(g)); strcat(#ce_info, #ce_t2););
+    (ce_prv && (v > 0)) ? (
+        q = ce_sim[i * CE_MAX + j];
+        (q <= 0) ? strcat(#ce_info, "  -> removed") :
+        (abs(q - v) > 0.0011) ? (sprintf(#ce_t2, "  -> %s", ed_Fmt(#ce_t1, q)); strcat(#ce_info, #ce_t2););
+    );
+    ce_alt ? (
+        // Alt : the power received by the output from all the inputs (the volume included)
+        (ce_cp[j] > 0) ?
+            sprintf(#ce_t2, "     Out %d : %d input%s, power %.1f dB", j + 1, ce_cn[j], (ce_cn[j] > 1) ? "s" : "",
+                10 * log10(ce_cp[j] * sqr(ce_vol))) :
+            sprintf(#ce_t2, "     Out %d : no input", j + 1);
+    ) : (
+        sprintf(#ce_t2, "     In %d : %d output%s, sum %s", i + 1, k, (k > 1) ? "s" : "", ed_Fmt(#ce_t1, s));
+    );
+    strcat(#ce_info, #ce_t2);
+    sprintf(#ce_t2, "     %s %s%s  (ring %d / %d)", ce_mode ? "Adjust" : "Sow", ce_Title(#ce_t1), ce_dirty ? " (changed)" : "",
+        ce_ri + 1, ce_rn); strcat(#ce_info, #ce_t2);
+    // (a row or a column dragged : what the release will do)
+    ((ce_md === 1) && (ce_dk >= 3) && ce_dmoved) ? (
+        strcpy(#ce_t3, (ce_dk === 3) ? "In" : "Out");
+        ((ce_htgt >= 0) && (ce_htgt !== ce_hsrc)) ? (
+            ce_hcp ? sprintf(#ce_info, "Copy %s %d onto %s %d (its weights replaced)", #ce_t3, ce_hsrc + 1, #ce_t3, ce_htgt + 1) :
+                sprintf(#ce_info, "Exchange %s %d and %s %d", #ce_t3, ce_hsrc + 1, #ce_t3, ce_htgt + 1);
+        ) : (
+            sprintf(#ce_info, "%s %d : release on the number of another %s (%s) ; elsewhere : nothing", #ce_t3, ce_hsrc + 1,
+                (ce_dk === 3) ? "input" : "output", ce_hcp ? "copy onto it" : "exchange");
+        );
+    );
+    gfx_set(1, 0.85, 0.4, 1);
+    gfx_x = 6; gfx_y = h - ce_ih + 3;
+    gfx_drawstr(#ce_info);
+    // copy to the screen (or to the ui-lib clip screen)
+    gfx_dest = od;
+    gfx_x = x; gfx_y = y;
+    gfx_a = 1; gfx_mode = 2;
+    gfx_blit(CE_IMG, 1, 0);
+    gfx_mode = 0;
+);
+
+
+//====== The 3D view (step 3)
+
+// The camera of the view, for w x h pixels : the globals of Space 3D (s3d_camera), saved before (ed_CamSave ; after use :
+// ed_CamRestore, as the editors Edit A ... D)
+function ce_CamSet(w, h)
+(
+    ed_CamSave();
+    s3d_az = ce_az; s3d_el = ce_el; s3d_dist = ce_dist; s3d_roll = ce_roll;
+    s3d_camera(max(16, w|0), max(16, h|0));
+    ce_el = s3d_el; // (kept in ]-pi, pi])
+);
+
+// (2026-11-21) The orbit of a drag of (dx, dy) pixels, as held in the hand (s3d_orbit, as all the 3D views) ; the
+// levelling (key 'a' over the view, the menu : s3d_LevelStart, its id 6 ; ce_Level3Step at each frame) ; the view shown
+// (0 Front, 1 Side, 2 Top, 3 3D or another one)
+function ce_Orbit3(dx, dy)
+local(ch)
+(
+    ed_CamSave(); ch = s3d_changed;
+    s3d_az = ce_az; s3d_el = ce_el; s3d_dist = ce_dist; s3d_roll = ce_roll;
+    s3d_orbit(dx, dy);
+    ce_az = s3d_az; ce_el = s3d_el; ce_roll = s3d_roll;
+    s3d_changed = ch; ed_CamRestore();
+);
+function ce_Level3()
+(
+    ed_CamSave();
+    s3d_az = ce_az; s3d_el = ce_el; s3d_dist = ce_dist; s3d_roll = ce_roll;
+    s3d_basis(); s3d_LevelStart(6);
+    ed_CamRestore();
+);
+function ce_Level3Step()
+local(a)
+(
+    (a = s3d_LevelStep(6)) ? (ce_roll -= a);
+    (s3d_lvId === 6) ? ui_GFXdoNow |= 4;
+);
+function ce_View3Of()
+(
+    (ce_roll != 0) ? 3 :
+    ((ce_el > 1.5) && (ce_az === 0)) ? 2 :
+    ((ce_el === 0) && (ce_az === 0)) ? 0 :
+    ((ce_el === 0) && (abs(ce_az - $pi / 2) < 0.0001)) ? 1 : 3;
+);
+
+// The views : 0 Front, 1 Side, 2 Top, 3 3D (as the views of Space 3D)
+function ce_SetView3(v)
+(
+    ce_roll = 0;
+    (v === 0) ? (ce_az = 0; ce_el = 0;) :
+    (v === 1) ? (ce_az = $pi / 2; ce_el = 0;) :
+    (v === 2) ? (ce_az = 0; ce_el = 1.55;) :
+    (ce_az = s3d_Az3D; ce_el = s3d_El3D; ce_dist = s3d_Dist3D;);
+);
+
+// The sub-menu "title" of a size (s3d_kval(i), i = 0 ... s3d_kN - 1 ; cur checked), added to #ce_mnu
+function ce_KMenu(title, cur)
+local(i)
+(
+    strcat(#ce_mnu, "|>"); strcat(#ce_mnu, title);
+    i = 0;
+    loop(s3d_kN,
+        sprintf(#ce_it, "|%s%sx %.2f", (i === s3d_kN - 1) ? "<" : "", (i === cur) ? "!" : "", s3d_kval(i));
+        strcat(#ce_mnu, #ce_it);
+        i += 1;
+    );
+);
+
+// The menu of the view (right clic on nothing, right clic on the cell 15) ; items : 2 ... 5 the views, 6 the levelling,
+// 7 ... 12 the presentations of the room (a sub-menu ; 2026-11-21 : as all the 3D views, the keys in parentheses), 13 14
+// the halos, 15 the numbers, 16 the weights, 17 ... the sizes of the halos then of the balls (s3d_kN each : the titles
+// of the sub-menus are not items), then the place of the view (right, below), its share (1/3, 1/2, 2/3), hide it
+function ce_ViewMenu3()
+local(m, o, g, k1, k2, k3)
+(
+    o = ce_opt; g = ce_pres;
+    sprintf(#ce_mnu, "#3D view : the halos of the input %d|Front view|Side view|Top view|3D view (v : the next one)|Level the view (a)||>Presentation of the room (>)|%sThe far faces of the room|%sThe planes x = 0, y = 0, z = 0|%sThe axes only|%sThe plane z = 0|%sThe circles of the plane z = 0 (polar)|<%sNothing (no axes)||",
+        ce_row + 1, (g === 0) ? "!" : "", (g === 1) ? "!" : "", (g === 2) ? "!" : "", (g === 3) ? "!" : "",
+        (g === 4) ? "!" : "", (g === 5) ? "!" : "");
+    sprintf(#ce_it, "%sHalos : the gains (the power shared by the outputs)|%sHalos : relative to the strongest one||%sShow the numbers|%sShow the weights|",
+        (o & ce_oRel) ? "" : "!", (o & ce_oRel) ? "!" : "", (o & ce_oNoNum) ? "" : "!", (o & ce_oNoW) ? "" : "!");
+    strcat(#ce_mnu, #ce_it);
+    ce_KMenu("Size of the halos", ce_kH);
+    ce_KMenu("Size of the speakers", ce_kS);
+    sprintf(#ce_it, "||%sThe 3D view at the right of the matrix|%sThe 3D view below the matrix|>Its share of the module|%s1/3|%s1/2|<%s2/3||%s",
+        (o & ce_oBelow) ? "" : "!", (o & ce_oBelow) ? "!" : "",
+        (abs(ce_split - 1/3) < 0.02) ? "!" : "", (abs(ce_split - 0.5) < 0.02) ? "!" : "", (abs(ce_split - 2/3) < 0.02) ? "!" : "",
+        (o & ce_oNo3D) ? "Show the 3D view" : "Hide the 3D view");
+    strcat(#ce_mnu, #ce_it);
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#ce_mnu);
+    prv_MenuEnd(m > 0);
+    k1 = 17; k2 = k1 + s3d_kN; k3 = k2 + s3d_kN;
+    ((m >= 2) && (m <= 5)) ? ce_SetView3(m - 2) :
+    (m === 6) ? ce_Level3() :
+    ((m >= 7) && (m <= 12)) ? (ce_pres = m - 7) :
+    (m === 13) ? (ce_opt = (ce_opt | ce_oRel) - ce_oRel) :
+    (m === 14) ? (ce_opt |= ce_oRel) :
+    (m === 15) ? (ce_opt = ce_opt ~ ce_oNoNum) :
+    (m === 16) ? (ce_opt = ce_opt ~ ce_oNoW) :
+    ((m >= k1) && (m < k2)) ? (ce_kH = m - k1) :
+    ((m >= k2) && (m < k3)) ? (ce_kS = m - k2) :
+    (m === k3) ? (ce_opt = (ce_opt | ce_oBelow) - ce_oBelow) :
+    (m === k3 + 1) ? (ce_opt |= ce_oBelow) :
+    (m === k3 + 2) ? (ce_split = 1/3) :
+    (m === k3 + 3) ? (ce_split = 0.5) :
+    (m === k3 + 4) ? (ce_split = 2/3) :
+    (m === k3 + 5) ? (ce_opt = ce_opt ~ ce_oNo3D);
+    (m > 0) ? (ui_GFXdoNow |= 4);
+);
+
+// The speaker under the mouse (mx, my : in the view), as drawn in the last frame : its output (0 ...), -1 none ; a ball
+// first (the nearest one), else a halo (the one whose centre is the nearest, for its radius) ; only the outputs of the
+// matrix (1 ... P)
+function ce_Pick3(mx, my)
+local(k, e, d, bd, r, hd, hr)
+(
+    r = hr = -1; bd = 10^30; hd = 1;
+    k = 0;
+    loop(ce_P,
+        e = ce_scr + 5 * k;
+        (e[2] > 0) ? (
+            d = sqrt(sqr(e[0] - mx) + sqr(e[1] - my));
+            ((d < max(8, e[3] + 3)) && (d < bd)) ? (bd = d; r = k;);
+            ((e[4] > 0) && (d < e[4]) && (d / e[4] < hd)) ? (hd = d / e[4]; hr = k;);
+        );
+        k += 1;
+    );
+    (r >= 0) ? r : hr;
+);
+
+// The mouse in the view (x, y, w, h : screen pixels) ; returns 1 when the wheel was used
+function ce_Mouse3(x, y, w, h, wheel)
+local(mx, my, inside, used, dx, dy, v)
+(
+    used = 0;
+    ce_Level3Step(); // (the levelling going on)
+    mx = mouse_x - x; my = mouse_y - y;
+    inside = (mx >= 0) && (my >= 0) && (mx < w) && (my < h);
+    (ce_seen3 < gfx_executed - 1) ? (ce_m3 = 0); // (not drawn in the previous frame : no drag going on)
+    ce_seen3 = gfx_executed;
+    ce_h3 = inside ? ce_Pick3(mx, my) : -1;
+    (ce_h3 >= 0) ? (ce_hr = ce_row; ce_hc = ce_h3;); // (the matrix frames its cell)
+    uix_click1 ? (
+        (inside && !(uix_mcap & 2)) ? (
+            ce_m3 = 1; ce_d3 = 0; ce_moved3 = 0; ce_mods3 = mouse_cap;
+            ce_3x0 = ce_3lx = mouse_x; ce_3y0 = ce_3ly = mouse_y;
+            ce_p3 = ce_h3;
+            (ce_p3 >= 0) ? (ce_col = ce_p3; ce_Show();); // (its cell : the current one)
+            ui_GFXdoNow |= 4;
+        ) : (
+            ce_m3 = -1;
+        );
+    ) : ((uix_mcap & 1) && (ce_m3 === 1)) ? (
+        dx = mouse_x - ce_3lx; dy = mouse_y - ce_3ly;
+        (!ce_moved3 && (abs(mouse_x - ce_3x0) + abs(mouse_y - ce_3y0) > 3)) ? (
+            // the kind of the drag : from a speaker, its weight ; from nothing, the orbit
+            ce_moved3 = 1;
+            (ce_p3 >= 0) ? (
+                ce_Keep(); ce_d3 = 2; ce_3v0 = ce_Wt(ce_row, ce_p3); ce_3acc = 0;
+            ) : (
+                ce_d3 = 1;
+            );
+        );
+        ui_cursor_drag((ce_d3 === 1) ? 2 : (ce_d3 === 2) ? 5 : 0); // (the orbit : a fist ; a weight : a hand with arrows)
+        (ce_d3 === 1) ? (
+            ce_Orbit3(dx, dy); // (2026-11-21 : as held in the hand)
+            ui_GFXdoNow |= 4;
+        ) :
+        (ce_d3 === 2) ? (
+            // as in the matrix : horizontal coarse (1 per 20 pixels of the display), vertical fine (1/10, up = more)
+            ce_3acc += (dx - 0.1 * dy) / (20 * ui_jscale());
+            (ce_3v0 + ce_3acc < 0) ? (ce_3acc = - ce_3v0);
+            ce_Set(ce_row, ce_p3, ce_3v0 + ce_3acc);
+            ui_GFXdoNow |= 4;
+        );
+        ce_3lx = mouse_x; ce_3ly = mouse_y;
+    ) : !(uix_mcap & 1) ? (
+        // released : a clic (not moved) on a speaker : Sow, + 1 (Shift : - 1) ; Adjust, Shift : 0
+        ((ce_m3 === 1) && !ce_moved3 && (ce_p3 >= 0) && (ce_p3 < ce_P)) ? (
+            v = ce_Wt(ce_row, ce_p3);
+            (ce_mode === 0) ? (
+                ((v > 0) || !(ce_mods3 & 8)) ? (ce_Keep(); ce_Set(ce_row, ce_p3, v + ((ce_mods3 & 8) ? -1 : 1)););
+            ) : (
+                ((ce_mods3 & 8) && (v > 0)) ? (ce_Keep(); ce_Set(ce_row, ce_p3, 0););
+            );
+            ui_GFXdoNow |= 4;
+        );
+        ce_m3 = 0; ce_d3 = 0;
+    );
+    // right clic : on a speaker, the menu of its cell ; elsewhere, the menu of the view (Shift + right clic : left to
+    // the host)
+    (uix_click2 && inside && !(mouse_cap & 8)) ? (
+        (ce_h3 >= 0) ? (
+            ce_col = ce_h3; ce_Show();
+            ce_CellMenu(ce_row, ce_h3);
+        ) : (
+            ce_ViewMenu3();
+        );
+        ui_GFXdoNow |= 4;
+    );
+    // the wheel : the zoom
+    (inside && (wheel != 0)) ? (
+        ce_dist = max(1.8, min(12, ce_dist * exp(- wheel / 1000)));
+        used = 1;
+    );
+    used;
+);
+
+// Draws the view (x, y, w, h : screen pixels) : the room, the speakers, the halos of the current input
+function ce_Draw3(x, y, w, h)
+local(od, gd, ax, sg, s, ro, wm, gm, n, np, k, i, e, fa, rb, r, v, wt, cr, cg, cb, cur, hov, ty, q, s2, wm2, gm2, v2, r2)
+(
+    od = gfx_dest;
+    w = max(16, w|0); h = max(16, h|0);
+    ((w != ce_3w) || (h != ce_3h)) ? (gfx_setimgdim(CE_IMG3, w, h); ce_3w = w; ce_3h = h;);
+    gfx_dest = CE_IMG3;
+    gfx_mode = 0;
+    gfx_set(s3d_bgr, s3d_bgg, s3d_bgb, 1);
+    gfx_rect(0, 0, w, h);
+    gd = s3d_gdark; s3d_gdark = ce_gdark; // (the hysteresis of the grid : that of this view)
+    s3d_colors();
+    ce_CamSet(w, h);
+    ce_SpkScan();
+    // the presentation of the room (2026-11-21 : as all the 3D views, s3d_grids ; the plane z at the height 0)
+    s3d_grids(ce_pres, 0, 6, 24);
+    // the current input : the sum of its weights, its outputs, the largest weight, the largest gain
+    s = ce_RowSum(ce_row); ro = ce_ro;
+    wm = 0; k = 0; loop(ce_P, wm = max(wm, ce_w[ce_row * CE_MAX + k]); k += 1;);
+    gm = (wm > 0) ? sqrt(wm / max(1, s)) : 0;
+    // the preview of Simplify : the same, simplified
+    ce_prv ? (
+        s2 = wm2 = 0; k = 0;
+        loop(ce_P, q = ce_sim[ce_row * CE_MAX + k]; (q > 0) ? (s2 += q; wm2 = max(wm2, q);); k += 1;);
+        gm2 = (wm2 > 0) ? sqrt(wm2 / max(1, s2)) : 0;
+    );
+    // the speakers projected (kept for the mouse), the order of drawing : far first ; np : the weights on outputs
+    // without position
+    n = np = 0;
+    k = 0;
+    loop(CE_MAX,
+        e = ce_scr + 5 * k;
+        e[2] = e[3] = e[4] = 0;
+        ((ce_spk[k + 1] > 0) && s3d_proj(ce_pos[3 * k], ce_pos[3 * k + 1], ce_pos[3 * k + 2])) ? (
+            e[0] = s3d_px; e[1] = s3d_py; e[2] = s3d_pz;
+            i = n;
+            while ((i > 0) && (ce_scr[5 * ce_ord[i - 1] + 2] < s3d_pz)) (ce_ord[i] = ce_ord[i - 1]; i -= 1;);
+            ce_ord[i] = k;
+            n += 1;
+        ) : ((ce_spk[k + 1] === 0) && (k < ce_P) && (ce_w[ce_row * CE_MAX + k] > 0)) ? (
+            np += 1;
+        );
+        k += 1;
+    );
+    ce_no = n;
+    // the speakers : the halo of the gain (its edge), the ball, the rings (the current one, the one under the mouse),
+    // the number and the weight
+    cur = ce_col; hov = ce_hc;
+    i = 0;
+    loop(n,
+        k = ce_ord[i]; e = ce_scr + 5 * k;
+        fa = 1 - 0.45 * max(0, min(1, (e[2] - s3d_zmin) / (s3d_zmax - s3d_zmin))); // (far : fainter)
+        rb = max(3, 0.035 * s3d_foc / e[2] * s3d_kval(ce_kS));
+        e[3] = rb;
+        wt = (k < ce_P) ? ce_w[ce_row * CE_MAX + k] : 0;
+        v = (wt > 0) ? sqrt(wt / max(1, s)) : 0;
+        ((v > 0) && (ce_opt & ce_oRel)) ? (v /= max(0.000001, gm));
+        (v > 0) ? (
+            r = max(rb + 3, (0.03 + 0.27 * min(1, v)) * s3d_kval(ce_kH) * s3d_foc / e[2]);
+            e[4] = r;
+            (k === cur) ? gfx_set(1, 0.88, 0.3, 1) : gfx_set(s3d_hr, s3d_hg, s3d_hb, 1);
+            s3d_halo(e[0], e[1], r, ((k === cur) ? 0.85 : 0.7) * fa);
+            (k === cur) ? (
+                gfx_set(1, 1, 1, 1);
+                gfx_circle(e[0], e[1], r, 0, 1); gfx_circle(e[0], e[1], r + 1, 0, 1);
+            ) : (
+                gfx_set(s3d_hr, s3d_hg, s3d_hb, 0.6 * fa);
+                gfx_circle(e[0], e[1], r, 0, 1);
+            );
+            // the preview of Simplify : removed, a red edge ; else its new size (a blue circle) when it changes
+            ce_prv ? (
+                q = ce_sim[ce_row * CE_MAX + k];
+                (q <= 0) ? (
+                    gfx_set(1, 0.15, 0.15, 1);
+                    gfx_circle(e[0], e[1], r, 0, 1); gfx_circle(e[0], e[1], r - 1, 0, 1);
+                ) : (
+                    v2 = sqrt(q / max(1, s2));
+                    (ce_opt & ce_oRel) ? (v2 /= max(0.000001, gm2));
+                    r2 = max(rb + 3, (0.03 + 0.27 * min(1, v2)) * s3d_kval(ce_kH) * s3d_foc / e[2]);
+                    (abs(r2 - r) > 1.5) ? (
+                        gfx_set(0.35, 0.75, 1, 1);
+                        gfx_circle(e[0], e[1], r2, 0, 1); gfx_circle(e[0], e[1], r2 + 1, 0, 1);
+                    );
+                );
+            );
+        );
+        // the ball : beyond the outputs of the matrix (faint), inactive (red), a weight (orange), none (blue grey)
+        (k >= ce_P) ? (cr = 0.4; cg = 0.42; cb = 0.48; fa *= 0.4;) :
+        (ce_spk[k + 1] === 2) ? (cr = 0.95; cg = 0.3; cb = 0.3;) :
+        (wt > 0) ? (cr = 1; cg = 0.75; cb = 0.05;) : (cr = 0.55; cg = 0.62; cb = 0.75;);
+        s3d_ball(e[0], e[1], rb, cr, cg, cb, fa);
+        (k === cur) ? (
+            gfx_set(1, 1, 1, 1);
+            gfx_circle(e[0], e[1], rb + 2, 0, 1); gfx_circle(e[0], e[1], rb + 3, 0, 1);
+        ) : (k === hov) ? (
+            gfx_set(1, 1, 1, 0.65);
+            gfx_circle(e[0], e[1], rb + 3, 0, 1);
+        );
+        (!(ce_opt & ce_oNoNum) || ((wt > 0) && !(ce_opt & ce_oNoW))) ? (
+            !(ce_opt & ce_oNoNum) ? sprintf(#ce_l3, "%d", k + 1) : strcpy(#ce_l3, "");
+            ((wt > 0) && !(ce_opt & ce_oNoW)) ? (
+                (strlen(#ce_l3) > 0) ? strcat(#ce_l3, " : ");
+                strcat(#ce_l3, ed_Fmt(#ce_t4, wt));
+            );
+            (k === cur) ? gfx_set(1, 0.9, 0.4, 1) : gfx_set(s3d_txr, s3d_txg, s3d_txb, 0.9 * fa);
+            s3d_label(e[0], e[1], rb + 1, #ce_l3);
+        );
+        i += 1;
+    );
+    // Alt : around the speaker of the current output, the power that it receives from all the inputs (a blue halo ; the
+    // scale of the halos : the amplitude, at most 2)
+    (ce_alt && (cur < ce_P) && (ce_scr[5 * cur + 2] > 0) && (ce_cp[cur] > 0)) ? (
+        e = ce_scr + 5 * cur;
+        v = sqrt(ce_cp[cur]);
+        (ce_opt & ce_oRel) ? (v /= sqrt(max(0.000001, ce_cpMax)));
+        r = max(e[3] + 5, (0.03 + 0.27 * min(2, v)) * s3d_kval(ce_kH) * s3d_foc / e[2]);
+        gfx_set(0.3, 0.7, 1, 1);
+        s3d_halo(e[0], e[1], r, 0.5);
+        gfx_set(0.55, 0.85, 1, 1);
+        gfx_circle(e[0], e[1], r, 0, 1); gfx_circle(e[0], e[1], r + 1, 0, 1);
+    );
+    // the texts : the input, the current cell, the weights on outputs without position ; no speaker
+    gfx_measurestr("0", s3d_tw, s3d_th);
+    gfx_set(1, 0.85, 0.4, 1);
+    gfx_x = 8; gfx_y = 6;
+    sprintf(#ce_l3, "In %d : %d output%s, sum %s", ce_row + 1, ro, (ro > 1) ? "s" : "", ed_Fmt(#ce_t4, s));
+    gfx_drawstr(#ce_l3);
+    wt = ce_Wt(ce_row, cur);
+    sprintf(#ce_l3, "Out %d : weight %s", cur + 1, ed_Fmt(#ce_t4, wt));
+    (wt > 0) ? (sprintf(#ce_t4, ", gain %.1f dB", 20 * log10(ce_Gain(ce_row, cur))); strcat(#ce_l3, #ce_t4););
+    (ce_spk[cur + 1] === 0) ? strcat(#ce_l3, "  (no position : hppos)");
+    gfx_set(1, 1, 1, 0.9);
+    gfx_x = 8; gfx_y = 6 + s3d_th + 2;
+    gfx_drawstr(#ce_l3);
+    ce_alt ? (
+        (ce_cp[cur] > 0) ?
+            sprintf(#ce_l3, "Out %d, all the inputs : %d input%s, power %.1f dB", cur + 1, ce_cn[cur], (ce_cn[cur] > 1) ? "s" : "",
+                10 * log10(ce_cp[cur] * sqr(ce_vol))) :
+            sprintf(#ce_l3, "Out %d : no input", cur + 1);
+        gfx_set(0.55, 0.85, 1, 1);
+        gfx_x = 8; gfx_y = 6 + 2 * (s3d_th + 2);
+        gfx_drawstr(#ce_l3);
+    );
+    ty = h - s3d_th - 6;
+    (np > 0) ? (
+        gfx_set(1, 0.5, 0.4, 1);
+        sprintf(#ce_l3, "%d weight%s on outputs without position (hppos)", np, (np > 1) ? "s" : "");
+        gfx_x = 8; gfx_y = ty;
+        gfx_drawstr(#ce_l3);
+        ty -= s3d_th + 2;
+    );
+    (n === 0) ? (
+        gfx_set(1, 0.5, 0.4, 1);
+        gfx_x = 8; gfx_y = ty;
+        gfx_drawstr("No speaker : their positions are given by hppos");
+    );
+    // the mode (what a clic on a speaker does), at the top right
+    gfx_set(0.6, 1, 0.6, 0.9);
+    strcpy(#ce_l3, (ce_mode === 0) ? "Sow" : "Adjust");
+    gfx_measurestr(#ce_l3, s3d_tw, s3d_th);
+    gfx_x = w - s3d_tw - 8; gfx_y = 6;
+    gfx_drawstr(#ce_l3);
+    // the cursor : a hand over the view (the orbit) ; over a speaker of the matrix, that of the mode (Sow : a brush ; Adjust :
+    // a hand with arrows ; Shift : an eraser)
+    ui_cursor_zone(x, y, w, h, 1, -1);
+    i = 0;
+    loop(n,
+        k = ce_ord[i]; e = ce_scr + 5 * k;
+        (k < ce_P) ? (r = e[3] + 3; ui_cursor_zone(x + e[0] - r, y + e[1] - r, 2 * r, 2 * r, ce_mode ? 5 : 3, 4););
+        i += 1;
+    );
+    ed_CamRestore();
+    ce_gdark = s3d_gdark; s3d_gdark = gd;
+    // copy to the screen (or to the ui-lib clip screen)
+    gfx_dest = od;
+    gfx_x = x; gfx_y = y;
+    gfx_a = 1; gfx_mode = 2;
+    gfx_blit(CE_IMG3, 1, 0);
+    gfx_mode = 0;
+);
+
+
+//====== The places of the matrix and of the view ; the separator between them (2026-11-21)
+
+// The matrix and the 3D view in x, y, w, h (screen pixels ; the gap gp between them) : the view at the right of the matrix
+// or below it, its share ce_split of the width or of the height (the rest : the matrix ; 40 pixels at least each) ; hidden :
+// ce_lw3 0
+function ce_Layout(x, y, w, h, gp)
+(
+    ce_lwm = w; ce_lhm = h; ce_lx3 = x; ce_ly3 = y; ce_lw3 = ce_lh3 = 0;
+    !(ce_opt & ce_oNo3D) ? (
+        (ce_opt & ce_oBelow) ? (
+            ce_lh3 = max(40, floor((h - gp) * ce_split)); ce_lhm = max(40, h - gp - ce_lh3);
+            ce_ly3 = y + ce_lhm + gp; ce_lw3 = w;
+        ) : (
+            ce_lw3 = max(40, floor((w - gp) * ce_split)); ce_lwm = max(40, w - gp - ce_lw3);
+            ce_lx3 = x + ce_lwm + gp; ce_lh3 = h;
+        );
+    );
+);
+
+// The separator (the gap between the matrix and the view, 3 pixels more on each side ; vertical, or horizontal when the view
+// is below the matrix) : under the mouse, a double arrow (its cursor zone : show_ConfEditor_Pad) ; a left drag : the share
+// of the view (ce_split, 0.1 ... 0.9 ; the menu of the view : 1/3, 1/2, 2/3) ; returns 1 when the share changed (ce_Layout
+// again)
+function ce_Sep(x, y, w, h, gp)
+local(bl, sx, sy, sw, sh, hov, v, ch)
+(
+    ch = 0;
+    bl = ce_opt & ce_oBelow;
+    bl ? (sx = x; sy = y + ce_lhm - 3; sw = w; sh = gp + 6;) : (sx = x + ce_lwm - 3; sy = y; sw = gp + 6; sh = h;);
+    hov = (mouse_x >= sx) && (mouse_x < sx + sw) && (mouse_y >= sy) && (mouse_y < sy + sh);
+    (ce_sepSeen < gfx_executed - 1) ? (ce_sepD = 0); // (not drawn in the previous frame : no drag going on)
+    (uix_click1 && hov && !(uix_mcap & 2)) ? (ce_sepD = 1);
+    (ce_sepD && !(uix_mcap & 1)) ? (ce_sepD = 0);
+    ce_sepD ? (
+        v = bl ? (y + h - mouse_y - gp / 2) / max(1, h - gp) : (x + w - mouse_x - gp / 2) / max(1, w - gp);
+        v = max(0.1, min(0.9, v));
+        (abs(v - ce_split) > 0.0001) ? (ce_split = v; ch = 1; ui_GFXdoNow |= 4;);
+    );
+    ce_sepOn = hov || ce_sepD;
+    ce_sepD ? ui_cursor_drag(bl ? 7 : 6);
+    ch;
+);
+
+
+//====== The pad
+
+// A clic on the cell c of the pad (not a drag)
+function ce_PadCell(c, ev)
+local(rc, sh, m, v)
+(
+    rc = ev & ui_jpad_ev_rmc; sh = mouse_cap & 8;
+    (c === 0) ? (rc ? ce_ConfMenu() : ce_RNext(sh ? -1 : 1)) : // (left : the next one of the ring, Shift : the previous one)
+    (c === 1) ? (
+        v = rc ? prv_MenuVal(ce_NList, 16, ce_N) : sh ? 2 : ce_N;
+        ce_N = max(1, min(CE_MAX, 0|v));
+    ) :
+    (c === 2) ? (
+        rc ? (
+            sprintf(#ce_mnu, "%s|The speakers (%d)", ce_NList, max(1, ce_SpkScan()));
+            m = prv_Menu(#ce_mnu, 17, -1);
+            (m === 16) ? (v = max(1, ce_SpkScan())) : (m >= 0) ? (sx_Nth(ce_NList, m, #ce_t1); v = s3d_atof(#ce_t1, 0, strlen(#ce_t1));) : (v = ce_P);
+        ) : (v = sh ? max(1, ce_SpkScan()) : ce_P);
+        ce_P = max(1, min(CE_MAX, 0|v));
+    ) :
+    (c === 3) ? (
+        // (left : a drag, see ce_DragPad ; Shift + left : 1)
+        rc ? ce_FacMenu() : sh ? (ce_fac = 1);
+    ) :
+    (c === 4) ? (
+        m = rc ? prv_Menu("Sow : + 1 on the cells clicked or crossed (Shift : - 1)|Adjust : the weight of a cell dragged", 2, ce_mode) : !ce_mode;
+        (m >= 0) ? (ce_mode = m);
+    ) :
+    (c === 5) ? (
+        rc ? (
+            sprintf(#ce_mnu, "Simplify all the inputs now|Simplify the input %d now|%s", ce_row + 1,
+                ce_simOn ? "Hide the settings (line 3)" : "Show the settings (line 3)");
+            m = prv_Menu(#ce_mnu, 3, -1);
+            ((m === 0) || (m === 1)) ? ce_SimApply(m) : (m === 2) ? (ce_simOn = !ce_simOn);
+        ) : (
+            ce_simOn = !ce_simOn;
+        );
+    ) :
+    (c === 6) ? (
+        !rc ? ce_Undo();
+    ) :
+    (c === 7) ? ce_RingMenu() :
+    ((c === 8) || (c === 9)) ? (
+        rc ? (
+            (c === 8) ? (
+                m = prv_Menu("Clear the row|Fill the row with 1", 2, -1);
+                (m === 0) ? ce_ClearRow(ce_row) : (m === 1) ? (ce_Keep(); v = 0; loop(ce_P, ce_Set(ce_row, v, 1); v += 1;););
+            ) : (
+                m = prv_Menu("Clear the column|Fill the column with 1", 2, -1);
+                (m === 0) ? ce_ClearCol(ce_col) : (m === 1) ? (ce_Keep(); v = 0; loop(ce_N, ce_Set(v, ce_col, 1); v += 1;););
+            );
+        ) : (c === 8) ? (
+            ce_row = sh ? ((ce_row <= 0) ? ce_N - 1 : ce_row - 1) : (ce_row + 1) % ce_N;
+        ) : (
+            ce_col = sh ? ((ce_col <= 0) ? ce_P - 1 : ce_col - 1) : (ce_col + 1) % ce_P;
+        );
+        ce_Show();
+    ) :
+    (c === 10) ? (
+        // (left : a drag, see ce_DragPad ; Shift + left : 0)
+        v = rc ? prv_MenuVal(ce_WList, 14, ce_Wt(ce_row, ce_col)) : sh ? 0 : ce_Wt(ce_row, ce_col);
+        (v != ce_Wt(ce_row, ce_col)) ? (ce_Keep(); ce_Set(ce_row, ce_col, v););
+    ) :
+    (c === 12) ? (
+        v = rc ? prv_MenuVal(ce_dBList, 14, 20 * log10(ce_vol)) : sh ? 0 : 20 * log10(ce_vol);
+        v = 10 ^ (max(-40, min(20, v)) / 20);
+        (abs(v - ce_vol) > 0.000001) ? (ce_Keep(); ce_vol = v; ce_dirty = 1;);
+    ) :
+    (c === 13) ? (
+        rc ? (
+            sprintf(#ce_mnu, "Fit : the whole matrix|%s", ce_SizeList);
+            m = prv_Menu(#ce_mnu, 12, -1);
+            (m === 0) ? (ce_cs = 0) : (m > 0) ? (sx_Nth(ce_SizeList, m - 1, #ce_t1); ce_cs = ce_csL = s3d_atof(#ce_t1, 0, strlen(#ce_t1)););
+        ) : (
+            ce_cs = (ce_cs > 0) ? 0 : ce_csL;
+        );
+    ) :
+    (c === 14) ? (
+        sprintf(#ce_mnu, "Clear the cell (In %d > Out %d)|Clear the row (In %d)|Clear the column (Out %d)|Clear all", ce_row + 1, ce_col + 1, ce_row + 1, ce_col + 1);
+        m = prv_Menu(#ce_mnu, 4, -1);
+        (m === 0) ? (ce_Keep(); ce_Set(ce_row, ce_col, 0);) :
+        (m === 1) ? ce_ClearRow(ce_row) :
+        (m === 2) ? ce_ClearCol(ce_col) :
+        (m === 3) ? ce_ClearAll();
+    ) :
+    (c === 15) ? (
+        rc ? ce_ViewMenu3() : (ce_opt = ce_opt ~ ce_oNo3D);
+    ) :
+    // the line 3 : Simplify
+    (c === 16) ? (
+        // (left : a drag, see ce_DragPad ; Shift + left : Off)
+        v = rc ? prv_MenuVal(ce_ShList, 11, ce_sShare) : sh ? 0 : ce_sShare;
+        ce_sShare = max(0, min(50, v));
+    ) :
+    (c === 17) ? (
+        v = rc ? prv_MenuVal(ce_KList, 10, ce_sMax) : sh ? 0 : ce_sMax;
+        ce_sMax = max(0, min(32, 0|v));
+    ) :
+    (c === 18) ? (
+        rc ? (
+            m = prv_Menu("Round : Off|Round 1 : the smallest weight 1, the others integers|Round 0.5 : multiples of 0.5|Round 0.25 : multiples of 0.25|Round 0.1 : multiples of 0.1", 5, ce_sRi);
+            (m >= 0) ? (ce_sRi = m);
+        ) : (
+            ce_sRi = sh ? (ce_sRi + 4) % 5 : (ce_sRi + 1) % 5;
+        );
+    ) :
+    (c === 19) ? (
+        m = rc ? prv_Menu(sprintf(#ce_t1, "All the inputs|The current input (%d)", ce_row + 1), 2, ce_sCur) : !ce_sCur;
+        (m >= 0) ? (ce_sCur = m);
+    ) :
+    (c === 20) ? (ce_simPrev = !ce_simPrev) :
+    (c === 21) ? ce_SimApply(-1) :
+    (c === 23) ? (ce_simOn = 0);
+    ce_row = max(0, min(ce_N - 1, ce_row)); ce_col = max(0, min(ce_P - 1, ce_col));
+);
+
+// The factor of a drag (0.1 ... 10 : 2 decimals below 1, else 1)
+function ce_FacRnd(v)
+(
+    v = max(0.1, min(10, v));
+    (v < 1) ? floor(v * 100 + 0.5) / 100 : floor(v * 10 + 0.5) / 10;
+);
+
+// The drag of the cells In N (1), Out P (2), the factor (3), w (10), dB (12), Share (16), Max (17) : potentiometers of the
+// library (ui_jdrag)
+function ce_DragPad(blockId, c)
+local(d, v)
+(
+    ui_jdrag_can_start() ? (
+        ce_pk = 0;
+        (c === 1) ? ui_jdrag_start(blockId, 1, ce_N, 1, CE_MAX, 380, 2) :
+        (c === 3) ? ui_jdrag_start(blockId, 3, ce_fac, 0.1, 10, 400, 1) :
+        (c === 2) ? ui_jdrag_start(blockId, 2, ce_P, 1, CE_MAX, 380, 2) :
+        (c === 10) ? ui_jdrag_start(blockId, 10, ce_Wt(ce_row, ce_col), 0, 32, 640, 0) :
+        (c === 12) ? ui_jdrag_start(blockId, 12, 20 * log10(ce_vol), -40, 20, 600, 0) :
+        (c === 16) ? ui_jdrag_start(blockId, 16, ce_sShare, 0, 50, 400, 2) :
+        (c === 17) ? ui_jdrag_start(blockId, 17, ce_sMax, 0, 32, 320, 2);
+    );
+    d = ui_jdrag(blockId);
+    (d & 1) ? (
+        v = ui_jdrag_v;
+        (ui_jdrag_cell === 1) ? (ce_N = max(1, min(CE_MAX, v)); ce_row = min(ce_row, ce_N - 1);) :
+        (ui_jdrag_cell === 2) ? (ce_P = max(1, min(CE_MAX, v)); ce_col = min(ce_col, ce_P - 1);) :
+        (ui_jdrag_cell === 3) ? (ce_fac = ce_FacRnd(v)) :
+        (ui_jdrag_cell === 10) ? (
+            !ce_pk ? (ce_Keep(); ce_pk = 1;);
+            ce_Set(ce_row, ce_col, v);
+        ) :
+        (ui_jdrag_cell === 12) ? (
+            !ce_pk ? (ce_Keep(); ce_pk = 1;);
+            ce_vol = 10 ^ (floor(v * 10 + 0.5) / 200); ce_dirty = 1;
+        ) :
+        (ui_jdrag_cell === 16) ? (ce_sShare = max(0, min(50, v))) :
+        (ui_jdrag_cell === 17) ? (ce_sMax = max(0, min(32, v)));
+    );
+    d;
+);
+
+/*
+    The module "Conf Editor"
+*/
+function show_ConfEditor_Pad(blockId)
+local(h1, hv, hneed, zzmi, zz, c, dr, x, y, w, h, i, g, s, gp, ov3)
+(
+    ce_Prompted();
+    ce_N = max(1, min(CE_MAX, ce_N)); ce_P = max(1, min(CE_MAX, ce_P));
+    ce_row = max(0, min(ce_N - 1, ce_row)); ce_col = max(0, min(ce_P - 1, ce_col));
+    h1 = uix_jpadHeight(ce_simOn ? 3 : 2);
+    hv = max(160, min(ui_width() * 0.75, ui_height() - h1 - ui_jd_ctgr - 8));
+    hneed = h1 + hv + ui_jd_ctgr + 8;
+    (ui_height() >= hneed) ? (
+        ui_split_top(hneed);
+            zzmi = ui_hover();
+            keepBlockInfos(blockId);
+            (zzmi) ? (
+                ui_push();
+                    ui_color(Col_Frame);
+                    ui_border();
+                ui_pop();
+            );
+            // the keys over the module : < or a the other mode, z Undo, the arrows (no modifier) : the current cell, +
+            // (=) and - : + 1, - 1 on it ; e (empty), Backspace, Delete : it is cleared ; v : the 3D view shown or hidden ;
+            // over the 3D view (2026-11-21, as all the 3D views) : a the levelling, v the next view, > the presentation of
+            // the room (< : the mode, as over the matrix)
+            ov3 = (ce_lw3 > 0) && (mouse_x >= ce_lx3) && (mouse_x < ce_lx3 + ce_lw3) && (mouse_y >= ce_ly3) && (mouse_y < ce_ly3 + ce_lh3);
+            zzmi ? (
+                (ov3 && GM_key_take('a')) ? (ce_Level3(); ui_GFXdoNow |= 4;) :
+                (ov3 && GM_key_take('v')) ? (ce_SetView3((ce_View3Of() + 1) % 4); ui_GFXdoNow |= 4;) :
+                GM_key_take('>') ? (ce_pres = (ce_pres + 1) % 6; ui_GFXdoNow |= 4;) :
+                (GM_key_take('<') || GM_key_take('a')) ? (ce_mode = !ce_mode; ui_GFXdoNow |= 4;) :
+                GM_key_take('v') ? (ce_opt = ce_opt ~ ce_oNo3D; ui_GFXdoNow |= 4;) :
+                GM_key_take('z') ? (ce_Undo(); ui_GFXdoNow |= 4;) :
+                (GM_key_take('+') || GM_key_take('=')) ? (ce_Keep(); ce_Set(ce_row, ce_col, ce_Wt(ce_row, ce_col) + 1); ui_GFXdoNow |= 4;) :
+                GM_key_take('-') ? ((ce_Wt(ce_row, ce_col) > 0) ? (ce_Keep(); ce_Set(ce_row, ce_col, ce_Wt(ce_row, ce_col) - 1);); ui_GFXdoNow |= 4;) :
+                (GM_key_take('e') || GM_key_take(8) || GM_key_take('del')) ? ((ce_Wt(ce_row, ce_col) > 0) ? (ce_Keep(); ce_Set(ce_row, ce_col, 0);); ui_GFXdoNow |= 4;) :
+                (GM_key_mods() === 0) ? (
+                    GM_key_take('left') ? (ce_col = max(0, ce_col - 1); ce_Show(); ui_GFXdoNow |= 4;) :
+                    GM_key_take('rght') ? (ce_col = min(ce_P - 1, ce_col + 1); ce_Show(); ui_GFXdoNow |= 4;) :
+                    GM_key_take('up') ? (ce_row = max(0, ce_row - 1); ce_Show(); ui_GFXdoNow |= 4;) :
+                    GM_key_take('down') ? (ce_row = min(ce_N - 1, ce_row + 1); ce_Show(); ui_GFXdoNow |= 4;);
+                );
+            );
+            // Alt held over the module : the power received by the outputs ; Simplify : its result (the counts, the
+            // preview)
+            ce_alt = zzmi && (mouse_cap & 16);
+            ce_alt ? ce_ColPowers();
+            ce_prv = ce_simOn && ce_simPrev;
+            ce_simOn ? ce_SimCompute();
+            control_group("Conf Editor");
+            ui_pad(0, ui_cg_pad_top, 0, ui_cg_pad_bottom);
+
+            // the pad
+            ui_split_top(h1);
+                ui_pad(1,2,2,2);
+                mSL_setStrArray(pad_CET_Labs, pad_CET_Siz);
+                ce_Title(pad_CET_Labs[0]);
+                ce_dirty ? strcat(pad_CET_Labs[0], " *");
+                sprintf(pad_CET_Labs[1], "In %d", ce_N);
+                sprintf(pad_CET_Labs[2], "Out %d", ce_P);
+                sprintf(pad_CET_Labs[3], "Factor %s", ed_Fmt(#ce_fs, ce_fac));
+                strcpy(pad_CET_Labs[4], ce_mode ? "Adjust" : "Sow");
+                strcpy(pad_CET_Labs[5], "Simplify");
+                strcpy(pad_CET_Labs[6], (ce_uSt === 2) ? "Redo" : "Undo");
+                sprintf(pad_CET_Labs[7], "Ring %d/%d", ce_ri + 1, ce_rn);
+                sprintf(pad_CET_Labs[8], "In %d", ce_row + 1);
+                sprintf(pad_CET_Labs[9], "Out %d", ce_col + 1);
+                sprintf(pad_CET_Labs[10], "w %s", ed_Fmt(#ce_t1, ce_Wt(ce_row, ce_col)));
+                g = ce_Gain(ce_row, ce_col);
+                (g > 0) ? sprintf(pad_CET_Labs[11], "%.1f dB", 20 * log10(g)) : strcpy(pad_CET_Labs[11], "- dB");
+                sprintf(pad_CET_Labs[12], "Vol %.1f dB", 20 * log10(ce_vol));
+                (ce_cs > 0) ? sprintf(pad_CET_Labs[13], "Size %d", ce_cs) : strcpy(pad_CET_Labs[13], "Size Fit");
+                strcpy(pad_CET_Labs[14], "Clear");
+                strcpy(pad_CET_Labs[15], (ce_opt & ce_oNo3D) ? "3D view Off" : "3D view");
+                pad_CET_Colrs[0] = ce_dirty ? Color_Goldenrod : Col_P1;
+                pad_CET_Colrs[1] = pad_CET_Colrs[2] = Col_P1;
+                pad_CET_Colrs[3] = (abs(ce_fac - 1) > 0.000001) ? Color_Goldenrod : Col_P1;
+                pad_CET_Colrs[4] = ce_mode ? Color_Cornflower_Blue : Color_Limegreen; // (each mode its color)
+                pad_CET_Colrs[5] = ce_simOn ? Color_Limegreen : Col_P1;
+                pad_CET_Colrs[6] = (ce_uSt > 0) ? Col_P1 : Col_Inactive;
+                pad_CET_Colrs[7] = Col_P2;
+                pad_CET_Colrs[8] = pad_CET_Colrs[9] = Col_P1;
+                pad_CET_Colrs[10] = Col_P1;
+                pad_CET_Colrs[11] = Col_InfoA;
+                pad_CET_Colrs[12] = (abs(ce_vol - 1) > 0.000001) ? Color_Goldenrod : Col_P1;
+                pad_CET_Colrs[13] = Col_P1;
+                pad_CET_Colrs[14] = Col_P6;
+                pad_CET_Colrs[15] = (ce_opt & ce_oNo3D) ? Col_InfoA : Color_Limegreen;
+                // the line 3 : Simplify
+                (ce_sShare > 0) ? (sprintf(pad_CET_Labs[16], "Share %s", ed_Fmt(#ce_t1, ce_sShare)); strcat(pad_CET_Labs[16], " %");) :
+                    strcpy(pad_CET_Labs[16], "Share Off");
+                (ce_sMax > 0) ? sprintf(pad_CET_Labs[17], "Max %d", ce_sMax) : strcpy(pad_CET_Labs[17], "Max Off");
+                (ce_sRi > 0) ? sprintf(pad_CET_Labs[18], "Round %s", ed_Fmt(#ce_t1, ce_RStep(ce_sRi))) : strcpy(pad_CET_Labs[18], "Round Off");
+                ce_sCur ? sprintf(pad_CET_Labs[19], "Input %d", ce_row + 1) : strcpy(pad_CET_Labs[19], "All inputs");
+                strcpy(pad_CET_Labs[20], ce_simPrev ? "Preview" : "Preview Off");
+                strcpy(pad_CET_Labs[21], "Apply");
+                sprintf(pad_CET_Labs[22], "-%d  ~%d", ce_sRem, ce_sChg);
+                strcpy(pad_CET_Labs[23], "Close");
+                pad_CET_Colrs[16] = (ce_sShare > 0) ? Col_P1 : Col_InfoA;
+                pad_CET_Colrs[17] = (ce_sMax > 0) ? Col_P1 : Col_InfoA;
+                pad_CET_Colrs[18] = (ce_sRi > 0) ? Col_P1 : Col_InfoA;
+                pad_CET_Colrs[19] = Col_P1;
+                pad_CET_Colrs[20] = ce_simPrev ? Color_Limegreen : Col_InfoA;
+                pad_CET_Colrs[21] = (ce_sRem + ce_sChg > 0) ? Color_Goldenrod : Col_Inactive;
+                pad_CET_Colrs[22] = Col_InfoA;
+                pad_CET_Colrs[23] = Col_P6;
+                zz = control_jpad(pad_CET, ce_simOn ? 3 : 2, -1, 0);
+                c = ui_jpad_cell_at();
+                dr = ce_DragPad(blockId, c); // the cells of values : a drag
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4;
+                    ((zz & (ui_jpad_ev_lmc | ui_jpad_ev_rmc)) && !((zz & ui_jpad_ev_lmc) && (dr & 2))) ? (
+                        ce_PadCell(pad_CET[ui_jpad_last] - 1, zz);
+                    );
+                );
+            ui_pop();
+
+            // the matrix, the 3D view (at its right, or below it : its share ce_split) ; the separator between them : a drag
+            // changes the share (ce_Sep ; meanwhile, the matrix and the view do not see the mouse)
+            ui_pad(2, 3, 2, 2);
+            x = ui_left_retina(); y = ui_top_retina(); w = ui_width_retina(); h = ui_height_retina(); // (screen pixels)
+            gp = floor(6 * ui_jscale());
+            ce_Layout(x, y, w, h, gp);
+            (ce_lw3 > 0) ? (
+                ce_Sep(x, y, w, h, gp) ? ce_Layout(x, y, w, h, gp);
+            ) : (
+                ce_sepD = ce_sepOn = 0;
+            );
+            ce_sepSeen = gfx_executed;
+            ce_sepD ? (
+                ce_hr = ce_hc = ce_h3 = -1;
+            ) : (
+                ce_Mouse(x, y, ce_lwm, ce_lhm, uix_scroll_y) ? (uix_scroll_y = 0; ui_GFXdoNow |= 4;);
+                (ce_lw3 > 0) ? (ce_Mouse3(ce_lx3, ce_ly3, ce_lw3, ce_lh3, uix_scroll_y) ? (uix_scroll_y = 0; ui_GFXdoNow |= 4;););
+            );
+            ce_Draw(x, y, ce_lwm, ce_lhm);
+            // the cursor over the cells : that of the mode (Sow : a brush ; Adjust : a hand with arrows ; Shift : an eraser)
+            ui_cursor_zone(x + ce_hw, y + ce_th, ce_vc * ce_csz, ce_vr * ce_csz, ce_mode ? 5 : 3, 4);
+            // over the numbers (2026-11-21) : a hand (a drag : an exchange) ; Shift : a hand + (a copy)
+            ui_cursor_zone(x, y + ce_th, ce_hw, ce_vr * ce_csz, 1, 10);
+            ui_cursor_zone(x + ce_hw, y, ce_vc * ce_csz, ce_th, 1, 10);
+            (ce_lw3 > 0) ? ce_Draw3(ce_lx3, ce_ly3, ce_lw3, ce_lh3);
+            // the separator : a double arrow (over the matrix and the view)
+            (ce_lw3 > 0) ? (
+                (ce_opt & ce_oBelow) ? ui_cursor_zone(x, y + ce_lhm - 3, w, gp + 6, 7, -1) :
+                    ui_cursor_zone(x + ce_lwm - 3, y, gp + 6, h, 6, -1);
+            );
+            // the separator under the mouse, or dragged : a faint line
+            ce_sepOn ? (
+                gfx_set(0.55, 0.7, 1, ce_sepD ? 0.6 : 0.3);
+                (ce_opt & ce_oBelow) ? gfx_rect(x, y + ce_lhm + floor(gp / 2) - 1, w, 2) :
+                    gfx_rect(x + ce_lwm + floor(gp / 2) - 1, y, 2, h);
+            );
+        ui_pop();
+    );
+);

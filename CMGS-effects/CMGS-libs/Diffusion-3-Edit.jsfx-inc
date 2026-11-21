@@ -16,12 +16,14 @@
           smoothed : at each point, its two segments share the mean of their tangents (no angle ; without bends, the
           curve of Catmull-Rom) (left : the other one ; right : menu, also : straighten all, which comes back to
           Straight ; kept for Undo)
-        4, 5, 6 the mode : View, Move, Add/Del (left : this mode ; right : menu ; keys v, m, p over the module)
+        4, 5, 6 the mode : View, Move, Add/Del (left : this mode ; right : menu ; keys m, p over the module, < the next
+          mode ; 2026-11-21 : v is the next view, as in all the 3D views)
         7 Points N (both clics : menu : select all, none, invert, delete the selection, delete all)
         8 the view : Front, Side, Top, 3D, Custom (left : the next one ; right : menu)
         9 the grid : Room (the far faces of the room), Planes (the planes x = 0, y = 0, z = 0), Axes (no grid), Plane z
-          (the plane z = val only, where the new points are created), Polar z (the same plane, with circles and rays)
-          (left : the next one ; right : menu)
+          (the plane z = val only, where the new points are created), Polar z (the same plane, with circles and rays),
+          None (2026-11-21 : nothing, not even the axes ; the presentations of all the 3D views, s3d_grids of
+          mSL_ui_Space3D) (left : the next one ; right : menu)
         10 z= val : the height of the plane z = val (potentiometer, -1 ... 1 ; Shift + left : 0 ; right : menu)
         11 Step 1/d : the step of the grids, d = 1 ... 10 squares per unit ; Polar z : the circles of radii 1/d ... d/d
           (potentiometer ; Shift + left : 6 ; right : menu)
@@ -73,8 +75,9 @@
     The camera of an editor is free (ed_sFw, ed_sUp : the forward and up vectors ; the views Front ... 3D set them from
     an azimuth and an elevation, as "Space 3D").
     Mouse : wheel = zoom ; right clic = menu (views, grid, display, selection) ; Shift + right clic : the Studio menu
-        View    : left drag = orbit : horizontal around the axis z, vertical around the right of the view ; Shift +
-                  horizontal : around the axis x or y when it is vertical in the view (within 45 degrees ; else z)
+        View    : left drag = orbit (2026-11-21 : as held in the hand) : horizontal around the vertical of the view,
+                  vertical around its right (the side near the eye follows the mouse) ; Shift + horizontal : around
+                  the axis x, y or z of the room nearest to the vertical of the view (x or y within 45 degrees ; else z)
         Move    : drag from a point : selected, it becomes the current one and moves with the selection ; else it is
                   selected alone and moves ; drag from the barycentre : the selection moves ; in the plane of the
                   screen (grids Plane z, Polar z : in its horizontal plane, z kept) ; Cmd + vertical drag : in depth,
@@ -109,7 +112,9 @@
         Off point x y z bend dx dy dz ... )) (Data/name-d3-EditA-table-date.mSL) : the points as they are, in their
         order (no number : a point added or removed in the file renumbers the next ones), with their bends ; dropped on a module Edit, it is loaded there again (elsewhere : in the module named in the file ; read by
         Set_Table in Diffusion-3-Set-Table, staged, taken by ed_Frame : ed_TbTake).
-    Keys over the module : v, m, p the modes View, Move, Add/Del ; < the next mode ; > (Shift + <) the next grid ;
+    Keys over the module : m, p the modes Move, Add/Del ; < the next mode ; > (Shift + <) the next grid ; (2026-11-21,
+        as in all the 3D views) v the next view (Front, Side, Top, 3D), a the levelling (the face of the room nearest
+        to the bottom of the screen made horizontal, s3d_LevelStart) ;
         z : Undo (then Redo) ; Cmd + A : select all ; Cmd + E : select none ; Backspace, Delete : delete the
         selection ; left, right arrows : the previous, the next point ; up, down : the first, the last one (selected
         alone)
@@ -175,7 +180,7 @@ ed_ModeNames = "View|Move|Add/Del";
 ed_KindNames = "Speakers|Sources|Trajectory";
 ed_SmoothNames = "Straight segments (only their bends)|Smooth segments (their tangents joined at the points)|Straighten all the segments";
 ed_ViewNames = "Front|Side|Top|3D";
-ed_GridNames = "Room|Planes|Axes|Plane z|Polar z";
+ed_GridNames = "Room|Planes|Axes|Plane z|Polar z|None"; // (as s3d_PresNames, 2026-11-21 : None)
 ed_FreeNames = "Room : the points in [-1, 1]|Free : the points up to 10";
 ed_RotList = "-90|-45|-30|-15|-5|5|15|30|45|90|180";
 ed_Coords = "-1|-0.75|-0.5|-0.25|0|0.25|0.5|0.75|1";
@@ -254,7 +259,7 @@ local(b)
 );
 
 // The grid is a plane z = val (Plane z, Polar z)
-function ed_PlaneZ(g) ( g >= 3; );
+function ed_PlaneZ(g) ( (g === 3) || (g === 4); );
 
 // The camera of the editor e from an azimuth and an elevation (as s3d_camera : the right horizontal)
 function ed_AzEl(e, az, el)
@@ -299,22 +304,26 @@ local(st, f, u, l, d)
     );
 );
 
-// The orbit of the camera of the editor e for a drag of (dx, dy) pixels : horizontal, around the axis z (sh : Shift,
-// around the axis x or y when it is vertical in the view, within 45 degrees ; else z) ; vertical, around the right of
-// the view. Returns the axis of the horizontal rotation : 0 x, 1 y, 2 z.
+// The orbit of the camera of the editor e for a drag of (dx, dy) pixels (2026-11-21 : as held in the hand, as all the 3D
+// views, s3d_orbit) : horizontal, around the vertical of the view ; vertical, around its right ; the side near the eye
+// follows the mouse. sh : Shift, the horizontal around the axis of the room nearest to the vertical of the view (x or y
+// within 45 degrees ; else z ; its sense : that of the vertical). Returns the axis of the horizontal rotation : 0 x, 1 y,
+// 2 z ; 3 : the vertical of the view.
 function ed_Orbit(e, dx, dy, sh)
 local(st, f, u, k, a, rx, ry, rz)
 (
     st = ed_St(e); f = st + ed_sFw; u = st + ed_sUp;
-    k = 2;
-    sh ? (
-        ((abs(u[0]) > 0.7) && (abs(u[0]) >= abs(u[1]))) ? (k = 0) : (abs(u[1]) > 0.7) ? (k = 1);
-    );
-    // (around x or y : the same feel as around z when it goes up in the view)
     a = - dx * 0.008;
-    ((k < 2) && (u[k] < 0)) ? (a = - a);
-    ed_Rot(f, k === 0, k === 1, k === 2, a);
-    ed_Rot(u, k === 0, k === 1, k === 2, a);
+    sh ? (
+        k = 2;
+        ((abs(u[0]) > 0.7) && (abs(u[0]) >= abs(u[1]))) ? (k = 0) : (abs(u[1]) > 0.7) ? (k = 1);
+        (u[k] < 0) ? (a = - a); // (the same feel as around the vertical of the view)
+        ed_Rot(f, k === 0, k === 1, k === 2, a);
+        ed_Rot(u, k === 0, k === 1, k === 2, a);
+    ) : (
+        k = 3;
+        ed_Rot(f, u[0], u[1], u[2], a);
+    );
     // vertical : around the right of the view (fw x up), down = the camera goes up
     rx = f[1] * u[2] - f[2] * u[1]; ry = f[2] * u[0] - f[0] * u[2]; rz = f[0] * u[1] - f[1] * u[0];
     ed_Rot(f, rx, ry, rz, - dy * 0.008);
@@ -366,7 +375,7 @@ local(e, st, k, p)
         st[ed_sView] = max(-1, min(3, 0|st[ed_sView]));
         st[ed_sOpt] = 0|st[ed_sOpt];
         st[ed_sUndo] = 0; // (the undo buffers are not saved)
-        st[ed_sGrid] = max(0, min(4, 0|st[ed_sGrid]));
+        st[ed_sGrid] = max(0, min(5, 0|st[ed_sGrid]));
         st[ed_sZ] = ed_Lim(st[ed_sZ]);
         st[ed_sDiv] = max(1, min(10, 0|st[ed_sDiv]));
         st[ed_sRays] = (st[ed_sRays] >= 2) ? min(40, 0|st[ed_sRays]) : min(40, 4 * st[ed_sDiv]); // (none saved : 4 d)
@@ -858,6 +867,7 @@ function ed_CamSave()
     ed_cam[9] = s3d_rgx; ed_cam[10] = s3d_rgy; ed_cam[11] = s3d_rgz;
     ed_cam[12] = s3d_upx; ed_cam[13] = s3d_upy; ed_cam[14] = s3d_upz;
     ed_cam[15] = s3d_foc; ed_cam[16] = s3d_ox; ed_cam[17] = s3d_oy; ed_cam[18] = s3d_zmin; ed_cam[19] = s3d_zmax;
+    ed_cam[20] = s3d_roll;
 );
 function ed_CamRestore()
 (
@@ -867,6 +877,7 @@ function ed_CamRestore()
     s3d_rgx = ed_cam[9]; s3d_rgy = ed_cam[10]; s3d_rgz = ed_cam[11];
     s3d_upx = ed_cam[12]; s3d_upy = ed_cam[13]; s3d_upz = ed_cam[14];
     s3d_foc = ed_cam[15]; s3d_ox = ed_cam[16]; s3d_oy = ed_cam[17]; s3d_zmin = ed_cam[18]; s3d_zmax = ed_cam[19];
+    s3d_roll = ed_cam[20];
 );
 
 // The camera of the editor e, for a view of w x h pixels (ed_CamRestore after use) : the globals of s3d_camera, from
@@ -886,6 +897,26 @@ local(st, f, u, d)
     s3d_foc = 0.5 * min(w, h) / tan(0.5 * s3d_fov);
     s3d_ox = 0.5 * w; s3d_oy = 0.5 * h;
     s3d_zmin = d - 1.75; s3d_zmax = d + 1.75;
+);
+
+// (2026-11-21) The levelling of the camera of the editor e (key 'a', the menu ; as all the 3D views) : started
+// (s3d_LevelStart, its id 11 + e), then turned at each frame around the line of sight (ed_LevelStep)
+function ed_Level(e)
+(
+    ed_CamSet(e, 16, 16);
+    s3d_LevelStart(11 + e);
+    ed_CamRestore();
+);
+function ed_LevelStep(e)
+local(st, f, a)
+(
+    (a = s3d_LevelStep(11 + e)) ? (
+        st = ed_St(e); f = st + ed_sFw;
+        ed_Rot(st + ed_sUp, f[0], f[1], f[2], a);
+        ed_Ortho(e);
+        st[ed_sView] = -1;
+    );
+    (s3d_lvId === 11 + e) ? ui_GFXdoNow |= 4;
 );
 
 // The point under the mouse (mx, my : relative to the view), on the plane of the screen through the current point (the
@@ -1008,81 +1039,7 @@ local(i, n)
     s3d_proj(x2, y2, z2) ? gfx_circle(s3d_px, s3d_py, 2.5, 1, 1);
 );
 
-// The grid of the plane normal to the axis ax (0 x, 1 y, 2 z) at the coordinate c, limited to the room (the color is
-// set ; the camera is set)
-function ed_Plane(ax, c)
-local(i, t)
-(
-    i = 0;
-    loop(s3d_GridN + 1,
-        t = -1 + 2 * i / s3d_GridN;
-        (ax === 0) ? (
-            s3d_line(c, t, -1, c, t, 1); s3d_line(c, -1, t, c, 1, t);
-        ) : (ax === 1) ? (
-            s3d_line(t, c, -1, t, c, 1); s3d_line(-1, c, t, 1, c, t);
-        ) : (
-            s3d_line(t, -1, c, t, 1, c); s3d_line(-1, t, c, 1, t, c);
-        );
-        i += 1;
-    );
-);
-
-// The polar grid of the plane z = c : the circles of radii k / d (k = 1 ... d), nr rays from the center, evenly spaced
-// from the axis x (the color is set ; the camera is set)
-function ed_Polar(c, d, nr)
-local(k, j, r, a, ns, x0, y0, x1, y1)
-(
-    ns = 72; // (the segments of a circle)
-    k = 1;
-    loop(d,
-        r = k / d;
-        x0 = r; y0 = 0; j = 1;
-        loop(ns,
-            a = 2 * $pi * j / ns;
-            x1 = r * cos(a); y1 = r * sin(a);
-            s3d_line(x0, y0, c, x1, y1, c);
-            x0 = x1; y0 = y1; j += 1;
-        );
-        k += 1;
-    );
-    j = 0;
-    loop(nr,
-        a = 2 * $pi * j / nr;
-        s3d_line(0, 0, c, cos(a), sin(a), c);
-        j += 1;
-    );
-);
-
-// An arrow at the end +1 of an axis (ux, uy, uz : its unit vector), pointing outwards, and the name of the axis (the
-// color is set ; the camera is set). An axis seen end-on : a ring, with a dot when its end +1 comes towards the eye,
-// with a cross when it goes away.
-function ed_Arrow(ux, uy, uz, lbl)
-local(bx, by, bz, tx, ty, tz, dx, dy, d, l, cx, cy)
-(
-    s3d_proj(0.9 * ux, 0.9 * uy, 0.9 * uz) ? (
-        bx = s3d_px; by = s3d_py; bz = s3d_pz;
-        s3d_proj(ux, uy, uz) ? (
-            tx = s3d_px; ty = s3d_py; tz = s3d_pz;
-            dx = tx - bx; dy = ty - by; d = sqrt(dx * dx + dy * dy); // (the last tenth of the axis, on the screen)
-            gfx_measurestr(lbl, s3d_tw, s3d_th);
-            (d > 0.6) ? (
-                l = min(11, 8 * d); dx /= d; dy /= d;
-                cx = tx - dx * l; cy = ty - dy * l; // the base of the head, its tip at the end of the axis
-                gfx_triangle(tx, ty, cx - dy * l * 0.45, cy + dx * l * 0.45, cx + dy * l * 0.45, cy - dx * l * 0.45);
-                gfx_x = tx + dx * 9 - s3d_tw / 2; gfx_y = ty + dy * 9 - s3d_th / 2;
-            ) : (
-                gfx_circle(tx, ty, 5, 0, 1);
-                (tz < bz) ? (
-                    gfx_circle(tx, ty, 1.5, 1, 1);
-                ) : (
-                    gfx_line(tx - 3, ty - 3, tx + 3, ty + 3, 1); gfx_line(tx - 3, ty + 3, tx + 3, ty - 3, 1);
-                );
-                gfx_x = tx + 8; gfx_y = ty - 6 - s3d_th;
-            );
-            gfx_drawstr(lbl);
-        );
-    );
-);
+// (2026-11-21 : ed_Plane, ed_Polar, ed_Arrow moved into mSL_ui_Space3D : s3d_plane, s3d_polar, s3d_arrow, s3d_grids)
 
 // The segments of a trajectory (the camera is set) : the lines from each point to the next one (the curves : 24 steps),
 // an arrow at 0.7 of each (the direction), and in the modes Move, Add/Del a handle at its middle (a diamond : filled
@@ -1143,27 +1100,30 @@ local(st, ns, hs, k, j, p, x0, y0, z0, ux, uy, dx, dy, d, tx, ty, bt, r)
     );
 );
 
-// The menu of the view (right clic)
+// The menu of the view (right clic ; 2026-11-21 : as all the 3D views, the levelling and the presentations of the room in
+// a sub-menu, the keys in parentheses) : 1 ... 4 the views, 5 the levelling, 6 ... 11 the grids (the presentations), 12
+// Snap, 13 ... 16 the display, 17 ... 19 the selection
 function ed_ViewMenu(e)
 local(st, c, g)
 (
     st = ed_St(e); g = st[ed_sGrid];
-    sprintf(#ed_mnu, "Front view|Side view|Top view|3D view||%sGrid : the far faces of the room|%sGrid : the planes x = 0, y = 0, z = 0|%sNo grid : the axes only|%sGrid : the plane z = %.2f (the new points)|%sGrid : the circles of the plane z = %.2f (polar)|%sSnap to the grid (step 1/%d)||%sShow the numbers|%sShow the projections of the current point|%sShow the barycentre of the selection|%sFree points (beyond the room, up to %d)||Select all|Select none|Invert the selection",
+    sprintf(#ed_mnu, "Front view|Side view|Top view|3D view (v : the next one)|Level the view (a)||>Presentation of the room (>)|%sThe far faces of the room|%sThe planes x = 0, y = 0, z = 0|%sThe axes only|%sThe plane z = %.2f (the new points)|%sThe circles of the plane z = %.2f (polar)|<%sNothing (no axes)|%sSnap to the grid (step 1/%d)||%sShow the numbers|%sShow the projections of the current point|%sShow the barycentre of the selection|%sFree points (beyond the room, up to %d)||Select all|Select none|Invert the selection",
         (g === 0) ? "!" : "", (g === 1) ? "!" : "", (g === 2) ? "!" : "", (g === 3) ? "!" : "", st[ed_sZ],
-        (g === 4) ? "!" : "", st[ed_sZ], st[ed_sSnap] ? "!" : "", st[ed_sDiv],
+        (g === 4) ? "!" : "", st[ed_sZ], (g === 5) ? "!" : "", st[ed_sSnap] ? "!" : "", st[ed_sDiv],
         (st[ed_sOpt] & ed_oNum) ? "!" : "", (st[ed_sOpt] & ed_oProj) ? "!" : "", (st[ed_sOpt] & ed_oBary) ? "!" : "",
         st[ed_sFree] ? "!" : "", ED_FAR);
     gfx_x = mouse_x; gfx_y = mouse_y;
     c = gfx_showmenu(#ed_mnu);
     prv_MenuEnd(c > 0); // (the clic that chose the entry is not a new point)
     ((c >= 1) && (c <= 4)) ? ed_SetView(e, c - 1) :
-    ((c >= 5) && (c <= 9)) ? (st[ed_sGrid] = c - 5) :
-    (c === 10) ? (st[ed_sSnap] = !st[ed_sSnap]) :
-    (c === 11) ? (st[ed_sOpt] = st[ed_sOpt] ~ ed_oNum) :
-    (c === 12) ? (st[ed_sOpt] = st[ed_sOpt] ~ ed_oProj) :
-    (c === 13) ? (st[ed_sOpt] = st[ed_sOpt] ~ ed_oBary) :
-    (c === 14) ? ed_SetFree(e, !st[ed_sFree]) :
-    ((c >= 15) && (c <= 17)) ? ed_SelOp(e, c - 15);
+    (c === 5) ? ed_Level(e) :
+    ((c >= 6) && (c <= 11)) ? (st[ed_sGrid] = c - 6) :
+    (c === 12) ? (st[ed_sSnap] = !st[ed_sSnap]) :
+    (c === 13) ? (st[ed_sOpt] = st[ed_sOpt] ~ ed_oNum) :
+    (c === 14) ? (st[ed_sOpt] = st[ed_sOpt] ~ ed_oProj) :
+    (c === 15) ? (st[ed_sOpt] = st[ed_sOpt] ~ ed_oBary) :
+    (c === 16) ? ed_SetFree(e, !st[ed_sFree]) :
+    ((c >= 17) && (c <= 19)) ? ed_SelOp(e, c - 17);
     (c > 0) ? (ui_GFXdoNow |= 4);
 );
 
@@ -1226,9 +1186,10 @@ local(st, mx, my, inside, used, dx, dy, f, p, cur, mode, grid, pz, dvx, dvy, dvz
             );
         );
         ed_dmoved ? (
+            ui_cursor_drag((ed_dk === 1) ? 2 : (ed_dk === 3) ? 12 : 8); // (the orbit : a fist ; a place : 4 arrows, Cmd in depth)
             dx = mouse_x - ed_lmx; dy = mouse_y - ed_lmy;
             (ed_dk === 1) ? (
-                ed_oax = ed_Orbit(e, dx, dy, mouse_cap & 8); // (Shift read at each frame : around x or y while held)
+                ed_oax = ed_Orbit(e, dx, dy, mouse_cap & 8); // (Shift read at each frame : around x, y or z while held)
                 st[ed_sView] = -1;
             ) : (
                 // the place moved : the current point, the barycentre, or the middle of a segment
@@ -1336,6 +1297,38 @@ local(st, mx, my, inside, used, dx, dy, f, p, cur, mode, grid, pz, dvx, dvy, dvz
     used;
 );
 
+// (2026-11-21) The cursors of the view of the editor e (x, y, w, h : screen pixels ; ui_cursor_zone8 : a kind for each
+// combination of Shift, Cmd and Alt, as ed_Mouse acts ; the places as drawn in the last frame : ed_Pick). View : an
+// open hand (the orbit). Move and Add/Del : on a point, the barycentre or the middle of a segment, 4 arrows (Cmd, not
+// Shift : in depth, arrows up - down ; Shift : the orbit, an open hand) ; Add/Del : on nothing, a hand with + (a new
+// point ; with Shift or Alt : none, an open hand), on a point an eraser, on the middle of a segment a hand with + (a
+// point inserted)
+function ed_Cursors(e, x, y, w, h)
+local(st, mode, k, sc, g, r, kp, km)
+(
+    st = ed_St(e); mode = st[ed_sMode];
+    (mode === 2) ? ui_cursor_zone8(x, y, w, h, 10, 1, 10, 1, 1, 1, 1, 1) : ui_cursor_zone8(x, y, w, h, 1, 1, 1, 1, 1, 1, 1, 1);
+    (mode >= 1) ? (
+        r = 12; // (as ed_Pick)
+        km = (mode === 2) ? 10 : 8; kp = (mode === 2) ? 4 : 8;
+        // the middles of the segments, the barycentre, then the points (over them)
+        g = ed_hsc + e * ED_MAXP * 3;
+        k = 0;
+        loop(st[ed_sN],
+            (g[3 * k + 2] > 0) ? ui_cursor_zone8(x + g[3 * k] - r, y + g[3 * k + 1] - r, 2 * r, 2 * r, km, 1, 12, 1, 8, 1, 12, 1);
+            k += 1;
+        );
+        g = ed_gsc + 3 * e;
+        (g[2] > 0) ? ui_cursor_zone8(x + g[0] - r, y + g[1] - r, 2 * r, 2 * r, 8, 1, 12, 1, 8, 1, 12, 1);
+        sc = ed_scr + e * ED_MAXP * 3;
+        k = 0;
+        loop(st[ed_sN],
+            (sc[3 * k + 2] > 0) ? ui_cursor_zone8(x + sc[3 * k] - r, y + sc[3 * k + 1] - r, 2 * r, 2 * r, kp, 1, 12, 1, 8, 1, 12, 1);
+            k += 1;
+        );
+    );
+);
+
 // Draws the view of the editor e (x, y, w, h : screen pixels)
 function ed_Draw(e, x, y, w, h)
 local(od, st, n, cur, img, ax, s, sc, k, j, i, p, r, cr, cg, cb, grid, aa, px, py, pz, ty, gn, ns, bo, g, qx, qy, qz, hq)
@@ -1358,30 +1351,10 @@ local(od, st, n, cur, img, ax, s, sc, k, j, i, p, r, cr, cg, cb, grid, aa, px, p
     ns = ed_Bary(e); // the selected points, their barycentre (ed_gx ...)
     bo = st[ed_sOpt] & ed_oBary;
 
-    (grid === 0) ? (
-        // the far faces of the room, their grid
-        ax = 0;
-        loop(3,
-            s = -1;
-            loop(2, s3d_farface(ax, s) ? s3d_face(ax, s); s += 2;);
-            ax += 1;
-        );
-    ) : (grid === 1) ? (
-        // the planes x = 0, y = 0, z = 0 (where the current point is projected)
-        gfx_set(0.55, 0.78, 1, 0.3);
-        ed_Plane(0, 0); ed_Plane(1, 0); ed_Plane(2, 0);
-    ) : ed_PlaneZ(grid) ? (
-        // the plane z = val (where the new points are created) : its square grid, or its circles and rays (Polar z)
-        gfx_set(1, 0.85, 0.2, 0.5);
-        (grid === 3) ? ed_Plane(2, st[ed_sZ]) : ed_Polar(st[ed_sZ], st[ed_sDiv], st[ed_sRays]);
-    ); // (Axes : no grid)
-    // the axes, over the grid, an arrow at their end +1
-    aa = (grid === 0) ? 0.6 : 0.95;
-    gfx_set(0.85, 0.3, 0.3, aa); s3d_line(-1, 0, 0, 1, 0, 0); ed_Arrow(1, 0, 0, "x");
-    gfx_set(0.3, 0.8, 0.3, aa); s3d_line(0, -1, 0, 0, 1, 0); ed_Arrow(0, 1, 0, "y");
-    gfx_set(0.35, 0.5, 1, aa); s3d_line(0, 0, -1, 0, 0, 1); ed_Arrow(0, 0, 1, "z");
-    // grids Plane z, Polar z : where the axis z crosses the plane, a green dot
-    (ed_PlaneZ(grid) && s3d_proj(0, 0, st[ed_sZ])) ? (gfx_set(0.3, 0.95, 0.3, 1); gfx_circle(s3d_px, s3d_py, 2, 1, 1););
+    // the presentation of the room (2026-11-21 : that of all the 3D views, s3d_grids of mSL_ui_Space3D) : the far faces of
+    // the room, the planes x = 0, y = 0, z = 0 (where the current point is projected), the axes only, the plane z = val
+    // (where the new points are created : its square grid, or its circles and rays), or nothing ; the axes over it
+    s3d_grids(grid, st[ed_sZ], st[ed_sDiv], st[ed_sRays]);
 
     // the projections of the points on the screen (kept for the mouse), the order of drawing : far first
     sc = ed_scr + e * ED_MAXP * 3;
@@ -1494,7 +1467,7 @@ local(od, st, n, cur, img, ax, s, sc, k, j, i, p, r, cr, cg, cb, grid, aa, px, p
         gfx_x = 8; gfx_y = ty;
         gfx_drawstr(#ed_lbl);
     );
-    ((ed_md[e] === 1) && (ed_dk === 1)) ? (
+    ((ed_md[e] === 1) && (ed_dk === 1) && (ed_oax < 3)) ? (
         gfx_set(1, 1, 1, 0.9);
         sprintf(#ed_lbl, "Around %c", 'x' + ed_oax);
         gfx_measurestr(#ed_lbl, s3d_tw, s3d_th);
@@ -2138,7 +2111,7 @@ local(st, rc, m, v)
         (m >= 0) ? ed_SetView(e, m);
     ) :
     (c === 9) ? (
-        m = rc ? prv_Menu(ed_GridNames, 5, st[ed_sGrid]) : (st[ed_sGrid] + 1) % 5;
+        m = rc ? prv_Menu(ed_GridNames, 6, st[ed_sGrid]) : (st[ed_sGrid] + 1) % 6;
         (m >= 0) ? (st[ed_sGrid] = m);
     ) :
     (c === 10) ? (
@@ -2338,18 +2311,20 @@ local(h1, hl, hv, hneed, wl, zz, zzmi, st, n, cur, ok, p, c, dr, x, y, w, h, i, 
                     ui_border();
                 ui_pop();
             );
-            // the keys over the module : v View, m Move, p Add/Del (the points), < the next mode, > the next grid, z Undo ;
+            // the keys over the module : m Move, p Add/Del (the points), < the next mode, > the next grid, v the next view,
+            // a the levelling (2026-11-21 : as in all the 3D views ; until then v was the mode View), z Undo ;
             // Cmd + A : all the points selected ; Cmd + E : none ; Backspace, Delete : the selected points deleted ; the
             // arrows (no modifier : Shift + arrows are left to the pane) : left, right the previous, the next point ;
             // up, down the first, the last one (selected alone)
             zzmi ? (
                 ((GM_key_mods() & 4) && (GM_key_take('a') || GM_key_take(1))) ? (ed_SelOp(e, 0); ui_GFXdoNow |= 4;) :
                 ((GM_key_mods() & 4) && (GM_key_take('e') || GM_key_take(5))) ? (ed_SelOp(e, 1); ui_GFXdoNow |= 4;) :
-                GM_key_take('v') ? (st[ed_sMode] = 0; ui_GFXdoNow |= 4;) :
+                GM_key_take('v') ? (ed_SetView(e, (max(-1, st[ed_sView]) + 1) % 4); ui_GFXdoNow |= 4;) :
+                GM_key_take('a') ? (ed_Level(e); ui_GFXdoNow |= 4;) :
                 GM_key_take('m') ? (st[ed_sMode] = 1; ui_GFXdoNow |= 4;) :
                 GM_key_take('p') ? (st[ed_sMode] = 2; ui_GFXdoNow |= 4;) :
                 GM_key_take('<') ? (st[ed_sMode] = (st[ed_sMode] + 1) % 3; ui_GFXdoNow |= 4;) :
-                GM_key_take('>') ? (st[ed_sGrid] = (st[ed_sGrid] + 1) % 5; ui_GFXdoNow |= 4;) :
+                GM_key_take('>') ? (st[ed_sGrid] = (st[ed_sGrid] + 1) % 6; ui_GFXdoNow |= 4;) :
                 GM_key_take('z') ? (ed_Undo(e); ui_GFXdoNow |= 4;) :
                 (GM_key_take(8) || GM_key_take('del')) ? (ed_DelSelK(e); ui_GFXdoNow |= 4;) :
                 ((n > 0) && (GM_key_mods() === 0)) ? (
@@ -2478,9 +2453,11 @@ local(h1, hl, hv, hneed, wl, zz, zzmi, st, n, cur, ok, p, c, dr, x, y, w, h, i, 
             // the view
             ui_pad(2, 3, 2, 2);
             x = ui_left_retina(); y = ui_top_retina(); w = ui_width_retina(); h = ui_height_retina(); // (screen pixels)
+            ed_LevelStep(e); // (the levelling going on)
             ed_Mouse(e, x, y, w, h, uix_scroll_y) ? (uix_scroll_y = 0; ui_GFXdoNow |= 4;);
             ed_Norm(e);
             ed_Draw(e, x, y, w, h);
+            ed_Cursors(e, x, y, w, h);
         ui_pop();
     );
 );

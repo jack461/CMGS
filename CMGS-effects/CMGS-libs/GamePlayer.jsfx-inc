@@ -5486,23 +5486,36 @@ i__ii = 0; loop(padJSFXSlSiz,
             i__ii+=1;
 );
 
-JSFXSlNb = 0;
-JSFXSlShow = 0;
+JSFXSlNb = 0;       // the generic slider of the Links Manager (0 ... 63 : Ctl 1 ... 64)
+JSFXSlShow = 0;     // 1 : the Links Manager shows it in the panel of REAPER
 JSFXSlCnt = 65;
+gsl_shown = 0;      // 1 : all the generic sliders shown in the panel of REAPER (key 'S', gsl_Show)
 
-// Sliders management
+// The generic sliders Ctl 1 ... 64 (-1 ... 1 ; 2026-11-20 : until then "Slider 1 ... 64", ranges 0-1, 0-127 or 0-100,
+// whose bounds were learned by moving them : sliders_Min, sliders_Max) : their last values (@slider ; Undef : not read yet)
 sliders_current = make_array(JSFXSlCnt); //  0 unused, 1 to 64 are sliders values
-sliders_Min = make_array(JSFXSlCnt);
-sliders_Max = make_array(JSFXSlCnt);
-sliders_par_Min = make_array(JSFXSlCnt);
-sliders_par_Max = make_array(JSFXSlCnt);
-sliders_flags = make_array(JSFXSlCnt);
 i__ii = 0; loop(JSFXSlCnt,
     sliders_current[i__ii] = Undef;
-    sliders_flags[i__ii] = Undef;
-    sliders_Min[i__ii] = 1000000000.0;
-    sliders_Max[i__ii] = -1000000000.0;
     i__ii+=1;
+);
+
+// The generic slider n (0 ... 63 : Ctl n + 1) shown (v = 1) or hidden (v = 0) in the panel of REAPER ; not hidden while
+// they are all shown (gsl_shown)
+function gsl_ShowOne(n, v)
+(
+    (v || !gsl_shown) ? (
+        <? i = 0; loop(64, printf("(n === %d) ? slider_show(slCtl%d, v) :\n        ", i, i+1); i += 1;); ?>0;
+    );
+);
+
+// All the generic sliders Ctl 1 ... 64 shown or hidden in the panel of REAPER (key 'S', as in Interstys and Diffusion-3 ;
+// par : 1 show, 0 hide, -1 toggle) ; when they are hidden, the one that the Links Manager shows stays
+function gsl_Show(par)
+(
+    (par === -1) ? par = 1 - gsl_shown;
+    gsl_shown = (par !== 0) ? 1 : 0;
+    <? i = 0; loop(64, printf("slider_show(slCtl%d, gsl_shown); ", i+1); ((i % 8) == 7) && (i < 63) ? printf("\n    "); i += 1;); ?>
+    (!gsl_shown && JSFXSlShow) ? gsl_ShowOne(JSFXSlNb, 1);
 );
 
 
@@ -15929,30 +15942,26 @@ local (tstrt)
 @slider
 
 
+// The generic sliders Ctl 1 ... 64 (-1 ... 1) : a slider linked (Links Manager, source Slider) gives its position in
+// [0, 1] to its action (2026-11-20 : the declared range, until then the bounds learned by moving the slider, lost at each
+// reopening) ; the first values read (a project opened : sliders_current Undef) do no action
 l__ibs = 1;
 while (l__ibs < JSFXSlCnt) (
     l__ibv = slider(l__ibs);
     (sliders_current[l__ibs] != l__ibv) ? (
+        l__u0 = sliders_current[l__ibs];
         sliders_current[l__ibs] = l__ibv;
-        (l__ibv < sliders_Min[l__ibs]) ? sliders_Min[l__ibs] = l__ibv;
-        (l__ibv > sliders_Max[l__ibs]) ? sliders_Max[l__ibs] = l__ibv;
         MIDILogActive ? (
             // Log into log
-            sprintf(#s, "Slider %d : %g [%g %g]", l__ibs, l__ibv, sliders_Min[l__ibs], sliders_Max[l__ibs]);
+            sprintf(#s, "Ctl %d : %g", l__ibs, l__ibv);
             mSL_log(SysLogBox, #s);
         );
-        ((l__u = getLinkEntry(Slider_Source_Ty+l__ibs)) >= 0) ? (
+        ((l__u0 !== Undef) && ((l__u = getLinkEntry(Slider_Source_Ty+l__ibs)) >= 0)) ? (
             // An action is associated
-            // can we perform it ?
-            sl_zz = sliders_Max[l__ibs] - sliders_Min[l__ibs];
-            (sl_zz > 0) ? (
-                W_Actions_Ent[W_Actions_Ptr] = l__u; // keep the entry
-                // compute the appropriate value as a [0-1]
-                W_Actions_Par[W_Actions_Ptr] = (l__ibv - sliders_Min[l__ibs]) / sl_zz; // a [0 1] value
-                W_Actions_Flg = 1;
-                W_Actions_Ptr = (W_Actions_Ptr + 1) % W_Actions_Siz;
-
-            );
+            W_Actions_Ent[W_Actions_Ptr] = l__u; // keep the entry
+            W_Actions_Par[W_Actions_Ptr] = max(0, min(1, (l__ibv + 1) / 2)); // a [0 1] value
+            W_Actions_Flg = 1;
+            W_Actions_Ptr = (W_Actions_Ptr + 1) % W_Actions_Siz;
         );
     );
     l__ibs += 1;
@@ -18395,7 +18404,7 @@ loadMode ? (
         z__p = serialBlock + Pr7_StudConf;
         z__i = 0; loop(dcbTabsMax, z__p[z__i] = max(1, min(4, 0|z__p[z__i])); z__i += 1;);
         z__p = serialBlock + Pr7_StudRat;
-        z__i = 0; loop(dcbTabsMax*4, z__p[z__i] = max(180, min(1800, 0|z__p[z__i])); z__i += 1;);
+        z__i = 0; loop(dcbTabsMax*4, z__p[z__i] = max(20, min(20000, z__p[z__i])); z__i += 1;); // (2026-11-21 : the borders dragged)
 
 
         define_loaded();
@@ -25177,11 +25186,11 @@ local (h1, h2, uix_jneed, uix_jmini, str, p, u, par_reduce, cty, col, ig, sic, t
                         Link_Type = MIDI_LinkTY_Slid; // link type
                         (JSFXSlShow != 1) ? (
                             JSFXSlShow = 1;
-                            slider_show(2 ^ JSFXSlNb, 1);
+                            gsl_ShowOne(JSFXSlNb, 1);
                         );
                         SysSourceKod = Slider_Source_Ty | (JSFXSlNb+1);
-                        sprintf(padLinksLabs[2], "Slider %d", JSFXSlNb+1);
-                        sprintf(padLinksLabs[3], "(%d)", slider(JSFXSlNb+1));
+                        sprintf(padLinksLabs[2], "Ctl %d", JSFXSlNb+1);
+                        sprintf(padLinksLabs[3], "(%.2f)", slider(JSFXSlNb+1));
                         col = Color_Forest_Green;
                     ) :
                     (SysSourceType === 2) ? (
@@ -25226,7 +25235,7 @@ local (h1, h2, uix_jneed, uix_jmini, str, p, u, par_reduce, cty, col, ig, sic, t
                     ((JSFXSlShow === 1) && (SysSourceType != 1)) ? (
                         // Hide the slider
                         JSFXSlShow = 0;
-                        slider_show(2 ^ JSFXSlNb, 0);
+                        gsl_ShowOne(JSFXSlNb, 0);
                     );
 
                     // Look for the targets
@@ -25343,8 +25352,8 @@ local (h1, h2, uix_jneed, uix_jmini, str, p, u, par_reduce, cty, col, ig, sic, t
                             xtp = u & 0xfff; // in 1-64
                             (ty === 0x1000) ? (
                                 // Slider
-                                sprintf(padLinksLabs[12], "Slider %d", xtp);
-                                sprintf(padLinksLabs[13], "(%d)", slider(xtp));
+                                sprintf(padLinksLabs[12], "Ctl %d", xtp);
+                                sprintf(padLinksLabs[13], "(%.2f)", slider(xtp));
                                 col = Color_Forest_Green;
                             ) :
                             (ty === 0x2000) ? (
@@ -25442,9 +25451,9 @@ local (h1, h2, uix_jneed, uix_jmini, str, p, u, par_reduce, cty, col, ig, sic, t
                                     (z === 0x1B0) ? MIDI_lk_msg1 &= 0x6FF;
                                 ) :
                                 (SysSourceType === 1) ? (
-                                    slider_show(2 ^ JSFXSlNb, 0);
+                                    gsl_ShowOne(JSFXSlNb, 0);
                                     JSFXSlNb = (JSFXSlNb + 64 - sic) % 64;
-                                    JSFXSlShow ? slider_show(2 ^ JSFXSlNb, JSFXSlShow);
+                                    JSFXSlShow ? gsl_ShowOne(JSFXSlNb, 1);
                                 ) :
                                 (SysSourceType === 3) ? (
                                     Evnt_Current = (Evnt_Current + 512 - sic) % 512;
@@ -25522,9 +25531,9 @@ local (h1, h2, uix_jneed, uix_jmini, str, p, u, par_reduce, cty, col, ig, sic, t
                                 // modify source type
                                 sic = (mc & 0x20) ? 10 : 1;
                                 (SysSourceType === 1) ? (
-                                    slider_show(2 ^ JSFXSlNb, 0);
+                                    gsl_ShowOne(JSFXSlNb, 0);
                                     JSFXSlNb = (JSFXSlNb + sic) % 64;
-                                    JSFXSlShow ? slider_show(2 ^ JSFXSlNb, JSFXSlShow);
+                                    JSFXSlShow ? gsl_ShowOne(JSFXSlNb, 1);
                                 ) :
                                 (SysSourceType === 3) ? (
                                     Evnt_Current = (Evnt_Current + sic) % 512;
@@ -27261,6 +27270,8 @@ local (ww, t, p)
 
     studDispCol = 0;
     p = serialBlock + Pr7_StudRat + 4 * tbNum;
+    (studDispPCnt > 1) ? ui_jborders(studDispPCnt, p, TabIdt, 0); // (2026-11-21 : the borders dragged, ui-lib-JJ-GUI)
+    ui_push(); // (the rect of the tab, for ui_jborders after the panes)
     (studDispPCnt === 4)  ? (
         ui_split_leftratio(max(1, p[0])/max(1, p[0] + p[1] + p[2] + p[3]));
             genericItemsPos(TabIdt * dcbPannelsMax);
@@ -27301,6 +27312,8 @@ local (ww, t, p)
     ) : (
         genericItemsPos(TabIdt * dcbPannelsMax);
     );
+    ui_pop();
+    (studDispPCnt > 1) ? ui_jborders(studDispPCnt, p, TabIdt, 1);
     ); // live / panes
     do_GenericTabEnd();
 );
@@ -27321,7 +27334,8 @@ local (ww, t, p)
 
 
 // The commands of GamePlayer : the key shortcuts of the user (getLinkEntry), with the keys left by the tabs
-// (at the end of the frame, before the Studio pad ; not while a shortcut is learned : SysLinksActive)
+// (at the end of the frame, before the Studio pad ; not while a shortcut is learned : SysLinksActive) ; 'S' without a
+// shortcut of the user : the generic sliders Ctl 1 ... 64 shown or hidden in the panel of REAPER (gsl_Show, 2026-11-20)
 function do_Plugin_Keys()
 local (k, m, kshrtct, sysEnt)
 (
@@ -27339,6 +27353,10 @@ local (k, m, kshrtct, sysEnt)
             W_Actions_Flg = 1;
             GM_key_take(GM_key_peek()); // the key has been used
             W_Actions_Ptr = (W_Actions_Ptr + 1) % W_Actions_Siz;
+        ) :
+        (GM_key_peek() === 'S') ? (
+            GM_key_take('S');
+            gsl_Show(-1);
         );
     );
 );
@@ -27425,7 +27443,7 @@ must_do_gfx() ? (
     ) : (
         JSFXSlShow ? (
             JSFXSlShow = 0;
-            slider_show(2 ^ JSFXSlNb, 0);
+            gsl_ShowOne(JSFXSlNb, 0);
         );
         // (the key shortcuts : at the end of the frame, do_Plugin_Keys)
     );

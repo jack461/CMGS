@@ -20,18 +20,28 @@
                 trajectory : s3d_trj[k*3 + 0/1/2], s3d_ntrj points, s3d_trjclosed
         size of the memory needed from "base" : s3d_memsize(maxspk, maxsrc, maxtrj)
         @gfx  : s3d_mouse(x, y, w, h, wheel);  // orbit (left drag), zoom (wheel), pick (left click), menu (right click)
+                    (2026-11-21) the orbit as held in the hand (s3d_orbit : horizontal around the vertical of the
+                    screen, vertical around its horizontal ; the camera has a roll, s3d_roll) ; the levelling
+                    (s3d_level, s3d_LevelStart, s3d_LevelStep : the face of the room nearest to the bottom of the
+                    screen made horizontal) ; the presentations of the room (s3d_grids : the far faces, the planes,
+                    the axes, the plane z, polar, nothing : s3d_PresSet, s3d_PresCur, s3d_presZ) ; the drags follow
+                    the screen (the side near the eye follows the mouse)
                     the trajectory (as the cursors S, R, T of GRM Spaces) : Shift + drag = size,
-                    Cmd + drag = rotation (horizontal : around z, vertical : tilt), Alt + drag = translation ;
+                    Cmd + drag = rotation (horizontal : around z, vertical : tilt), Alt + drag = translation,
+                    Shift + Alt + vertical drag = translation in depth (2026-11-21, up = farther) ;
                     s3d_tchanged != 0 when it was changed
                     controls for the play (horizontal drag) : Cmd + Alt = s3d_speed (turns per minute, -240 ... 240),
                     Cmd + Shift = s3d_mix (0 ... 1, see s3d_mkmorph) ; the value is shown during the drag
                     s3d_mtarget = 1 : Shift, Cmd and Alt drags act on the group of sources instead of the trajectory :
                     Shift = size (s3d_gsc), Cmd = yaw (horizontal) and pitch (vertical), Alt = roll (horizontal)
                     s3d_plmode = 1 (2026-11-19, set by the host : the placement of one trajectory, Diffusion-3) : the
-                    host puts the placement into s3d_tsc, s3d_trx, s3d_trz, s3d_ttx ... before s3d_mouse and takes it
-                    back after ; Cmd + Alt (horizontal) = the inclination around y, s3d_try, instead of the speed ;
-                    the Cmd tilt goes to +- 2 pi ; s3d_mtarget is ignored ; s3d_draw draws the trajectory in gold and,
-                    during a drag of the placement, the line #s3d_plLbl (written by the host)
+                    host puts the placement into s3d_tsc, s3d_trx, s3d_try, s3d_trz, s3d_ttx ... before s3d_mouse and
+                    takes it back after, with the transform of the whole path (its parent : s3d_pgs, s3d_pgrx,
+                    s3d_pgrz) ; the drags follow the screen (2026-11-21, s3d_plvec, s3d_plrot) : Alt in the plane of
+                    the screen, Shift + Alt in depth, Cmd turned as held in the hand, Cmd + Alt (horizontal) turned
+                    in the plane of the screen (instead of the speed) ; s3d_mtarget is ignored ; s3d_draw draws the
+                    trajectory in gold, its pivot as a red cross (s3d_pvOn, s3d_pvx ...) and, during a drag of the
+                    placement, the line #s3d_plLbl (written by the host)
                 sources : s3d_place_sources(lay, n, spread) : the sources of the layout "lay" (x, y, z in [-1,1]) around
                     the group center, scaled by spread * s3d_gsc, rotated by s3d_groll (around y), s3d_gpitch
                     (around x), s3d_gyaw (around z), in the room frame (s3d_grel = 0) or in the frame of the
@@ -125,6 +135,9 @@ local(k, a, b)
     s3d_nftrj = 0; s3d_ftclosed = 1;
     s3d_gon = 0; s3d_gx = s3d_gy = s3d_gz = 0;
     s3d_az = s3d_Az3D; s3d_el = s3d_El3D; s3d_dist = s3d_Dist3D;
+    s3d_roll = 0; s3d_camId = 7; s3d_lvId = 0; // (2026-11-21 : the roll of the camera, the levelling ; see s3d_basis)
+    s3d_pres = 0; s3d_presZ = 0; // (2026-11-21 : the presentation of the room, see s3d_grids)
+    s3d_pgs = 1; s3d_pgrx = s3d_pgrz = 0; s3d_pvOn = 0; s3d_pvx = s3d_pvy = s3d_pvz = 0; // (a placement, see s3d_mouse)
     s3d_fov = 50 * $pi / 180;
     s3d_opt = s3d_oGains | s3d_oInfos | s3d_oBox | s3d_oTraj | s3d_oClamp;
     s3d_bgr = s3d_bgg = s3d_bgb = 0; // the background (black), and the color of the texts (white)
@@ -138,7 +151,8 @@ local(k, a, b)
     s3d_tchanged = 0;
     // controls for the play
     s3d_speed = 3; s3d_mix = 0;
-    s3d_dmode = 0; // current drag : 1 orbit, 2 translation, 3 rotation, 4 size, 5 speed, 6 mix, 7 sources
+    s3d_dmode = 0; // current drag : 1 orbit, 2 translation, 3 rotation, 4 size, 5 speed, 6 mix, 7 sources, 8 a placement
+                   // turned in the plane of the screen, 9 translation in depth
     // the group of sources : size, rotations (radians), frame (0 room, 1 trajectory), target of the drags
     s3d_gsc = 1; s3d_gyaw = s3d_gpitch = s3d_groll = 0; s3d_grel = 0; s3d_mtarget = 0;
     s3d_tdx = 0; s3d_tdy = 1; s3d_tdz = 0; // direction of the trajectory at the group center
@@ -158,10 +172,12 @@ local(k, a, b)
 );
 
 
-// Compute the camera (orbit around the center of the room) ; the elevation is not limited : beyond the poles,
-// the view continues upside down (s3d_el is kept in ]-pi, pi])
-function s3d_camera(w, h)
-local(ce)
+// The camera (an orbit around the center of the room) : its azimuth s3d_az, its elevation s3d_el, its roll s3d_roll (the
+// right and the up of the screen turned around the line of sight, 2026-11-21), its distance s3d_dist : its place, its
+// forward, right and up vectors (s3d_cp..., s3d_fw..., s3d_rg..., s3d_up...). The elevation is not limited : beyond the
+// poles, the view continues upside down (s3d_el is kept in ]-pi, pi])
+function s3d_basis()
+local(ce, cr, sr, rx, ry, ux, uy, uz)
 (
     s3d_el -= 2 * $pi * floor((s3d_el + $pi) / (2 * $pi));
     ce = cos(s3d_el);
@@ -170,16 +186,128 @@ local(ce)
     s3d_cpz = s3d_dist * sin(s3d_el);
     // forward : towards the center
     s3d_fwx = - s3d_cpx / s3d_dist; s3d_fwy = - s3d_cpy / s3d_dist; s3d_fwz = - s3d_cpz / s3d_dist;
-    // right : horizontal, given by the azimuth only (forward x (0, 0, 1) would flip over the poles)
-    s3d_rgx = cos(s3d_az); s3d_rgy = sin(s3d_az); s3d_rgz = 0;
-    // up = right x forward
-    s3d_upx = s3d_rgy * s3d_fwz - s3d_rgz * s3d_fwy;
-    s3d_upy = s3d_rgz * s3d_fwx - s3d_rgx * s3d_fwz;
-    s3d_upz = s3d_rgx * s3d_fwy - s3d_rgy * s3d_fwx;
+    // without the roll : the right horizontal, given by the azimuth only (forward x (0, 0, 1) would flip over the
+    // poles) ; up = right x forward
+    rx = cos(s3d_az); ry = sin(s3d_az);
+    ux = ry * s3d_fwz; uy = - rx * s3d_fwz; uz = rx * s3d_fwy - ry * s3d_fwx;
+    // the roll
+    cr = cos(s3d_roll); sr = sin(s3d_roll);
+    s3d_rgx = cr * rx + sr * ux; s3d_rgy = cr * ry + sr * uy; s3d_rgz = sr * uz;
+    s3d_upx = cr * ux - sr * rx; s3d_upy = cr * uy - sr * ry; s3d_upz = cr * uz;
+);
+
+// The camera for a view of w x h pixels : s3d_basis, the focal length, the center of the screen
+function s3d_camera(w, h)
+(
+    s3d_basis();
     s3d_foc = 0.5 * min(w, h) / tan(0.5 * s3d_fov);
     s3d_ox = 0.5 * w; s3d_oy = 0.5 * h;
     // depths of the room, for the fade out
     s3d_zmin = s3d_dist - 1.75; s3d_zmax = s3d_dist + 1.75;
+);
+
+// (2026-11-21) The azimuth, the elevation and the roll of the forward and up vectors s3d_fw..., s3d_up... (made
+// orthonormal ; the elevation in [-pi/2, pi/2] : a view upside down has a roll of 180 degrees) ; the right again
+function s3d_FromBasis()
+local(l, d, ce, rx, ry, ux, uy, uz)
+(
+    l = sqrt(sqr(s3d_fwx) + sqr(s3d_fwy) + sqr(s3d_fwz));
+    (l > 0.000001) ? (s3d_fwx /= l; s3d_fwy /= l; s3d_fwz /= l;);
+    d = s3d_upx * s3d_fwx + s3d_upy * s3d_fwy + s3d_upz * s3d_fwz;
+    s3d_upx -= d * s3d_fwx; s3d_upy -= d * s3d_fwy; s3d_upz -= d * s3d_fwz;
+    l = sqrt(sqr(s3d_upx) + sqr(s3d_upy) + sqr(s3d_upz));
+    (l > 0.000001) ? (s3d_upx /= l; s3d_upy /= l; s3d_upz /= l;);
+    // right = forward x up
+    s3d_rgx = s3d_fwy * s3d_upz - s3d_fwz * s3d_upy;
+    s3d_rgy = s3d_fwz * s3d_upx - s3d_fwx * s3d_upz;
+    s3d_rgz = s3d_fwx * s3d_upy - s3d_fwy * s3d_upx;
+    s3d_el = asin(max(-1, min(1, - s3d_fwz)));
+    ce = cos(s3d_el);
+    // (looking straight up or down : the azimuth from the right of the screen, the roll 0)
+    s3d_az = (ce > 0.0001) ? atan2(- s3d_fwx, s3d_fwy) : atan2(s3d_rgy, s3d_rgx);
+    rx = cos(s3d_az); ry = sin(s3d_az);
+    ux = ry * s3d_fwz; uy = - rx * s3d_fwz; uz = rx * s3d_fwy - ry * s3d_fwx;
+    // up = cos(roll) up0 - sin(roll) right0
+    s3d_roll = atan2(- (s3d_upx * rx + s3d_upy * ry), s3d_upx * ux + s3d_upy * uy + s3d_upz * uz);
+);
+
+// The forward and up vectors of the camera turned around the unit axis (kx, ky, kz) by the angle t (Rodrigues)
+function s3d_camrot(kx, ky, kz, t)
+local(c, s, d, x, y, z)
+(
+    c = cos(t); s = sin(t);
+    x = s3d_fwx; y = s3d_fwy; z = s3d_fwz;
+    d = (kx * x + ky * y + kz * z) * (1 - c);
+    s3d_fwx = x * c + (ky * z - kz * y) * s + kx * d;
+    s3d_fwy = y * c + (kz * x - kx * z) * s + ky * d;
+    s3d_fwz = z * c + (kx * y - ky * x) * s + kz * d;
+    x = s3d_upx; y = s3d_upy; z = s3d_upz;
+    d = (kx * x + ky * y + kz * z) * (1 - c);
+    s3d_upx = x * c + (ky * z - kz * y) * s + kx * d;
+    s3d_upy = y * c + (kz * x - kx * z) * s + ky * d;
+    s3d_upz = z * c + (kx * y - ky * x) * s + kz * d;
+);
+
+// (2026-11-21) The orbit of a drag of (dx, dy) pixels, as an object held in the hand : horizontal, around the vertical
+// of the screen ; vertical, around its horizontal ; the side of the room near the eye follows the mouse (any view, even
+// upside down : the room may lean, s3d_level makes it level again)
+function s3d_orbit(dx, dy)
+local(ax, ay, az)
+(
+    s3d_basis();
+    s3d_camrot(s3d_upx, s3d_upy, s3d_upz, - dx * 0.008);
+    ax = s3d_fwy * s3d_upz - s3d_fwz * s3d_upy; ay = s3d_fwz * s3d_upx - s3d_fwx * s3d_upz; az = s3d_fwx * s3d_upy - s3d_fwy * s3d_upx;
+    s3d_camrot(ax, ay, az, - dy * 0.008);
+    s3d_FromBasis();
+    s3d_changed = 1;
+);
+
+/*
+    (2026-11-21) The levelling ("aplomb", key 'a' in the 3D views of Diffusion-3) : the face of the room nearest to the
+    bottom of the screen becomes horizontal, the camera turned around the line of sight only (its azimuth and elevation
+    seen kept), in s3d_LvTime seconds. s3d_LevelAngle : the angle (the camera set : s3d_basis, or that of a host), up
+    turned towards the right (as s3d_camrot around the forward : the roll decreases by it) ; s3d_LevelStart(id) : for the
+    camera id of a host (not 0 ; s3d_camId : the camera of s3d_mouse, s3d_menu) ; s3d_LevelStep(id) : at each frame, the
+    angle to turn now (0 : none ; s3d_lvId : the camera levelled, 0 when done)
+*/
+s3d_LvTime = 0.3;
+function s3d_LevelAngle()
+local(ax, ay, az, tx, ty, tz, d)
+(
+    // the axis of the room nearest to the vertical of the screen, upwards
+    ax = abs(s3d_upx); ay = abs(s3d_upy); az = abs(s3d_upz);
+    tx = ty = tz = 0;
+    ((ax >= ay) && (ax >= az)) ? (tx = sign(s3d_upx)) : (ay >= az) ? (ty = sign(s3d_upy)) : (tz = sign(s3d_upz));
+    // on the plane of the screen : the new up
+    d = tx * s3d_fwx + ty * s3d_fwy + tz * s3d_fwz;
+    tx -= d * s3d_fwx; ty -= d * s3d_fwy; tz -= d * s3d_fwz;
+    // the angle from up to it, around the forward
+    atan2(s3d_fwx * (s3d_upy * tz - s3d_upz * ty) + s3d_fwy * (s3d_upz * tx - s3d_upx * tz) + s3d_fwz * (s3d_upx * ty - s3d_upy * tx),
+          s3d_upx * tx + s3d_upy * ty + s3d_upz * tz);
+);
+function s3d_LevelStart(id)
+local(a)
+(
+    a = s3d_LevelAngle();
+    ((id != 0) && (abs(a) > 0.0005)) ? (s3d_lvId = id; s3d_lvT0 = time_precise(); s3d_lvA = a; s3d_lvD = 0;);
+);
+function s3d_LevelStep(id)
+local(t, v, r)
+(
+    r = 0;
+    ((id != 0) && (s3d_lvId === id)) ? (
+        t = min(1, (time_precise() - s3d_lvT0) / s3d_LvTime);
+        v = s3d_lvA * t * t * (3 - 2 * t);
+        r = v - s3d_lvD; s3d_lvD = v;
+        (t >= 1) ? (s3d_lvId = 0);
+    );
+    r;
+);
+// the camera of s3d_mouse (az, el, roll) : levelled from its own place, s3d_camId
+function s3d_level()
+(
+    s3d_basis();
+    s3d_LevelStart(s3d_camId);
 );
 
 
@@ -415,6 +543,140 @@ function s3d_farface(ax, s)
 );
 
 
+/*
+    (2026-11-21) The presentations of the room (as the grids of the editors Edit A ... D, Diffusion-3, whose drawing they
+    were) : 0 Room (the far faces, their grid), 1 Planes (x = 0, y = 0, z = 0), 2 Axes (no grid), 3 Plane z (the plane
+    z = zv, its square grid), 4 Polar z (the same, its circles and rays), 5 None (nothing, not even the axes) ; the axes
+    over the grids (fainter over the room), an arrow at their end + 1. s3d_draw : s3d_PresCur (the option s3d_oBox off :
+    None ; s3d_pres, the plane at the height s3d_presZ, set by the host)
+*/
+s3d_PresNames = "Room|Planes|Axes|Plane z|Polar z|None";
+
+// The grid of the plane normal to the axis ax (0 x, 1 y, 2 z) at the coordinate c, limited to the room (the color is
+// set ; the camera is set ; s3d_GridN lines)
+function s3d_plane(ax, c)
+local(i, t)
+(
+    i = 0;
+    loop(s3d_GridN + 1,
+        t = -1 + 2 * i / s3d_GridN;
+        (ax === 0) ? (
+            s3d_line(c, t, -1, c, t, 1); s3d_line(c, -1, t, c, 1, t);
+        ) : (ax === 1) ? (
+            s3d_line(t, c, -1, t, c, 1); s3d_line(-1, c, t, 1, c, t);
+        ) : (
+            s3d_line(t, -1, c, t, 1, c); s3d_line(-1, t, c, 1, t, c);
+        );
+        i += 1;
+    );
+);
+
+// The polar grid of the plane z = c : the circles of radii k / d (k = 1 ... d), nr rays from the center, evenly spaced
+// from the axis x (the color is set ; the camera is set)
+function s3d_polar(c, d, nr)
+local(k, j, r, a, ns, x0, y0, x1, y1)
+(
+    ns = 72; // (the segments of a circle)
+    k = 1;
+    loop(d,
+        r = k / d;
+        x0 = r; y0 = 0; j = 1;
+        loop(ns,
+            a = 2 * $pi * j / ns;
+            x1 = r * cos(a); y1 = r * sin(a);
+            s3d_line(x0, y0, c, x1, y1, c);
+            x0 = x1; y0 = y1; j += 1;
+        );
+        k += 1;
+    );
+    j = 0;
+    loop(nr,
+        a = 2 * $pi * j / nr;
+        s3d_line(0, 0, c, cos(a), sin(a), c);
+        j += 1;
+    );
+);
+
+// An arrow at the end +1 of an axis (ux, uy, uz : its unit vector), pointing outwards, and the name of the axis (the
+// color is set ; the camera is set). An axis seen end-on : a ring, with a dot when its end +1 comes towards the eye,
+// with a cross when it goes away.
+function s3d_arrow(ux, uy, uz, lbl)
+local(bx, by, bz, tx, ty, tz, dx, dy, d, l, cx, cy)
+(
+    s3d_proj(0.9 * ux, 0.9 * uy, 0.9 * uz) ? (
+        bx = s3d_px; by = s3d_py; bz = s3d_pz;
+        s3d_proj(ux, uy, uz) ? (
+            tx = s3d_px; ty = s3d_py; tz = s3d_pz;
+            dx = tx - bx; dy = ty - by; d = sqrt(dx * dx + dy * dy); // (the last tenth of the axis, on the screen)
+            gfx_measurestr(lbl, s3d_tw, s3d_th);
+            (d > 0.6) ? (
+                l = min(11, 8 * d); dx /= d; dy /= d;
+                cx = tx - dx * l; cy = ty - dy * l; // the base of the head, its tip at the end of the axis
+                gfx_triangle(tx, ty, cx - dy * l * 0.45, cy + dx * l * 0.45, cx + dy * l * 0.45, cy - dx * l * 0.45);
+                gfx_x = tx + dx * 9 - s3d_tw / 2; gfx_y = ty + dy * 9 - s3d_th / 2;
+            ) : (
+                gfx_circle(tx, ty, 5, 0, 1);
+                (tz < bz) ? (
+                    gfx_circle(tx, ty, 1.5, 1, 1);
+                ) : (
+                    gfx_line(tx - 3, ty - 3, tx + 3, ty + 3, 1); gfx_line(tx - 3, ty + 3, tx + 3, ty - 3, 1);
+                );
+                gfx_x = tx + 8; gfx_y = ty - 6 - s3d_th;
+            );
+            gfx_drawstr(lbl);
+        );
+    );
+);
+
+// The presentation g (0 ... 5) : zv the height of the plane z, div the squares per unit (the step 1 / div ; Polar z :
+// the circles of radii k / div), nr the rays of Polar z (the camera is set ; the colors : s3d_colors)
+function s3d_grids(g, zv, div, nr)
+local(gn, ax, sg, aa)
+(
+    gn = s3d_GridN; s3d_GridN = 2 * div;
+    (g === 0) ? (
+        // the far faces of the room, their grid
+        ax = 0;
+        loop(3,
+            sg = -1;
+            loop(2, s3d_farface(ax, sg) ? s3d_face(ax, sg); sg += 2;);
+            ax += 1;
+        );
+    ) : (g === 1) ? (
+        // the planes x = 0, y = 0, z = 0
+        gfx_set(0.55, 0.78, 1, 0.3);
+        s3d_plane(0, 0); s3d_plane(1, 0); s3d_plane(2, 0);
+    ) : ((g === 3) || (g === 4)) ? (
+        // the plane z = zv : its square grid, or its circles and rays (Polar z)
+        gfx_set(1, 0.85, 0.2, 0.5);
+        (g === 3) ? s3d_plane(2, zv) : s3d_polar(zv, div, nr);
+    ); // (Axes : no grid)
+    (g <= 4) ? (
+        // the axes, over the grid, an arrow at their end +1
+        aa = (g === 0) ? 0.6 : 0.95;
+        gfx_set(0.85, 0.3, 0.3, aa); s3d_line(-1, 0, 0, 1, 0, 0); s3d_arrow(1, 0, 0, "x");
+        gfx_set(0.3, 0.8, 0.3, aa); s3d_line(0, -1, 0, 0, 1, 0); s3d_arrow(0, 1, 0, "y");
+        gfx_set(0.35, 0.5, 1, aa); s3d_line(0, 0, -1, 0, 0, 1); s3d_arrow(0, 0, 1, "z");
+        // Plane z, Polar z : where the axis z crosses the plane, a green dot
+        ((g >= 3) && s3d_proj(0, 0, zv)) ? (gfx_set(0.3, 0.95, 0.3, 1); gfx_circle(s3d_px, s3d_py, 2, 1, 1););
+    );
+    s3d_GridN = gn;
+);
+
+// The presentation shown by s3d_draw : None when the option s3d_oBox is off (as before 2026-11-21, "Display Box"
+// unchecked) ; s3d_PresSet : it becomes k (None : the option off)
+function s3d_PresCur()
+(
+    !(s3d_opt & s3d_oBox) ? 5 : ((s3d_pres >= 0) && (s3d_pres < 5)) ? 0|s3d_pres : 0;
+);
+function s3d_PresSet(k)
+(
+    k = max(0, min(5, 0|k));
+    s3d_pres = k;
+    s3d_opt = (k === 5) ? (s3d_opt & (0x7FFFFFFF - s3d_oBox)) : (s3d_opt | s3d_oBox);
+);
+
+
 // The shadow of a point on the far face (ax, s) : a disc of radius r in the plane of the face
 function s3d_disc(ax, s, x, y, z, r)
 local(k, a, u, v, ok, p)
@@ -607,18 +869,8 @@ local(k, e, ax, s, p, q, r, od, bx, by, bz)
         );
     );
 
-    // the far faces of the room
-    (s3d_opt & s3d_oBox) ? (
-        ax = 0;
-        loop(3,
-            s = -1;
-            loop(2,
-                s3d_farface(ax, s) ? s3d_face(ax, s);
-                s += 2;
-            );
-            ax += 1;
-        );
-    );
+    // the room : its presentation (2026-11-21 : the far faces, the planes, the axes, the plane z ... ; s3d_grids)
+    s3d_grids(s3d_PresCur(), s3d_presZ, 6, 24);
 
     // projection on the far faces (as GRM Spaces) : the shadows of the sources,
     // and lines from the barycenter of the sources to the faces
@@ -692,13 +944,23 @@ local(k, e, ax, s, p, q, r, od, bx, by, bz)
 
     s3d_selection();
 
+    // (2026-11-21) a placement : its pivot (the barycentre of the trajectory placed, given by the host), a red cross
+    (s3d_plmode && s3d_pvOn && s3d_proj(s3d_pvx, s3d_pvy, s3d_pvz)) ? (
+        r = 7;
+        gfx_set(0, 0, 0, 0.7);
+        gfx_rect(s3d_px - r - 1, s3d_py - 2, 2 * r + 3, 5); gfx_rect(s3d_px - 2, s3d_py - r - 1, 5, 2 * r + 3);
+        gfx_set(1, 0.1, 0.1, 1);
+        gfx_rect(s3d_px - r, s3d_py - 1, 2 * r + 1, 3); gfx_rect(s3d_px - 1, s3d_py - r, 3, 2 * r + 1);
+    );
+
     // the value changed by the current drag (a placement : the line #s3d_plLbl written by the host)
-    (s3d_plmode && (s3d_dmode >= 2) && ((s3d_dmode <= 4) || (s3d_dmode === 8))) ? (
+    (s3d_plmode && (s3d_dmode >= 2) && ((s3d_dmode <= 4) || (s3d_dmode === 8) || (s3d_dmode === 9))) ? (
         gfx_set(1, 0.85, 0.4, 1);
         gfx_x = 10; gfx_y = 8;
         gfx_drawstr(#s3d_plLbl);
     ) :
     (s3d_dmode >= 4) ? (
+        (s3d_dmode === 9) ? sprintf(#s3d_lbl, "Position x %.2f  y %.2f  z %.2f", s3d_ttx, s3d_tty, s3d_ttz) :
         (s3d_dmode === 4) ? sprintf(#s3d_lbl, "Size x %.2f", s3d_tsc) :
         (s3d_dmode === 5) ? sprintf(#s3d_lbl, "Speed %.2f turns / min", s3d_speed) :
         (s3d_dmode === 7) ? sprintf(#s3d_lbl, "Sources : size x %.2f   yaw %d   pitch %d   roll %d",
@@ -765,46 +1027,111 @@ local(i, v)
 );
 
 function s3d_menu()
-local(c, b, k, v)
+local(c, b, k, v, g)
 (
-    // items 1 ... 11 : the options : 1 = bit 1 (s3d_oGains), 2 = s3d_oHideSrc (inverted : checked when not set),
-    // 3 ... 11 = bit 2^(item-2) (s3d_oLevels ... s3d_oClamp) ; 12 ... 15 : the views (as the cell View of Diffusion-3) ;
-    // 16 ... 15 + 3 * s3d_kN : the sizes of the speakers, of the sources, of the crosses (s3d_kmenu)
-    sprintf(#s3d_mnu, "%sDisplay Diffusers|%sDisplay Source|%sDisplay Levels|%sDisplay Infos|%sDisplay All Infos||%sDisplay Box|%sProjection on planes|%sFade out|%sStarfield|%sDisplay Trajectory||%sLimit to the room||Front view|Side view|Top view|3D view|",
+    // (2026-11-21) items 1 ... 5 the options (1 = bit 1 s3d_oGains, 2 = s3d_oHideSrc inverted : checked when not set,
+    // 3 ... 5 = bit 2^(item-2)) ; 6 ... 11 the presentations (s3d_PresSet, a sub-menu) ; 12 ... 16 the options (bit
+    // 2^(item-7) : s3d_oProj ... s3d_oClamp) ; 17 ... 20 the views (as the cell View of Diffusion-3) ; 21 the levelling
+    // (s3d_level) ; 22 ... 21 + 3 * s3d_kN : the sizes of the speakers, of the sources, of the crosses (s3d_kmenu) ;
+    // the keys of the views of Diffusion-3 in parentheses
+    g = s3d_PresCur();
+    sprintf(#s3d_mnu, "%sDisplay Diffusers|%sDisplay Source|%sDisplay Levels|%sDisplay Infos|%sDisplay All Infos||>Presentation of the room (>)|%sThe far faces of the room|%sThe planes x = 0, y = 0, z = 0|%sThe axes only|%sThe plane z = %.2f|%sThe circles of the plane z = %.2f (polar)|<%sNothing (no axes)|",
         (s3d_opt & s3d_oGains) ? "!" : "", (s3d_opt & s3d_oHideSrc) ? "" : "!", (s3d_opt & s3d_oLevels) ? "!" : "",
         (s3d_opt & s3d_oInfos) ? "!" : "", (s3d_opt & s3d_oAllInfos) ? "!" : "",
-        (s3d_opt & s3d_oBox) ? "!" : "", (s3d_opt & s3d_oProj) ? "!" : "",
-        (s3d_opt & s3d_oFade) ? "!" : "", (s3d_opt & s3d_oStars) ? "!" : "",
+        (g === 0) ? "!" : "", (g === 1) ? "!" : "", (g === 2) ? "!" : "", (g === 3) ? "!" : "", s3d_presZ,
+        (g === 4) ? "!" : "", s3d_presZ, (g === 5) ? "!" : "");
+    sprintf(#s3d_kit, "%sProjection on planes|%sFade out|%sStarfield|%sDisplay Trajectory (x)||%sLimit to the room (w)||Front view|Side view|Top view|3D view (v : the next one)|Level the view (a)|",
+        (s3d_opt & s3d_oProj) ? "!" : "", (s3d_opt & s3d_oFade) ? "!" : "", (s3d_opt & s3d_oStars) ? "!" : "",
         (s3d_opt & s3d_oTraj) ? "!" : "", (s3d_opt & s3d_oClamp) ? "!" : "");
+    strcat(#s3d_mnu, #s3d_kit);
     s3d_kmenu("Size of the speakers", s3d_kSpk);
     s3d_kmenu("Size of the sources", s3d_kSrc);
     s3d_kmenu("Size of the crosses (gains)", s3d_kX);
     gfx_x = mouse_x; gfx_y = mouse_y;
     c = gfx_showmenu(#s3d_mnu); s3d_mres = c; // (the result, for the host : e.g. uix_menu_end of ui-lib)
-    ((c >= 1) && (c <= 11)) ? (
-        b = (c === 1) ? s3d_oGains : (c === 2) ? s3d_oHideSrc : 2 ^ (c - 2);
+    (((c >= 1) && (c <= 5)) || ((c >= 12) && (c <= 16))) ? (
+        b = (c === 1) ? s3d_oGains : (c === 2) ? s3d_oHideSrc : (c <= 5) ? 2 ^ (c - 2) : 2 ^ (c - 7);
         s3d_opt = (s3d_opt & b) ? s3d_opt - b : s3d_opt + b;
     ) :
-    (c === 12) ? (s3d_az = 0; s3d_el = 0;) :           // front
-    (c === 13) ? (s3d_az = $pi / 2; s3d_el = 0;) :     // side
-    (c === 14) ? (s3d_az = 0; s3d_el = 1.55;) :        // top
-    (c === 15) ? (s3d_az = s3d_Az3D; s3d_el = s3d_El3D; s3d_dist = s3d_Dist3D;) :
-    ((c >= 16) && (c < 16 + 3 * s3d_kN)) ? (
-        k = c - 16; v = s3d_kval(k % s3d_kN);
+    ((c >= 6) && (c <= 11)) ? s3d_PresSet(c - 6) :
+    (c === 17) ? (s3d_az = 0; s3d_el = 0; s3d_roll = 0;) :           // front
+    (c === 18) ? (s3d_az = $pi / 2; s3d_el = 0; s3d_roll = 0;) :     // side
+    (c === 19) ? (s3d_az = 0; s3d_el = 1.55; s3d_roll = 0;) :        // top
+    (c === 20) ? (s3d_az = s3d_Az3D; s3d_el = s3d_El3D; s3d_dist = s3d_Dist3D; s3d_roll = 0;) :
+    (c === 21) ? s3d_level() :
+    ((c >= 22) && (c < 22 + 3 * s3d_kN)) ? (
+        k = c - 22; v = s3d_kval(k % s3d_kN);
         (k < s3d_kN) ? s3d_kSpk = v : (k < 2 * s3d_kN) ? s3d_kSrc = v : s3d_kX = v;
     );
     (c > 0) ? s3d_changed = 1;
 );
 
 
-// Mouse : left drag = orbit, left click = select, wheel = zoom, right click = menu (2026-11-13 : opened when the button
-// is released, inside the view : a menu opened at the press leaves the right button "down" in mouse_cap). The buttons :
-// mouse_cap, or s3d_mcap given by the host when s3d_hostcap is set (e.g. without the "ghost" buttons of ui-lib :
-// uix_mouse_cap) ; s3d_menued : the menu was shown in this call (the host may end it : e.g. uix_menu_end(s3d_mres > 0))
+// (2026-11-21) A placement (s3d_plmode) : the trajectory placed is then transformed by that of the whole path (the
+// parent, given by the host : its size s3d_pgs, its tilt around x s3d_pgrx, its rotation around z s3d_pgrz : G =
+// Rz Rx). s3d_plvec : the vector (x, y, z) of the room into the frame of the placement (G^-1, divided by the size when
+// sc) : s3d_qx, s3d_qy, s3d_qz
+function s3d_plvec(x, y, z, sc)
+local(c, s, a)
+(
+    c = cos(s3d_pgrz); s = sin(s3d_pgrz);
+    a = x * c + y * s; y = - x * s + y * c; x = a;
+    c = cos(s3d_pgrx); s = sin(s3d_pgrx);
+    a = y * c + z * s; z = - y * s + z * c; y = a;
+    sc ? (a = 1 / max(0.01, s3d_pgs); x *= a; y *= a; z *= a;);
+    s3d_qx = x; s3d_qy = y; s3d_qz = z;
+);
+// an angle (a choice of the Euler angles) brought near the old one (by turns), within +- 2 pi
+function s3d_angnear(a, old)
+(
+    a += 2 * $pi * floor((old - a) / (2 * $pi) + 0.5);
+    max(-2 * $pi, min(2 * $pi, a));
+);
+// The placement turned by t around the unit axis (kx, ky, kz) of the room, as held in the hand : its rotation R = Rz Ry
+// Rx (s3d_trz, s3d_try, s3d_trx, as sp_TpBlend) becomes Q' R, Q' the rotation around the axis seen in the frame of the
+// placement (G^-1 k) ; its angles again (of the two choices, the nearest to the old ones)
+function s3d_plrot(kx, ky, kz, t)
+local(cx, sx, cy, sy, cz, sz, r0, r1, r3, r4, r6, r7, r2, r5, r8, c, s, u, a, b, d, q00, q01, q02, q10, q11, q12, q20, q21, q22,
+      m0, m1, m3, m4, m6, m7, m8, ex, ey, ez, fx, fy, fz)
+(
+    s3d_plvec(kx, ky, kz, 0); a = s3d_qx; b = s3d_qy; d = s3d_qz;
+    cx = cos(s3d_trx); sx = sin(s3d_trx); cy = cos(s3d_try); sy = sin(s3d_try); cz = cos(s3d_trz); sz = sin(s3d_trz);
+    r0 = cz * cy; r1 = cz * sy * sx - sz * cx; r2 = cz * sy * cx + sz * sx;
+    r3 = sz * cy; r4 = sz * sy * sx + cz * cx; r5 = sz * sy * cx - cz * sx;
+    r6 = - sy;    r7 = cy * sx;                r8 = cy * cx;
+    c = cos(t); s = sin(t); u = 1 - c;
+    q00 = c + a * a * u;     q01 = a * b * u - d * s; q02 = a * d * u + b * s;
+    q10 = a * b * u + d * s; q11 = c + b * b * u;     q12 = b * d * u - a * s;
+    q20 = a * d * u - b * s; q21 = b * d * u + a * s; q22 = c + d * d * u;
+    m0 = q00 * r0 + q01 * r3 + q02 * r6; m1 = q00 * r1 + q01 * r4 + q02 * r7;
+    m3 = q10 * r0 + q11 * r3 + q12 * r6; m4 = q10 * r1 + q11 * r4 + q12 * r7;
+    m6 = q20 * r0 + q21 * r3 + q22 * r6; m7 = q20 * r1 + q21 * r4 + q22 * r7; m8 = q20 * r2 + q21 * r5 + q22 * r8;
+    ey = asin(max(-1, min(1, - m6)));
+    (cos(ey) > 0.000001) ? (
+        ex = atan2(m7, m8); ez = atan2(m3, m0);
+    ) : (
+        ex = 0; ez = atan2(- m1, m4);
+    );
+    // the other choice (x + pi, pi - y, z + pi) ; the nearest one to the old angles
+    fx = s3d_angnear(ex + $pi, s3d_trx); fy = s3d_angnear($pi - ey, s3d_try); fz = s3d_angnear(ez + $pi, s3d_trz);
+    ex = s3d_angnear(ex, s3d_trx); ey = s3d_angnear(ey, s3d_try); ez = s3d_angnear(ez, s3d_trz);
+    ((abs(fx - s3d_trx) + abs(fy - s3d_try) + abs(fz - s3d_trz)) < (abs(ex - s3d_trx) + abs(ey - s3d_try) + abs(ez - s3d_trz))) ? (
+        ex = fx; ey = fy; ez = fz;
+    );
+    s3d_trx = ex; s3d_try = ey; s3d_trz = ez;
+);
+
+// Mouse : left drag = orbit (2026-11-21 : as held in the hand, s3d_orbit), left click = select, wheel = zoom, right
+// click = menu (2026-11-13 : opened when the button is released, inside the view : a menu opened at the press leaves
+// the right button "down" in mouse_cap). The drags follow the screen (2026-11-21) : the side near the eye follows the
+// mouse. The buttons : mouse_cap, or s3d_mcap given by the host when s3d_hostcap is set (e.g. without the "ghost"
+// buttons of ui-lib : uix_mouse_cap) ; s3d_menued : the menu was shown in this call (the host may end it : e.g.
+// uix_menu_end(s3d_mres > 0)). The levelling of the camera s3d_camId goes on here (s3d_LevelStep).
 function s3d_mouse(x, y, w, h, wheel)
-local(mx, my, inside, used, dx, dy, f, v, b)
+local(mx, my, inside, used, dx, dy, f, v, b, sg)
 (
     used = 0; s3d_menued = 0;
+    (v = s3d_LevelStep(s3d_camId)) ? (s3d_roll -= v; s3d_changed = 1;);
     b = s3d_hostcap ? s3d_mcap : mouse_cap;
     mx = mouse_x - x; my = mouse_y - y;
     inside = (mx >= 0) && (my >= 0) && (mx < w) && (my < h);
@@ -820,10 +1147,12 @@ local(mx, my, inside, used, dx, dy, f, v, b)
             (abs(mouse_x - s3d_mx0) + abs(mouse_y - s3d_my0) > 3) ? s3d_moved = 1;
             s3d_moved ? (
                 dx = mouse_x - s3d_lmx; dy = mouse_y - s3d_lmy;
+                s3d_basis(); // (the camera : the drags follow the screen)
                 (((mouse_cap & 20) === 20) && s3d_plmode) ? (
-                    // a placement (s3d_plmode, set by the host) : Cmd + Alt = the inclination around y (s3d_try)
+                    // a placement (s3d_plmode, set by the host) : Cmd + Alt = turned in the plane of the screen
+                    // (horizontal : clockwise to the right)
                     s3d_dmode = 8;
-                    s3d_try = max(-2 * $pi, min(2 * $pi, s3d_try - dx * 0.01));
+                    s3d_plrot(s3d_fwx, s3d_fwy, s3d_fwz, dx * 0.01);
                     s3d_tchanged = 1;
                 ) : ((mouse_cap & 20) === 20) ? (
                     // Cmd + Alt : speed ; quadratic scale, fine near 0
@@ -848,18 +1177,40 @@ local(mx, my, inside, used, dx, dy, f, v, b)
                     );
                     s3d_gyaw -= 2 * $pi * floor((s3d_gyaw + $pi) / (2 * $pi));
                 ) : (mouse_cap & 16) ? (
-                    s3d_dmode = 2;
-                    // Alt : translate the trajectory, in the plane of the screen
-                    f = s3d_dist / s3d_foc;
-                    s3d_ttx = max(-4, min(4, s3d_ttx + f * (dx * s3d_rgx - dy * s3d_upx)));
-                    s3d_tty = max(-4, min(4, s3d_tty + f * (dx * s3d_rgy - dy * s3d_upy)));
-                    s3d_ttz = max(-4, min(4, s3d_ttz + f * (dx * s3d_rgz - dy * s3d_upz)));
+                    // Alt : translate the trajectory, in the plane of the screen ; Shift + Alt (2026-11-21) : in depth,
+                    // along the line of sight (vertical : up = farther) ; a placement : in its frame (s3d_plvec : it
+                    // follows the mouse, whatever the transform of the whole path)
+                    (mouse_cap & 8) ? (
+                        s3d_dmode = 9;
+                        f = - dy * 0.005;
+                        s3d_qx = f * s3d_fwx; s3d_qy = f * s3d_fwy; s3d_qz = f * s3d_fwz;
+                    ) : (
+                        s3d_dmode = 2;
+                        f = s3d_dist / s3d_foc;
+                        s3d_qx = f * (dx * s3d_rgx - dy * s3d_upx);
+                        s3d_qy = f * (dx * s3d_rgy - dy * s3d_upy);
+                        s3d_qz = f * (dx * s3d_rgz - dy * s3d_upz);
+                    );
+                    s3d_plmode ? s3d_plvec(s3d_qx, s3d_qy, s3d_qz, 1);
+                    s3d_ttx = max(-4, min(4, s3d_ttx + s3d_qx));
+                    s3d_tty = max(-4, min(4, s3d_tty + s3d_qy));
+                    s3d_ttz = max(-4, min(4, s3d_ttz + s3d_qz));
                     s3d_tchanged = 1;
                 ) : (mouse_cap & 4) ? (
                     s3d_dmode = 3;
-                    // Cmd : rotate the trajectory (horizontal : around z ; vertical : tilt)
-                    s3d_trz -= dx * 0.01;
-                    s3d_trx = s3d_plmode ? max(-2 * $pi, min(2 * $pi, s3d_trx + dy * 0.01)) : max(-$pi, min($pi, s3d_trx + dy * 0.01));
+                    s3d_plmode ? (
+                        // a placement (2026-11-21) : turned as held in the hand (horizontal : around the vertical of
+                        // the screen ; vertical : around its horizontal), its three inclinations together
+                        s3d_plrot(s3d_upx, s3d_upy, s3d_upz, dx * 0.01);
+                        s3d_plrot(s3d_rgx, s3d_rgy, s3d_rgz, dy * 0.01);
+                    ) : (
+                        // Cmd : rotate the trajectory (horizontal : around z ; vertical : tilt around its x), the side
+                        // near the eye following the mouse (2026-11-21 : the senses given by the camera)
+                        sg = (s3d_upz < 0) ? -1 : 1;
+                        s3d_trz += sg * dx * 0.01;
+                        sg = ((cos(s3d_trz) * s3d_rgx + sin(s3d_trz) * s3d_rgy) < 0) ? -1 : 1;
+                        s3d_trx = max(-$pi, min($pi, s3d_trx + sg * dy * 0.01));
+                    );
                     s3d_tchanged = 1;
                 ) : (mouse_cap & 8) ? (
                     s3d_dmode = 4;
@@ -867,11 +1218,9 @@ local(mx, my, inside, used, dx, dy, f, v, b)
                     s3d_tsc = max(0.05, min(10, s3d_tsc * exp(- dy * 0.01)));
                     s3d_tchanged = 1;
                 ) : (
-                    // orbit
+                    // the orbit, as held in the hand
                     s3d_dmode = 1;
-                    s3d_az -= dx * 0.008;
-                    s3d_el += dy * 0.008;
-                    s3d_changed = 1;
+                    s3d_orbit(dx, dy);
                 );
             );
             s3d_lmx = mouse_x; s3d_lmy = mouse_y;

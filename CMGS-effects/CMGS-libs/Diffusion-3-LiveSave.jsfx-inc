@@ -1,0 +1,357 @@
+/*
+    Diffusion-3-LiveSave.jsfx-inc
+
+    The Live screen saved with the project and with the presets (2026-11-20) :
+    - the box of the speakers (HP_Box) : its camera (s3d_az, s3d_el, s3d_dist, sx_view : the arrows, ';' ',', '?', the
+      wheel ; 2026-11-21 : its roll s3d_roll, Shift + drag, key 'a'), the presentation of the room (key '>'), the gains and the levels shown (keys '%', '$'), its background (key '/', sx_lbg), its size (keys '=' ':',
+      bx_sfact), shown or hidden (key 'i') ;
+    - the clock (shown or hidden, the clock or the timer), the state of the projector (shown or hidden), the graphics
+      (key 'g'), the animation of the background (key 'C') ;
+    - the boxes shown (at most LV_NB) : their place and their size in squares, their flags (selected, locked, kept
+      visible), their fonts, their colors, their texts, the time left to show them.
+    The window of the plugin itself (its size, its place) : kept by REAPER with the project (not with the presets) ; a
+    JSFX cannot set it.
+
+    @serialize (lv_Serialize : the last record, 'lsc1' ; the older projects end before it) :
+    - written : the Live screen as it is (lv_Snap : only reads the boxes ; the camera : lv_cam, its copy made by @gfx after
+      each frame of the Live screen, the views "Space A" ... "D" swapping theirs with the globals) ; a restore not yet
+      applied (lv_req : the Live screen not shown since the load) : the record read is written again ;
+    - read : into lv_g, lv_buf, lv_str, then applied by @gfx (lv_Frame, lv_Apply : once the Live screen is shown and its
+      grid fits a window that has not changed for 0.5 s ; the boxes, their strings and the grid of the places belong to
+      @gfx).
+    The boxes are found by their name (bx_name : the ids of the controls, of the states of the projectors, the clock,
+    the projector, the speakers ; 0 : a message) : a box shown at the restore keeps its text (more recent), the others
+    are made again with the text saved ; a place outside the window (a smaller window, another display size) : the box
+    is placed by the allocator, near it.
+
+    Part 1 (lvs_part = 1) : in @init, after the module "Conf Editor" ; part 2 (lvs_part = 2) : in @gfx, after HP_Box_Show
+    and live_box_remove, before pns_LiveDisplay (which calls lv_Frame and lv_CamCopy).
+*/
+
+<? lvs_part != 1 ? _suppress = 1; ?>
+
+LV_NB = 48;                 // the boxes saved, at most
+LV_NF = 24;                 // the fields of a box (lvf_*)
+LV_NG = 20;                 // the global fields (lv_g, see lv_Snap ; 16 until 2026-11-21)
+LV_SL = 120;                // the characters of a string, at most
+LV_SS = LV_SL + 1;          // a string in lv_str : its length, its characters (4 per box : font 1, font 2, string 1, 2)
+lv_g = make_array(LV_NG);
+lv_buf = make_array(LV_NB * LV_NF);
+lv_str = make_array(LV_NB * 4 * LV_SS);
+lv_hdr = make_array(4);
+lv_cam = make_array(8);
+lv_cnt = 0;                 // the boxes in lv_buf
+lv_req = 0;                 // a restore read by @serialize, applied by @gfx (lv_Apply)
+lv_szW = lv_szH = -1;       // the size of the window, since lv_szT (lv_Frame ; time_precise : timez stops with the audio)
+lv_szT = 0;
+// the fields of a box : the kind (1 the speakers, 2 the clock, 3 the projector, 4 another box), its name, its flags
+// (lv_FlMask), its mode of allocation, its place and its size in squares (x, y : -1 when it has no place), the time left
+// (s ; -1 : no end), the sizes and the modes of its fonts, its colors (-1 : the standard ones), its minimal size, its
+// extra sizes (pixels at 100 %), the distance between its strings, its initial size (squares), its size factor (the
+// speakers)
+lvf_kind = 0; lvf_name = 1; lvf_flags = 2; lvf_mode = 3; lvf_x = 4; lvf_y = 5; lvf_w = 6; lvf_h = 7; lvf_dur = 8;
+lvf_fs1 = 9; lvf_fm1 = 10; lvf_fs2 = 11; lvf_fm2 = 12; lvf_col1 = 13; lvf_col2 = 14; lvf_minw = 15; lvf_minh = 16;
+lvf_exw = 17; lvf_exh = 18; lvf_itl = 19; lvf_iw = 20; lvf_ih = 21; lvf_sf = 22;
+lv_FlMask = bx__select | bx__permlock | bx__keepVisible | bx__2strings | bx__boxaround | bx__col1std | bx__col2std |
+    bx__drawbox;
+lv_FlKeep = bx__select | bx__permlock | bx__keepVisible; // (restored after the place)
+// the camera of the box of the speakers at the start (the globals of Space 3D are those of the HP box)
+lv_cam[0] = s3d_az; lv_cam[1] = s3d_el; lv_cam[2] = s3d_dist; lv_cam[3] = sx_view; lv_cam[4] = s3d_opt;
+lv_cam[5] = s3d_roll; lv_cam[6] = s3d_PresCur();
+
+// A string into lv_str (k : its index, 4 per box), at most LV_SL characters
+function lv_PutS(k, s)
+local(p, n, i)
+(
+    p = lv_str + k * LV_SS;
+    n = min(LV_SL, strlen(s));
+    p[0] = n;
+    i = 0; loop(n, p[i + 1] = str_getchar(s, i, 'cu'); i += 1;);
+);
+
+// The string k of lv_str into s ; returns s
+function lv_GetS(k, s)
+local(p, n, i)
+(
+    p = lv_str + k * LV_SS;
+    n = max(0, min(LV_SL, 0|p[0]));
+    strcpy(s, "");
+    str_setlen(s, n);
+    i = 0; loop(n, str_setchar(s, i, p[i + 1], 'cu'); i += 1;);
+    s;
+);
+
+// A box into lv_buf, lv_str (the kind k)
+function lv_SaveBox(box, k)
+local(f, s, fl, p, e)
+(
+    (lv_cnt < LV_NB) ? (
+        f = lv_buf + lv_cnt * LV_NF; s = lv_cnt * 4;
+        memset(f, 0, LV_NF);
+        fl = box[bx_activ]; p = box[bx_posit];
+        f[lvf_kind] = k; f[lvf_name] = box[bx_name]; f[lvf_flags] = fl & lv_FlMask;
+        f[lvf_mode] = box[bx_posflgs] & bx__allocmod;
+        ((fl & bx__posfound) && (p >= 0)) ? (
+            f[lvf_x] = p & bx__maskw; f[lvf_y] = p >> bx__shifth;
+        ) : (
+            f[lvf_x] = f[lvf_y] = -1;
+        );
+        f[lvf_w] = box[bx_sqw]; f[lvf_h] = box[bx_sqh];
+        e = box[bx_endshow];
+        f[lvf_dur] = (e > 0) ? max(1, e - timez) : -1;
+        f[lvf_fs1] = box[bx_fsize1]; f[lvf_fm1] = box[bx_fmods1]; f[lvf_fs2] = box[bx_fsize2]; f[lvf_fm2] = box[bx_fmods2];
+        f[lvf_col1] = box[bx_icol1]; f[lvf_col2] = box[bx_icol2];
+        f[lvf_minw] = box[bx_minw]; f[lvf_minh] = box[bx_minh]; f[lvf_exw] = box[bx_extraw]; f[lvf_exh] = box[bx_extrah];
+        f[lvf_itl] = box[bx_interl]; f[lvf_iw] = box[bx_initw]; f[lvf_ih] = box[bx_inith]; f[lvf_sf] = box[bx_sfact];
+        // the strings : those of the messages (the clock and the projector show strings of the plugin)
+        ((k >= 2) && (box[bx_fname1] != 0)) ? lv_PutS(s, box[bx_fname1]) : lv_PutS(s, "");
+        ((k >= 2) && (box[bx_fname2] != 0)) ? lv_PutS(s + 1, box[bx_fname2]) : lv_PutS(s + 1, "");
+        ((k === 4) && !(fl & bx__usestring1)) ? lv_PutS(s + 2, box[bx_string1]) : lv_PutS(s + 2, "");
+        ((k === 4) && (fl & bx__2strings) && !(fl & bx__usestring2)) ? lv_PutS(s + 3, box[bx_string2]) : lv_PutS(s + 3, "");
+        lv_cnt += 1;
+    );
+);
+
+// The Live screen into lv_g, lv_buf, lv_str (@serialize, written : the boxes are only read)
+function lv_Snap()
+local(g, box, fl, m)
+(
+    g = lv_g;
+    memset(g, 0, LV_NG);
+    m = s3d_oGains | s3d_oLevels;
+    g[0] = lv_cam[0]; g[1] = lv_cam[1]; g[2] = lv_cam[2]; g[3] = lv_cam[3]; g[4] = lv_cam[4] & m;
+    g[5] = sx_lbg; g[6] = statclock; g[7] = stattimer; g[8] = statproj;
+    g[9] = ((HP_Box > 0) && (HP_Box[bx_activ] & bx__drawbox)) ? 1 : 0;
+    g[10] = (HP_Box > 0) ? HP_Box[bx_sfact] : HPDr_f;
+    g[11] = statgraph; g[12] = coloriterate; g[13] = win_cols; g[14] = win_lines;
+    g[15] = lv_cam[5]; g[16] = lv_cam[6] + 1; // (2026-11-21 : the roll of the camera, the presentation of the room + 1)
+    lv_cnt = 0;
+    (HP_Box > 0) ? lv_SaveBox(HP_Box, 1);
+    ((clockbox > 0) && (clockbox[bx_name] === clockid) && (clockbox[bx_activ] & bx__used)) ? lv_SaveBox(clockbox, 2);
+    ((projbox > 0) && (projbox[bx_name] === projid) && (projbox[bx_activ] & bx__used)) ? lv_SaveBox(projbox, 3);
+    // the other boxes shown (not ending)
+    box = dispboxes;
+    loop(dispboxcount,
+        fl = box[bx_activ];
+        ((box[bx_check] === bx__bxcheck) && (fl & bx__used) && !(fl & (bx__drawended | bx__fading)) &&
+            (box[bx_type] === bx_ty_msg) && (box !== clockbox) && (box !== projbox) &&
+            (box[bx_name] !== clockid) && (box[bx_name] !== projid)) ? lv_SaveBox(box, 4);
+        box += dispboxsize;
+    );
+);
+
+// Saved with the project (after the module "Conf Editor" : the last record, the older projects end before it)
+function lv_Serialize()
+local(i, k, ng, nf, nb)
+(
+    (file_avail(0) >= 0) ? (
+        // reading : applied by @gfx (lv_Frame)
+        (file_avail(0) > 0) ? (
+            memset(lv_hdr, 0, 4);
+            load_mem(0, lv_hdr, 4);
+            ng = 0|lv_hdr[1]; nb = 0|lv_hdr[2]; nf = 0|lv_hdr[3];
+            ((lv_hdr[0] === 'lsc1') && (ng >= 1) && (ng <= LV_NG) && (nf >= 1) && (nf <= LV_NF) && (nb >= 0) &&
+                (nb <= LV_NB)) ? (
+                lv_req = 0; // (a restore not applied yet : replaced)
+                memset(lv_g, 0, LV_NG);
+                load_mem(0, lv_g, ng);
+                memset(lv_buf, 0, LV_NB * LV_NF);
+                i = 0;
+                loop(nb,
+                    load_mem(0, lv_buf + i * LV_NF, nf);
+                    k = 0; loop(4, file_string(0, #lv_s); lv_PutS(i * 4 + k, #lv_s); k += 1;);
+                    i += 1;
+                );
+                lv_cnt = nb;
+                lv_req = 1;
+            );
+        );
+    ) : (
+        // writing (a restore not applied yet : the record read)
+        !lv_req ? lv_Snap();
+        lv_hdr[0] = 'lsc1'; lv_hdr[1] = LV_NG; lv_hdr[2] = lv_cnt; lv_hdr[3] = LV_NF;
+        save_mem(0, lv_hdr, 4);
+        save_mem(0, lv_g, LV_NG);
+        i = 0;
+        loop(lv_cnt,
+            save_mem(0, lv_buf + i * LV_NF, LV_NF);
+            k = 0; loop(4, file_string(0, lv_GetS(i * 4 + k, #lv_s)); k += 1;);
+            i += 1;
+        );
+    );
+);
+
+<? _suppress = 0; ?>
+<? lvs_part != 2 ? _suppress = 1; ?>
+
+// The font named s (one of font_names : the fonts of the boxes), or dflt
+function lv_FontName(s, dflt)
+local(j, r)
+(
+    r = dflt;
+    (strlen(s) > 0) ? (
+        j = 0;
+        loop(font_count,
+            ((font_names[j] != 0) && (stricmp(font_names[j], s) === 0)) ? r = font_names[j];
+            j += 1;
+        );
+    );
+    r;
+);
+
+// The box with the name n shown (a message, not ending), or 0
+function lv_Find(n)
+local(b, r, fl)
+(
+    r = 0;
+    (n != 0) ? (
+        b = dispboxes;
+        loop(dispboxcount,
+            fl = b[bx_activ];
+            ((r === 0) && (b[bx_check] === bx__bxcheck) && (b[bx_name] === n) && (fl & bx__used) &&
+                !(fl & bx__drawended) && (b[bx_type] === bx_ty_msg)) ? r = b;
+            b += dispboxsize;
+        );
+    );
+    r;
+);
+
+// The box i of lv_buf : found (the speakers, the clock, the projector, a box shown with its name) or made again ; its
+// fonts, sizes, time left ; its place (box_change : locked, then its flags saved), else near the place saved
+function lv_ApplyBox(i)
+local(f, s, k, box, fl, dur, w, h)
+(
+    f = lv_buf + i * LV_NF; s = i * 4;
+    k = f[lvf_kind];
+    dur = (f[lvf_dur] > 0) ? max(1, f[lvf_dur]) : -1;
+    box = 0;
+    (k === 1) ? (
+        box = (HP_Box > 0) ? HP_Box : 0;
+    ) :
+    (k === 2) ? (
+        box = (statclock && (clockbox > 0) && (clockbox[bx_name] === clockid)) ? clockbox : 0;
+    ) :
+    (k === 3) ? (
+        box = (statproj && (projbox > 0) && (projbox[bx_name] === projid)) ? projbox : 0;
+    ) :
+    (k === 4) ? (
+        box = lv_Find(f[lvf_name]);
+        (box === 0) ? (
+            box = mk_display_box(f[lvf_name], lv_GetS(s + 2, #lv_t1), lv_GetS(s + 3, #lv_t2), dur,
+                (f[lvf_flags] & (bx__2strings | bx__boxaround)) | (f[lvf_mode] & bx__allocmod), 3, 3,
+                f[lvf_col1], f[lvf_col2], -1, -1, -1, -1, -1, -1);
+        );
+        (box > 0) ? (
+            (box[bx_activ] & bx__fading) ? box_recall(box, 0, 0); // (its colors again)
+            box[bx_endshow] = (dur > 0) ? timez + dur : -1;
+        );
+    );
+    (box > 0) ? (
+        // the messages : their fonts, their sizes
+        (k >= 2) ? (
+            box[bx_fname1] = lv_FontName(lv_GetS(s, #lv_t1), box[bx_fname1]);
+            box[bx_fname2] = lv_FontName(lv_GetS(s + 1, #lv_t1), box[bx_fname2]);
+            (f[lvf_fs1] >= 6) ? box[bx_fsize1] = min(512, f[lvf_fs1]);
+            (f[lvf_fs2] >= 6) ? box[bx_fsize2] = min(512, f[lvf_fs2]);
+            box[bx_fmods1] = f[lvf_fm1]; box[bx_fmods2] = f[lvf_fm2];
+            box[bx_minw] = max(0, f[lvf_minw]); box[bx_minh] = max(0, f[lvf_minh]);
+            box[bx_extraw] = max(0, f[lvf_exw]); box[bx_extrah] = max(0, f[lvf_exh]);
+            box[bx_interl] = max(0, f[lvf_itl]);
+            (f[lvf_iw] > 0) ? box[bx_initw] = f[lvf_iw];
+            (f[lvf_ih] > 0) ? box[bx_inith] = f[lvf_ih];
+            box[bx_activ] |= bx__update;
+            box[bx_activ] &= 0x7FFFFFFF - bx__drawready;
+        );
+        // its place (the speakers : their size from their factor, lv_Apply)
+        (k === 1) ? (
+            w = ceil(HPDr_w * box[bx_sfact] / sqr_bw); h = ceil(HPDr_h * box[bx_sfact] / sqr_bh);
+        ) : (
+            w = max(1, 0|f[lvf_w]); h = max(1, 0|f[lvf_h]);
+        );
+        ((f[lvf_x] >= 0) && (f[lvf_y] >= 0) && ((k !== 1) || (box[bx_activ] & bx__drawbox))) ?
+            box_change(box, 0|f[lvf_x], 0|f[lvf_y], w, h);
+        fl = box[bx_activ];
+        (fl & bx__posfound) ? (
+            // placed (and locked by box_change) : the flags saved
+            fl = ((fl | lv_FlKeep) - lv_FlKeep) | (f[lvf_flags] & lv_FlKeep);
+        ) : (
+            // no place (outside the window) : near the place saved (the allocator, mode 1), not locked
+            (f[lvf_x] >= 0) ? (
+                box[bx_sqx] = 0|f[lvf_x]; box[bx_sqy] = 0|f[lvf_y];
+                box[bx_posflgs] = (box[bx_posflgs] & bx__alloczzz) | 1;
+            );
+            fl = ((fl | lv_FlKeep) - lv_FlKeep) | (f[lvf_flags] & (bx__select | bx__keepVisible));
+        );
+        box[bx_activ] = fl;
+    );
+    box;
+);
+
+// The camera of the box of the speakers, for @serialize (after each frame of the Live screen : the globals of Space 3D
+// are then those of the HP box)
+function lv_CamCopy()
+(
+    lv_cam[0] = s3d_az; lv_cam[1] = s3d_el; lv_cam[2] = s3d_dist; lv_cam[3] = sx_view; lv_cam[4] = s3d_opt;
+    lv_cam[5] = s3d_roll; lv_cam[6] = s3d_PresCur();
+);
+
+// The restore read by @serialize : the box of the speakers, the clock, the projector, the boxes, the graphics
+function lv_Apply()
+local(g, m, i, n)
+(
+    g = lv_g;
+    // the camera of the box of the speakers, the gains and the levels shown, its background
+    s3d_az = g[0]; s3d_el = g[1]; s3d_dist = max(1.8, min(12, (g[2] > 0) ? g[2] : s3d_Dist3D));
+    sx_view = max(0, min(3, 0|g[3]));
+    s3d_roll = max(- $pi, min($pi, g[15])); // (2026-11-21 ; before : 0, and the far faces of the room)
+    s3d_PresSet((g[16] >= 1) ? g[16] - 1 : 0);
+    m = s3d_oGains | s3d_oLevels;
+    s3d_opt = ((s3d_opt | m) - m) | (g[4] & m);
+    sx_lbg = g[5] ? 1 : 0;
+    // the clock (or the timer), the state of the projector, the box of the speakers : shown or hidden (as the menu Show)
+    stattimer = g[7] ? 1 : 0;
+    g[6] ? (
+        !statclock ? toggleclock(1);
+    ) : statclock ? (
+        toggleclock(0);
+        (clockbox[bx_name] === clockid) ? live_box_remove(clockbox);
+    );
+    g[8] ? (
+        !statproj ? toggleproj(1);
+    ) : statproj ? (
+        toggleproj(0);
+        (projbox[bx_name] === projid) ? live_box_remove(projbox);
+    );
+    (HP_Box > 0) ? (
+        HP_Box_Show(g[9] ? 1 : 0);
+        HP_Dr_updsize(HP_Box, max(10, (g[10] > 0) ? g[10] : HPDr_f));
+    );
+    // the boxes
+    n = 0;
+    i = 0; loop(lv_cnt, (lv_ApplyBox(i) > 0) ? n += 1; i += 1;);
+    togglegraphics(g[11] ? 1 : 0);
+    coloriterate = g[12] ? 1 : 0;
+    lv_CamCopy();
+    lv_req = 0;
+    sprintf(#lv_t1, "Live screen : restored (%d box(es) of %d)", n, lv_cnt);
+    mSL_log(SysLogBox, #lv_t1);
+    ui_GFXdoNow |= 4;
+);
+
+// Each frame of the Live screen (pns_LiveDisplay, after live_screen) : a restore asked, applied once the grid fits a
+// window that has not changed for 0.5 s (update_window waits 3 s between two updates) ; the graphics hidden : shown
+// for the restore (live_screen updates the grid only then ; lv_Apply sets them again)
+function lv_Frame()
+(
+    ((gfx_w !== lv_szW) || (gfx_h !== lv_szH)) ? (lv_szW = gfx_w; lv_szH = gfx_h; lv_szT = time_precise(););
+    lv_req ? (
+        !statgraph ? (
+            statgraph = 1;
+        ) : (
+            ((win_cols > 1) && (win_lines > 0) && (win_width === gfx_w) && (win_height === gfx_h) &&
+                (live_zoom === ((uix_zoom > 0) ? uix_zoom : 1)) && (time_precise() > lv_szT + 0.5) && !gxnotinited) ? lv_Apply();
+        );
+    );
+);
+
+<? _suppress = 0; ?>

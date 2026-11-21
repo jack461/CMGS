@@ -18,15 +18,18 @@
     block), 2 prop (its number), 3 action (its slot), 4 hppos (HP_Positions), 5 source (its number ; count, points),
     6 groupdefs, 7 globals (defaultconf, background set, its two colors), 8 projector (its index ; the fields cg_pf),
     9 the geometry of the speakers (2026-11-18 : hp_Geo, the frame and the size of hppos, then hp_Act, their
-    activations ; an older project has none : no frame, no size, all active) ; 0 : the end.
+    activations ; an older project has none : no frame, no size, all active), 10 the weights and the name of a
+    configuration (2026-11-20 : its index ; its block cf_wts, see cf_W ; an older project has none : its weights are
+    found again from its gains when needed, cf_WGains) ; 0 : the end.
 
     The module "Configurations" (show_Configurations_Pad) : the configurations defined, or the sources (cell 0), by pages
     of 128 (cell 1) ; one cell each : its number, its sources > its outputs (or its points) ; colors : green used by a
     projector, orange in no group, [ ] selected ; the text : the item under the mouse (or selected) : its contents, its
     places in the groups, the projectors that use it. Left clic : select ; right clic : its menu : load it into a
     projector (as its cell Config) / use the source for a projector, copy it under another number, renumber it (the
-    groups or the projectors follow), delete it. Cell 3 : export the whole configuration as a configuration file (.mSL,
-    settings ; Data/d3-config-date.mSL) ; cell 4 : load a configuration file (as the module "Global").
+    groups or the projectors follow), rename it (2026-11-20 : its name, in the library of the configurations, cf_W),
+    edit it in the module "Conf Editor", delete it. Cell 3 : export the whole configuration as a configuration file
+    (.mSL, settings ; Data/d3-config-date.mSL) ; cell 4 : load a configuration file (as the module "Global").
 
     Included in @init after Diffusion-3-Trajectories (xpt_*, ed_Fmt, prv_*), while make_array allocates static memory.
 */
@@ -122,6 +125,7 @@ local(i, b, n, k, p, pp, ok)
         ser_hdr[0] = 'cfg1'; ser_hdr[1] = 1; ser_hdr[2] = 0; ser_hdr[3] = 0;
         save_mem(0, ser_hdr, 4);
         i = 1; loop(conflsize - 2, ((b = conflist[i]) > 0) ? cg_Rec(1, i, b, b[-1]); i += 1;);
+        i = 1; loop(conflsize - 2, ((b = cf_wts[i]) > 0) ? cg_Rec(10, i, b, cf_WSize(b)); i += 1;); // (2026-11-20)
         i = 0; loop(proprescnt, ((b = proprerefs[i]) > 0) ? cg_Rec(2, i, b, b[-1]); i += 1;);
         i = 0; loop(actlsize, ((b = actlist[i]) > 0) ? cg_Rec(3, i, b, b[-1]); i += 1;);
         (HP_Positions > 0) ? cg_Rec(4, 0, HP_Positions, HP_Positions[-1]);
@@ -164,6 +168,11 @@ local(pos, kd, idx, n, body, b, pp, j, v, nc, np, ns)
         ((kd === 1) && (idx >= 1) && (idx < conflsize - 1) && (n > 0)) ? (
             b = mSL_Dyn_Alloc(n, 'conf', 0);
             (b > 0) ? (memcpy(b, body, n); conflist[idx] = b; nc += 1;);
+        ) :
+        ((kd === 10) && (idx >= 1) && (idx < conflsize - 1) && (n >= 4)) ? (
+            // (2026-11-20) the weights and the name of the configuration idx (see cf_W)
+            b = mSL_Dyn_Alloc(n, 'cfwt', 0);
+            (b > 0) ? (memcpy(b, body, n); b[0] = idx; cf_wts[idx] = b;);
         ) :
         ((kd === 2) && (idx >= 0) && (idx < proprescnt) && (n > 0)) ? (
             b = mSL_Dyn_Alloc(n, 'prop', 0);
@@ -319,7 +328,9 @@ local(b, q, s, g0, eq, k)
         ) : sprintf(#cg_txt, "Source %d : not defined", n);
     ) : (
         ((b = conflist[n]) > 0) ? (
-            sprintf(#cg_txt, "Configuration %d :", n);
+            // (2026-11-20 : its name)
+            (strlen(cf_Name(n, #cg_nm)) > 0) ? sprintf(#cg_txt, "Configuration %d \"%s\" :", n, #cg_nm) :
+                sprintf(#cg_txt, "Configuration %d :", n);
             q = b + 1;
             while ((q[0] > 0) && (strlen(#cg_txt) < 150)) (
                 s = q[0]; q += 1;
@@ -351,7 +362,11 @@ function cg_Prompt(kind, n)
     strcpy(#cg_prm, "");
     ui_screen_open("control.prompt");
     ui_screen_arg(0, #cg_prm);
-    sprintf(#cg_w, "%s the %s %d : its new number", (kind === 1) ? "Copy" : "Renumber", cg_view ? "source" : "configuration", n);
+    (kind === 3) ? (
+        // (2026-11-20) the name of a configuration (empty : none)
+        cf_Name(n, #cg_prm);
+        sprintf(#cg_w, "The name of the configuration %d (empty : none)", n);
+    ) : sprintf(#cg_w, "%s the %s %d : its new number", (kind === 1) ? "Copy" : "Renumber", cg_view ? "source" : "configuration", n);
     ui_screen_arg(1, #cg_w);
 );
 
@@ -383,8 +398,10 @@ local(b, c, sz, k, p, pp, cnt)
             (c <= 0) ? cg_Err(2466, "no memory for the copy") : (
                 memcpy(c, b, sz); c[0] = m;
                 conflist[m] = c;
+                cf_CopyW(n, m); // (2026-11-20 : its weights and its name)
                 ren ? (
                     conflist[n] = 0;
+                    cf_FreeW(n);
                     cnt = 0; k = 0;
                     loop(groupdefsize - 1, (groupdefs[k] === n) ? (groupdefs[k] = m; cnt += 1;); k += 1;);
                     // the projectors that use it : the new block
@@ -396,6 +413,7 @@ local(b, c, sz, k, p, pp, cnt)
                         p += 1;
                     );
                     hypchange = 1;
+                    ce_MovReq = n; ce_MovTo = m; // (2026-11-21 : the ring of the module "Conf Editor" follows, ce_RingCheck)
                     sprintf(#cg_w, "Configurations : the configuration %d renumbered %d (%d place(s) of the groups follow)", n, m, cnt);
                 ) : sprintf(#cg_w, "Configurations : the configuration %d copied as %d", n, m);
                 mSL_log(SysLogBox, #cg_w);
@@ -406,9 +424,18 @@ local(b, c, sz, k, p, pp, cnt)
 );
 
 function cg_Prompted()
-local(m)
+local(m, w)
 (
     ((cg_pend > 0) && !(ui_screen() == "control.prompt")) ? (
+        (cg_pend === 3) ? (
+            // (2026-11-20) the name (its weights found again from its gains if it has none)
+            ((w = cf_WGains(cg_pnum)) > 0) ? (
+                cf_NewW(cg_pnum, w[1], #cg_prm, w + 3 + w[2], cf_RLen(w + 3 + w[2]));
+                (cg_pnum === ce_num) ? cf_Name(cg_pnum, #ce_name); // (2026-11-21 : the module "Conf Editor" edits it)
+                sprintf(#cg_w, "Configurations : the configuration %d named \"%s\"", cg_pnum, cf_Name(cg_pnum, #cg_t3));
+                mSL_log(SysLogBox, #cg_w);
+            );
+        ) :
         (strlen(#cg_prm) > 0) ? (
             m = floor(s3d_atof(#cg_prm, 0, strlen(#cg_prm)) + 0.5);
             cg_Copy(cg_pnum, m, cg_pend === 2);
@@ -428,6 +455,7 @@ local(b, p, pp, k)
     ) : (
         b = conflist[n];
         conflist[n] = 0;
+        cf_FreeW(n); // (2026-11-20 : its weights and its name)
         p = 0;
         loop(akousmax,
             pp = projectors + p * projsize;
@@ -436,6 +464,7 @@ local(b, p, pp, k)
             p += 1;
         );
         hypchange = 1;
+        ce_DelReq = n; // (2026-11-21 : it leaves the ring of the module "Conf Editor", ce_RingCheck)
         k = cg_Places(n);
         sprintf(#cg_w, "Configurations : the configuration %d deleted%s", n,
             k ? sprintf(#cg_t3, " (it was in %d place(s) of the groups)", k) : "");
@@ -459,7 +488,7 @@ local(m, p, k)
         p += 1;
     );
     strcat(#cg_mnu, cg_view ? "||Copy as...|Renumber... (the projectors follow)||Delete" :
-                              "||Copy as...|Renumber... (the groups follow)||Delete");
+                              "||Copy as...|Renumber... (the groups follow)|Rename...|Edit in the module Conf Editor||Delete");
     gfx_x = mouse_x; gfx_y = mouse_y;
     m = gfx_showmenu(#cg_mnu);
     prv_MenuEnd(m > 0);
@@ -473,15 +502,19 @@ local(m, p, k)
     ) :
     (m === k) ? cg_Prompt(1, n) :
     (m === k + 1) ? cg_Prompt(2, n) :
-    (m === k + 2) ? cg_Delete(n);
+    cg_view ? ((m === k + 2) ? cg_Delete(n)) :
+    (m === k + 2) ? cg_Prompt(3, n) :
+    (m === k + 3) ? (ce_LoadReq = n) : // (2026-11-20 : taken by the module "Conf Editor", ce_Frame)
+    (m === k + 4) ? cg_Delete(n);
 );
 
 // Export the whole configuration as a configuration file (.mSL : settings(data( clear ... )) ; Data/d3-config-date.mSL,
-// written by CMGS-auxiliary.eel ; ed_Frame logs when it is written). The gains of a configuration : weights (their squares,
-// normalized again when it is read) and a global volume (dB) ; a configuration whose sources have different volumes
-// (invert) is approximated (a comment says so). Not exported : the actions.
+// written by CMGS-auxiliary.eel ; ed_Frame logs when it is written). A configuration : its name, its volume and its
+// weights as written (2026-11-20 : the library of the configurations, cf_W) ; without them, from its gains : weights (their
+// squares, normalized again when it is read) and a global volume (dB) ; a configuration whose sources have different
+// volumes (invert) is approximated (a comment says so). Not exported : the actions.
 function cg_Export()
-local(c, i, b, q, k, s, v, vs, ap, eq, g, sc, gr, first, n, w)
+local(c, i, b, q, k, s, v, vs, ap, eq, g, sc, gr, first, n, w, wb)
 (
     ((c = xpt_Ready()) !== 0) ? (
         cg_Err(2467, (c === 1) ? "no auxiliary script (CMGS-auxiliary.eel) : nothing is written" :
@@ -550,6 +583,29 @@ local(c, i, b, q, k, s, v, vs, ap, eq, g, sc, gr, first, n, w)
         // the configurations
         i = 1;
         loop(conflsize - 2,
+            (((b = conflist[i]) > 0) && ((wb = cf_W(i)) > 0)) ? (
+                // (2026-11-20) its name, its volume, its weights as written (a weight 1 : not written)
+                sprintf(#cg_xt, "conf %d", i);
+                (strlen(cf_Name(i, #cg_nm)) > 0) ? (sprintf(#cg_w, " \"%s\"", #cg_nm); strcat(#cg_xt, #cg_w););
+                (abs(wb[1] - 1) > 0.000001) ? (sprintf(#cg_w, " dB %s", ed_Fmt(#ed_f1, 20 * log10(max(0.000001, wb[1])))); strcat(#cg_xt, #cg_w););
+                strcat(#cg_xt, " :");
+                q = wb + 3 + wb[2];
+                while (q[0] > 0) (
+                    sprintf(#cg_w, " %d >", q[0]); strcat(#cg_xt, #cg_w);
+                    q += 1; first = 1;
+                    while (q[0] > 0) (
+                        (q[1] === 1) ? sprintf(#cg_w, "%s %d", first ? "" : ",", q[0]) :
+                            sprintf(#cg_w, "%s %d %s", first ? "" : ",", q[0], ed_Fmt(#ed_f2, q[1]));
+                        strcat(#cg_xt, #cg_w); first = 0;
+                        q += 2;
+                        (strlen(#cg_xt) > 110) ? (xpt_Line(#cg_xt); strcpy(#cg_xt, "     "););
+                    );
+                    strcat(#cg_xt, " ;");
+                    q += 1;
+                    (strlen(#cg_xt) > 100) ? (xpt_Line(#cg_xt); strcpy(#cg_xt, "   "););
+                );
+                (strlen(#cg_xt) > 5) ? xpt_Line(#cg_xt);
+            ) :
             ((b = conflist[i]) > 0) ? (
                 // the volume : that of the first source ; the others different : approximated
                 v = -1; ap = 0;
@@ -733,7 +789,9 @@ local(h1, h2, h3, hneed, zzmi, i, n, np, zz, e, hk, c, it, us)
                             pad_CGG_Colrs[i] = us ? Color_Limegreen : (n === cg_sel) ? Col_P2 : Col_P1;
                         ) : (
                             cg_Counts(n);
-                            sprintf(pad_CGG_Labs[i], (n === cg_sel) ? "[%d  %d>%d]" : "%d  %d>%d", n, cg_ns, cg_nd);
+                            // (2026-11-20 : its name, if any ; else its count of sources and outputs)
+                            (strlen(cf_Name(n, #cg_nm)) > 0) ? sprintf(pad_CGG_Labs[i], (n === cg_sel) ? "[%d %s]" : "%d %s", n, #cg_nm) :
+                                sprintf(pad_CGG_Labs[i], (n === cg_sel) ? "[%d  %d>%d]" : "%d  %d>%d", n, cg_ns, cg_nd);
                             us = cg_Users(n, 0, #cg_t3);
                             pad_CGG_Colrs[i] = us ? Color_Limegreen : !prv_ingrp[n] ? Col_P6 : (n === cg_sel) ? Col_P2 : Col_P1;
                         );

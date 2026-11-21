@@ -171,6 +171,7 @@ local (ii, std)
         uix_jG_menuscr[ii=0] = "Main";
         uix_jG_menuscr[ii+=1] = -1;
         uix_jtheme_ctlsiz = make_array(16); // up to 16 themes
+        uix_cz = make_array(UIX_CZS * UIX_CZMAX); // (2026-11-21) the cursor zones (see ui_cursor_zone, mSL_ui_LibJJ)
         ui_lib_JJ_inited = 1;
     );
     std = (size == 2);
@@ -602,6 +603,73 @@ function ui_split_topratio(ratio, mini) (
 
 function ui_split_leftratio(ratio,mini) (
     ui_split_left(max(mini,ratio*uix_drawconfig_current[18]));
+);
+
+// the border between two panes dragged (ui_jborders) : its index (-1 : none), its tab, the count of the panes ; the last
+// clic on a border (a double clic : the two panes equal)
+uix_jbdK = -1; uix_jbdTab = 0; uix_jbdN = 0; uix_jbdLK = -1; uix_jbdLT = 0;
+
+/*
+    (2026-11-21) The borders between the n panes of a tab (p : their widths, relative ; tab : its number ; the rect : the
+    tab ; the tabs of mSL_Panes and of the GamePlayer, genericTabSet) : under the mouse
+    (3 pixels on each side), a double arrow ; a left drag moves the border (the widths of its two panes, their sum kept ;
+    80 pixels at least each) ; a double clic : the two panes equal. The clic on a border is not seen by the modules
+    (uix_click_block). Called before the panes (ph 0 : the clics, the drag), then after them (ph 1 : the cursor zones, over
+    those of the modules)
+*/
+function ui_jborders(n, p, tab, ph)
+local(L, T, W, H, S, c, k, i, xb, hz, a, b, pm, x, r)
+(
+    L = ui_left(); T = ui_top(); W = max(1, ui_width()); H = ui_height(); r = ui_retina();
+    S = 0; k = 0; loop(n, S += max(1, p[k]); k += 1;);
+    hz = 3;
+    (ph === 0) ? (
+        // a drag going on (the same tab, the same panes) : the border follows the mouse
+        (uix_jbdK >= 0) ? (
+            ((uix_mcap & 1) && (uix_jbdTab === tab) && (uix_jbdN === n) && (uix_jbdK < n - 1)) ? (
+                k = uix_jbdK;
+                c = 0; i = 0; loop(k, c += max(1, p[i]); i += 1;);
+                a = max(1, p[k]); b = max(1, p[k + 1]);
+                pm = 80 * S / W;
+                x = max(pm, min(a + b - pm, (uix_mouse_x - L) / W * S - c));
+                (a + b > 2 * pm) ? (p[k] = x; p[k + 1] = a + b - x;);
+                ui_cursor_drag(6);
+                ui_GFXdoNow |= 4;
+            ) : (
+                uix_jbdK = -1;
+            );
+        );
+        // a clic on a border : a drag ; a double clic : the two panes equal
+        (uix_click1 && (uix_jbdK < 0) && (uix_mouse_y >= T) && (uix_mouse_y < T + H)) ? (
+            c = 0; k = 0;
+            loop(n - 1,
+                c += max(1, p[k]);
+                xb = L + W * c / S;
+                ((uix_jbdK < 0) && (abs(uix_mouse_x - xb) <= hz)) ? (
+                    ((uix_jbdLK === k) && (time_precise() - uix_jbdLT < 0.4)) ? (
+                        a = (max(1, p[k]) + max(1, p[k + 1])) / 2; p[k] = p[k + 1] = a;
+                        uix_jbdLK = -1;
+                    ) : (
+                        uix_jbdK = k; uix_jbdTab = tab; uix_jbdN = n;
+                        uix_jbdLK = k; uix_jbdLT = time_precise();
+                    );
+                    uix_click_block(); // (the modules under it do not see this clic)
+                    ui_cursor_drag(6);
+                    ui_GFXdoNow |= 4;
+                );
+                k += 1;
+            );
+        );
+    ) : (
+        // the cursor zones of the borders
+        c = 0; k = 0;
+        loop(n - 1,
+            c += max(1, p[k]);
+            xb = L + W * c / S;
+            ui_cursor_zone((xb - hz) * r, T * r, 2 * hz * r, H * r, 6, -1);
+            k += 1;
+        );
+    );
 );
 
 
