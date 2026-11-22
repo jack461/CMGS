@@ -3435,6 +3435,8 @@ local (j, i, tmp, bln, blu, blockStrSpace, blockThemeBlack, blockThemeTron, bloc
     blockDispNames[blockDynPars] = "Dynamic Play Parameters"; // 36
     blockConsole = (itdsp += 1);
     blockDispNames[blockConsole] = "mSL Console"; // 37 (2026-11-19, see mSL_Console ; the user modules follow : + 1)
+    blockGUI = (itdsp += 1);
+    blockDispNames[blockGUI] = "GUI"; // 38 (2026-11-21, see mSL_GUI ; the user modules follow : + 1)
 
     blockUsrFirst = itdsp+1;
     // Add users modules
@@ -3542,9 +3544,20 @@ local (j, i, tmp, bln, blu, blockStrSpace, blockThemeBlack, blockThemeTron, bloc
     blockThemeLightMagenta = (itdsp += 1);
     blockDispNames[blockThemeLightMagenta] = "!&1< Light Magenta"; //
     itdsp = ui_jzoom_menu_items(blockDispNames, itdsp); // the sub-menu "Display size" (see ui-lib-JJ-GUI)
-    (itdsp += 1); // separator
-    blockStyleSoft = (itdsp += 1);
-    blockDispNames[blockStyleSoft] = "&/Soft style"; // combined with the theme ; see ui_jstyle (saved in serialBlock[Pr7_UiStyle])
+    // (2026-11-21) the sub-menu "Style" : ui_jstyle 0 classic, 1 soft (saved in serialBlock[Pr7_UiStyle] ; combined with the
+    // theme ; see also the module "GUI", mSL_GUI)
+    blockDispNames[(itdsp += 1)] = ">Style";
+    blockStyle0 = (itdsp += 1);
+    blockDispNames[blockStyle0] = "&S Classic";
+    blockDispNames[(itdsp += 1)] = "&S< Soft";
+    // the sub-menu "Variation" : the cells of the pads, ui_jvariant 0 Std (filled), 1 Faded (the soft fill), 2 Text (their
+    // color in their text) ; -1 (the default) : as the style, Classic Std, Soft Faded (see control_jpad, mSL_ui_Pads)
+    blockDispNames[(itdsp += 1)] = ">Variation";
+    blockVar0 = (itdsp += 1);
+    blockDispNames[blockVar0] = "&V Std";
+    blockDispNames[(itdsp += 1)] = "&V Faded";
+    blockDispNames[(itdsp += 1)] = "&V Text";
+    blockDispNames[(itdsp += 1)] = "&V< Outline"; // (2026-11-22 : 3, Text and a selected cell framed)
     //
     //
     blockMenuITC = itdsp + 1 ;
@@ -8882,6 +8895,9 @@ mm_highblocks[0] = 'High'; mm_highblocks[1] = '_Mem';
 // mcon_CpFlags, mcon_LoadEnd, mcon_Tee and mcon_End are called by mSL_load_file_inGFX and mSL_run_slice ; part 2, the
 // module : in @gfx, after keepBlockInfos)
 <? mcon_part = 1; include("CMGS-libs/mSL_Console.jsfx-inc"); ?>
+
+// The rubric "GUI" (2026-11-21, see mSL_GUI), part 1 : the settings of the look, the record, the pad of the module
+<? jg_part = 1; include("CMGS-libs/mSL_GUI.jsfx-inc"); ?>
 // 2 slots for the context of the mSL Console (its incremental mode : the tables of its variables, see mSL_Console)
 mcon_prot = mm_usr_prot_ptr; mm_usr_prot[mcon_prot] = mm_usr_prot[mcon_prot + 1] = 0; mm_usr_prot_ptr += 2;
 
@@ -9239,7 +9255,7 @@ function playRewind()
 */
 // Implementation of the mSL "table" operation
 function
-Set_Table(tbl)
+Set_Table_App(tbl)
 local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback, rd_err, pt, zpt, totsize, tout, pttr,
     Cl_n, Cl_dB, ii, s1, s2, s3, s4, s5, ty, n, ps, cp, cnt, kct, vmin, vmax, pos, stnext, kmax, cvl, LWA, LWAsiz,
     xp1, xp2, xp3, AddT, flgneg, LWpt, err_pos)
@@ -12072,6 +12088,11 @@ local (st, itc, ptr, lptr, cwd, cwdMin, err, cid, hct, pt1st, xmct, flgs, stback
             //—-1-+=// State 1 we expect some keywords
             (cwd === mSL_KW_Table) ? (
                 st = 2; ptr +=1; //
+            ) :
+            (cwd === jg_kGUI) ? (
+                // (2026-11-21) a part GUI (the look of the application, mSL_GUI) : its keys, up to the next block
+                ptr = jg_Embedded(tbl, itc, ptr + 1, 1);
+                (jg_err !== 0) ? ( rd_err = jg_err; err_pos = ptr; ); // (already in the log)
             ) :
             (cwd === mSL_KW_End) ? (
                 st = 1; ptr +=1;//
@@ -15316,6 +15337,16 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
 
 
 // Insert here the mSL interpreter
+// (2026-11-21) The mSL "settings" : a block that starts with the word GUI goes to the rubric GUI (mSL_GUI), the others to
+// the settings of the application (Set_Table_App)
+function Set_Table(tbl)
+(
+    // (a part GUI in the settings : see Set_Table_App ; 2026-11-22 : GUI first and a word that is not a block of the Game
+    // Master after its keys, Table or DefM : a key misspelled, error 1640)
+    jg_Own(tbl, jg_Only(tbl) || ((jg_stopw !== mSL_KW_Table) && (jg_stopw !== mSL_KW_DefM))) ? jg_Settings(tbl) :
+        Set_Table_App(tbl);
+);
+
 <? include("CMGS-libs/mSL_Evaluator.jsfx-inc"); ?>
 
 
@@ -18663,6 +18694,9 @@ loadMode ? (
 
 AGMXXX += 1;
 
+// The rubric "GUI" (2026-11-21, see mSL_GUI) : the look of the pads ; the last record (the older projects end before it)
+jg_Serialize();
+
 mSL_tok_give(2); // end of @serialize
 
 
@@ -19353,6 +19387,9 @@ local(i)
 
 // The module "mSL Console", part 2 (2026-11-19) : the module (functions only ; after keepBlockInfos ; part 1 : @init)
 <? mcon_part = 2; include("CMGS-libs/mSL_Console.jsfx-inc"); ?>
+
+// The rubric "GUI" (2026-11-21, see mSL_GUI), part 2 : the module "GUI" (functions only)
+<? jg_part = 2; include("CMGS-libs/mSL_GUI.jsfx-inc"); ?>
 
 
 
@@ -26892,7 +26929,8 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in, x
             s = p[block1Pane -1 + studDispPrf];
             str_setchar(s, 1, '!');
             (serialBlock[Pr7_StudLive + TabIdt]) ? str_setchar(p[blockTabLive], 1, '!');
-            ui_jstyle ? str_setchar(p[blockStyleSoft], 1, '!');
+            str_setchar(p[blockStyle0 + (ui_jstyle != 0)], 1, '!'); // the current style, the current variation :
+            str_setchar(p[blockVar0 + ((ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0))], 1, '!');
             str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
             ui_jzoom_menu_tick(p); // current display size
             0 ? (
@@ -26970,8 +27008,11 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in, x
                 ui_jzoom_menu_click(kit) ? (
                     0; // a display size (see ui-lib-JJ-GUI)
                 ) :
-                (kit === blockStyleSoft) ? (
-                    serialBlock[Pr7_UiStyle] = ui_jstyle = !ui_jstyle;
+                ((kit >= blockStyle0) && (kit <= blockStyle0 + 1)) ? (
+                    serialBlock[Pr7_UiStyle] = ui_jstyle = kit - blockStyle0; // (the sub-menu "Style")
+                ) :
+                ((kit >= blockVar0) && (kit <= blockVar0 + 3)) ? (
+                    ui_jvariant = kit - blockVar0; // (the sub-menu "Variation" ; saved by the module GUI, jg_Serialize)
                 ) :
                 (kit >= blockThemeDefault) ? (
                     uix_jtheme = kit - blockThemeDefault;
@@ -27108,6 +27149,9 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in, x
                 (igb === blockConsole) ? (
                     show_Console(blockConsole); // (the module "mSL Console")
                 ) :
+                (igb === blockGUI) ? (
+                    show_GUI_Pad(blockGUI); // (the module "GUI", 2026-11-21)
+                ) :
                 //((igb >= blockUsrFirst) && (igb <= blockUsrLast) && (blockUsrChecks[igb - blockUsrFirst])) ? (
                 ((igb >= blockUsrFirst) && (igb <= blockUsrLast)) && (blockUsrChecks[blockUsrNum[igb - blockUsrFirst]]) ? (
                     show_UserModule(igb);
@@ -27172,6 +27216,16 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in, x
                 // increase 2nd col. size
                 k = min(20, max(0, p[2] - ui_MinSize1Pane)); p[3] += k; p[2] -= k;
             ) ;
+        ) :
+        // (2026-11-21) Shift + Up / Down : the column gets narrower, its width given back to the column on its right (Up :
+        // the reverse of Shift + Right) or on its left (Down : the reverse of Shift + Left ; the first and the last ones are
+        // neighbours, as above)
+        (pn_in && (GM_key_mods() === 8) && ((u = GM_key_take('up')) || GM_key_take('down'))) ? (
+            p = serialBlock + Pr7_StudRat + 4 * TabIdt;
+            ((studDispPCnt >= 2) && (colMouseWasIn >= 0) && (colMouseWasIn < studDispPCnt)) ? (
+                v = u ? (colMouseWasIn + 1) % studDispPCnt : (colMouseWasIn + studDispPCnt - 1) % studDispPCnt;
+                k = min(20, max(0, p[colMouseWasIn] - ui_MinSize1Pane)); p[colMouseWasIn] -= k; p[v] += k;
+            );
         );
 
 
@@ -27191,7 +27245,8 @@ local (p, i, xx, kit)
     i = 0; while (i < blockMenuITC) ( str_setchar(p[i], 1, ui_jmenu_chSP); i += 1; );
     str_setchar(p[block1Pane -1 + studDispPrf], 1, '!');
     str_setchar(p[blockTabLive], 1, '!');
-    ui_jstyle ? str_setchar(p[blockStyleSoft], 1, '!');
+    str_setchar(p[blockStyle0 + (ui_jstyle != 0)], 1, '!'); // the current style, the current variation :
+    str_setchar(p[blockVar0 + ((ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0))], 1, '!');
     str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
     ui_jzoom_menu_tick(p); // current display size
     xx = control_jmenu(menu_Stud_Mod);
@@ -27211,8 +27266,11 @@ local (p, i, xx, kit)
         ui_jzoom_menu_click(kit) ? (
             0; // a display size (see ui-lib-JJ-GUI)
         ) :
-        (kit === blockStyleSoft) ? (
-            serialBlock[Pr7_UiStyle] = ui_jstyle = !ui_jstyle;
+        ((kit >= blockStyle0) && (kit <= blockStyle0 + 1)) ? (
+            serialBlock[Pr7_UiStyle] = ui_jstyle = kit - blockStyle0; // (the sub-menu "Style")
+        ) :
+        ((kit >= blockVar0) && (kit <= blockVar0 + 3)) ? (
+            ui_jvariant = kit - blockVar0; // (the sub-menu "Variation" ; saved by the module GUI, jg_Serialize)
         ) :
         (kit >= blockThemeDefault) ? (
             uix_jtheme = kit - blockThemeDefault;

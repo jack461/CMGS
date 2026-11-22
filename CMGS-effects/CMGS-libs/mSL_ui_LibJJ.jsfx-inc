@@ -700,6 +700,28 @@ local(k, i, z, f, m)
     (k !== uix_czCur) ? (uix_cursor_set(k); uix_czCur = k;);
 );
 
+/*
+   (2026-11-22) The pads whose cells have roles (rubric GUI, step 2 : see ui_jpad_rl_action in mSL_ui_Pads) : their cells
+   react to the mouse (hover). The palette (uix_jp_tab, made by mSL_GUI : 0 without it) ; the rectangles of these pads in the
+   last frame drawn (uix_jhv_tab, uix_jhvN of them, see uix_jhv_add in mSL_ui_Pads) ; the cell under the mouse then
+   (uix_jhv_cur). must_do_gfx draws a frame when the mouse is on another cell.
+*/
+uix_jp_tab = 0; uix_jhv_tab = 0; uix_jhvN = 0; uix_jhv_cur = -1; uix_jalt = 0;
+// the cell under the mouse, among these pads : pad * 4096 + its place ; -1 if none
+function uix_jhv_key() local(i, q, k, cx, cy)
+(
+    k = -1; i = 0;
+    while ((k < 0) && (i < uix_jhvN)) (
+        q = uix_jhv_tab + 7 * i;
+        ((mouse_x >= q[0]) && (mouse_y >= q[1]) && (q[2] > 0) && (q[3] > 0)) ? (
+            cx = floor((mouse_x - q[0]) / q[2]); cy = floor((mouse_y - q[1]) / q[3]);
+            ((cx < q[4]) && (cy < q[5])) ? k = q[6] * 4096 + cy * q[4] + cx;
+        );
+        i += 1;
+    );
+    k;
+);
+
 // Should we execute now the graphic part of the plug-in ?
 //   ui_XFlags explains the reasons why we should do it
 //
@@ -724,6 +746,11 @@ local (R, prev_mouse_buttons, frame_count, prev_unix_time, prev_gfx_w, prev_gfx_
     // if we accept keyboard interactions
     (ui_XonKeyb & ui_XFlags) ? (uix_latestchar || ui_key_next()) ? ui_XlocDoNow |= 1;
 
+    // (2026-11-22) the mouse on another cell of a pad that has roles (its hover) ; Alt pressed or released (the tip of the
+    // cells, uix_jtip_set in mSL_ui_Pads)
+    ((uix_jhvN > 0) && (uix_jhv_key() !== uix_jhv_cur)) ? ui_XlocDoNow |= 1;
+    ((mouse_cap & 16) !== uix_jalt) ? (uix_jalt = mouse_cap & 16; ui_XlocDoNow |= 1;);
+
     ui_jmouse_cap = uix_mouse_cap(); // (without the "ghost" buttons, see uix_mghost in ui-lib)
     prev_mouse_buttons = ui_jmouse_buttons; ui_jmouse_buttons = ui_jmouse_cap & ui_XFlags;
 
@@ -735,7 +762,7 @@ local (R, prev_mouse_buttons, frame_count, prev_unix_time, prev_gfx_w, prev_gfx_
     ;
     (R != 0) ? ( ui_XUsrCnt += 1; ) ;
     R |= ui_XlocDoNow;
-    R ? (uix_czN = 0); // (a frame is drawn : its cursor zones are declared again)
+    R ? (uix_czN = 0; uix_jhvN = 0; uix_jhv_cur = -1; uix_jtip = 0;); // (a frame is drawn : its cursor zones, its pads with roles, the tip)
     ui_GFXdoNow = 0; // reset external requests
     ui_XlocDoNow = max(0, ui_XlocDoNow-1); // update internal flags
     prev_gfx_w = gfx_w; prev_gfx_h = gfx_h;

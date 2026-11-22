@@ -2145,6 +2145,12 @@ local (i)
 // part 2 : the module (keepBlockInfos, the UI libraries and the colors are defined above)
 <? mcon_part = 2; include("CMGS-libs/mSL_Console.jsfx-inc"); ?>
 
+// The rubric "GUI" (2026-11-21, see mSL_GUI), part 1 : the settings of the look, the record, the pad of the module
+<? jg_part = 1; include("CMGS-libs/mSL_GUI.jsfx-inc"); ?>
+
+// The rubric "GUI" (2026-11-21, see mSL_GUI), part 2 : the module "GUI" (functions only)
+<? jg_part = 2; include("CMGS-libs/mSL_GUI.jsfx-inc"); ?>
+
 
 
 /*
@@ -7550,6 +7556,9 @@ local (i, j, g, it, fid, sid, ttl, gl0, gl1, gl2, gl3, gl4, gl5, othFirst, tmp, 
     // are saved ; the user modules follow, their numbers + 1)
     blockConsole = (itdsp += 1);
     blockDispNames[blockConsole] = "mSL Console";
+    // the look of the pads (2026-11-21, see mSL_GUI ; the user modules follow, their numbers + 1)
+    blockGUI = (itdsp += 1);
+    blockDispNames[blockGUI] = "GUI";
 
     blockUsrFirst = itdsp+1;
     // Add users modules
@@ -7687,9 +7696,20 @@ local (i, j, g, it, fid, sid, ttl, gl0, gl1, gl2, gl3, gl4, gl5, othFirst, tmp, 
     blockThemeLightMagenta = (itdsp += 1);
     blockDispNames[blockThemeLightMagenta] = "!&1< Light Magenta"; //
     itdsp = ui_jzoom_menu_items(blockDispNames, itdsp); // the sub-menu "Display size" (see ui-lib-JJ-GUI)
-    (itdsp += 1); // separator
-    blockStyleSoft = (itdsp += 1);
-    blockDispNames[blockStyleSoft] = "&/Soft style"; // combined with the theme ; see ui_jstyle (saved in serialBlock[Pr7_UiStyle])
+    // (2026-11-21) the sub-menu "Style" : ui_jstyle 0 classic, 1 soft (saved in serialBlock[Pr7_UiStyle] ; combined with the
+    // theme ; see also the module "GUI", mSL_GUI)
+    blockDispNames[(itdsp += 1)] = ">Style";
+    blockStyle0 = (itdsp += 1);
+    blockDispNames[blockStyle0] = "&S Classic";
+    blockDispNames[(itdsp += 1)] = "&S< Soft";
+    // the sub-menu "Variation" : the cells of the pads, ui_jvariant 0 Std (filled), 1 Faded (the soft fill), 2 Text (their
+    // color in their text) ; -1 (the default) : as the style, Classic Std, Soft Faded (see control_jpad, mSL_ui_Pads)
+    blockDispNames[(itdsp += 1)] = ">Variation";
+    blockVar0 = (itdsp += 1);
+    blockDispNames[blockVar0] = "&V Std";
+    blockDispNames[(itdsp += 1)] = "&V Faded";
+    blockDispNames[(itdsp += 1)] = "&V Text";
+    blockDispNames[(itdsp += 1)] = "&V< Outline"; // (2026-11-22 : 3, Text and a selected cell framed)
     //
     //
     blockMenuITC = itdsp + 1 ;
@@ -12459,6 +12479,7 @@ its_TK_output = its_TK("output");
 its_TK_param = its_TK("param");
 its_TK_Set = its_TK("Set");
 its_TK_Curve = its_TK("Curve");
+its_TK_GUI = its_TK("GUI"); // (2026-11-21) a part GUI (the look of the application, mSL_GUI), see its_Tb_GUI
 its_TK_points = its_TK("points");
 its_TK_periodic = its_TK("periodic");
 its_TK_sustain = its_TK("sustain");
@@ -12972,7 +12993,7 @@ function its_Tb_IsHead(w)
         || (w === its_TK_Free) || (w === its_TK_End) || (w === its_TK_EofMark) || (w === its_TK_Algorithm)
         || (w === its_TK_Instance) || (w === its_TK_Set) || (w === its_TK_Curve) || (w === its_TK_Display) || (w === its_TK_Remove)
         || (w === its_TK_Control) || (w === its_TK_Export) || (w === its_TK_Tab) || (w === its_TK_View)
-        || (w === its_TK_Link) || (w === its_TK_Inject);
+        || (w === its_TK_Link) || (w === its_TK_Inject) || (w === its_TK_GUI);
 );
 
 // a number in [vmin, vmax] (a "-" word before it changes its sign) ; Undef and an error otherwise
@@ -19180,7 +19201,14 @@ function its_Tb_ShowAll() local(i, j, k, b, ty, t2, x, f)
 );
 
 // Implementation of the mSL "settings" operation (formerly "table")
-function Set_Table(tbl) local(m, w, xb)
+// (2026-11-21) A part GUI (mSL_GUI : its keys, up to the next block) : set in pass 3, only checked in the others
+function its_Tb_GUI()
+(
+    its_Tb_ptr = jg_Embedded(its_Tb_tbl, its_Tb_itc, its_Tb_ptr, its_Tb_mode === 3);
+    (jg_err !== 0) ? (its_Tb_error = jg_err); // (already in the log)
+);
+
+function Set_Table_App(tbl) local(m, w, xb)
 (
     its_Tb_tbl = tbl; its_Tb_itc = tbl[-1];
     its_Tb_error = its_Tb_res = its_TbNCnt = 0;
@@ -19226,8 +19254,9 @@ function Set_Table(tbl) local(m, w, xb)
             (w === its_TK_View) ? its_Tb_View() :
             (w === its_TK_Link) ? its_Tb_Link(0) :
             (w === its_TK_Inject) ? its_Tb_Inject() :
-            (w === its_TK_Curve) ? its_Tb_Curve() : (
-                sprintf(#its_TbW, "%s : a block (Line, Writer, Reader, Effect, Global, Control, Curve, Algorithm, Instance, Set, Dump, Check, Free, Display, Remove, Clear, Export, Tab, View, Link, Inject) is expected", mSL_edit_value(#its_TbV, w));
+            (w === its_TK_Curve) ? its_Tb_Curve() :
+            (w === its_TK_GUI) ? its_Tb_GUI() : (
+                sprintf(#its_TbW, "%s : a block (Line, Writer, Reader, Effect, Global, Control, Curve, Algorithm, Instance, Set, Dump, Check, Free, Display, Remove, Clear, Export, Tab, View, Link, Inject, GUI) is expected", mSL_edit_value(#its_TbV, w));
                 its_Tb_Err(2750, #its_TbW);
             );
         );
@@ -19243,6 +19272,14 @@ function Set_Table(tbl) local(m, w, xb)
 
 
 // Insert here the mSL interpreter
+// (2026-11-21) The mSL "settings" : a block GUI of its own goes to the rubric GUI (mSL_GUI), the others to the settings of
+// the application (Set_Table_App), where a part GUI may be in any place (its_Tb_GUI)
+function Set_Table(tbl)
+(
+    // (2026-11-22 : GUI first and a word that is not a block of Interstys after its keys : a key misspelled, error 1640)
+    jg_Own(tbl, jg_Only(tbl) || !its_Tb_IsHead(jg_stopw)) ? jg_Settings(tbl) : Set_Table_App(tbl);
+);
+
 <? include("CMGS-libs/mSL_Evaluator.jsfx-inc"); ?>
 
 
@@ -19298,6 +19335,8 @@ loadMode ? (
     handling_load = 1;
     (ldprev) ? its_Load_Drop();
     lditmc = 0; ldstud = 0; ldtnam = -1; // count of tabs names read (-1 : none in this preset)
+    jg_Defaults(); // (2026-11-21 : the rubric GUI, record 'gui1' ; an older project has none)
+    jg_DefReset(); // (2026-11-22 : the default of the user, record 'gui3')
     ldfxtv = 1; // the numbering of the types of effects (a block 'fxtv' ; none : 1, the types Mover, Action, Script)
     its_LayN = 0; its_LaySer += 1; // the speakers (a block 'spk1' ; none : no speakers)
     ldtotal = 0;
@@ -19516,6 +19555,39 @@ loadMode ? (
                 loop(2 * savtmp[1] * savtmp[2], file_var(0, zzz_dskip)); // (each value in 2 words, see save_mem)
             );
         ) :
+        (savtmp[0] === 'gui1') ? (
+            // the rubric GUI (2026-11-21, see mSL_GUI) : savtmp[1] values, one by one
+            z__sp = max(0, min(256, savtmp[1])); z__si = 0;
+            loop(z__sp, ldtotal += load_mem(0, savtmp, 1); (z__si < JG_NF) ? jg_Set(z__si, savtmp[0]); z__si += 1;);
+        ) :
+        (savtmp[0] === 'gui2') ? (
+            // (2026-11-22) the adjustments of the roles of the palette (see jg_AdjSet in mSL_GUI) : savtmp[1] of them,
+            // 4 values each (16 family + role, hue, lightness, chroma)
+            z__sp = max(0, min(128, savtmp[1]));
+            loop(z__sp,
+                ldtotal += load_mem(0, savtmp, 1); z__si = savtmp[0];
+                ldtotal += load_mem(0, savtmp, 1); z__sh = savtmp[0];
+                ldtotal += load_mem(0, savtmp, 1); z__sl = savtmp[0];
+                ldtotal += load_mem(0, savtmp, 1);
+                jg_AdjSet(z__si >> 4, z__si & 15, z__sh, z__sl, savtmp[0]);
+            );
+        ) :
+        (savtmp[0] === 'gui3') ? (
+            // (2026-11-22) the default of the user (see jg_SaveDef in mSL_GUI) : savtmp[1] values, its style savtmp[2], then
+            // savtmp[3] adjustments of its roles (4 values each)
+            jg_hasdef = 1; jg_defStyle = (savtmp[2] != 0);
+            z__sp = max(0, min(256, savtmp[1])); z__sn = max(0, min(128, savtmp[3])); z__si = 0;
+            loop(z__sp, ldtotal += load_mem(0, savtmp, 1); (z__si < JG_NF) ? jg_defv[z__si] = savtmp[0]; z__si += 1;);
+            jg_tgt = 1;
+            loop(z__sn,
+                ldtotal += load_mem(0, savtmp, 1); z__si = savtmp[0];
+                ldtotal += load_mem(0, savtmp, 1); z__sh = savtmp[0];
+                ldtotal += load_mem(0, savtmp, 1); z__sl = savtmp[0];
+                ldtotal += load_mem(0, savtmp, 1);
+                jg_AdjSet(z__si >> 4, z__si & 15, z__sh, z__sl, savtmp[0]);
+            );
+            jg_tgt = 0;
+        ) :
         (savtmp[0] === 'tnam') ? (
             ldtnam = savtmp[1]; // alternate tabs names (see "Rename tab...")
             z__si = 0; loop(savtmp[1],
@@ -19641,6 +19713,41 @@ loadMode ? (
     // the numbering of the types of effects (2026-11-18 : read before the effects, see the load)
     savtmp[0] = 'fxtv'; savtmp[1] = its_Efx_TyVers; savtmp[2] = savtmp[3] = 0;
     svtotal += save_mem(0, savtmp, TMPSIZ);
+    // the rubric GUI (2026-11-21, see mSL_GUI) : its values, by groups of TMPSIZ (savtmp : TMPSIZ words)
+    savtmp[0] = 'gui1'; savtmp[1] = JG_NF; savtmp[2] = savtmp[3] = 0;
+    svtotal += save_mem(0, savtmp, TMPSIZ);
+    z__si = 0; loop(JG_NF, savtmp[0] = jg_Get(z__si); svtotal += save_mem(0, savtmp, 1); z__si += 1;);
+    // (2026-11-22) the adjustments of the roles of the palette (see jg_AdjSet in mSL_GUI) : their count, 4 values each
+    savtmp[0] = 'gui2'; savtmp[1] = jg_AdjN(); savtmp[2] = savtmp[3] = 0;
+    svtotal += save_mem(0, savtmp, TMPSIZ);
+    z__si = 0;
+    loop(128,
+        jg_AdjAny(z__si >> 4, z__si & 15) ? (
+            z__sp = jg_Adj(z__si >> 4, z__si & 15);
+            savtmp[0] = z__si; svtotal += save_mem(0, savtmp, 1);
+            savtmp[0] = z__sp[0]; svtotal += save_mem(0, savtmp, 1);
+            savtmp[0] = z__sp[1]; svtotal += save_mem(0, savtmp, 1);
+            savtmp[0] = z__sp[2]; svtotal += save_mem(0, savtmp, 1);
+        );
+        z__si += 1;
+    );
+    // (2026-11-22) the default of the user (see jg_SaveDef in mSL_GUI), if any : its values, its style, its adjustments
+    jg_hasdef ? (
+        savtmp[0] = 'gui3'; savtmp[1] = JG_NF; savtmp[2] = jg_defStyle; savtmp[3] = jg_AdjND();
+        svtotal += save_mem(0, savtmp, TMPSIZ);
+        z__si = 0; loop(JG_NF, savtmp[0] = jg_defv[z__si]; svtotal += save_mem(0, savtmp, 1); z__si += 1;);
+        z__si = 0;
+        loop(128,
+            jg_AdjAnyD(z__si >> 4, z__si & 15) ? (
+                z__sp = jg_AdjD(z__si >> 4, z__si & 15);
+                savtmp[0] = z__si; svtotal += save_mem(0, savtmp, 1);
+                savtmp[0] = z__sp[0]; svtotal += save_mem(0, savtmp, 1);
+                savtmp[0] = z__sp[1]; svtotal += save_mem(0, savtmp, 1);
+                savtmp[0] = z__sp[2]; svtotal += save_mem(0, savtmp, 1);
+            );
+            z__si += 1;
+        );
+    );
 
     // siz4 = 0;
     // Save all objects, except lines set pointers and contents
@@ -21295,7 +21402,7 @@ local (p, k, chg)
 
 // a line of its own for the "n" inputs "mp" (reader, writer) : 0 "Modulation", 1 ... n the inputs ; returns 1 if a source changed
 function its_Mod_Row(mp, n, names, okm, defs, kinds)
-local (j, zz, zzmcl, jmc, chg)
+local (j, zz, zzmcl, jmc, chg, p)
 (
     chg = 0;
     mSL_setStrArray(pad_RdM_Labs, pad_RdM_Siz);
@@ -21307,6 +21414,22 @@ local (j, zz, zzmcl, jmc, chg)
     strcpy(pad_RdM_Labs[0], "Modulation");
     (its_Mod_BypState(mp, n) === 2) ? ( strcpy(pad_RdM_Labs[0], "Modulation (off)"); pad_RdM_Colrs[0] = Color_Dark_Orange; );
     its_Mod_Fill(pad_RdM_Labs, pad_RdM_Colrs, 1, mp, n, names, okm);
+    // (2026-11-22) the roles (the palette, rubric GUI) : "Modulation" and the inputs : Choice ; an input connected : selected,
+    // switched off (bypass) : locked (hatched), not usable in this mode : disabled ; all switched off : "Modulation" locked
+    ui_jpad_roles_set(pad_RdMod, 0, "c.......");
+    j = 0;
+    loop(pad_RdM_Siz,
+        (j >= 1) && (j <= n) ? (
+            ui_jpad_role(pad_RdMod, j, ui_jpad_rl_choice);
+            p = mp + (j - 1) * its_ModDist;
+            ui_jpad_mark(pad_RdMod, j, p[its_Mod_Src] !== 0, (okm & (1 << (j - 1))) === 0);
+            ui_jpad_lock(pad_RdMod, j, (p[its_Mod_Src] !== 0) && (p[its_Mod_Flags] & its_ModF_Byp));
+        ) : (
+            ui_jpad_mark(pad_RdMod, j, 0, 0); ui_jpad_lock(pad_RdMod, j, 0);
+        );
+        j += 1;
+    );
+    ui_jpad_lock(pad_RdMod, 0, its_Mod_BypState(mp, n) === 2);
     jmc = ui_jmouse_cap;
     ui_jpad_txt_rpad = its_Mod_BypCount(mp, n) ? 2 * its_ModDotR + 8 : 0; // (the room of the red dots)
     zz = control_jpad(pad_RdMod);
@@ -21590,6 +21713,72 @@ function its_Gr_CrvClick(r, ev, sh) local(k, i, xx)
     );
 );
 
+/*
+   (2026-11-22, the rubric GUI, step 2 : the pilot) The roles of the cells of the pad of a reader (their colors : the palette
+   chosen in the module GUI, see ui_jpad_rl_action in mSL_ui_Pads ; the colors of pad_Rdr_Colrs are not used any more) :
+     line 1 : the reader (Navigation : its menu), its status (State), its mode (Choice), its line (Object), the size or the
+              segment (Choice), the channels of the line (Information), the first one, the count used (Choice)
+     line 2 : Mute, Solo, the output, its count of channels (Choice), the position (Information), the speed (Value ; the
+              delay mode : the writer followed, Object), the error (Alert ; none : Empty), Action
+     line 3 : the transport (Choice : backward, the loop, the pause, forward)
+     lines 4, 5 : the settings of the modes Stretch, Brage (Value ; the lag : Information) and Grains (Value ; the curve of
+              the envelope : Object ; the count of grains : Information)
+   Their modes : selected (lit) : the status Reading, a segment, Mute, Solo, a count of output channels chosen, the
+   transport running, a setting changed ; disabled (dim : no effect now) : the status Paused, a setting of another mode, a
+   curve that is not an envelope, no reader yet (except its menu, its mode, its line and, in delay mode, the writer). The
+   region (RDBL[6] 1, 2) : the cells 19 and 20 in a color of the identity series (until then, Heliotrope, Light Steel Blue).
+   rok : the reader exists (rcbl), md its mode (or the mode chosen before it exists, RDBL[1])
+*/
+function its_Rd_Roles(rcbl, rok, md, RDBL) local(i, k, f, d, st)
+(
+    ui_jpad_roles_set(pad_Reader, 0, "nscocicccccciv.acccccccc");
+    (md === its_RdrMode_Delay) ? ui_jpad_role(pad_Reader, 13, ui_jpad_rl_object);
+    (rok && (rcbl[its_Rdr_Error] != 0)) ? ui_jpad_role(pad_Reader, 14, ui_jpad_rl_alert);
+    its_Rd_Blocks(md) ? ui_jpad_roles_set(pad_Reader, 24, "vvvvvi..") :
+    (md === its_RdrMode_Grains) ? ui_jpad_roles_set(pad_Reader, 24, "vvvvvvoivvvvvv..") :
+        ui_jpad_roles_set(pad_Reader, 24, "................");
+    (RDBL[6] > 0) ? (
+        ui_jpad_role(pad_Reader, 19, ui_jpad_rl_choice + ui_jpad_rl_ident * RDBL[6]);
+        ui_jpad_role(pad_Reader, 20, ui_jpad_rl_choice + ui_jpad_rl_ident * RDBL[6]);
+    );
+    // the modes : no reader yet, all dim except its menu, its mode, its line (and the writer in delay mode)
+    i = 0;
+    loop(pad_Rdr_Siz,
+        ui_jpad_mark(pad_Reader, i, 0, !rok && (i !== 0) && (i !== 2) && (i !== 3) && !((i === 13) && (md === its_RdrMode_Delay)));
+        i += 1;
+    );
+    rok ? (
+        st = rcbl[its_Rdr_Status];
+        ui_jpad_mark(pad_Reader, 1, st === its_RdrStat_Reading, st === its_RdrStat_Paused);
+        ui_jpad_mark(pad_Reader, 4, its_Rd_HasSeg(rcbl), 0);
+        ui_jpad_mark(pad_Reader, 8, (rcbl[its_Rdr_StFlgs] & its_RdrFlg_mute) != 0, 0);
+        ui_jpad_mark(pad_Reader, 9, (rcbl[its_Rdr_StFlgs] & its_RdrFlg_solo) != 0, 0);
+        ui_jpad_mark(pad_Reader, 11, rcbl[its_Rdr_OutCnt] > 0, 0);
+        // the transport : the direction read (the stretch in mode Stretch), the pause, ready
+        (st === its_RdrStat_Reading) ? (
+            ((d = its_Rd_Dir(rcbl)) >= 0) ? (k = (d > 1.3) ? ((d > 2.8) ? 23 : 22) : 21) :
+                (k = (d < -1.3) ? ((d < -2.8) ? 16 : 17) : 18);
+            ui_jpad_mark(pad_Reader, k, 1, 0);
+        ) :
+        (st === its_RdrStat_Paused) ? ui_jpad_mark(pad_Reader, 20, 1, 0) :
+        (st === its_RdrStat_Ready) ? ui_jpad_mark(pad_Reader, 19, 1, 0);
+        // the settings of the modes : changed (selected), without effect in this mode (dim)
+        i = 24;
+        loop(16,
+            (ui_jpad_role_of(pad_Reader, i) === ui_jpad_rl_value) ? (
+                f = its_RdSt_Field(rcbl, i);
+                ui_jpad_mark(pad_Reader, i, (f > 0) && (rcbl[f] !== its_RdSt_def), f <= 0);
+            );
+            i += 1;
+        );
+        // mode Grains : the curve of the envelope (dim : not an envelope)
+        (md === its_RdrMode_Grains) ? (
+            k = rcbl[its_Rdr_GrCurve] - 1;
+            ui_jpad_mark(pad_Reader, 30, 0, (k >= 0) && !((its_CrvBlk[k] > BASE_MEMORY) && (its_CrvTbXs[k] >= 0)));
+        );
+    );
+);
+
 function show_Reader_Pad(RDBL, blockId)
 local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, dfCol, zzmi, i, xx, w, k, r, jmc,
         rp, zi, zz, zzch, zzent, zzmcl, zzmmd, p1, p2, newlnb, rerr, spd, d1, clen, mvl, rgh, rsc, p, c, f, dr, wy)
@@ -21846,6 +22035,8 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                 strcpy(pad_Rdr_Labs[23],">>>");
 
 
+                // (2026-11-22) the roles of the cells and their modes (the palette, see its_Rd_Roles)
+                its_Rd_Roles(rcbl, rok, (rok) ? rcbl[its_Rdr_Mode] : RDBL[1], RDBL);
                 zz = control_jpad(pad_Reader, its_Rd_PadLines((rok) ? rcbl[its_Rdr_Mode] : RDBL[1]), -1, 0); // delay mode : 2 lines, Stretch : 4
                 // muted by another reader in solo : a small red circle in the "Mute" cell
                 (rok && (its_RdrSolos !== 0) && !(rcbl[its_Rdr_StFlgs] & its_RdrFlg_solo)) ? (
@@ -24855,6 +25046,37 @@ local (h1, h2, h3, h3d, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r,
             10 source (right clic : menu ; left clic : first channel taken), 11 write position (s), 13 W-Mix : the phase of the cycle,
             15 actions (right or left clic : menus)
 */
+/*
+   (2026-11-22, the rubric GUI, step 2) The roles of the cells of the pad of a writer (their colors : the palette chosen in
+   the module GUI ; the colors of pad_Wrt_Colrs are not used any more) :
+     line 1 : the writer (Navigation : its menu), its status (State), its mode (Choice), its line (Object), its size, the
+              channels of the line (Information), the first one, the count used (Choice)
+     line 2 : the direction (Choice ; W-Mix : none), the source (Choice), the position (Information), the phase of the
+              cycle of W-Mix (State), Action
+   Their modes : selected (lit) : the status Writing, the direction while it goes backward (until then, orange), the phase
+   of W-Mix while it writes (fade-in, plateau, fade-out) ; disabled (dim) : the status Paused, no line (its size and
+   channels), no writer yet (except its menu and its line). wok : the writer exists (wcbl), lok : it has a line
+*/
+function its_Wr_Roles(wcbl, wok, lok) local(i, k, wm)
+(
+    wm = wok && (wcbl[its_Wrt_Mode] === its_WrtMode_WMix);
+    ui_jpad_roles_set(pad_Writer, 0, wm ? "nscoiicc..ci.s.a" : "nscoiiccc.ci...a");
+    i = 0;
+    loop(pad_Wrt_Siz,
+        ui_jpad_mark(pad_Writer, i, 0, (!wok && (i !== 0) && (i !== 3)) || (wok && !lok && (i >= 4) && (i <= 7)));
+        i += 1;
+    );
+    wok ? (
+        k = wcbl[its_Wrt_Status];
+        ui_jpad_mark(pad_Writer, 1, k === its_WrtStat_Writing, k === its_WrtStat_Paused);
+        !wm ? ui_jpad_mark(pad_Writer, 8, wcbl[its_Wrt_Step] < 0, 0);
+        wm ? (
+            k = wcbl[its_Wrt_WPhase];
+            ui_jpad_mark(pad_Writer, 13, (k === its_WMix_FadeIn) || (k === its_WMix_Plateau) || (k === its_WMix_FadeOut), 0);
+        );
+    );
+);
+
 function show_Writer_Pad(WDBL, blockId)
 local (h1, h2, h3, h4, h5, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl, lok, CL1, dfCol, i, k, r, w, x, xx, zi, zz, zzch,
         zzent, zzmcl, zzmmd, wgh, f, n, wm)
@@ -24959,6 +25181,8 @@ local (h1, h2, h3, h4, h5, uix_jneed, uix_jmini, zzmi, jmc, wrt, wcbl, wok, lcbl
                 strcpy(pad_Wrt_Labs[15],"Action");
                 pad_Wrt_Colrs[15] = Col_P1;
 
+                // (2026-11-22) the roles of the cells and their modes (the palette, see its_Wr_Roles)
+                its_Wr_Roles(wcbl, wok, lok);
                 zz = control_jpad(pad_Writer);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 34;
@@ -28817,7 +29041,8 @@ local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in
             s = p[block1Pane -1 + studDispPrf];
             str_setchar(s, 1, '!');
             (serialBlock[Pr7_StudLive + TabIdt]) ? str_setchar(p[blockTabLive], 1, '!');
-            ui_jstyle ? str_setchar(p[blockStyleSoft], 1, '!');
+            str_setchar(p[blockStyle0 + (ui_jstyle != 0)], 1, '!'); // the current style, the current variation :
+            str_setchar(p[blockVar0 + ((ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0))], 1, '!');
             str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
             ui_jzoom_menu_tick(p); // current display size
             0 ? (
@@ -28894,8 +29119,11 @@ local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in
                 ui_jzoom_menu_click(kit) ? (
                     0; // a display size (see ui-lib-JJ-GUI)
                 ) :
-                (kit === blockStyleSoft) ? (
-                    serialBlock[Pr7_UiStyle] = ui_jstyle = !ui_jstyle;
+                ((kit >= blockStyle0) && (kit <= blockStyle0 + 1)) ? (
+                    serialBlock[Pr7_UiStyle] = ui_jstyle = kit - blockStyle0; // (the sub-menu "Style")
+                ) :
+                ((kit >= blockVar0) && (kit <= blockVar0 + 3)) ? (
+                    ui_jvariant = kit - blockVar0; // (the sub-menu "Variation" ; saved by the module GUI, jg_Serialize)
                 ) :
                 (kit >= blockThemeDefault) ? (
                     uix_jtheme = kit - blockThemeDefault;
@@ -29061,6 +29289,9 @@ local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in
                 (igb === blockConsole) ? (
                     show_Console(blockConsole); // (the module "mSL Console")
                 ) :
+                (igb === blockGUI) ? (
+                    show_GUI_Pad(blockGUI); // (the module "GUI", 2026-11-21)
+                ) :
                 ((igb >= blockUsrFirst) && (igb <= blockUsrLast)) && (blockUsrChecks[blockUsrNum[igb - blockUsrFirst]]) ? (
                     show_UserModule(igb);
                 );
@@ -29126,6 +29357,16 @@ local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in
                 // increase 2nd col. size
                 k = min(20, max(0, p[2] - ui_MinSize1Pane)); p[3] += k; p[2] -= k;
             ) ;
+        ) :
+        // (2026-11-21) Shift + Up / Down : the column gets narrower, its width given back to the column on its right (Up :
+        // the reverse of Shift + Right) or on its left (Down : the reverse of Shift + Left ; the first and the last ones are
+        // neighbours, as above)
+        (pn_in && (GM_key_mods() === 8) && ((u = GM_key_take('up')) || GM_key_take('down'))) ? (
+            p = serialBlock + Pr7_StudRat + 4 * TabIdt;
+            ((studDispPCnt >= 2) && (colMouseWasIn >= 0) && (colMouseWasIn < studDispPCnt)) ? (
+                v = u ? (colMouseWasIn + 1) % studDispPCnt : (colMouseWasIn + studDispPCnt - 1) % studDispPCnt;
+                k = min(20, max(0, p[colMouseWasIn] - ui_MinSize1Pane)); p[colMouseWasIn] -= k; p[v] += k;
+            );
         );
 
 
@@ -29145,7 +29386,8 @@ local (p, i, xx, kit)
     i = 0; while (i < blockMenuITC) ( str_setchar(p[i], 1, ui_jmenu_chSP); i += 1; );
     str_setchar(p[block1Pane -1 + studDispPrf], 1, '!');
     str_setchar(p[blockTabLive], 1, '!');
-    ui_jstyle ? str_setchar(p[blockStyleSoft], 1, '!');
+    str_setchar(p[blockStyle0 + (ui_jstyle != 0)], 1, '!'); // the current style, the current variation :
+    str_setchar(p[blockVar0 + ((ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0))], 1, '!');
     str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
     ui_jzoom_menu_tick(p); // current display size
     xx = control_jmenu(menu_Stud_Mod);
@@ -29165,8 +29407,11 @@ local (p, i, xx, kit)
         ui_jzoom_menu_click(kit) ? (
             0; // a display size (see ui-lib-JJ-GUI)
         ) :
-        (kit === blockStyleSoft) ? (
-            serialBlock[Pr7_UiStyle] = ui_jstyle = !ui_jstyle;
+        ((kit >= blockStyle0) && (kit <= blockStyle0 + 1)) ? (
+            serialBlock[Pr7_UiStyle] = ui_jstyle = kit - blockStyle0; // (the sub-menu "Style")
+        ) :
+        ((kit >= blockVar0) && (kit <= blockVar0 + 3)) ? (
+            ui_jvariant = kit - blockVar0; // (the sub-menu "Variation" ; saved by the module GUI, jg_Serialize)
         ) :
         (kit >= blockThemeDefault) ? (
             uix_jtheme = kit - blockThemeDefault;
@@ -29223,6 +29468,8 @@ local (p, ww, t, BankLink)
 
     studDispCol = 0;
     p = serialBlock + Pr7_StudRat + 4 * TabIdt;
+    (studDispPCnt > 1) ? ui_jborders(studDispPCnt, p, TabIdt, 0); // (2026-11-21 : the borders dragged, ui-lib-JJ-GUI)
+    ui_push(); // (the rect of the tab, for ui_jborders after the panes)
     (studDispPCnt === 4)  ? (
         ui_split_leftratio(max(1, p[0])/max(1, p[0] + p[1] + p[2] + p[3]));
             genericItemsPos(TabIdt * dcbPannelsMax);
@@ -29254,6 +29501,8 @@ local (p, ww, t, BankLink)
     ) : (
         genericItemsPos(TabIdt * dcbPannelsMax);
     );
+    ui_pop();
+    (studDispPCnt > 1) ? ui_jborders(studDispPCnt, p, TabIdt, 1);
     ); // live / panes
     do_GenericTabEnd();
 );

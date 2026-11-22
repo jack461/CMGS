@@ -2039,6 +2039,11 @@ function control_finish_technical(state) (
 	ui_pop();
 );
 
+// (JJG 2026-11-21) a packed color (0xRRGGBB) and an opacity as the current color (ui_pcolor, mSL_ui_LibJJ, comes after this
+// file) ; the titles of the groups (the modules) when the background is made darker or lighter (uix_jbg_on, rubric GUI :
+// the colors of the texts and of the borders made readable on it, see update_theme in ui-lib-JJ-GUI)
+function uix_jcol(c, a) ( ui_color((c >> 16) & 255, (c >> 8) & 255, c & 255, a); );
+
 function control_group(text) local(texth, textw, textl, textr, textv) (
 	uix_control_theme == 2/*uix_THEME:TRON*/ ? (
 		ui_fontsize(min(min(uix_default_fontsize, ui_height()*0.2), ui_padding_y()*2));
@@ -2047,17 +2052,17 @@ function control_group(text) local(texth, textw, textl, textr, textv) (
 
 		!ui_jstyle ? ( // (JJG) no frames with the "soft" look
 			ui_push();
-				ui_color(128, 128, 128);
+				uix_jbg_on ? uix_jcol(ui_jcolor_border, 0.6) : ui_color(128, 128, 128);
 				gfx_roundrect(ui_left_retina(), ui_top_retina() + 1, ui_width_retina(), ui_height_retina() - 1, 10*uix_drawconfig_current[9/*uix_DRAWCONFIG:RETINA_SCALING*/], 1);
 			ui_pop();
 		);
 
 		strlen(text) > 0 ? (
 			ui_split_bottom(ui_texth() + ui_padding_y()/2);
-				ui_color(128, 128, 128);
+				uix_jbg_on ? uix_jcol(ui_jcolor_border, 0.6) : ui_color(128, 128, 128);
 				!ui_jstyle ? ui_border_top(); // (JJG) no frames with the "soft" look
 
-				ui_color(255, 255, 255);
+				uix_jbg_on ? uix_jcol(ui_jcolor_text, 0.8) : ui_color(255, 255, 255);
 				ui_align(0.5, 0.5);
 				ui_text(text);
 			ui_pop();
@@ -2079,8 +2084,10 @@ function control_group(text) local(texth, textw, textl, textr, textv) (
 			texth /= uix_drawconfig_current[9/*uix_DRAWCONFIG:RETINA_SCALING*/];
 			textw /= uix_drawconfig_current[9/*uix_DRAWCONFIG:RETINA_SCALING*/];
 
-			// Border color
-			uix_control_theme == 1/*uix_THEME:BLACK_AND_WHITE*/ ? (
+			// Border color (JJG : the background made darker or lighter : the color of the texts, readable on it)
+			uix_jbg_on ? (
+				uix_jcol(ui_jcolor_text, 0.75);
+			) : uix_control_theme == 1/*uix_THEME:BLACK_AND_WHITE*/ ? (
 				// ui_color(255, 255, 255);
 				ui_color(uix_black_border);
 			) : uix_control_theme == 3/*uix_THEME:BITMAP_SIMPLE*/ ? (
@@ -2105,7 +2112,7 @@ function control_group(text) local(texth, textw, textl, textr, textv) (
 					textv = ui_top_retina() + ui_height_retina()/2;
 					textw > 0 ? (
 						ui_align(0.5, 0.5);
-						uix_control_theme == 1/*uix_THEME:BLACK_AND_WHITE*/ ? (
+						((uix_control_theme == 1/*uix_THEME:BLACK_AND_WHITE*/) && !uix_jbg_on) ? (
 							ui_color(255, 255, 255);
 						);
 						ui_text(text);
@@ -2114,8 +2121,10 @@ function control_group(text) local(texth, textw, textl, textr, textv) (
 			ui_pop();
 			ui_padbottom();
 
-			// Border colour is lighter
-			uix_control_theme == 3/*uix_THEME:BITMAP_SIMPLE*/ ? (
+			// Border colour is lighter (JJG : the background changed : the color of the borders, readable on it)
+			uix_jbg_on ? (
+				uix_jcol(ui_jcolor_border, 0.6);
+			) : uix_control_theme == 3/*uix_THEME:BITMAP_SIMPLE*/ ? (
 				uix_control_color_from_theme(151, 30, 0.25);
 			);
 
@@ -2375,8 +2384,9 @@ function uix_slider_soft(screenratio, handlesize, state, linkToLeft) local(rs, x
 	hh = floor(ui_height_retina() * 1.2); // height of the handle (a little higher than the slider)
 	gfx_mode = 0;
 	// the line : dim on the right, accent color on the left of the handle
-	c = ui_jcolor_text;
-	gfx_r = ((c >> 16) & 0xff) / 255; gfx_g = ((c >> 8) & 0xff) / 255; gfx_b = (c & 0xff) / 255; gfx_a = 0.15;
+	// ((JJG 2026-11-21) the background made darker or lighter, rubric GUI : the track in its color, a little brighter)
+	c = uix_jbg_on ? uix_jbg_track : ui_jcolor_text;
+	gfx_r = ((c >> 16) & 0xff) / 255; gfx_g = ((c >> 8) & 0xff) / 255; gfx_b = (c & 0xff) / 255; gfx_a = uix_jbg_on ? 1 : 0.15;
 	gfx_rect(x0, floor(yc - lt / 2), x1 - x0, lt);
 	c = ui_jcolor_draw;
 	gfx_r = ((c >> 16) & 0xff) / 255; gfx_g = ((c >> 8) & 0xff) / 255; gfx_b = (c & 0xff) / 255; gfx_a = 1;
@@ -2399,7 +2409,7 @@ function uix_slider_soft(screenratio, handlesize, state, linkToLeft) local(rs, x
 // time : ui_drag() is true only in the slider where the press was) : the ratio, the last mouse position, the column
 uix_sld_r = uix_sld_lx = uix_sld_ly = uix_sld_xc = 0;
 
-function uix_control_slider_h(value, range_low, range_high, curve_bias, hasDefault, defaultValue, linkToLeft) local(valueratio, screenratio, state, barwidth, handlesize, hx, pxw, inr, inc) (
+function uix_control_slider_h(value, range_low, range_high, curve_bias, hasDefault, defaultValue, linkToLeft) local(valueratio, screenratio, state, barwidth, handlesize, hx, pxw, inr, inc, jc) (
 	// We calculate screenratio first (before updating value) because then any rounding/limiting applied to the value is reflected in the UI
 	screenratio = uix_slider_value_to_ratio(value, range_low, range_high, curve_bias);
 
@@ -2410,6 +2420,27 @@ function uix_control_slider_h(value, range_low, range_high, curve_bias, hasDefau
 			state = control_state();
 			ui_push();
 				uix_slider_soft(screenratio, handlesize, state, linkToLeft);
+			ui_pop();
+		) : uix_jbg_on ? (
+			// (JJG 2026-11-21) the classic look, the background made darker or lighter (rubric GUI : ui_jg_bgk, see
+			// update_theme) : the images of the theme can't follow it ; a flat slider in its colors (the track a little
+			// brighter, its edge, the filled part or the handle in the color of the drawings, the accent when pressed)
+			// (ui_color : ui_pcolor, mSL_ui_LibJJ, comes after this file)
+			state = control_state();
+			jc = uix_jbg_track; ui_color((jc >> 16) & 255, (jc >> 8) & 255, jc & 255); ui_fill();
+			jc = uix_jbg_trackb; ui_color((jc >> 16) & 255, (jc >> 8) & 255, jc & 255); ui_border();
+			ui_push();
+				linkToLeft ? (
+					barwidth = floor((ui_width() - 1)*screenratio + 1.5);
+					ui_split_left(barwidth);
+				) : (
+					ui_align(screenratio, 0.5);
+					ui_push_width(handlesize);
+				);
+					jc = ((state == "press") || (state == "drag")) ? uix_theme_accent() : ui_jcolor_draw;
+					ui_color((jc >> 16) & 255, (jc >> 8) & 255, jc & 255);
+					ui_pad(1, 1); ui_fill();
+				ui_pop();
 			ui_pop();
 		) : (
 		uix_control_theme == 1/*uix_THEME:BLACK_AND_WHITE*/ ? (

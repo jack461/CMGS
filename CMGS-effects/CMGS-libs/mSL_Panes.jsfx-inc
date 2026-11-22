@@ -284,9 +284,20 @@ local (i, j, g, it, othFirst, tmp, itdsp, blockStrSpace, blockThemeBlack, blockT
     blockThemeLightMagenta = (itdsp += 1);
     blockDispNames[blockThemeLightMagenta] = "!&1< Light Magenta"; //
     itdsp = ui_jzoom_menu_items(blockDispNames, itdsp); // the sub-menu "Display size" (see ui-lib-JJ-GUI)
-    (itdsp += 1); // separator
-    blockStyleSoft = (itdsp += 1);
-    blockDispNames[blockStyleSoft] = "&/Soft style"; // combined with the theme ; see ui_jstyle (saved in serialBlock[Pr7_UiStyle])
+    // (2026-11-21) the sub-menu "Style" : ui_jstyle 0 classic, 1 soft (saved in serialBlock[Pr7_UiStyle] ; combined with the
+    // theme ; see also the module "GUI", mSL_GUI)
+    blockDispNames[(itdsp += 1)] = ">Style";
+    blockStyle0 = (itdsp += 1);
+    blockDispNames[blockStyle0] = "&S Classic";
+    blockDispNames[(itdsp += 1)] = "&S< Soft";
+    // the sub-menu "Variation" : the cells of the pads, ui_jvariant 0 Std (filled), 1 Faded (the soft fill), 2 Text (their
+    // color in their text) ; -1 (the default) : as the style, Classic Std, Soft Faded (see control_jpad, mSL_ui_Pads)
+    blockDispNames[(itdsp += 1)] = ">Variation";
+    blockVar0 = (itdsp += 1);
+    blockDispNames[blockVar0] = "&V Std";
+    blockDispNames[(itdsp += 1)] = "&V Faded";
+    blockDispNames[(itdsp += 1)] = "&V Text";
+    blockDispNames[(itdsp += 1)] = "&V< Outline"; // (2026-11-22 : 3, Text and a selected cell framed)
     //
     //
     blockMenuITC = itdsp + 1 ;
@@ -730,7 +741,8 @@ local(xx, igb, u, v, i, j, k, p, s, wst, kit, x, d, e, pn_in)
             s = p[block1Pane -1 + studDispPrf];
             str_setchar(s, 1, '!');
             (serialBlock[Pr7_StudLive + TabIdt]) ? str_setchar(p[blockTabLive], 1, '!');
-            ui_jstyle ? str_setchar(p[blockStyleSoft], 1, '!');
+            str_setchar(p[blockStyle0 + (ui_jstyle != 0)], 1, '!'); // the current style, the current variation :
+            str_setchar(p[blockVar0 + ((ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0))], 1, '!');
             str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
             ui_jzoom_menu_tick(p); // current display size
 
@@ -783,8 +795,11 @@ local(xx, igb, u, v, i, j, k, p, s, wst, kit, x, d, e, pn_in)
                 ui_jzoom_menu_click(kit) ? (
                     0; // a display size (see ui-lib-JJ-GUI)
                 ) :
-                (kit === blockStyleSoft) ? (
-                    serialBlock[Pr7_UiStyle] = ui_jstyle = !ui_jstyle;
+                ((kit >= blockStyle0) && (kit <= blockStyle0 + 1)) ? (
+                    serialBlock[Pr7_UiStyle] = ui_jstyle = kit - blockStyle0; // (the sub-menu "Style")
+                ) :
+                ((kit >= blockVar0) && (kit <= blockVar0 + 3)) ? (
+                    ui_jvariant = kit - blockVar0; // (the sub-menu "Variation" ; saved by the module GUI, jg_Serialize)
                 ) :
                 (kit >= blockThemeDefault) ? (
                     uix_jtheme = kit - blockThemeDefault;
@@ -872,6 +887,16 @@ local(xx, igb, u, v, i, j, k, p, s, wst, kit, x, d, e, pn_in)
                 // increase 2nd col. size
                 k = min(20, max(0, p[2] - ui_MinSize1Pane)); p[3] += k; p[2] -= k;
             ) ;
+        ) :
+        // (2026-11-21) Shift + Up / Down : the column gets narrower, its width given back to the column on its right (Up :
+        // the reverse of Shift + Right) or on its left (Down : the reverse of Shift + Left ; the first and the last ones are
+        // neighbours, as above)
+        (pn_in && (GM_key_mods() === 8) && ((u = GM_key_take('up')) || GM_key_take('down'))) ? (
+            p = serialBlock + Pr7_StudRat + 4 * TabIdt;
+            ((studDispPCnt >= 2) && (colMouseWasIn >= 0) && (colMouseWasIn < studDispPCnt)) ? (
+                v = u ? (colMouseWasIn + 1) % studDispPCnt : (colMouseWasIn + studDispPCnt - 1) % studDispPCnt;
+                k = min(20, max(0, p[colMouseWasIn] - ui_MinSize1Pane)); p[colMouseWasIn] -= k; p[v] += k;
+            );
         );
     );
     blockDesc = 0;
@@ -889,7 +914,8 @@ local (p, i, xx, kit)
     i = 0; while (i < blockMenuITC) ( str_setchar(p[i], 1, ui_jmenu_chSP); i += 1; );
     str_setchar(p[block1Pane -1 + studDispPrf], 1, '!');
     str_setchar(p[blockTabLive], 1, '!');
-    ui_jstyle ? str_setchar(p[blockStyleSoft], 1, '!');
+    str_setchar(p[blockStyle0 + (ui_jstyle != 0)], 1, '!'); // the current style, the current variation :
+    str_setchar(p[blockVar0 + ((ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0))], 1, '!');
     str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
     ui_jzoom_menu_tick(p); // current display size
     xx = control_jmenu(menu_Stud_Mod);
@@ -909,8 +935,11 @@ local (p, i, xx, kit)
         ui_jzoom_menu_click(kit) ? (
             0; // a display size (see ui-lib-JJ-GUI)
         ) :
-        (kit === blockStyleSoft) ? (
-            serialBlock[Pr7_UiStyle] = ui_jstyle = !ui_jstyle;
+        ((kit >= blockStyle0) && (kit <= blockStyle0 + 1)) ? (
+            serialBlock[Pr7_UiStyle] = ui_jstyle = kit - blockStyle0; // (the sub-menu "Style")
+        ) :
+        ((kit >= blockVar0) && (kit <= blockVar0 + 3)) ? (
+            ui_jvariant = kit - blockVar0; // (the sub-menu "Variation" ; saved by the module GUI, jg_Serialize)
         ) :
         (kit >= blockThemeDefault) ? (
             uix_jtheme = kit - blockThemeDefault;

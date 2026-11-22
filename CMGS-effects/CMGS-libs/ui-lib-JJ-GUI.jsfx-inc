@@ -15,7 +15,7 @@
 ui_lib_JJ_inited = 0;
 uix_jtheme_ctlsiz = 0;
 uix_jtheme = 0;
-ui_jstyle = 0; // 0 : classic look ; 1 : "soft" look (no frames, soft cells, thin sliders, hidden tabs bar) - saved by the host
+ui_jstyle = 0; // 0 : classic look ; 1 : "soft" look (no frames, soft cells, thin sliders, hidden tabs bar) - saved by the host ; the cells of the pads : see ui_jvariant (mSL_ui_Pads)
 uix_jtheme_prev = -1;
 uix_jtheme_img = -1; // the bitmap theme whose image is loaded (-1 : none ; see uix_jtheme_load)
 uix_jtheme_menu = 0;
@@ -38,6 +38,20 @@ ui_jzoomDef = 5; // 100 %
 ui_jzoomK = ui_jzoomDef;
 ui_jzoomItem0 = -1; // the item "50 %" in the menu of the modules of the plugin (ui_jzoom_menu_items)
 ui_jfontk = 1.1; // the fonts at 100 % (uix_fontk, see ui_jzoom_set ; 1 for the compact size of ui_lib_JJ_GUI_init)
+// (2026-11-21) The rubric GUI (mSL_GUI) : the size of all the texts (percent ; the fonts, and above 100 % the heights of
+// the lines, see ui_jtext_set) ; the labels of the faders (slider_ctl, slider_ctl_led) : the size of their text, the
+// width they get (percent of ui_js_slValSize), bold
+ui_jg_fonts = 100;
+ui_jg_ftext = 100;
+ui_jg_fwidth = 100;
+ui_jg_fbold = 0;   // the labels of the faders in bold (1)
+ui_jg_bgk = 0;     // the background : darker (-80 ... -1 %) or lighter (1 ... 80 %) ; 0 : as the theme (see update_theme)
+uix_jbg_k = 0; ui_jcolor_text0 = 0; // (the color of the texts given by the theme, before ui_jg_bgk)
+ui_jcolor_draw0 = ui_jcolor_border0 = 0; // (the same : the color of the drawings, of the borders)
+uix_jbg_on = 0;    // the background is changed (ui_jg_bgk, not a "live" tab) : the faders follow it (uix_jbg_track ...)
+uix_jbg_track = uix_jbg_trackb = 0; // their track : the background a little brighter ; its edge
+ui_jstd = 1;      // the size given to ui_lib_JJ_GUI_init : 1 standard, 0 compact
+ui_jd_vtext0 = 20; // the height of a line of text at 100 % (ui_jd_vtext : with ui_jg_fonts)
 
 function ui_jzoom_pc(k)
 (
@@ -51,7 +65,8 @@ function ui_jzoom_set(k)
     uix_zoom = ui_jzoom_pc(ui_jzoomK) / 100;
     // the fonts : ui_jfontk at 100 %, reduced less than the rest (50 % : 0.71 of their size at 100 %, 70 % : 0.87),
     // and enlarged less (150 % : 1.28, 200 % : 1.52)
-    uix_fontk = ui_jfontk * (uix_zoom ^ (-0.4));
+    uix_fontk = ui_jfontk * (ui_jg_fonts / 100) * (uix_zoom ^ (-0.4));
+    uix_font_dirty = 1;
     uix_jl_gfx_w = -1; // the sizes of the tabs bar are computed again (my_menu_bar_classic)
     ui_GFXdoNow |= 1; ui_GFXReason = 46;
 );
@@ -132,9 +147,11 @@ function ui_lib_JJ_updSiz()
 (
     // Update some secondary values
     ui_jd_tboxh = ui_jd_tboxs = ui_jd_vtext + ui_jd_delta2; // text box size
-    ui_jd_slidh = ui_jd_vtext + ui_jd_delta0; // slider height
-    ui_jd_menuh = ui_jd_vtext + ui_jd_delta3; // main tabulation bar height
-    ui_jd_padline = ui_jd_vtext + ui_jd_delta4; // pad line height
+    // (2026-11-21) the labels of the faders and the text of the pads larger (rubric GUI : ui_jg_ftext, ui_jg_ptext, above
+    // 100 %) : their lines get higher (ui_text makes a text smaller to fit the height of its box)
+    ui_jd_slidh = floor(ui_jd_vtext * max(1, ui_jg_ftext / 100) + 0.5) + ui_jd_delta0; // slider height
+    ui_jd_menuh = floor(ui_jd_vtext * max(1, ui_jg_ptext / 100) + 0.5) + ui_jd_delta3; // main tabulation bar height (its tabs : a pad)
+    ui_jd_padline = floor(ui_jd_vtext * max(1, ui_jg_ptext / 100) + 0.5) + ui_jd_delta4; // pad line height
     ui_jd_padb2 = ui_jd_padb + ui_jd_delta2; // integated pads
     ui_jd_bboxs = ui_jd_padTBox1 * 2 + ui_jd_padTBox2 * 2; // box group border
     ui_jd_ctgr = ui_cg_lab_height + ui_cg_pad_top + ui_cg_pad_bottom + ui_spec_jd_ctgr; // add. size for the group label
@@ -156,6 +173,29 @@ function uix_jBoxHeight(k) // height of a show box with "k" lines
 );
 
 
+// the heights that follow the height of a line of text (ui_jd_vtext) : the group labels, per theme
+function uix_jctlsiz() local(ii)
+(
+    ii = 0; loop(16, uix_jtheme_ctlsiz[ii] = ui_jd_vtext + (ui_jstd ? 13 : 12); ii += 1;);
+    uix_jtheme_ctlsiz[0] = ui_cg_lab_height = ui_jd_vtext + (ui_jstd ? 16 : 12);
+    uix_jtheme_ctlsiz[1] = ui_jd_vtext + (ui_jstd ? 23 : 26); // Black
+    uix_jtheme_ctlsiz[2] = ui_jd_vtext + 36; // Tron
+);
+
+// (2026-11-21) The size of all the texts (rubric GUI : "fonts", 80 ... 150 %) : the fonts (uix_fontk) ; above 100 %, the
+// heights of the lines too (ui_jd_vtext and the sizes that follow it : the boxes, the sliders, the pads, the tabs bar)
+function ui_jtext_set(pc)
+(
+    ui_jg_fonts = max(50, min(200, pc));
+    uix_fontk = ui_jfontk * (ui_jg_fonts / 100) * (uix_zoom ^ (-0.4));
+    ui_jd_vtext = floor(ui_jd_vtext0 * max(1, ui_jg_fonts / 100) + 0.5);
+    uix_jctlsiz();
+    ui_lib_JJ_updSiz();
+    uix_font_dirty = 1;
+    uix_jl_gfx_w = -1; // the sizes of the tabs bar are computed again (my_menu_bar_classic)
+    ui_GFXdoNow |= 1;
+);
+
 /*
     the dimensions of the interface, in ui units : size 2, the standard one (Helvetica 15), used by the plugins of the
     Game Master ; size 1, a compact one (Arial 13), kept for the small plugins (MIDI_In, SmoothMultiLimiter) ;
@@ -172,16 +212,23 @@ local (ii, std)
         uix_jG_menuscr[ii+=1] = -1;
         uix_jtheme_ctlsiz = make_array(16); // up to 16 themes
         uix_cz = make_array(UIX_CZS * UIX_CZMAX); // (2026-11-21) the cursor zones (see ui_cursor_zone, mSL_ui_LibJJ)
+        // (2026-11-21) the tabs bar and its button "Back", drawn as pads (the look of the pads, rubric GUI) ; no border :
+        // each tab keeps the width of its zone of clics (uix_jsiz_menu_bar_item_width)
+        uix_jtabs_pad = make_jpad(ui_jpad_ty_sel | ui_jpad_mk_labs | ui_jpad_mk_colors, 1, 32, 32);
+        uix_jtabs_pad[ui_jpad_border] = 0;
+        uix_jback_pad = make_jpad(ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors, 1, 1, 1);
+        uix_jback_pad[ui_jpad_border] = 0;
         ui_lib_JJ_inited = 1;
     );
-    std = (size == 2);
+    ui_jstd = std = (size == 2);
     ui_jfontk = std ? 1.1 : 1;
-    uix_fontk = ui_jfontk * (uix_zoom ^ (-0.4));
+    uix_fontk = ui_jfontk * (ui_jg_fonts / 100) * (uix_zoom ^ (-0.4));
 
     ui_jdefault_fontface = #FONT;
     strcpy(ui_jdefault_fontface, std ? "Helvetica" : "Arial");
     ui_jdefault_fontsize = std ? 15 : 13;
-    ui_jd_vtext = std ? 20 : 19; // text vertical size
+    ui_jd_vtext0 = std ? 20 : 19; // text vertical size (at 100 %)
+    ui_jd_vtext = floor(ui_jd_vtext0 * max(1, ui_jg_fonts / 100) + 0.5); // (with the size of the texts, rubric GUI)
     ui_jd_padb = 4; // pad line border
     ui_cg_pad_top = std ? 2 : 1;
     ui_cg_pad_bottom = 1;
@@ -207,10 +254,7 @@ local (ii, std)
     ui_jd_delta10 = std ? 52 : 42;
     ui_jd_delta20 = std ? 90 : 75;
     // the height of the group labels, per theme
-    ii = 0; loop(16, uix_jtheme_ctlsiz[ii] = ui_jd_vtext + (std ? 13 : 12); ii += 1;);
-    uix_jtheme_ctlsiz[0] = ui_cg_lab_height = ui_jd_vtext + (std ? 16 : 12);
-    uix_jtheme_ctlsiz[1] = ui_jd_vtext + (std ? 23 : 26); // Black
-    uix_jtheme_ctlsiz[2] = ui_jd_vtext + 36; // Tron
+    uix_jctlsiz();
 
     uix_default_fontsize = ui_jdefault_fontsize;
     uix_default_fontface = ui_jdefault_fontface;
@@ -272,8 +316,11 @@ local (r, w, k, ssv, ssx, ssvd)
         ui_hover() ? (
             ui_click(2) ? r |= 8;
         );
-        k = ui_js_slValSize;
+        // (2026-11-21) the label : its width, the size of its text (rubric GUI : ui_jg_fwidth, ui_jg_ftext)
+        k = (ui_jg_fwidth !== 100) ? max(20, min(floor(ui_js_slValSize * ui_jg_fwidth / 100), ui_width() - 40)) : ui_js_slValSize;
         ui_split_left(k);
+            (ui_jg_ftext !== 100) ? ui_fontsize(ui_fontsize(0) * ui_jg_ftext / 100);
+            ui_jg_fbold ? ui_fontbold(1);
             ui_align(0, 0.5); //
             // compute the "display value"
             ssvd = ssv + ((ssv>0)?(rnd/100):(ssv<0)?(-rnd/100):0);
@@ -314,8 +361,11 @@ local (r, z, w, k, ssv, ssx, ssvd)
         ui_hover() ? (
             ui_click(2) ? r |= 8;
         );
-        k = ui_js_slValSize;
+        // (2026-11-21) the label : its width, the size of its text (rubric GUI : ui_jg_fwidth, ui_jg_ftext)
+        k = (ui_jg_fwidth !== 100) ? max(20, min(floor(ui_js_slValSize * ui_jg_fwidth / 100), ui_width() - 40)) : ui_js_slValSize;
         ui_split_left(k);
+            (ui_jg_ftext !== 100) ? ui_fontsize(ui_fontsize(0) * ui_jg_ftext / 100);
+            ui_jg_fbold ? ui_fontbold(1);
             ui_align(0, 0.5); //
             (led1 != 0) ? (
                 ui_split_left(14);
@@ -386,8 +436,52 @@ function uix_jmy_theme_menu() local(z)
 );
 
 
+// (2026-11-21) The tabs bar drawn as a pad (control_jpad : the style, the variation, the frames, the gaps, the texts of
+// the rubric GUI) : the current tab selected, in the accent color of the theme ; the others in a grey tinted by it
+function uix_jtab_other() local(a)
+(
+    a = uix_theme_accent();
+    ((0|(((a >> 16) & 255) * 0.35 + 140 * 0.65)) << 16) | ((0|(((a >> 8) & 255) * 0.35 + 140 * 0.65)) << 8) |
+        (0|((a & 255) * 0.35 + 140 * 0.65));
+);
+// the count of tabs of "said" (ended by -1) shown in the width aw (each one tw wide)
+function uix_jtabs_count(said, aw, tw) local(n)
+(
+    n = 0; while ((said[n] != -1) && (aw > tw)) ( aw -= tw; n += 1; );
+    n;
+);
+// the n first tabs in the current rectangle ; returns the tab clicked (0 ...), -1 : none
+function uix_jtabs_draw(said, n) local(p, labs, cols, cdefs, i, str, ast, acc, oth, ev)
+(
+    p = uix_jtabs_pad;
+    labs = p + p[ui_jpad_labs]; cols = p + p[ui_jpad_clrs]; cdefs = p + p[ui_jpad_cells];
+    acc = uix_theme_accent(); oth = uix_jtab_other();
+    n = max(1, min(32, n));
+    i = 0;
+    loop(n,
+        str = said[i];
+        labs[i] = ((altTabsNames != 0) && ((ast = altTabsNames[i]) != 0) && (strlen(ast) != 0)) ? ast : str;
+        cols[i] = (str == ui_screen()) ? acc : oth;
+        cdefs[i] = (cdefs[i] & (-1 ~ ui_jpad_ct_selec)) | ((str == ui_screen()) ? ui_jpad_ct_selec : 0);
+        ui_jpad_role(p, i, ui_jpad_rl_nav); // (2026-11-22 : the palette, rubric GUI ; the current tab : selected)
+        i += 1;
+    );
+    ev = control_jpad(p, 1, n, 1);
+    ((ev & ui_jpad_ev_lmc) && (p[ui_jpad_last] >= 1)) ? p[ui_jpad_last] - 1 : -1;
+);
+// the button "Back" (a secondary screen) in the current rectangle ; 1 if clicked
+function uix_jback_draw() local(p, ev)
+(
+    p = uix_jback_pad;
+    (p + p[ui_jpad_labs])[0] = "Back";
+    (p + p[ui_jpad_clrs])[0] = uix_jtab_other();
+    ui_jpad_role(p, 0, ui_jpad_rl_action); // (2026-11-22 : the palette, rubric GUI)
+    ev = control_jpad(p);
+    (ev & ui_jpad_ev_lmc) ? 1 : 0;
+);
+
 function my_menu_bar_classic(said)
-local(str, str2, tw, ii, aw, ast, xcol)
+local(tw, aw, n, k, xcol)
 (
     (gfx_w != uix_jl_gfx_w) ? (
         uix_jl_gfx_w = gfx_w;
@@ -401,32 +495,21 @@ local(str, str2, tw, ii, aw, ast, xcol)
         ui_pcolor(ui_jcolor_text);
         aw = ui_width();
 
-        ii = 0;
-        while ((str = said[ii]) != -1) (
-            (aw > tw) ? (
-                aw -= tw;
-                (ii == 0) ? ui_split_left(tw) : ui_split_next();
-                // ui_split_left(tw);
-                ui_pad(2,2,0,2);
-                str2 = str;
-                ((altTabsNames != 0) && ((ast = altTabsNames[ii]) != 0) && (strlen(ast) != 0)) ? (
-                    str2 = ast;
-                );
-                (control_button(str2, str != ui_screen())) ? (
-                    uix_jmbsel = ii; // selected tabulation
-                    ui_screen_switch(str);
+        // (2026-11-21) the tabs : a pad (see uix_jtabs_draw ; until then, buttons of the theme)
+        ((n = uix_jtabs_count(said, aw, tw)) > 0) ? (
+            ui_split_left(n * tw);
+                (((k = uix_jtabs_draw(said, n)) >= 0) && (said[k] != ui_screen())) ? (
+                    uix_jmbsel = k; // selected tabulation
+                    ui_screen_switch(said[k]);
                     ui_GFXdoNow |= 1;
                     ui_GFXReason = 40;
                 );
-            );
-            ii+= 1;
+            ui_pop();
         );
-        ui_pop();
 
         (ui_screen_level() > 0) ? (
             ui_split_right(tw);
-                ui_pad(2,2);
-                control_button("Back") ? (
+                uix_jback_draw() ? (
                     ui_screen_close();
                     ui_GFXdoNow |= 1;
                     ui_GFXReason = 41;
@@ -457,6 +540,10 @@ ui_jbar_delay = 10; // in seconds (the time to come back to the bar after leavin
 ui_jbar_shown = 0; // the bar is visible
 ui_jbar_was = 0; // it was visible at the previous display
 ui_jbar_in = 0; // the mouse was over the bar at the previous display
+// (2026-11-22, the rubric GUI : the key tabs, see mSL_GUI) the tabs bar : 0 as the style (Classic : always shown ; Soft :
+// shown when the mouse comes near the top of the window), 1 always shown, 2 shown when the mouse comes near the top
+ui_jg_tabs = 0;
+function uix_jbar_auto() ( (ui_jg_tabs === 1) ? 0 : (ui_jg_tabs === 2) ? 1 : (ui_jstyle != 0); );
 
 function my_menu_bar_soft(said)
 local(str, tw, ii, aw, h, ww, inb)
@@ -516,14 +603,29 @@ local(str, tw, ii, aw, h, ww, inb)
     uix_javail_Wheight = ui_height(); // the panes use the whole height
 );
 
+// (2026-11-22) The tip of a cell (Alt and the mouse on it : #uix_jtip_s, see uix_jtip_set in mSL_ui_Pads) : near the mouse,
+// over everything (called by my_menu_bar_overlay)
+function uix_jtip_draw() local(rs, w, h, x, y, m)
+(
+    rs = uix_drawconfig_current[9];
+    uix_setgfxfont();
+    w = h = 0; gfx_measurestr(#uix_jtip_s, w, h);
+    m = floor(4 * rs);
+    x = max(0, min(gfx_w - w - 2 * m - 1, mouse_x + floor(14 * rs)));
+    y = mouse_y + floor(18 * rs); (y + h + 2 * m > gfx_h) ? y = max(0, mouse_y - h - 2 * m - floor(6 * rs));
+    gfx_set(0.08, 0.08, 0.09, 0.92); gfx_rect(x, y, w + 2 * m, h + 2 * m);
+    gfx_set(0.6, 0.6, 0.62, 1); gfx_rect(x, y, w + 2 * m, h + 2 * m, 0);
+    gfx_set(0.96, 0.96, 0.97, 1); gfx_x = x + m; gfx_y = y + m; gfx_drawstr(#uix_jtip_s);
+    gfx_a = 1;
+);
+
 // Draws the "soft" tabs bar over the panes (to call at the end of @gfx, at the top level)
 function my_menu_bar_overlay(said)
-local(str, str2, tw, ii, aw, ast, h, acc, bgc, ww)
+local(tw, n, aw, h, bgc, ww)
 (
-    (ui_jstyle && ui_jbar_shown) ? (
+    (uix_jbar_auto() && ui_jbar_shown) ? (
         h = ui_jd_menuh;
         ww = gfx_w / uix_drawconfig_current[9]; // width of the window (ui coordinates)
-        acc = uix_theme_accent();
         bgc = (ui_pcontrast(ui_jcolor_text) == uix_pblack) ? 0x202020 : 0xF2F2F2; // dark under a light text, and conversely
         ui_push();
             ui_set_rect(0, 0, ww, h); // absolute position : the top of the window, over the panes
@@ -532,42 +634,25 @@ local(str, str2, tw, ii, aw, ast, h, acc, bgc, ww)
             ui_pad(5,2);
             tw = uix_jsiz_menu_bar_item_width;
             aw = ui_width();
-            ii = 0;
-            while ((str = said[ii]) != -1) (
-                (aw > tw) ? (
-                    aw -= tw;
-                    (ii == 0) ? ui_split_left(tw) : ui_split_next();
-                    str2 = str;
-                    ((altTabsNames != 0) && ((ast = altTabsNames[ii]) != 0) && (strlen(ast) != 0)) ? (
-                        str2 = ast;
-                    );
-                    ui_align(0.5, 0.5);
-                    (str == ui_screen()) ? (
-                        // current tab : soft fill in the accent color of the theme
-                        uix_jpad_soft_fill(ui_left(), ui_top(), ui_width(), ui_height(), str2, acc);
-                        ui_pcolor(ui_pcontrast(acc));
-                    ) : (
-                        ui_pcolor(ui_hover() ? acc : ui_jcolor_text);
-                    );
-                    ui_text(str2);
-                );
-                ii += 1;
+            // (2026-11-21) the tabs : a pad (see uix_jtabs_draw ; the clics were taken by my_menu_bar_soft)
+            ((n = uix_jtabs_count(said, aw, tw)) > 0) ? (
+                ui_split_left(n * tw);
+                    uix_jtabs_draw(said, n);
+                ui_pop();
             );
-            ui_pop();
             (ui_screen_level() > 0) ? (
                 ui_split_right(tw);
-                    ui_align(0.5, 0.5);
-                    ui_pcolor(ui_hover() ? acc : ui_jcolor_text);
-                    ui_text("Back");
+                    uix_jback_draw();
                 ui_pop();
             );
         ui_pop();
     );
+    uix_jtip ? uix_jtip_draw(); // (2026-11-22 : the tip of a cell, Alt)
 );
 
 function my_menu_bar(said)
 (
-    ui_jstyle ? my_menu_bar_soft(said) : my_menu_bar_classic(said);
+    uix_jbar_auto() ? my_menu_bar_soft(said) : my_menu_bar_classic(said); // (2026-11-22 : ui_jg_tabs, as the style by default)
 );
 
 // Next (d = 1) or previous (d = -1) tabulation of the menu bar "said" (uix_jG_menuscr, ended by -1),
@@ -859,6 +944,368 @@ function uix_jtheme_load() local(slot, w, h)
 );
 
 
+// (2026-11-21) The background darker or lighter (rubric GUI : ui_jg_bgk) : its color, after the change (uix_jbg_r, _g, _b :
+// 0 ... 1) ; a veil (black or white) over the image of the themes Tron and bitmap, or their plain color changed
+function uix_jbg_color() local(k, w, r, g, b, od)
+(
+    k = max(-0.9, min(0.9, ui_jg_bgk / 100)); w = (k > 0);
+    (uix_control_theme === 3) ? (
+        // the image of the theme : a pixel of its tile (see control_start)
+        od = gfx_dest; gfx_dest = uix_control_theme_buffer; gfx_x = gfx_y = 80; r = g = b = 0; gfx_getpixel(r, g, b);
+        gfx_dest = od;
+    ) : (uix_control_theme === 2) ? (
+        r = g = b = 70 / 255;
+    ) : (
+        r = (gfx_clear & 255) / 255; g = ((gfx_clear >> 8) & 255) / 255; b = ((gfx_clear >> 16) & 255) / 255;
+    );
+    uix_jbg_r = r + abs(k) * (w - r); uix_jbg_g = g + abs(k) * (w - g); uix_jbg_b = b + abs(k) * (w - b);
+);
+// the background (uix_jbg_r ...) moved by d toward white (dark) or black (light) : a packed color
+function uix_jbg_shift(d) local(w, r, g, b)
+(
+    w = ((0.299 * uix_jbg_r + 0.587 * uix_jbg_g + 0.114 * uix_jbg_b) < 0.5);
+    r = uix_jbg_r + d * (w - uix_jbg_r); g = uix_jbg_g + d * (w - uix_jbg_g); b = uix_jbg_b + d * (w - uix_jbg_b);
+    ((0|(r * 255 + 0.5)) << 16) | ((0|(g * 255 + 0.5)) << 8) | (0|(b * 255 + 0.5));
+);
+function uix_jbg_draw() local(k)
+(
+    k = max(-0.9, min(0.9, ui_jg_bgk / 100));
+    ((uix_control_theme === 2) || (uix_control_theme === 3)) ? (
+        gfx_set(k > 0, k > 0, k > 0, abs(k)); // (the veil)
+        gfx_rect(0, 0, gfx_w, gfx_h);
+    ) : (
+        uix_jbg_color(); // (the plain color : drawn, and the clear color of the next frames)
+        gfx_set(uix_jbg_r, uix_jbg_g, uix_jbg_b, 1);
+        gfx_rect(0, 0, gfx_w, gfx_h);
+        gfx_clear = (0|(uix_jbg_r * 255 + 0.5)) + 256 * (0|(uix_jbg_g * 255 + 0.5)) + 65536 * (0|(uix_jbg_b * 255 + 0.5));
+    );
+    gfx_a = 1;
+);
+
+/*
+   (2026-11-22) The palette (rubric GUI, step 2) : the colors of the cells that have a role (see ui_jpad_rl_action in
+   mSL_ui_Pads), computed in OKLCH (the same perceived lightness for all the roles), from the theme, its background (made
+   darker or lighter : ui_jg_bgk) and the settings of the module GUI (mSL_GUI) :
+     ui_jp_fam      the family : 0 Theme (the action cells in the color of the buttons of the theme, the other roles its
+                    neighbours), 1 Mono (one hue : the roles by their lightness), 2 Analog (neighbouring hues), 3 Complement
+                    (the commands on one side of the circle, the data opposite, the signals between), 4 Spectrum (six hues
+                    around the circle), 5 Muted (neighbouring hues, little saturated), 6 Pastel (light cells, dark text),
+                    7 Contrast (fixed hues, Okabe-Ito : distinct with a color blindness)
+     ui_jp_hue      the base hue (0 ... 359 degrees) ; -1 : that of the theme (the family Theme : always)
+     ui_jp_chroma   the saturation (0 ... 100 %)
+     ui_jp_light    the lightness (0 ... 100 %)
+     ui_jp_danger   0 : the cells Danger in red ; 1 : in a hue of the palette
+     ui_jp_hover    the strength of the mode "hover" (0 ... 100 %) ; "selected" : ui_jpad_selmix x 2 ; "disabled" : ui_jp_dis
+   The table uix_jp_tab (JP_TABSIZE words, made by mSL_GUI, part 1 : uix_jp_init) : for the role k (1 ... 15) and the mode
+   m (0 rest, 1 hover, 2 pressed, 3 selected, 4 disabled, 5 locked), at 8 k + m the fill, + 128 its text, + 256 the text
+   on the background (the variation Text) ; the identity series (16 colors, the role Object) the same from 384 ; the data
+   of the families from 896 ; the pads with roles (uix_jhv_tab, see mSL_ui_LibJJ) from 1040 ; (2026-11-22) the adjustments
+   of the roles by the user from JP_ADJ (1152 : for the family f and the role k, at 3 (16 f + k) : the hue in degrees, the
+   lightness in %, the chroma in % of that of the palette ; see jg_AdjSet in mSL_GUI). Made again by update_theme
+   when uix_jp_dirty (a setting, the theme, the background, the variation changed). The measures (uix_jp_measure) : the
+   least contrast of a text, the least difference between two roles, between a role and the background.
+*/
+JP_TABSIZE = 1920; JP_ADJ = 1152; JP_ADJD = 1536; // (JP_ADJD : the adjustments of the default of the user, see jg_SaveDef in mSL_GUI)
+ui_jp_fam = 0; ui_jp_hue = -1; ui_jp_chroma = 50; ui_jp_light = 50; ui_jp_danger = 0; ui_jp_hover = 60; ui_jp_dis = 70;
+uix_jp_dirty = 1; uix_jp_vr = -1; uix_jp_vtx = 0; uix_jp_itx = 0;
+uix_jp_mTxt = uix_jp_mDe = uix_jp_mBg = 0; uix_jp_mTxtR = uix_jp_mDeA = uix_jp_mDeB = uix_jp_mBgR = 0;
+
+// sRGB <-> linear ; the cube root (of a negative number too)
+function uix_jp_lin(c) ( (c <= 0.04045) ? c / 12.92 : ((c + 0.055) / 1.055) ^ 2.4; );
+function uix_jp_delin(c) ( c = max(0, min(1, c)); (c <= 0.0031308) ? 12.92 * c : 1.055 * (c ^ (1 / 2.4)) - 0.055; );
+function uix_jp_cbrt(x) ( (x >= 0) ? x ^ (1 / 3) : -((-x) ^ (1 / 3)); );
+// a packed color (0xRRGGBB) in OKLab : uix_jp_oL, uix_jp_oa, uix_jp_ob
+function uix_jp_lab(c) local(r, g, b, x, y, z)
+(
+    r = uix_jp_lin(((c >> 16) & 255) / 255); g = uix_jp_lin(((c >> 8) & 255) / 255); b = uix_jp_lin((c & 255) / 255);
+    x = uix_jp_cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    y = uix_jp_cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    z = uix_jp_cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    uix_jp_oL = 0.2104542553 * x + 0.7936177850 * y - 0.0040720468 * z;
+    uix_jp_oa = 1.9779984951 * x - 2.4285922050 * y + 0.4505937099 * z;
+    uix_jp_ob = 0.0259040371 * x + 0.7827717662 * y - 0.8086757660 * z;
+);
+// in OKLCH : uix_jp_cL, uix_jp_cC, uix_jp_cH (degrees)
+function uix_jp_lch(c)
+(
+    uix_jp_lab(c);
+    uix_jp_cL = uix_jp_oL; uix_jp_cC = sqrt(sqr(uix_jp_oa) + sqr(uix_jp_ob));
+    uix_jp_cH = atan2(uix_jp_ob, uix_jp_oa) * 180 / $pi; (uix_jp_cH < 0) ? uix_jp_cH += 360;
+);
+// OKLab -> linear sRGB (uix_jp_lr, uix_jp_lg, uix_jp_lb) ; 1 if in the gamut
+function uix_jp_tolin(ll, aa, bb) local(x, y, z)
+(
+    x = ll + 0.3963377774 * aa + 0.2158037573 * bb; x = x * x * x;
+    y = ll - 0.1055613458 * aa - 0.0638541728 * bb; y = y * y * y;
+    z = ll - 0.0894841775 * aa - 1.2914855480 * bb; z = z * z * z;
+    uix_jp_lr = 4.0767416621 * x - 3.3077115913 * y + 0.2309699292 * z;
+    uix_jp_lg = -1.2684380046 * x + 2.6097574011 * y - 0.3413193965 * z;
+    uix_jp_lb = -0.0041960863 * x - 0.7034186147 * y + 1.7076147010 * z;
+    (uix_jp_lr >= -0.0001) && (uix_jp_lr <= 1.0001) && (uix_jp_lg >= -0.0001) && (uix_jp_lg <= 1.0001) &&
+        (uix_jp_lb >= -0.0001) && (uix_jp_lb <= 1.0001);
+);
+// OKLCH -> a packed color ; out of the gamut : the chroma reduced (the same lightness, the same hue)
+function uix_jp_mk(ll, cc, hh) local(ca, sa, lo, hi, md)
+(
+    ll = max(0, min(1, ll)); cc = max(0, cc);
+    ca = cos(hh * $pi / 180); sa = sin(hh * $pi / 180);
+    !uix_jp_tolin(ll, cc * ca, cc * sa) ? (
+        lo = 0; hi = cc;
+        loop(20, md = (lo + hi) / 2; uix_jp_tolin(ll, md * ca, md * sa) ? (lo = md) : (hi = md););
+        uix_jp_tolin(ll, lo * ca, lo * sa);
+    );
+    ((0|(uix_jp_delin(uix_jp_lr) * 255 + 0.5)) << 16) | ((0|(uix_jp_delin(uix_jp_lg) * 255 + 0.5)) << 8) |
+        (0|(uix_jp_delin(uix_jp_lb) * 255 + 0.5));
+);
+// the luminance (WCAG) ; the contrast of two colors (1 ... 21) ; the text (light or dark) the most readable on c
+function uix_jp_lum(c)
+(
+    0.2126 * uix_jp_lin(((c >> 16) & 255) / 255) + 0.7152 * uix_jp_lin(((c >> 8) & 255) / 255) +
+        0.0722 * uix_jp_lin((c & 255) / 255);
+);
+function uix_jp_ctr(c1, c2) local(x, y) ( x = uix_jp_lum(c1); y = uix_jp_lum(c2); (max(x, y) + 0.05) / (min(x, y) + 0.05); );
+function uix_jp_best(c) ( (uix_jp_ctr(0xF6F7F8, c) >= uix_jp_ctr(0x121314, c)) ? 0xF6F7F8 : 0x121314; );
+// the difference of two colors (in OKLab, x 100)
+function uix_jp_dist(c1, c2) local(l1, a1, b1)
+(
+    uix_jp_lab(c1); l1 = uix_jp_oL; a1 = uix_jp_oa; b1 = uix_jp_ob;
+    uix_jp_lab(c2);
+    100 * sqrt(sqr(l1 - uix_jp_oL) + sqr(a1 - uix_jp_oa) + sqr(b1 - uix_jp_ob));
+);
+// a text in the color (ll, cc, hh), readable on the background (contrast 4.5 at least : lighter on a dark background,
+// darker on a light one)
+function uix_jp_tbg(ll, cc, hh) local(c, i, go)
+(
+    cc = min(cc, 0.17); go = 1; i = 0;
+    while (go && (i < 50)) (
+        c = uix_jp_mk(ll, cc, hh);
+        (uix_jp_ctr(c, uix_jp_bgc) >= 4.5) ? (go = 0) : (ll = max(0, min(1, ll + uix_jp_dir * 0.02)); i += 1;);
+    );
+    go ? uix_jp_best(uix_jp_bgc) : c;
+);
+// the lightness of the color (uix_jp_cL) at least d away from that of the background
+function uix_jp_sep(d) ( (abs(uix_jp_cL - uix_jp_bgL) < d) ? uix_jp_cL = uix_jp_bgL + ((uix_jp_bgL < 0.5) ? d : -d); );
+// the fixed colors of the family Contrast (Okabe-Ito) : action, choice, navigation, value, object, state, danger, other
+function uix_jp_oi(i)
+(
+    (i === 0) ? 0x0072B2 : (i === 1) ? 0xE69F00 : (i === 2) ? 0x56B4E9 : (i === 3) ? 0x009E73 : (i === 4) ? 0xCC79A7 :
+    (i === 5) ? 0xF0E442 : (i === 6) ? 0xD55E00 : 0x8E7CC3;
+);
+// a fixed color, its lightness and its chroma following the settings
+function uix_jp_fix(c)
+(
+    uix_jp_lch(c);
+    uix_jp_cL = max(0.22, min(0.94, uix_jp_cL + (uix_jp_v - 0.5) * 0.3)); uix_jp_cC *= (0.5 + uix_jp_s);
+    uix_jp_sep(0.1);
+);
+// the color of the buttons of the theme (the family Theme, the base hue "theme")
+function uix_jp_btn()
+(
+    (uix_control_theme === 3) ? (uix_control_pcolor_from_theme(240, 50, 1) & 0xffffff) :
+    (uix_control_theme === 2) ? 0x4A9CBD : (uix_control_theme === 1) ? (uix_black_light & 0xffffff) : 0x40668C;
+);
+// the least difference between the color c and the roles 1 ... n at rest (already in the table)
+function uix_jp_near(c, n) local(j, d, m)
+(
+    m = 999; j = 1;
+    loop(n, d = uix_jp_dist(c, uix_jp_tab[8 * j]); (d < m) ? m = d; j += 1;);
+    m;
+);
+// the base color of the role rk (1 ... 15) : uix_jp_cL, uix_jp_cC, uix_jp_cH
+function uix_jp_role(rk) local(f, i, p)
+(
+    f = max(0, min(7, ui_jp_fam));
+    (rk === 8) ? (
+        // Information : close to the background, the text of the theme
+        uix_jp_cL = uix_jp_bgL + uix_jp_dir * (uix_jp_dark ? 0.09 : 0.07); uix_jp_cC = min(0.02, uix_jp_baseC * 0.3);
+        uix_jp_cH = uix_jp_h0;
+    ) : (rk === 9) ? (
+        // Empty : hardly visible
+        uix_jp_cL = uix_jp_bgL + uix_jp_dir * 0.035; uix_jp_cC = 0.008; uix_jp_cH = uix_jp_h0;
+    ) : (rk === 7) ? (
+        // Danger : red (or a hue of the palette), more saturated
+        (f === 7) ? uix_jp_fix(uix_jp_oi(6)) : (
+            uix_jp_cL = uix_jp_baseL;
+            uix_jp_cC = ((f === 5) || (f === 6)) ? uix_jp_baseC * 1.6 : max(uix_jp_baseC * 1.1, 0.13);
+            uix_jp_cH = (ui_jp_danger === 0) ? 27 : uix_jp_h0 + 150;
+            uix_jp_sep(0.1);
+            // (too close to another role, e.g. a red theme and the family Theme : lighter on a dark background, darker on a
+            // light one, more saturated)
+            (uix_jp_near(uix_jp_mk(uix_jp_cL, uix_jp_cC, uix_jp_cH), 6) < 12) ? (
+                uix_jp_cL = max(0.15, min(0.95, uix_jp_cL + uix_jp_dir * 0.16)); uix_jp_cC = max(uix_jp_cC, 0.16);
+            );
+        );
+    ) : (rk === 10) ? (
+        // (2026-11-22) Alert : orange (Danger red ; or a hue of the palette), saturated ; apart from the roles 1 ... 7
+        (f === 7) ? uix_jp_fix(0xFFB000) : (
+            uix_jp_cL = uix_jp_baseL;
+            uix_jp_cC = ((f === 5) || (f === 6)) ? uix_jp_baseC * 1.6 : max(uix_jp_baseC * 1.1, 0.13);
+            uix_jp_cH = (ui_jp_danger === 0) ? 62 : uix_jp_h0 + 210;
+            uix_jp_sep(0.1);
+        );
+        (uix_jp_near(uix_jp_mk(uix_jp_cL, uix_jp_cC, uix_jp_cH), 7) < 12) ? (
+            uix_jp_cL = max(0.15, min(0.95, uix_jp_cL + uix_jp_dir * 0.14)); uix_jp_cC = max(uix_jp_cC, 0.15);
+        );
+    ) : ((rk >= 1) && (rk <= 6)) ? (
+        // Action, Choice, Navigation, Value, Object, State : the family
+        i = rk - 1;
+        (f === 7) ? uix_jp_fix(uix_jp_oi(i)) : (
+            p = uix_jp_tab + 896 + 18 * f;
+            uix_jp_cL = max(0.15, min(0.95, uix_jp_baseL + p[6 + i])); uix_jp_cC = uix_jp_baseC * p[12 + i];
+            uix_jp_cH = uix_jp_h0 + p[i];
+            uix_jp_sep(0.1);
+        );
+    ) : (
+        uix_jp_cL = uix_jp_baseL; uix_jp_cC = uix_jp_baseC; uix_jp_cH = uix_jp_h0; uix_jp_sep(0.1); // (11 ... 15 : free)
+    );
+    // (2026-11-22) the adjustments of the user (the role rk in the family f : hue, lightness, chroma ; jg_AdjSet in mSL_GUI)
+    // (Information, Empty : almost without chroma, it is added : 0.1 for 100 %)
+    p = uix_jp_tab + JP_ADJ + 3 * (16 * f + rk);
+    uix_jp_cH += p[0]; uix_jp_cL = max(0.05, min(0.98, uix_jp_cL + p[1] / 100));
+    ((rk === 8) || (rk === 9)) ? (uix_jp_cC = max(0, uix_jp_cC + 0.1 * p[2] / 100)) : (uix_jp_cC *= max(0, 1 + p[2] / 100));
+);
+// the color i (0 ... 15) of the identity series : 8 hues 45 degrees apart, then 8 between them, darker
+function uix_jp_ident(i) local(f, j, a)
+(
+    f = max(0, min(7, ui_jp_fam)); j = i & 7;
+    (f === 1) ? (
+        uix_jp_cL = 0.34 + 0.5 * j / 7; uix_jp_cC = uix_jp_baseC * ((i >= 8) ? 0.55 : 1); uix_jp_cH = uix_jp_h0;
+        uix_jp_sep(0.1);
+    ) : (f === 7) ? (
+        uix_jp_fix(uix_jp_oi(j)); (i >= 8) ? uix_jp_cL = max(0.2, min(0.95, uix_jp_cL - 0.12));
+    ) : (
+        a = (i >= 8) ? -0.08 : (j & 1) ? -0.03 : 0.03;
+        uix_jp_cL = max(0.15, min(0.95, uix_jp_baseL + a)); uix_jp_cC = uix_jp_baseC;
+        uix_jp_cH = uix_jp_h0 + 45 * j + ((i >= 8) ? 22.5 : 0);
+        uix_jp_sep(0.1);
+    );
+);
+// the 6 modes of the color (uix_jp_cL, uix_jp_cC, uix_jp_cH) into base[8 k + m] (+ 128 the text on it, + 256 the text on the
+// background) ; info : the text of the theme
+function uix_jp_modes(base, k, info) local(kh, ks, kd, m, ll, cc, hh, p, c)
+(
+    kh = max(0, min(100, ui_jp_hover)) / 100; ks = max(0, min(1.6, ui_jpad_selmix * 2)); kd = max(0, min(100, ui_jp_dis)) / 100;
+    m = 0;
+    loop(6,
+        ll = uix_jp_cL; cc = uix_jp_cC; hh = uix_jp_cH;
+        (m === 1) ? ( ll += uix_jp_dir * 0.08 * kh; ) :                              // hover
+        (m === 2) ? ( ll -= uix_jp_dir * 0.09; cc = cc * 1.1 + 0.01; ) :             // pressed
+        (m === 3) ? ( ll += uix_jp_dir * 0.1 * ks; cc = cc * (1 + 0.7 * ks) + 0.02 * ks; ) : // selected
+        (m === 4) ? ( ll += (uix_jp_bgL - ll) * 0.6 * kd; cc *= (1 - 0.85 * kd); ) :  // disabled
+        (m === 5) ? ( cc *= 0.5; );                                                   // locked
+        p = 8 * k + m;
+        base[p] = c = uix_jp_mk(ll, cc, hh);
+        // (the text of the informations : kept down to a contrast of 3, its color may be adjusted by the user)
+        base[128 + p] = (info && (uix_jp_ctr(uix_jp_itx, c) >= 3)) ? uix_jp_itx : uix_jp_best(c);
+        // (the text on the background : only for the variation Text, uix_jp_vtx : the slowest one)
+        base[256 + p] = info ? uix_jp_itx : uix_jp_vtx ? uix_jp_tbg(ll, cc, hh) : base[128 + p];
+        m += 1;
+    );
+    p = 8 * k; base[p + 6] = base[p + 7] = base[p]; base[p + 134] = base[p + 135] = base[p + 128];
+    base[p + 262] = base[p + 263] = base[p + 256];
+);
+// the measures : the least contrast of the texts (uix_jp_mTxt, its role uix_jp_mTxtR), the least difference between two
+// roles (uix_jp_mDe : uix_jp_mDeA, uix_jp_mDeB), between a role and the background (uix_jp_mBg : uix_jp_mBgR ; the variation
+// Text : none) ; in the variation Text, the colors of the texts
+function uix_jp_measure() local(t, vr, k, j, r, d)
+(
+    t = uix_jp_tab; vr = (ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0); uix_jp_vr = vr;
+    uix_jp_mTxt = 99; uix_jp_mTxtR = 0;
+    k = 1; loop(10,
+        (k !== 9) ? (
+            r = (vr >= 2) ? uix_jp_ctr(t[256 + 8 * k], uix_jp_bgc) : uix_jp_ctr(t[128 + 8 * k], t[8 * k]);
+            (r < uix_jp_mTxt) ? (uix_jp_mTxt = r; uix_jp_mTxtR = k;);
+        );
+        k += 1;
+    );
+    uix_jp_mDe = 999; uix_jp_mDeA = uix_jp_mDeB = 0;
+    // (the roles 1 ... 7 and 10, Alert)
+    k = 1; loop(7,
+        j = k + 1; loop(8 - k,
+            (j === 8) ? (j = 10);
+            d = (vr >= 2) ? uix_jp_dist(t[256 + 8 * k], t[256 + 8 * j]) : uix_jp_dist(t[8 * k], t[8 * j]);
+            (d < uix_jp_mDe) ? (uix_jp_mDe = d; uix_jp_mDeA = k; uix_jp_mDeB = j;);
+            j += 1;
+        );
+        k += 1;
+    );
+    uix_jp_mBg = 999; uix_jp_mBgR = 0;
+    (vr < 2) ? (
+        k = 1; loop(8, (k === 8) ? (k = 10); d = uix_jp_dist(t[8 * k], uix_jp_bgc); (d < uix_jp_mBg) ? (uix_jp_mBg = d; uix_jp_mBgR = k;); k += 1;);
+    );
+);
+// The palette made again (update_theme, when uix_jp_dirty)
+function uix_jp_make() local(t, f, k, v, s, ll, cc, hh, c)
+(
+    (uix_jp_tab > 0) ? (
+        t = uix_jp_tab; f = max(0, min(7, ui_jp_fam));
+        uix_jp_vtx = ((ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0)) >= 2; // (the variations Text, Outline)
+        // the background (that of the theme, made darker or lighter : uix_jbg_color), the texts of the theme
+        uix_jbg_color();
+        uix_jp_bgc = ((0|(uix_jbg_r * 255 + 0.5)) << 16) | ((0|(uix_jbg_g * 255 + 0.5)) << 8) | (0|(uix_jbg_b * 255 + 0.5));
+        uix_jp_lab(uix_jp_bgc); uix_jp_bgL = uix_jp_oL;
+        uix_jp_dark = (uix_jp_bgL < 0.6); uix_jp_dir = uix_jp_dark ? 1 : -1;
+        uix_jp_txt = ui_jcolor_text & 0xffffff;
+        (uix_jp_ctr(uix_jp_txt, uix_jp_bgc) < 4.5) ? uix_jp_txt = uix_jp_best(uix_jp_bgc);
+        // the base : its lightness, its chroma, its hue
+        uix_jp_lch(uix_jp_btn()); ll = uix_jp_cL; cc = uix_jp_cC; hh = uix_jp_cH;
+        v = uix_jp_v = max(0, min(100, ui_jp_light)) / 100; s = uix_jp_s = max(0, min(100, ui_jp_chroma)) / 100;
+        uix_jp_h0 = ((f === 0) || (ui_jp_hue < 0)) ? hh : ui_jp_hue;
+        (f === 0) ? (
+            uix_jp_baseL = max(0.2, min(0.92, ll + (v - 0.5) * 0.5)); uix_jp_baseC = cc * 2 * s;
+        ) : (f === 6) ? (
+            uix_jp_baseL = max(0.62, min(0.93, 0.80 + (v - 0.5) * 0.24)); uix_jp_baseC = 0.025 + 0.08 * s;
+        ) : (
+            uix_jp_baseL = 0.30 + 0.58 * v; uix_jp_baseC = 0.02 + 0.18 * s;
+        );
+        (f === 5) ? uix_jp_baseC *= 0.45;
+        (abs(uix_jp_baseL - uix_jp_bgL) < 0.12) ? uix_jp_baseL = uix_jp_bgL + ((uix_jp_bgL < 0.5) ? 0.12 : -0.12);
+        // (2026-11-22) the text of the informations : on a dark background, a light tint of the base hue (white was too harsh)
+        uix_jp_itx = uix_jp_txt;
+        uix_jp_dark ? (
+            c = uix_jp_mk(0.9, 0.035, uix_jp_h0);
+            (uix_jp_ctr(c, uix_jp_bgc) >= 4.5) ? uix_jp_itx = c;
+        );
+        // the adjustments of the role Information (the family f) : its text too (the hue, the lightness ; the chroma added :
+        // 0.12 for 100 %)
+        k = uix_jp_tab + JP_ADJ + 3 * (16 * f + 8);
+        ((k[0] !== 0) || (k[1] !== 0) || (k[2] !== 0)) ? (
+            uix_jp_lch(uix_jp_itx);
+            uix_jp_itx = uix_jp_mk(max(0, min(1, uix_jp_cL + k[1] / 100)), max(0, uix_jp_cC + 0.12 * k[2] / 100), uix_jp_h0 + k[0]);
+        );
+        // the roles 1 ... 15 (11 ... 15 : free, the base), the identity series
+        k = 1; loop(15, uix_jp_role(k); uix_jp_modes(t, k, (k === 8)); k += 1;);
+        k = 0; loop(16, uix_jp_ident(k); uix_jp_modes(t + 384, k, 0); k += 1;);
+        uix_jp_measure();
+    );
+    uix_jp_vr = (ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0); // (also without a palette : made once)
+    uix_jp_dirty = 0;
+);
+// the data of the families (6 values : action, choice, navigation, value, object, state) : hue offsets (degrees), lightness
+// offsets, chroma factors
+function uix_jp_f6(p, a, b, c, d, e, g) ( p[0] = a; p[1] = b; p[2] = c; p[3] = d; p[4] = e; p[5] = g; );
+// The table of the palette (JP_TABSIZE words : mSL_GUI, part 1, in @init ; 0 : no palette, the roles not drawn)
+function uix_jp_init(tab) local(p, f)
+(
+    (tab > 0) ? (
+        uix_jp_tab = tab; uix_jhv_tab = tab + 1040; uix_jhvN = 0; uix_jhv_cur = -1;
+        p = tab + 896;
+        uix_jp_f6(p, 0, 30, 60, -40, -75, 105); uix_jp_f6(p + 6, 0, -0.04, 0.04, 0, -0.05, 0.12); p += 18;   // 0 Theme
+        uix_jp_f6(p, 0, 0, 0, 0, 0, 0); uix_jp_f6(p + 6, 0, -0.07, 0.07, -0.14, 0.14, 0.21); p += 18;        // 1 Mono
+        uix_jp_f6(p, 0, 25, 50, -35, -65, 85); uix_jp_f6(p + 6, 0, -0.03, 0.03, 0, -0.04, 0.12); p += 18;    // 2 Analog
+        uix_jp_f6(p, 0, 30, -30, 180, 210, 95); uix_jp_f6(p + 6, 0, -0.04, 0.04, 0, -0.05, 0.12); p += 18;   // 3 Complement
+        uix_jp_f6(p, 0, 60, 120, 180, 240, 300); uix_jp_f6(p + 6, 0, 0, 0, 0, 0, 0); p += 18;                // 4 Spectrum
+        uix_jp_f6(p, 0, 35, 70, -40, -80, 120); uix_jp_f6(p + 6, 0, -0.04, 0.04, 0, -0.05, 0.06); p += 18;   // 5 Muted
+        uix_jp_f6(p, 0, 60, 120, 180, 240, 300); uix_jp_f6(p + 6, 0, 0, 0, 0, 0, 0); p += 18;                // 6 Pastel
+        uix_jp_f6(p, 0, 0, 0, 0, 0, 0); uix_jp_f6(p + 6, 0, 0, 0, 0, 0, 0);                                  // 7 Contrast (fixed)
+        f = 0; loop(8, uix_jp_f6(tab + 896 + 18 * f + 12, 1, 1, 1, 1, 1, 1); f += 1;);
+        uix_jp_f6(tab + 896 + 18 + 12, 1, 0.85, 0.85, 0.7, 0.7, 1.3); // (Mono : the chroma by role)
+        // (2026-11-22) State, lighter and less saturated (more pastel) in the families Theme, Analog, Complement
+        tab[896 + 12 + 5] = tab[896 + 36 + 12 + 5] = tab[896 + 54 + 12 + 5] = 0.7;
+        uix_jp_dirty = 1;
+    );
+);
+
 function update_theme() local(main, img)
 (
     main = main_screen(uix_jG_menuscr);
@@ -887,14 +1334,46 @@ function update_theme() local(main, img)
         AAAA_chg_jtheme += 1;
         uix_jtheme_prev = uix_jtheme;
         prev_control_theme = uix_control_theme;
-        ui_jcolor_text = uix_theme_pcolor("text");
-        ui_jcolor_draw = uix_theme_pcolor("draw");
+        ui_jcolor_text = ui_jcolor_text0 = uix_theme_pcolor("text");
+        uix_jbg_k = -1000; // (the texts and the background again, see below)
+        uix_jp_dirty = 1; // (the palette again, see below)
+        ui_jcolor_draw = ui_jcolor_draw0 = uix_theme_pcolor("draw");
         ui_jcolor_draw_bg = uix_theme_pcolor("bg-enabled");
-        ui_jcolor_border = uix_theme_pcolor("border");
+        ui_jcolor_border = ui_jcolor_border0 = uix_theme_pcolor("border");
         uix_control_width_prev += 1; // make sure to reset
 
         ui_lib_JJ_updSiz();
 
+    );
+    // (2026-11-21) the background darker or lighter (rubric GUI : ui_jg_bgk) : the color of the texts made readable on it ;
+    // the veil (or the plain color) drawn first, over the background of the theme ; not over the background imposed by the
+    // host (a "live" tab : uix_gfx_clear)
+    (uix_jbg_k !== ui_jg_bgk) ? (
+        uix_jbg_k = ui_jg_bgk;
+        (ui_jg_bgk != 0) ? (
+            uix_jbg_color();
+            ui_jcolor_text = uix_jcontrast(ui_jcolor_text0, uix_jbg_r, uix_jbg_g, uix_jbg_b, 0.45);
+            // the drawings (the filled part of the faders ...) and the borders : readable too (their opacity kept)
+            ui_jcolor_draw = uix_jcontrast(ui_jcolor_draw0 & 0xffffff, uix_jbg_r, uix_jbg_g, uix_jbg_b, 0.3) +
+                16777216 * floor(ui_jcolor_draw0 / 16777216);
+            ui_jcolor_border = uix_jcontrast(ui_jcolor_border0 & 0xffffff, uix_jbg_r, uix_jbg_g, uix_jbg_b, 0.2) +
+                16777216 * floor(ui_jcolor_border0 / 16777216);
+            // the track of the faders : the background, a little brighter on a dark one (a little darker on a light one)
+            uix_jbg_track = uix_jbg_shift(0.09); uix_jbg_trackb = uix_jbg_shift(0.18);
+        ) : (
+            ui_jcolor_text = ui_jcolor_text0; ui_jcolor_draw = ui_jcolor_draw0; ui_jcolor_border = ui_jcolor_border0;
+        );
+        ui_GFXdoNow |= 1;
+    );
+    // (2026-11-22) the palette of the cells with a role (rubric GUI, step 2 : uix_jp_make) : made again when a setting, the
+    // theme, the background or the variation (the measures) changed ; before uix_jbg_draw (it changes gfx_clear) ; at the
+    // start of the frame : its pads get the new colors
+    (((ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0)) !== uix_jp_vr) ? uix_jp_dirty = 1;
+    uix_jp_dirty ? uix_jp_make();
+    uix_jbg_on = (ui_jg_bgk != 0) && (uix_gfx_clear < 0);
+    uix_jbg_on ? (
+        uix_jbg_draw();
+        ui_pcolor(ui_jcolor_text); // (the default color of the texts, given by control_start)
     );
 );
 

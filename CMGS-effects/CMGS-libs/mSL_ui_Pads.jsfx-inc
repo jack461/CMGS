@@ -226,6 +226,7 @@ ui_jpad_color3 = 25; // local color 3
 ui_jpad_color4 = 26; // local color 4
 ui_jpad_color5 = 27; // local color 5
 ui_jpad_coff = 28;  // global offset
+ui_jpad_roles = 29; // (2026-11-22) the roles of the cells [array offset ; negative while no role is set, see ui_jpad_roles_set]
 ui_jpad_free = 30; // size of description, and first free entry.
 
 // Description of pad types
@@ -250,6 +251,31 @@ ui_jpad_ct_nobrd = 0x2000; // no border
 ui_jpad_ct_cclear = 0x4000; // set to leave the cell without label
 ui_jpad_ct_disab = 0x8000; // set if cell is disabled
 ui_jpad_ct_altcol = 0x10000; // set to use alternate color for cell
+ui_jpad_ct_lock = 0x20000; // (2026-11-22) a cell with a role : drawn locked (hatched)
+ui_jpad_ct_dim = 0x40000; // (2026-11-22) a cell with a role : drawn disabled (as ui_jpad_ct_disab), its clics kept
+
+/*
+   (2026-11-22) The roles of the cells (rubric GUI, step 2 : see mSL_GUI and the palette, uix_jp_make in ui-lib-JJ-GUI) :
+   one word per cell (the area of pad[ui_jpad_roles]) ; 0 : the cell is drawn with the colors of the pad, as until then ;
+   otherwise its role (bits 0-3) gives its color in the palette chosen by the user, and its mode (rest, hover, pressed,
+   selected, disabled, locked) its variant : the mode comes from the flags of the cell (ui_jpad_ct_selec, ui_jpad_ct_disab,
+   ui_jpad_ct_dim, ui_jpad_ct_lock) and from the mouse.
+     bits 4-8 : 0, or 1 + an index (0 ... 15) in the identity series (the colors of what is numbered : projectors,
+                channels ...) : the color of the cell, its role giving its behaviour (hover ...)
+     bits 9-11 : 0, or 1 + a mode imposed (the preview of the module GUI)
+*/
+ui_jpad_rl_action = 1;  // opens a menu, starts an operation
+ui_jpad_rl_choice = 2;  // On / Off, a mode among several
+ui_jpad_rl_nav = 3;     // views, pages, tabs
+ui_jpad_rl_value = 4;   // a number (a potentiometer)
+ui_jpad_rl_object = 5;  // an item of a list : effect, reader, line ...
+ui_jpad_rl_state = 6;   // an indicator, not clickable (selected : lit)
+ui_jpad_rl_danger = 7;  // remove, reset
+ui_jpad_rl_info = 8;    // a title, a caption, a passive display
+ui_jpad_rl_empty = 9;   // an unused cell
+ui_jpad_rl_alert = 10;  // (2026-11-22) an alert, an error : orange (Danger red), or a hue of the palette
+ui_jpad_rl_ident = 16;  // role + ui_jpad_rl_ident * (1 + k) : the color k of the identity series
+ui_jpad_rl_force = 512; // role + ui_jpad_rl_force * (1 + m) : the mode m imposed (0 rest ... 5 locked)
 
 // Creation Flags, not used elsewhere
 // Combine with "|", not "+"
@@ -381,6 +407,107 @@ local (pty, pp, cel, v, ii, r)
 // "Soft" look (ui_jstyle) : the color of a cell fills the zone of its text, then fades into the background
 ui_jpad_fade = 40; // max width of the fading, in pixels (it never leaves the cell)
 ui_jpad_selmix = 0.35; // a selected cell is brighter : its color is mixed with white
+// (2026-11-21) The look of the pads, set by the rubric "GUI" (mSL_GUI : the module "GUI", settings(data( GUI ... ))) ;
+// the defaults : the look until then. In ui units (the display size and the retina scaling follow) :
+ui_jg_gapx = 0;     // the room added between the cells, horizontally : the colored rectangle shrinks (never narrower than
+                    // its text), the cell keeps its place (its clics), the pad its size
+ui_jg_gapy = 0;     // vertically the same
+ui_jg_extend = 0;   // the "soft" look : 1 the fade goes up to the edges of the cell (its frame), whatever ui_jpad_fade
+ui_jg_frame = 0;    // the "soft" look : a frame around each cell that has a text : 0 none, 1 a rectangle, 2 rounded
+ui_jg_radius = 6;   // the radius of its corners
+ui_jg_thick = 1;    // its thickness (units ; 0 : no frame ; the classic style : no border around the cells either)
+ui_jg_fcol = 1;     // its color : 0 that of the cell, 1 lighter, 2 darker, 3 grey
+ui_jg_falpha = 0.7; // its opacity
+ui_jg_cround = -1;  // the variation Std : the radius of the corners of the rectangular cells (-1 : as each pad draws them)
+ui_jg_bold = 0;     // the text of the cells : 1 bold (all the styles)
+ui_jg_ptext = 100;  // the text of the cells : its size, in % of the texts (80 ... 150 ; all the styles)
+ui_jg_tcontrast = 0.35; // the variation Text : the least difference of luminance between the text of a cell and the background
+// (2026-11-21) The variation of the cells (the sub-menu "Variation" of the panes, the module GUI) : 0 Std (the cell filled
+// with its color, as the classic look until then), 1 Faded (its color around the text, faded : the "soft" look until then),
+// 2 Text (its color in its text, no fill) ; -1 : as the style (Classic : Std, Soft : Faded). The style (ui_jstyle) sets
+// the rest : Classic, the borders of the cells ; Soft, none (the frame of the rubric GUI, if any)
+ui_jvariant = -1;
+
+// (2026-11-21) The rounded rectangles of the rubric GUI, drawn line by line : the circles and gfx_roundrect do not join the
+// straight sides well, and overshoot when the radius is more than half the height ; here the fill and the frame of a shape
+// have exactly the same edges (anti-aliased : the pixels partly covered get a lower alpha). Pixels ; the current color.
+// The inset of the line yy (0 ... h - 1) of the shape of height h, radius r (at most h / 2) :
+function uix_jrr_dx(yy, h, r) local(dy)
+(
+    dy = (yy < r) ? r - (yy + 0.5) : (yy + 0.5 > h - r) ? (yy + 0.5) - (h - r) : 0;
+    (dy > 0) ? r - sqrt(max(0, r * r - dy * dy)) : 0;
+);
+// the span [a, b) of the line yr (the pixels at the ends : partly covered)
+function uix_jspan(a, b, yr) local(ia, ib, a0)
+(
+    (b - a > 0.01) ? (
+        a0 = gfx_a;
+        ia = ceil(a); ib = floor(b);
+        (ib < ia) ? (
+            gfx_a = a0 * (b - a); gfx_rect(floor(a), yr, 1, 1);
+        ) : (
+            (ib > ia) ? gfx_rect(ia, yr, ib - ia, 1);
+            (ia - a > 0.02) ? (gfx_a = a0 * (ia - a); gfx_rect(ia - 1, yr, 1, 1););
+            (b - ib > 0.02) ? (gfx_a = a0 * (b - ib); gfx_rect(ib, yr, 1, 1););
+        );
+        gfx_a = a0;
+    );
+);
+// A filled rectangle with rounded corners (pixels : the rectangle (x, y, w, h), as floor(x) ... floor(x + w) ; radius r)
+function uix_jfill_rrect(x, y, w, h, r) local(px, py, pw, ph, yy, dx, rb, y1)
+(
+    px = floor(x); py = floor(y); pw = floor(x + w) - px; ph = floor(y + h) - py;
+    r = max(0, min(r, min(pw, ph) / 2));
+    (r < 1) ? gfx_rect(px, py, pw, ph) : (
+        rb = ceil(r); // the lines of the corners, at the top and at the bottom
+        (ph - 2 * rb > 0) ? gfx_rect(px, py + rb, pw, ph - 2 * rb);
+        yy = 0; loop(min(rb, ph), dx = uix_jrr_dx(yy, ph, r); uix_jspan(px + dx, px + pw - dx, py + yy); yy += 1;);
+        yy = y1 = max(rb, ph - rb);
+        loop(ph - y1, dx = uix_jrr_dx(yy, ph, r); uix_jspan(px + dx, px + pw - dx, py + yy); yy += 1;);
+    );
+);
+// Its frame, inside it : thickness t (pixels ; the same edges as uix_jfill_rrect)
+function uix_jline_rrect(x, y, w, h, r, t) local(px, py, pw, ph, yy, dxo, dxi, ri)
+(
+    px = floor(x); py = floor(y); pw = floor(x + w) - px; ph = floor(y + h) - py;
+    r = max(0, min(r, min(pw, ph) / 2));
+    t = max(1, min(floor(t), floor(min(pw, ph) / 2)));
+    ri = max(0, r - t); // the inner shape : (t, t, pw - 2 t, ph - 2 t), radius ri
+    yy = 0;
+    loop(ph,
+        dxo = uix_jrr_dx(yy, ph, r);
+        ((yy < t) || (yy >= ph - t)) ? (
+            uix_jspan(px + dxo, px + pw - dxo, py + yy);
+        ) : (
+            dxi = t + uix_jrr_dx(yy - t, ph - 2 * t, ri);
+            uix_jspan(px + dxo, px + dxi, py + yy);
+            uix_jspan(px + pw - dxi, px + pw - dxo, py + yy);
+        );
+        yy += 1;
+    );
+);
+
+// (2026-11-21) The frame of a cell in the "soft" look (ui units : the zone of the cell ; col : its color ; rad : the radius
+// of its corners, ui units, whatever ui_jg_frame (the variation Std : the corners of the cell), -1 : ui_jg_radius with
+// ui_jg_frame 2 (Round), none with 1 (Rect) ; ui_jg_thick, ui_jg_fcol, ui_jg_falpha)
+function uix_jpad_soft_frame(x, y, w, h, col, rad)
+local (rs, t, k, r, cr, cg, cb, px, py, pw, ph)
+(
+    rs = uix_drawconfig_current[9]; // retina scaling
+    cr = ((col >> 16) & 0xff) / 255; cg = ((col >> 8) & 0xff) / 255; cb = (col & 0xff) / 255;
+    (ui_jg_fcol === 1) ? (cr += 0.45 * (1 - cr); cg += 0.45 * (1 - cg); cb += 0.45 * (1 - cb);) :
+    (ui_jg_fcol === 2) ? (cr *= 0.55; cg *= 0.55; cb *= 0.55;) :
+    (ui_jg_fcol === 3) ? (cr = cg = cb = 0.62;);
+    gfx_set(cr, cg, cb, max(0.05, min(1, ui_jg_falpha)));
+    px = floor(x * rs); py = floor(y * rs); pw = floor((x + w) * rs) - px; ph = floor((y + h) * rs) - py;
+    t = max(1, floor(ui_jg_thick * rs + 0.5)); // (ui_jg_thick 0 : not called, see control_jpad)
+    r = (rad >= 0) ? rad * rs : (ui_jg_frame === 2) ? max(0, ui_jg_radius * rs) : 0;
+    (r >= 1) ? uix_jline_rrect(px, py, pw, ph, r, t) : (
+        k = 0;
+        loop(min(t, floor(min(pw, ph) / 2)), gfx_rect(px + k, py + k, pw - 2 * k, ph - 2 * k, 0); k += 1;);
+    );
+    gfx_a = 1;
+);
 
 // (2026-11-19) The core of the "soft" fill (pixels) : the zone (x0, y0) - (x1, y1) filled with color "col", then faded
 // into the actual background (read in the corner of the cell), at most ui_jpad_fade, without leaving the cell
@@ -389,11 +516,15 @@ function uix_jsoft_zone(cx0, cy0, cx1, cy1, x0, y0, x1, y1, col)
 local (rs, f, fl, fr, ft, fb, cr, cg, cb, br, bg, bb, k, ty, yy, kl, kr, kt, kb)
 (
     rs = uix_drawconfig_current[9]; // retina scaling
-    // the background color, in the corner of the cell
-    gfx_x = cx0 + 1; gfx_y = cy0 + 1;
+    // the background color, on the left of the cell, half way up (2026-11-21 : not in a corner, where a rounded border of
+    // the classic style may pass)
+    gfx_x = cx0 + 1; gfx_y = floor((cy0 + cy1) / 2);
     br = bg = bb = 0;
     gfx_getpixel(br, bg, bb);
-    f = ui_jpad_fade * rs;
+    // (2026-11-21) a whole number of pixels : gfx_gradrect drops the fractions of x and w, a fractional fade left a
+    // dark line of one pixel between the left fade and the zone, once the cell is wide enough for the whole fade
+    // ui_jg_extend (rubric GUI) : up to the edges of the cell
+    f = ui_jg_extend ? 1000000 : floor(ui_jpad_fade * rs + 0.5);
     fl = min(f, x0 - cx0); fr = min(f, cx1 - x1); ft = min(f, y0 - cy0); fb = min(f, cy1 - y1);
     cr = ((col >> 16) & 0xff) / 255; cg = ((col >> 8) & 0xff) / 255; cb = (col & 0xff) / 255;
     gfx_mode = 0; gfx_a = 1;
@@ -443,19 +574,57 @@ local (rs, f, fl, fr, ft, fb, cr, cg, cb, br, bg, bb, k, ty, yy, kl, kr, kt, kb)
 // Fills the zone of the text "txt" centered in the rectangle (x, y, w, h) (ui coordinates) with color "col",
 // then fades it into the actual background (read in the corner of the rectangle), without leaving the rectangle.
 // The fading is an opaque color gradient (the alpha of gfx_gradrect does not blend with the background).
-function uix_jpad_soft_fill(x, y, w, h, txt, col)
-local (rs, tw, th, cx0, cy0, cx1, cy1, x0, y0, x1, y1)
+// (2026-11-21) The same, the zone (x, y, w, h) and the rectangle (tx, ty, tww, tht) where the text is centered given apart
+// (the classic style : the zone is the inside of the border of the cell, the text is lower)
+function uix_jpad_soft_fill_in(x, y, w, h, tx, ty, tww, tht, txt, col)
+local (rs, tw, th, cx0, cy0, cx1, cy1, x0, y0, x1, y1, tx0, ty0, tx1, ty1)
 (
     ((txt != 0) && (strlen(txt) > 0)) ? (
         rs = uix_drawconfig_current[9]; // retina scaling
         cx0 = floor(x * rs); cy0 = floor(y * rs); cx1 = floor((x + w) * rs); cy1 = floor((y + h) * rs); // the cell, in pixels
+        tx0 = floor(tx * rs); ty0 = floor(ty * rs); tx1 = floor((tx + tww) * rs); ty1 = floor((ty + tht) * rs); // the text
         uix_setgfxfont();
         tw = th = 0;
         gfx_measurestr(txt, tw, th);
-        x0 = max(cx0, floor((cx0 + cx1 - tw) / 2 - 2 * rs)); x1 = min(cx1, ceil((cx0 + cx1 + tw) / 2 + 2 * rs));
-        y0 = max(cy0, floor((cy0 + cy1 - th) / 2)); y1 = min(cy1, ceil((cy0 + cy1 + th) / 2));
-        uix_jsoft_zone(cx0, cy0, cx1, cy1, x0, y0, x1, y1, col);
+        x0 = max(cx0, floor((tx0 + tx1 - tw) / 2 - 2 * rs)); x1 = min(cx1, ceil((tx0 + tx1 + tw) / 2 + 2 * rs));
+        y0 = max(cy0, floor((ty0 + ty1 - th) / 2)); y1 = min(cy1, ceil((ty0 + ty1 + th) / 2));
+        ((x1 > x0) && (y1 > y0)) ? uix_jsoft_zone(cx0, cy0, cx1, cy1, x0, y0, x1, y1, col);
     );
+);
+function uix_jpad_soft_fill(x, y, w, h, txt, col)
+(
+    uix_jpad_soft_fill_in(x, y, w, h, x, y, w, h, txt, col);
+);
+
+// (2026-11-21) The variation Text (ui_jvariant 2) : the color "col" of a cell, for its text, made readable on the background
+// read at (px, py) (pixels) : its luminance kept at least ui_jg_tcontrast away from that of the background (mixed with
+// white on a dark background, with black on a light one)
+// (the color col made readable on the background (br, bg, bb : 0 ... 1) : d, the least difference of luminance ; also for
+// the texts on a background made darker or lighter, see update_theme in ui-lib-JJ-GUI)
+function uix_jcontrast(col, br, bg, bb, d)
+local (cr, cg, cb, lc, lb, t)
+(
+    cr = ((col >> 16) & 0xff) / 255; cg = ((col >> 8) & 0xff) / 255; cb = (col & 0xff) / 255;
+    lc = 0.299 * cr + 0.587 * cg + 0.114 * cb; lb = 0.299 * br + 0.587 * bg + 0.114 * bb;
+    (lb < 0.5) ? (
+        (lc < lb + d) ? (
+            t = (min(1, lb + d) - lc) / max(0.001, 1 - lc);
+            cr += t * (1 - cr); cg += t * (1 - cg); cb += t * (1 - cb);
+        );
+    ) : (
+        (lc > lb - d) ? (
+            t = max(0, lb - d) / max(0.001, lc);
+            cr *= t; cg *= t; cb *= t;
+        );
+    );
+    ((0|min(255, cr * 255 + 0.5)) << 16) | ((0|min(255, cg * 255 + 0.5)) << 8) | (0|min(255, cb * 255 + 0.5));
+);
+function uix_jtext_color(col, px, py)
+local (br, bg, bb)
+(
+    gfx_x = px; gfx_y = py; br = bg = bb = 0;
+    gfx_getpixel(br, bg, bb);
+    uix_jcontrast(col, br, bg, bb, ui_jg_tcontrast);
 );
 
 // Guard of control_jpad : max lines / columns drawn ; the last anomaly is kept in ui_jpad_bad_*
@@ -466,11 +635,90 @@ ui_jpad_maxdim = 128;
 ui_jpad_txt_rpad = 0;
 ui_jpad_bad_pad = ui_jpad_bad_nl = ui_jpad_bad_nc = ui_jpad_bad_cnt = 0;
 
+// (2026-11-21) The border of a cell in the classic style (control_jpad : gx0, gy0, gw, gh the cell less its gaps, ui units ;
+// xc, yc, rc : a round cell ; drc, drr, crr : its shape) ; the current color
+function uix_jpad_border(gx0, gy0, gw, gh, xc, yc, rc, drc, drr, crr) local(rs, i, x0, y0, x1, y1, g)
+(
+    rs = uix_drawconfig_current[9]; // retina scaling
+    (drc) ? (
+        (drr) ? (
+            i = -1 + (0|min((gw-4)/2, (gh-4)/2));
+            gfx_roundrect(rs * (gx0+1), rs * (gy0+1), rs * (gw-4), rs * (gh-4), rs * i);
+        ) : (
+            gfx_circle(rs * xc, rs * yc, rs * rc * 1.1, 1);
+        );
+    ) : (drr) ? (
+        gfx_roundrect(rs * (gx0+1), rs * (gy0+1), rs * (gw-4), rs * (gh-4), rs * drr);
+    ) : (
+        // (2026-11-22) one pixel around the fill (gx0 + 2, gw - 5 : its pixels as uix_jfill_rrect), at floor(rs) - 1 pixels
+        // from it : the same distance on the 4 sides at all the display sizes (gfx_roundrect, one unit from the fill, gave
+        // 0 or 1 pixel by side at 120 %)
+        x0 = floor(rs * (gx0+2)); y0 = floor(rs * (gy0+2));
+        x1 = floor(rs * (gx0+2) + rs * (gw-5)); y1 = floor(rs * (gy0+2) + rs * (gh-5));
+        g = max(0, floor(rs) - 1) + 1;
+        uix_jline_rrect(x0 - g, y0 - g, x1 - x0 + 2 * g, y1 - y0 + 2 * g, (crr > 0) ? rs * crr + g : 0, 1);
+    );
+);
+
+// (2026-11-22) The mode "locked" of a cell with a role : diagonal lines over the rectangle (x, y, w, h) (pixels), every st
+// pixels, in the current color
+function uix_jhatch(x, y, w, h, st) local(d, ax, ay, bx, by)
+(
+    x = floor(x); y = floor(y); w = floor(w); h = floor(h);
+    d = floor(st / 2);
+    while ((st > 0) && (d < w + h)) (
+        (d <= w) ? (ax = x + d; ay = y;) : (ax = x + w; ay = y + d - w;);
+        (d <= h) ? (bx = x; by = y + d;) : (bx = x + d - h; by = y + h;);
+        gfx_line(ax, ay, bx, by, 1);
+        d += st;
+    );
+);
+
+// (2026-11-22) The pads that have roles (their cells react to the mouse : see uix_jhv_key in mSL_ui_LibJJ, must_do_gfx) :
+// their rectangles in the last frame drawn (uix_jhv_tab, uix_jhvN : 7 words each, in pixels : left, top, width and height of
+// a cell, columns, lines, the pad), the cell under the mouse then (uix_jhv_cur)
+UIX_JHV_MAX = 16;
+function uix_jhv_add(pm, left, top, wi, he, nc, nl, rs) local(q)
+(
+    ((uix_jhv_tab > 0) && (uix_jhvN < UIX_JHV_MAX)) ? (
+        q = uix_jhv_tab + 7 * uix_jhvN;
+        q[0] = left * rs; q[1] = top * rs; q[2] = wi * rs; q[3] = he * rs; q[4] = nc; q[5] = nl; q[6] = pm;
+        uix_jhvN += 1;
+        uix_jhv_cur = uix_jhv_key(); // (the same computation as must_do_gfx : the last pad drawn gives it for all of them)
+    );
+);
+
+// (2026-11-22) The tip : Alt (or Alt + Cmd) and the mouse on a cell of a pad : its number (as in ui_jpad_roles_set), its
+// role and its mode, in #uix_jtip_s, drawn near the mouse at the end of the frame (uix_jtip_draw, ui-lib-JJ-GUI ; uix_jtip :
+// 0 none, reset by must_do_gfx)
+uix_jtip = 0;
+function uix_jrole_name(k)
+(
+    (k === 1) ? "Action" : (k === 2) ? "Choice" : (k === 3) ? "Navigation" : (k === 4) ? "Value" : (k === 5) ? "Object" :
+    (k === 6) ? "State" : (k === 7) ? "Danger" : (k === 8) ? "Information" : (k === 9) ? "Empty" : (k === 10) ? "Alert" : "Role";
+);
+function uix_jmode_name(m)
+(
+    (m === 1) ? "hover" : (m === 2) ? "pressed" : (m === 3) ? "selected" : (m === 4) ? "disabled" : (m === 5) ? "locked" : "rest";
+);
+function uix_jtip_set(np, rk, rmo, jr, has)
+(
+    uix_jtip = 1;
+    (rk > 0) ? (
+        sprintf(#uix_jtip_s, "Cell %d : %s, %s", np, uix_jrole_name(rk), uix_jmode_name(rmo));
+        ((jr >> 4) & 31) ? (sprintf(#uix_jtip_t, " (identity %d)", (jr >> 4) & 31); strcat(#uix_jtip_s, #uix_jtip_t););
+        ((jr >> 9) & 7) ? strcat(#uix_jtip_s, " (imposed)");
+    ) : (
+        sprintf(#uix_jtip_s, has ? "Cell %d : no role (the colors of the pad)" : "Cell %d : no role (a pad without roles)", np);
+    );
+);
+
 function control_jpad(pm, fnl, fnc, opt)
 local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, iy, rs,
        dc, labs, gloff, isvalid, ctype, cc, cdefs, nums, colors, z1, z2, z3, z4, z5,
        CS, alabs, acolors, selected, fmsin, flevnt, drc, drr, bcl, dcl, i, ms_x, ms_y,
-       xc, yc, rc, xcl, ycl, zcl, sst)
+       xc, yc, rc, xcl, ycl, zcl, sst, gx0, gy0, gw, gh, gex, gey, crr, gtw, gth, gtc, vr, ttx, tty, ttw, tth,
+       roles, jr, rk, rmo, rb, ovr, sl, sx0, sy0, sg)
 (
     ty = pm[ui_jpad_typ]; // pad type and flags
     pty = ty & ui_jbtmask; // just the pad type
@@ -483,6 +731,12 @@ local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, 
     flevnt = 0; // no event yet
     ((pty == ui_jpad_ty_act) || (pty == ui_jpad_ty_sel) || (pty == ui_jpad_ty_opt)) ? (
         ui_push(); // push viewport to save it
+        // (2026-11-21) the text of the cells : bold, larger or smaller (rubric GUI ; the ui_pop at the end restores the font)
+        ui_jg_bold ? ui_fontbold(1);
+        // the variation of the cells : 0 Std (filled), 1 Faded, 2 Text, 3 Outline (2026-11-22 : Text, a selected cell framed) ;
+        // ui_jvariant -1 : as the style
+        vr = (ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0);
+        (ui_jg_ptext !== 100) ? ui_fontsize(ui_fontsize(0) * max(50, min(200, ui_jg_ptext)) / 100);
         nc = pm[ui_jpad_nco]; nc <= 0 ? nc = 1;
         (fnc > 0) ? (nc = (opt & 1) ? fnc : min(nc, fnc));
         nl = pm[ui_jpad_nli]; nl <= 0 ? nl = 1;
@@ -524,6 +778,13 @@ local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, 
         nums = pm[ui_jpad_values]; nums != 0 ? nums += pm; // values definitions
         colors = pm[ui_jpad_clrs]; colors != 0 ? colors += pm; // colors definitions
         acolors = pm[ui_jpad_altclrs]; acolors != 0 ? acolors += pm; // alt colors definitions
+        // (2026-11-22) the roles of the cells, if the pad has some and the palette exists (uix_jp_tab, see mSL_GUI) : the pad
+        // is declared for the mouse (its cells react when the mouse is on them)
+        roles = pm[ui_jpad_roles];
+        ((roles > 0) && (uix_jp_tab > 0)) ? (roles += pm; uix_jhv_add(pm, left, top, wi, he, nc, nl, rs);) : (
+            roles = 0;
+            ((mouse_cap & 16) && (uix_jp_tab > 0)) ? uix_jhv_add(pm, left, top, wi, he, nc, nl, rs); // (Alt : the tip, uix_jtip_set)
+        );
         pm[ui_jpad_lmods] = ui_jmouse_cap; // keep mouse/keys infos
         fmsin ? (
             // Mouse clicked here ?
@@ -549,15 +810,48 @@ local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, 
             nx = 0; loop (nc, ( // displayed column
                 np = nx*ix + ny*iy - gloff; // the cell to be displayed in it
                 ctype = drc = drr = 0; // dc = dcl;
+                gtc = -1; // (the "text" look : the color of the text)
                 CS = 0; // no color change for now
+                ovr = 0; // (the mouse on the cell)
                 isvalid = (np >= 0) && (np < pm[ui_jpad_siz]);
                 (isvalid && (cdefs != 0)) ? (ctype = cdefs[np];); // cell type
+                jr = (isvalid && (roles != 0)) ? roles[np] : 0; rk = jr & 15; // (its role, see ui_jpad_rl_action)
                 (ctype & ui_jpad_ct_nobrd) ? ( z4 = z5 = 0;) : ( z4 = 2; z5 = 5; ) ;
-                ui_set_rect(xpos, ypos, wi-z4, he-z4); // set rectangle
-                xc = xpos + wi/2 - z4; yc = ypos + he/2 - z4 +1;
-                rc = min(wi,he)/2 - z5 + 4;
+                // (2026-11-21) the zone drawn : the cell, less the room added between the cells (ui_jg_gapx, ui_jg_gapy :
+                // half on each side ; the cell keeps 12 x 8 units at least, and its text with 6 units on each side) ; the
+                // clics : the whole cell (xpos, ypos, wi, he)
+                gex = max(0, min(ui_jg_gapx, wi - 12)); gey = max(0, min(ui_jg_gapy, he - 8));
+                ((gex > 0) && isvalid && ((ctype & ui_jpad_ct_cclear) == 0)) ? (
+                    // its text (as drawn below)
+                    sst = ((ctype & ui_jpad_ct_selec) && (alabs != 0) && (alabs[np] != 0)) ? alabs[np] :
+                        ((labs != 0) && (labs[np] != 0) && ((ctype & ui_jpad_ct_showval) == 0)) ? labs[np] :
+                        (nums != 0) ? (
+                            sprintf(#uix_jpad_sst, pm[ui_jpad_fmts] != 0 ? pm[ui_jpad_fmts] : "%f", nums[np]); #uix_jpad_sst;
+                        ) : (
+                            sprintf(#uix_jpad_sst, "%d", np+pm[ui_jpad_coff]); #uix_jpad_sst;
+                        );
+                    uix_setgfxfont(); gtw = gth = 0;
+                    gfx_measurestr(sst, gtw, gth);
+                    gex = max(0, min(gex, floor(wi - z5 - ui_jpad_txt_rpad - gtw / rs - 12)));
+                );
+                gx0 = xpos + floor(gex / 2); gy0 = ypos + floor(gey / 2); gw = wi - gex; gh = he - gey;
+                ui_set_rect(gx0, gy0, gw-z4, gh-z4); // set rectangle
+                xc = gx0 + gw/2 - z4; yc = gy0 + gh/2 - z4 +1;
+                rc = min(gw,gh)/2 - z5 + 4;
                 drc = (ctype & ui_jpad_ct_round);  // draw round cells
                 drr = (ctype & ui_jpad_ct_rrect) ? 4 : 0; // draw round rectangles cells
+                crr = (!drc && !drr && (ui_jg_cround > 0)) ? ui_jg_cround : 0; // (the rectangular cells : rounded, rubric GUI)
+                // (2026-11-21) the rectangle of the text : a cell with a border (the classic style) or filled (Std) : the
+                // filled rectangle (its text was 4 units lower, under its center) ; otherwise (Faded, Text in the soft
+                // style ; no border) : lower by ui_jd_padTopDec, as until then (the frame of the soft style is around it)
+                (!(ctype & ui_jpad_ct_nobrd) && (!ui_jstyle || (vr === 0))) ? (
+                    ttx = gx0 + 2; tty = gy0 + 2; ttw = gw - 5 - ui_jpad_txt_rpad; tth = gh - 5;
+                ) : (
+                    ttx = gx0; tty = gy0 + ui_jd_padTopDec; ttw = gw - z4 - ui_jpad_txt_rpad; tth = gh - z4 - ui_jd_padTopDec;
+                );
+                // (Std, the soft style, a frame : the frame follows the corners of the cell, Rect or Round ; a round
+                // frame gives its radius to a cell without corners)
+                (!drc && !drr && (vr === 0) && ui_jstyle && (ui_jg_frame === 2) && (crr <= 0)) ? crr = ui_jg_radius;
                 dc = (ctype & ui_jpad_ct_altcol) ? ycl : dcl;
                 /*
                 (drc && drr) ? (
@@ -566,22 +860,12 @@ local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, 
                 );
                 */
                 ui_pcolor(dc);
-                (!(ctype & ui_jpad_ct_nobrd) && !ui_jstyle) ? (  // need the border (none with the "soft" look)
-                    (drc) ? (
-                         (drr) ? (
-                             i = -1 + (0|min((wi-4)/2, (he-4)/2));
-                             gfx_roundrect(rs * (xpos+1), rs * (ypos+1), rs * (wi-4), rs * (he-4), rs * i);
-                         ) : (
-                             // gfx_set_pcolor(cc2);
-                             gfx_circle(rs * xc, rs * yc, rs * rc * 1.1, 1);
-                         );
-                    ) : (
-                         gfx_roundrect(rs * (xpos+1), rs * (ypos+1), rs * (wi-4), rs * (he-4), rs * drr);
-                    );
-                );
+                // (the border of the classic style : drawn after the fill, see below)
                 ui_pcolor(dc);
                 isvalid ? (
                     // Mouse clicked here & cell enabled ?
+                    // (the mouse on the cell, for its mode "hover" : the whole cell, as uix_jhv_key)
+                    ovr = fmsin && (ms_x >= xpos) && (ms_x < xpos + wi) && (ms_y >= ypos) && (ms_y < ypos + he);
                     (fmsin && (ms_x >= xpos) && (ms_x < xpos+wi-2) && (ms_y >= ypos) && (ms_y < ypos+he-2)) ? (
                         ui_jmouse_buttons ? CS |= 1;
                         pm[ui_jpad_entkey] = pm[ui_jpad_last] = np+1; // keep the cell number, in "1" origin
@@ -622,56 +906,99 @@ local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, 
                         */
                     );
                     selected = ctype & ui_jpad_ct_selec;
-                    (ctype & ui_jpad_ct_disab) ? CS |=4;
-                    cc = (ctype & ui_jpad_ct_altcol) ? ycl : xcl;
-                    (!(ctype & ui_jpad_ct_nocolor)) ? (
-                        selected ? (
-                            ((acolors != 0) && (acolors[np] >= 0)) ? (
-                                cc = acolors[np];
+                    (rk > 0) ? (
+                        // (2026-11-22) a cell with a role : its mode (imposed ; or from its flags, the mouse : 0 rest, 1 hover,
+                        // 2 pressed, 3 selected, 4 disabled, 5 locked ; the states, the informations and the empty cells do not
+                        // react to the mouse), its colors in the palette (uix_jp_tab, see uix_jp_make in ui-lib-JJ-GUI : rb[0]
+                        // the fill, rb[128] the text on it, rb[256] the text on the background ; the identity series from 384)
+                        rmo = ((jr >> 9) & 7) ? ((jr >> 9) & 7) - 1 :
+                            (ctype & (ui_jpad_ct_disab | ui_jpad_ct_dim)) ? 4 : (ctype & ui_jpad_ct_lock) ? 5 : selected ? 3 :
+                            (ovr && (rk !== 6) && (rk !== 8) && (rk !== 9)) ? (ui_jmouse_buttons ? 2 : 1) : 0;
+                        rmo = min(5, rmo);
+                        rb = uix_jp_tab + rmo + (((jr >> 4) & 31) ? 384 + 8 * ((((jr >> 4) & 31) - 1) & 15) : 8 * rk);
+                        cc = rb[0];
+                        sl = (rmo === 3);
+                    ) : (
+                        sl = selected;
+                        (ctype & ui_jpad_ct_disab) ? CS |=4;
+                        cc = (ctype & ui_jpad_ct_altcol) ? ycl : xcl;
+                        (!(ctype & ui_jpad_ct_nocolor)) ? (
+                            selected ? (
+                                ((acolors != 0) && (acolors[np] >= 0)) ? (
+                                    cc = acolors[np];
+                                ) : (
+                                    ((colors != 0) && (colors[np] >= 0)) ? cc = colors[np];
+                                    CS |= 2;
+                                );
                             ) : (
-                                ((colors != 0) && (colors[np] >= 0)) ? cc = colors[np];
-                                CS |= 2;
+                                ((colors != 0) && (colors[np] >= 0))? cc = colors[np];
                             );
+                        );
+                        cc = ui_pcolor_derived(cc, CS);
+                    );
+                    gfx_set_pcolor(cc, 1);
+                    // the text of the cell (also for its frame)
+                    sst = 0;
+                    ((ctype & ui_jpad_ct_cclear) == 0) ? (
+                        (selected && (alabs != 0) && (alabs[np] != 0)) ? (
+                            sst = alabs[np];
+                        ) :
+                        ((labs != 0) && (labs[np] != 0) && ((ctype & ui_jpad_ct_showval) == 0)) ? (
+                            sst = labs[np];
+                        ) :
+                        (nums != 0) ? (
+                            sst = #uix_jpad_sst;
+                            sprintf(sst, pm[ui_jpad_fmts] != 0 ? pm[ui_jpad_fmts] : "%f", nums[np]);
                         ) : (
-                            ((colors != 0) && (colors[np] >= 0))? cc = colors[np];
+                            sst = #uix_jpad_sst;
+                            sprintf(sst, "%d", np+pm[ui_jpad_coff]);
                         );
                     );
-                    cc = ui_pcolor_derived(cc, CS);
-                    gfx_set_pcolor(cc, 1);
-                    ui_jstyle ? (
-                        // "soft" look : the color only around the text (as drawn below), brighter if selected
-                        selected ? (
+                    (vr >= 1) ? (
+                        // the variations Faded and Text (vr : ui_jvariant ; Faded : the "soft" look until 2026-11-21) : a
+                        // selected cell is brighter (a cell with a role : its mode "selected" already is)
+                        (selected && (rk === 0)) ? (
                             cc = ((0|(((cc >> 16) & 0xff) * (1 - ui_jpad_selmix) + 255 * ui_jpad_selmix)) << 16)
                                | ((0|(((cc >> 8) & 0xff) * (1 - ui_jpad_selmix) + 255 * ui_jpad_selmix)) << 8)
                                | (0|((cc & 0xff) * (1 - ui_jpad_selmix) + 255 * ui_jpad_selmix));
                         );
-                        sst = 0;
-                        ((ctype & ui_jpad_ct_cclear) == 0) ? (
-                            (selected && (alabs != 0) && (alabs[np] != 0)) ? (
-                                sst = alabs[np];
-                            ) :
-                            ((labs != 0) && (labs[np] != 0) && ((ctype & ui_jpad_ct_showval) == 0)) ? (
-                                sst = labs[np];
-                            ) :
-                            (nums != 0) ? (
-                                sst = #uix_jpad_sst;
-                                sprintf(sst, pm[ui_jpad_fmts] != 0 ? pm[ui_jpad_fmts] : "%f", nums[np]);
+                        // Faded : the color only around the text (as drawn below), then faded ; Text (2026-11-21) : no fill
+                        // (except a selected cell), the text in the color of the cell, readable on the background
+                        ((vr === 2) && sl && !ui_jstyle && !(ctype & ui_jpad_ct_nobrd) && !drc && !drr) ? (
+                            // (2026-11-22) Text, the classic style, a selected rectangular cell : filled without fade, up to
+                            // its border (the inside of the border of uix_jpad_border : the fill of Std, and the room between
+                            // them ; the same without border, Thick 0)
+                            sg = max(1, floor(rs)) - 1;
+                            sx0 = floor(rs * (gx0+2)); sy0 = floor(rs * (gy0+2));
+                            uix_jfill_rrect(sx0 - sg, sy0 - sg, floor(rs * (gx0+2) + rs * (gw-5)) - sx0 + 2 * sg,
+                                floor(rs * (gy0+2) + rs * (gh-5)) - sy0 + 2 * sg, (crr > 0) ? rs * crr + sg : 0);
+                        ) :
+                        ((vr === 1) || (sl && (vr === 2))) ? (
+                            (ui_jstyle || (ctype & ui_jpad_ct_nobrd)) ? (
+                                uix_jpad_soft_fill(ttx, tty, ttw, tth, sst, cc);
                             ) : (
-                                sst = #uix_jpad_sst;
-                                sprintf(sst, "%d", np+pm[ui_jpad_coff]);
+                                // the classic style : inside the border of the cell (drawn at gx0 + 1, gy0 + 1, one pixel),
+                                // around the text
+                                uix_jpad_soft_fill_in(gx0 + 1 + 1 / rs, gy0 + 1 + 1 / rs, gw - 4 - 1 / rs - ui_jpad_txt_rpad,
+                                    gh - 4 - 1 / rs, ttx, tty, ttw, tth, sst, cc);
                             );
+                        ) : (
+                            // (the background : on the left of the cell, inside its border, half way up ; a cell with a role :
+                            // its text on the background, computed with the palette)
+                            gtc = (rk > 0) ? rb[256] :
+                                uix_jtext_color(cc, floor((gx0 + ((ui_jstyle || (ctype & ui_jpad_ct_nobrd)) ? 0 : 2)) * rs) + 1,
+                                floor((gy0 + gh / 2) * rs));
                         );
-                        uix_jpad_soft_fill(xpos, ypos + ui_jd_padTopDec, wi - z4 - ui_jpad_txt_rpad, he - z4 - ui_jd_padTopDec, sst, cc);
                     ) :
                     (drc) ? (
                          (drr) ? (
-                             z1 = -1 + (0|min((wi-z5)/2, (he-z5)/2));
-                             gfx_circle(rs * (xpos+z4+z1-1), rs * (ypos+z4+z1-1), rs * z1, 1);
-                             gfx_circle(rs * (xpos+z4+wi-z5-z1-1), rs * (ypos+z4+he-z5-z1-1), rs * z1, 1);
-                             (wi > he) ? (
-                                 gfx_rect(rs * (xpos+z4+z1), rs * (ypos+z4), rs * (wi-z5-2*z1), rs * (he-z5));
+                             z1 = -1 + (0|min((gw-z5)/2, (gh-z5)/2));
+                             gfx_circle(rs * (gx0+z4+z1-1), rs * (gy0+z4+z1-1), rs * z1, 1);
+                             gfx_circle(rs * (gx0+z4+gw-z5-z1-1), rs * (gy0+z4+gh-z5-z1-1), rs * z1, 1);
+                             (gw > gh) ? (
+                                 gfx_rect(rs * (gx0+z4+z1), rs * (gy0+z4), rs * (gw-z5-2*z1), rs * (gh-z5));
                              ) : (
-                                 gfx_rect(rs * (xpos+z4), rs * (ypos+z4+z1), rs * (wi-z5), rs * (he-z5-2*z1));
+                                 gfx_rect(rs * (gx0+z4), rs * (gy0+z4+z1), rs * (gw-z5), rs * (gh-z5-2*z1));
                              );
                          ) : (
                              gfx_circle(rs * xc, rs * yc, rs * rc, 1);
@@ -679,25 +1006,68 @@ local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, 
                     ) : (
                         (drr) ? (
                             //gfx_roundrect(rs * xpos, rs * ypos, rs * (wi-2), rs * (he-2), rs * drr);
-                            gfx_roundrect(rs * (xpos+2), rs * (ypos+2), rs * (wi-6), rs * (he-6), rs * drr);
+                            gfx_roundrect(rs * (gx0+2), rs * (gy0+2), rs * (gw-6), rs * (gh-6), rs * drr);
                             //gfx_rect(rs * (xpos+z4), rs * (ypos+z4), rs * (wi-z5), rs * (he-z5));
                         ) : (
-                            gfx_rect(rs * (xpos+z4), rs * (ypos+z4), rs * (wi-z5), rs * (he-z5));
+                            // (2026-11-22 : without corners too, uix_jfill_rrect : its edges in pixels, each one rounded
+                            // down ; no column of the background left between the fill and the border at the fractional
+                            // display sizes, and the same pixels as the ring of a selected cell with a role, see below)
+                            uix_jfill_rrect(rs * (gx0+z4), rs * (gy0+z4), rs * (gw-z5), rs * (gh-z5), rs * crr);
                         );
                     );
-                    cc2 = ui_pcontrast(cc);
+                    // (2026-11-21) the frame of the cell (rubric GUI ; the soft style, a cell with a text, not a round cell of
+                    // Std) : Faded, Text : around the zone of the fill (the text, lowered by ui_jd_padTopDec, is centered in
+                    // it) ; Std : around the colored cell
+                    (ui_jstyle && (ui_jg_frame > 0) && (ui_jg_thick > 0) && !(ctype & ui_jpad_ct_nobrd) && ((vr >= 1) || !drc) && (sst != 0) &&
+                     (strlen(sst) > 0)) ? (
+                        (vr >= 1) ? uix_jpad_soft_frame(gx0, gy0 + ui_jd_padTopDec, gw - z4, gh - z4 - ui_jd_padTopDec, cc, -1) :
+                            uix_jpad_soft_frame(gx0 + z4, gy0 + z4, gw - z5, gh - z5, cc, crr);
+                        gfx_set_pcolor(cc, 1);
+                    );
+                    // (2026-11-21) the classic style : the border, over the fill (it is inside the border, but at the fractional
+                    // display sizes, a border drawn first loses the pixels it shares with the fill ; 2026-11-22 : Std too)
+                    // (2026-11-22 : Thick 0, ui_jg_thick : no border)
+                    (!(ctype & ui_jpad_ct_nobrd) && !ui_jstyle && (ui_jg_thick > 0)) ? (
+                        ui_pcolor(dc);
+                        uix_jpad_border(gx0, gy0, gw, gh, xc, yc, rc, drc, drr, crr);
+                    );
+                    ((rk > 0) && (gtc < 0)) ? gtc = rb[128]; // (a cell with a role : its text on its fill)
+                    cc2 = (gtc >= 0) ? gtc : ui_pcontrast(cc);
+                    // (2026-11-22) Outline, a selected cell : its text as the others, and a frame in its color, Thick + 1 units
+                    // (one at least, also with Thick 0), on the box of the cell (that of the border of the classic style)
+                    ((vr === 3) && sl && !drc && !drr) ? (
+                        sg = (ctype & ui_jpad_ct_nobrd) ? 0 : max(1, floor(rs));
+                        sx0 = floor(rs * (gx0+z4)); sy0 = floor(rs * (gy0+z4));
+                        gfx_set_pcolor(cc2, 1);
+                        uix_jline_rrect(sx0 - sg, sy0 - sg, floor(rs * (gx0+z4) + rs * (gw-z5)) - sx0 + 2 * sg,
+                            floor(rs * (gy0+z4) + rs * (gh-z5)) - sy0 + 2 * sg, (crr > 0) ? rs * crr + sg : 0,
+                            max(1, floor((max(0, ui_jg_thick) + 1) * rs + 0.5)));
+                        gfx_set_pcolor(cc, 1);
+                    );
+                    // (2026-11-22) a cell with a role, locked : hatched in the color of its text
+                    ((rk > 0) && (rmo === 5)) ? (
+                        gfx_set_pcolor(cc2, 0.22);
+                        uix_jhatch(rs * (gx0 + z4), rs * (gy0 + z4), rs * (gw - z5), rs * (gh - z5), max(4, floor(7 * rs)));
+                        gfx_set_pcolor(cc, 1);
+                    );
                     // dc = dcl;
                     // should we "mark" the cell ?
-                    (selected && !ui_jstyle) ? ( // ("soft" look : the selection is shown by a brighter color)
-                         // selected cell
-                         ui_pcolor(ui_jcolor_draw_bg);
+                    ((sl && (vr === 0)) && (rk > 0) && !drc && !drr) ? (
+                         // (2026-11-22) a selected cell with a role (Std) : a ring in the color of its text, on the edges of
+                         // its fill (uix_jline_rrect : the same pixels as uix_jfill_rrect)
+                         gfx_set_pcolor(cc2, 1);
+                         uix_jline_rrect(rs * (gx0+z4), rs * (gy0+z4), rs * (gw-z5), rs * (gh-z5), rs * crr, max(1, floor(rs * 1.5)));
+                    ) :
+                    (sl && (vr === 0)) ? ( // (Faded, Text : the selection is shown by a brighter color)
+                         // selected cell (a cell with a role : in the color of its text)
+                         ui_pcolor((rk > 0) ? cc2 : ui_jcolor_draw_bg);
                          // ui_pcolor(cc2);
                          // gfx_set_pcolor(cc2);
                          (drc) ? (
                              (drr) ? (
-                                 i = min((wi-6)/2, (he-6)/2);
-                                 gfx_roundrect(rs * xpos, rs * ypos, rs * (wi-2), rs * (he-2), rs * (i+2));
-                                 gfx_roundrect(rs * (xpos+2), rs * (ypos+2), rs * (wi-6), rs * (he-6), rs * i);
+                                 i = min((gw-6)/2, (gh-6)/2);
+                                 gfx_roundrect(rs * gx0, rs * gy0, rs * (gw-2), rs * (gh-2), rs * (i+2));
+                                 gfx_roundrect(rs * (gx0+2), rs * (gy0+2), rs * (gw-6), rs * (gh-6), rs * i);
                              ) : (
                                  gfx_a = 0.3;
                                  gfx_set_pcolor(cc2);
@@ -707,17 +1077,25 @@ local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, 
                                  gfx_circle(rs * xc, rs * yc, rs * rc * 0.70, 1);
                              );
                          ) : (
-                             gfx_roundrect(rs * xpos, rs * ypos, rs * (wi-2), rs * (he-2), rs * drr);
-                             gfx_roundrect(rs * (xpos+2), rs * (ypos+2), rs * (wi-6), rs * (he-6), rs * drr);
+                             (crr > 0) ? (
+                                 uix_jline_rrect(rs * gx0, rs * gy0, rs * (gw-2) + 1, rs * (gh-2) + 1, rs * crr, 1);
+                                 uix_jline_rrect(rs * (gx0+2), rs * (gy0+2), rs * (gw-6) + 1, rs * (gh-6) + 1, rs * crr, 1);
+                             ) : (
+                                 gfx_roundrect(rs * gx0, rs * gy0, rs * (gw-2), rs * (gh-2), rs * drr);
+                                 gfx_roundrect(rs * (gx0+2), rs * (gy0+2), rs * (gw-6), rs * (gh-6), rs * drr);
+                             );
                          );
                          // dc = ui_pcontrast(ui_jcolor_draw_bg);
                     );
 
 
-                    ui_pcolor(cc2);
+                    // (2026-11-22) Alt (or Alt + Cmd) and the mouse on the cell : its number, its role, its mode (uix_jtip_set)
+                    (ovr && (mouse_cap & 16)) ? uix_jtip_set(np, rk, rmo, jr, roles != 0);
+                    // (a cell with a role, disabled : its text faded)
+                    ((rk > 0) && (rmo === 4)) ? ui_pcolor(cc2 & 0xffffff, 0.45) : ui_pcolor(cc2);
                     //   ui_align((((ctype & ui_jpad_ct_align)>>4) -1)/2,-1); // set align type
                     //   ui_pad();
-                    ui_pad(0,ui_jd_padTopDec,ui_jpad_txt_rpad,0); ui_align(0.5, 0.5);
+                    ui_set_rect(ttx, tty, ttw, tth); ui_align(0.5, 0.5); // (2026-11-21 : the rectangle of the text, see above)
                     ((ctype & ui_jpad_ct_cclear) == 0) ? (
                         (selected && (alabs != 0) && (alabs[np] != 0)) ? (
                             ui_text(alabs[np]);
@@ -735,6 +1113,9 @@ local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, 
                         );
                     );
 
+                ) : (
+                    // (a place without a cell : its border only, as until 2026-11-22)
+                    (!ui_jstyle && (vr === 0) && (ui_jg_thick > 0)) ? uix_jpad_border(gx0, gy0, gw, gh, xc, yc, rc, drc, drr, crr);
                 );
                 // next cell
                 xpos += wi; nx +=1;
@@ -994,6 +1375,8 @@ local (pad, ii, plast, add, cty)
     (flags & ui_jpad_mk_values) ? (pad[ui_jpad_values] = plast; plast += icnt;);
     // area for actions
     (flags & ui_jpad_mk_actions) ? (pad[ui_jpad_actns] = plast; plast += icnt;);
+    // area for the roles of the cells (2026-11-22) : always present, all 0 ; negative offset until a role is set
+    pad[ui_jpad_roles] = -plast; plast += icnt;
     pad[ui_jpad_bsize] = plast;
     // clear the rest of the structure
     loop(plast-ui_jpad_free, pad[ii] = 0; ii+=1;);
@@ -1018,6 +1401,59 @@ local (pad, ii, plast, add, cty)
     pad[ui_jpad_coff] = 1; // default pad offset
     mSL_StM_BlockEnd(pad + plast);
     pad;
+);
+
+// (2026-11-22) The roles of the cells (see ui_jpad_rl_action ...) : the area of the roles (its offset made positive : the
+// pad has roles from then on), 0 if none
+function ui_jpad_roles_area(pad) local(r)
+(
+    r = abs(pad[ui_jpad_roles]); pad[ui_jpad_roles] = r;
+    (r > 0) ? pad + r : 0;
+);
+// the cells first, first + 1 ... from the characters of str, one per cell : a Action, c Choice, n Navigation, v Value,
+// o Object, s State, d Danger, w Alert (warning), i Information, '.' Empty ; '-' or ' ' : 0 (the colors of the pad) ; the
+// others : unchanged
+//   ex. ui_jpad_roles_set(pad, 0, "acvvos cvvvci");
+function ui_jpad_roles_set(pad, first, str) local(r, n, k, c, v)
+(
+    ((r = ui_jpad_roles_area(pad)) > 0) ? (
+        n = strlen(str); k = 0;
+        while ((k < n) && (first + k < pad[ui_jpad_siz])) (
+            c = str_getchar(str, k, 'cu');
+            v = (c === 'a') ? 1 : (c === 'c') ? 2 : (c === 'n') ? 3 : (c === 'v') ? 4 : (c === 'o') ? 5 : (c === 's') ? 6 :
+                (c === 'd') ? 7 : (c === 'i') ? 8 : (c === '.') ? 9 : (c === 'w') ? 10 : ((c === '-') || (c === ' ')) ? 0 : -1;
+            ((v >= 0) && (first + k >= 0)) ? r[first + k] = v;
+            k += 1;
+        );
+    );
+);
+// the cell np : its whole word v (role + ui_jpad_rl_ident * (1 + k) + ui_jpad_rl_force * (1 + m))
+function ui_jpad_role(pad, np, v) local(r)
+(
+    (((r = ui_jpad_roles_area(pad)) > 0) && (np >= 0) && (np < pad[ui_jpad_siz])) ? r[np] = v;
+);
+// the role of the cell np (0 : none)
+function ui_jpad_role_of(pad, np) local(r)
+(
+    r = pad[ui_jpad_roles];
+    ((r > 0) && (np >= 0) && (np < pad[ui_jpad_siz])) ? (pad + r)[np] & 15 : 0;
+);
+// the cell np of a pad with roles drawn locked (hatched : on 1, off 0 ; e.g. connected but switched off)
+function ui_jpad_lock(pad, np, on) local(d)
+(
+    ((np >= 0) && (np < pad[ui_jpad_siz])) ? (
+        d = pad + pad[ui_jpad_cells];
+        d[np] = (d[np] & (-1 ~ ui_jpad_ct_lock)) | (on ? ui_jpad_ct_lock : 0);
+    );
+);
+// the mode of the cell np of a pad with roles : selected (sel : lit, a value changed), drawn disabled while its clics are kept
+// (dim : ui_jpad_ct_dim, no effect now)
+function ui_jpad_mark(pad, np, sel, dim) local(d)
+(
+    ((np >= 0) && (np < pad[ui_jpad_siz])) ? (
+        d = pad + pad[ui_jpad_cells];
+        d[np] = (d[np] & (-1 ~ (ui_jpad_ct_selec | ui_jpad_ct_dim))) | (sel ? ui_jpad_ct_selec : 0) | (dim ? ui_jpad_ct_dim : 0);
+    );
 );
 
 
