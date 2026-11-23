@@ -227,7 +227,8 @@ ui_jpad_color4 = 26; // local color 4
 ui_jpad_color5 = 27; // local color 5
 ui_jpad_coff = 28;  // global offset
 ui_jpad_roles = 29; // (2026-11-22) the roles of the cells [array offset ; negative while no role is set, see ui_jpad_roles_set]
-ui_jpad_free = 30; // size of description, and first free entry.
+ui_jpad_fades = 30; // (2026-11-23) the fades of the cells [array offset, 2 words per cell ; 0 : none, see ui_jpad_mk_fades]
+ui_jpad_free = 31; // size of description, and first free entry.
 
 // Description of pad types
 ui_jpad_ty_act = 5; // action type : no pad is ever selected
@@ -253,6 +254,7 @@ ui_jpad_ct_disab = 0x8000; // set if cell is disabled
 ui_jpad_ct_altcol = 0x10000; // set to use alternate color for cell
 ui_jpad_ct_lock = 0x20000; // (2026-11-22) a cell with a role : drawn locked (hatched)
 ui_jpad_ct_dim = 0x40000; // (2026-11-22) a cell with a role : drawn disabled (as ui_jpad_ct_disab), its clics kept
+ui_jpad_ct_fade = 0x80000; // (2026-11-23) a cell with a role, in a pad made with ui_jpad_mk_fades : it fades (see ui_jpad_fadeon)
 
 /*
    (2026-11-22) The roles of the cells (rubric GUI, step 2 : see mSL_GUI and the palette, uix_jp_make in ui-lib-JJ-GUI) :
@@ -293,6 +295,7 @@ ui_jpad_mk_colmaj = 0x10000; // use column major order
 ui_jpad_mk_altlabs =   0x20000; // use also alt. labels
 ui_jpad_mk_altcolors = 0x40000; // use also alt. colors
 ui_jpad_mk_cclear =    0x80000; // set to leave the cell without label
+ui_jpad_mk_fades =    0x100000; // (2026-11-23) the area of the fades of the cells (ui_jpad_fadeon, ui_jpad_level)
 
 // Event flags returned
 ui_jpad_ev_cclk = 0x1; // a cell was clicked
@@ -422,6 +425,7 @@ ui_jg_cround = -1;  // the variation Std : the radius of the corners of the rect
 ui_jg_bold = 0;     // the text of the cells : 1 bold (all the styles)
 ui_jg_ptext = 100;  // the text of the cells : its size, in % of the texts (80 ... 150 ; all the styles)
 ui_jg_tcontrast = 0.35; // the variation Text : the least difference of luminance between the text of a cell and the background
+ui_jg_fadet = 10;   // (2026-11-23) the cells that fade (ui_jpad_ct_fade) : the time of their return to rest, in seconds (0 : at once)
 // (2026-11-21) The variation of the cells (the sub-menu "Variation" of the panes, the module GUI) : 0 Std (the cell filled
 // with its color, as the classic look until then), 1 Faded (its color around the text, faded : the "soft" look until then),
 // 2 Text (its color in its text, no fill) ; -1 : as the style (Classic : Std, Soft : Faded). The style (ui_jstyle) sets
@@ -713,12 +717,20 @@ function uix_jtip_set(np, rk, rmo, jr, has)
     );
 );
 
+// (2026-11-23, the fades of the cells) the color a mixed with b (t : 0 a ... 1 b ; 0xRRGGBB)
+function uix_jcmix(a, b, t)
+(
+    ((0|(((a >> 16) & 255) * (1 - t) + ((b >> 16) & 255) * t + 0.5)) << 16) |
+    ((0|(((a >> 8) & 255) * (1 - t) + ((b >> 8) & 255) * t + 0.5)) << 8) |
+    (0|((a & 255) * (1 - t) + (b & 255) * t + 0.5));
+);
+
 function control_jpad(pm, fnl, fnc, opt)
 local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, iy, rs,
        dc, labs, gloff, isvalid, ctype, cc, cdefs, nums, colors, z1, z2, z3, z4, z5,
        CS, alabs, acolors, selected, fmsin, flevnt, drc, drr, bcl, dcl, i, ms_x, ms_y,
        xc, yc, rc, xcl, ycl, zcl, sst, gx0, gy0, gw, gh, gex, gey, crr, gtw, gth, gtc, vr, ttx, tty, ttw, tth,
-       roles, jr, rk, rmo, rb, ovr, sl, sx0, sy0, sg)
+       roles, jr, rk, rmo, rb, ovr, sl, sx0, sy0, sg, tn, fda, fp, fe, flv, rf0, rf1, rf2, ofr)
 (
     ty = pm[ui_jpad_typ]; // pad type and flags
     pty = ty & ui_jbtmask; // just the pad type
@@ -729,6 +741,8 @@ local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, 
     ycl = ((pm[ui_jpad_color4] >= 0) ? pm[ui_jpad_color4] : bcl);
     zcl = ((pm[ui_jpad_color5] >= 0) ? pm[ui_jpad_color5] : bcl);
     flevnt = 0; // no event yet
+    // (2026-11-23) the fades of the cells (a pad made with ui_jpad_mk_fades), now
+    fda = (pm[ui_jpad_fades] > 0) ? pm + pm[ui_jpad_fades] : 0; tn = time_precise();
     ((pty == ui_jpad_ty_act) || (pty == ui_jpad_ty_sel) || (pty == ui_jpad_ty_opt)) ? (
         ui_push(); // push viewport to save it
         // (2026-11-21) the text of the cells : bold, larger or smaller (rubric GUI ; the ui_pop at the end restores the font)
@@ -916,7 +930,23 @@ local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, 
                             (ovr && (rk !== 6) && (rk !== 8) && (rk !== 9)) ? (ui_jmouse_buttons ? 2 : 1) : 0;
                         rmo = min(5, rmo);
                         rb = uix_jp_tab + rmo + (((jr >> 4) & 31) ? 384 + 8 * ((((jr >> 4) & 31) - 1) & 15) : 8 * rk);
-                        cc = rb[0];
+                        rf0 = rb[0]; rf1 = rb[128]; rf2 = rb[256]; // (the fill, the text on it, the text on the background)
+                        // (2026-11-23) a cell that fades (ui_jpad_ct_fade), at rest : its color between those of the modes rest
+                        // and selected (rb + 3), from 1 when it stopped being selected down to its level in ui_jg_fadet seconds
+                        // (the text : that of the nearer one) ; while it fades, must_do_gfx draws again (uix_jfading)
+                        ((fda != 0) && (ctype & ui_jpad_ct_fade) && ((rmo === 0) || (rmo === 3))) ? (
+                            fp = fda + 2 * np;
+                            (rmo === 3) ? (fp[1] = tn) : (
+                                fe = ((ui_jg_fadet > 0) && (fp[1] > 0)) ? max(0, 1 - (tn - fp[1]) / ui_jg_fadet) : 0;
+                                flv = max(0, min(1, fp[0])); flv += (1 - flv) * fe;
+                                (fe > 0) ? uix_jfading = 1;
+                                (flv > 0.002) ? (
+                                    rf0 = uix_jcmix(rb[0], rb[3], flv); rf2 = uix_jcmix(rb[256], rb[259], flv);
+                                    (flv >= 0.5) ? rf1 = rb[131];
+                                );
+                            );
+                        );
+                        cc = rf0;
                         sl = (rmo === 3);
                     ) : (
                         sl = selected;
@@ -985,7 +1015,7 @@ local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, 
                         ) : (
                             // (the background : on the left of the cell, inside its border, half way up ; a cell with a role :
                             // its text on the background, computed with the palette)
-                            gtc = (rk > 0) ? rb[256] :
+                            gtc = (rk > 0) ? rf2 :
                                 uix_jtext_color(cc, floor((gx0 + ((ui_jstyle || (ctype & ui_jpad_ct_nobrd)) ? 0 : 2)) * rs) + 1,
                                 floor((gy0 + gh / 2) * rs));
                         );
@@ -1015,10 +1045,14 @@ local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, 
                             uix_jfill_rrect(rs * (gx0+z4), rs * (gy0+z4), rs * (gw-z5), rs * (gh-z5), rs * crr);
                         );
                     );
+                    // (2026-11-23, the user) a selected cell that gets a frame of its own (Outline ; Std without a role : the
+                    // double frame, see below) : neither the frame of the soft style nor the border of the classic style
+                    // (they stuck out of it, shifted)
+                    ofr = sl && !drc && !drr && ((vr === 3) || ((vr === 0) && (rk === 0)));
                     // (2026-11-21) the frame of the cell (rubric GUI ; the soft style, a cell with a text, not a round cell of
                     // Std) : Faded, Text : around the zone of the fill (the text, lowered by ui_jd_padTopDec, is centered in
                     // it) ; Std : around the colored cell
-                    (ui_jstyle && (ui_jg_frame > 0) && (ui_jg_thick > 0) && !(ctype & ui_jpad_ct_nobrd) && ((vr >= 1) || !drc) && (sst != 0) &&
+                    (!ofr && ui_jstyle && (ui_jg_frame > 0) && (ui_jg_thick > 0) && !(ctype & ui_jpad_ct_nobrd) && ((vr >= 1) || !drc) && (sst != 0) &&
                      (strlen(sst) > 0)) ? (
                         (vr >= 1) ? uix_jpad_soft_frame(gx0, gy0 + ui_jd_padTopDec, gw - z4, gh - z4 - ui_jd_padTopDec, cc, -1) :
                             uix_jpad_soft_frame(gx0 + z4, gy0 + z4, gw - z5, gh - z5, cc, crr);
@@ -1027,11 +1061,11 @@ local (cc2, ty, pty, nl, nc, np, left, top, xpos, ypos, wi, he, xm, nx, ny, ix, 
                     // (2026-11-21) the classic style : the border, over the fill (it is inside the border, but at the fractional
                     // display sizes, a border drawn first loses the pixels it shares with the fill ; 2026-11-22 : Std too)
                     // (2026-11-22 : Thick 0, ui_jg_thick : no border)
-                    (!(ctype & ui_jpad_ct_nobrd) && !ui_jstyle && (ui_jg_thick > 0)) ? (
+                    (!ofr && !(ctype & ui_jpad_ct_nobrd) && !ui_jstyle && (ui_jg_thick > 0)) ? (
                         ui_pcolor(dc);
                         uix_jpad_border(gx0, gy0, gw, gh, xc, yc, rc, drc, drr, crr);
                     );
-                    ((rk > 0) && (gtc < 0)) ? gtc = rb[128]; // (a cell with a role : its text on its fill)
+                    ((rk > 0) && (gtc < 0)) ? gtc = rf1; // (a cell with a role : its text on its fill)
                     cc2 = (gtc >= 0) ? gtc : ui_pcontrast(cc);
                     // (2026-11-22) Outline, a selected cell : its text as the others, and a frame in its color, Thick + 1 units
                     // (one at least, also with Thick 0), on the box of the cell (that of the border of the classic style)
@@ -1377,6 +1411,8 @@ local (pad, ii, plast, add, cty)
     (flags & ui_jpad_mk_actions) ? (pad[ui_jpad_actns] = plast; plast += icnt;);
     // area for the roles of the cells (2026-11-22) : always present, all 0 ; negative offset until a role is set
     pad[ui_jpad_roles] = -plast; plast += icnt;
+    // area for the fades of the cells (2026-11-23) : 2 words per cell, its level and the last time it was selected (all 0)
+    (flags & ui_jpad_mk_fades) ? (pad[ui_jpad_fades] = plast; plast += 2 * icnt;);
     pad[ui_jpad_bsize] = plast;
     // clear the rest of the structure
     loop(plast-ui_jpad_free, pad[ii] = 0; ii+=1;);
@@ -1453,6 +1489,32 @@ function ui_jpad_mark(pad, np, sel, dim) local(d)
     ((np >= 0) && (np < pad[ui_jpad_siz])) ? (
         d = pad + pad[ui_jpad_cells];
         d[np] = (d[np] & (-1 ~ (ui_jpad_ct_selec | ui_jpad_ct_dim))) | (sel ? ui_jpad_ct_selec : 0) | (dim ? ui_jpad_ct_dim : 0);
+    );
+);
+// (2026-11-23) The fades (a pad made with ui_jpad_mk_fades ; the others : no effect) : the cell np fades (on 1) or changes
+// its look at once (on 0) ; a cell that fades and has a role : when it leaves the mode selected, it goes back to rest in
+// ui_jg_fadet seconds (the rubric GUI, Fade time), its colors mixed ; at rest, its level (0 ... 1, ui_jpad_level) puts its
+// color between that of the mode rest (0) and that of the mode selected (1)
+function ui_jpad_fadeon(pad, np, on) local(d)
+(
+    ((np >= 0) && (np < pad[ui_jpad_siz])) ? (
+        d = pad + pad[ui_jpad_cells];
+        d[np] = on ? (d[np] | ui_jpad_ct_fade) : (d[np] & (-1 ~ ui_jpad_ct_fade));
+    );
+);
+function ui_jpad_level(pad, np, lv) local(f)
+(
+    ((pad[ui_jpad_fades] > 0) && (np >= 0) && (np < pad[ui_jpad_siz])) ? (
+        f = pad + pad[ui_jpad_fades];
+        f[2 * np] = max(0, min(1, lv));
+    );
+);
+// the fades stopped (the cells show other things : the clips of another group ...) ; the levels kept
+function ui_jpad_fade_reset(pad) local(f, i)
+(
+    (pad[ui_jpad_fades] > 0) ? (
+        f = pad + pad[ui_jpad_fades];
+        i = 0; loop(pad[ui_jpad_siz], f[2 * i + 1] = 0; i += 1;);
     );
 );
 

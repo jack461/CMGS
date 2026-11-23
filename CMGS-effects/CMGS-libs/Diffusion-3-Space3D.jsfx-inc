@@ -902,6 +902,39 @@ local(lst, g, u, i, o, w, k, n, m, e, q, c)
     k = 0; loop(s3d_nspk, s3d_spk[k * s3d_st + s3d_fg] = (m > 0) ? sqrt(sx_dgo[k] / m) : 0; k += 1;);
 );
 
+// (2026-11-23) The same from a list of n coefficients (kl : their indices in the matrix, el : their energies, the square of
+// their gains) : the simulation of a MetaSurface (see ms_Sim, Diffusion-3-MetaSurface)
+function sx_DirectList(kl, el, n)
+local(u, i, o, w, k, m, e, q, j)
+(
+    memset(sx_dacc, 0, 128 * 4); memset(sx_dgo, 0, 128);
+    j = 0;
+    loop(n,
+        u = kl[j]; w = el[j];
+        ((w > 0) && (u >= 0) && (u < matrsiz)) ? (
+            i = u >> 7; o = u & 0x7f;
+            e = s3d_spk + o * s3d_st;
+            q = sx_dacc + 4 * i;
+            q[0] += w; q[1] += w * e[s3d_fx]; q[2] += w * e[s3d_fy]; q[3] += w * e[s3d_fz];
+            sx_dgo[o] += w;
+        );
+        j += 1;
+    );
+    k = 0; i = 0;
+    loop(128,
+        q = sx_dacc + 4 * i;
+        ((q[0] > 0) && (k < SX_MAXSRC)) ? (
+            e = s3d_src + k * s3d_st;
+            e[s3d_fx] = q[1] / q[0]; e[s3d_fy] = q[2] / q[0]; e[s3d_fz] = q[3] / q[0];
+            k += 1;
+        );
+        i += 1;
+    );
+    s3d_nsrc = k; s3d_gon = 0;
+    m = 0; k = 0; loop(s3d_nspk, m = max(m, sx_dgo[k]); k += 1;);
+    k = 0; loop(s3d_nspk, s3d_spk[k * s3d_st + s3d_fg] = (m > 0) ? sqrt(sx_dgo[k] / m) : 0; k += 1;);
+);
+
 // The scene of the view of the projector pk : the speakers of Diffusion and the power the projector sends them, the
 // levels of the outputs ; spatial : its trajectory, its points and its group center, where @block placed them ;
 // direct (2026-11-11) : its input channels on the speakers they feed (sx_Direct), no trajectory
@@ -910,8 +943,16 @@ local(pp, w, n, k, e, pos)
 (
     ((HP_Positions !== sx_hppos) || (hp_Seq !== sx_hpseq)) ? sx_SpkHP();
     pp = projectors + pk * projsize;
-    (pp[prx_spv] > 0) ? sx_SpGains(pk) : sx_Direct(pp);
-    k = 0; loop(s3d_nspk, s3d_spk[k * s3d_st + s3d_fl] = max(0, min(1, HP_Power[k] / 15)); k += 1;);
+    // (2026-11-23) a MetaSurface that shows its brush for this projector without sounding (ms_simV, Diffusion-3-MetaSurface) :
+    // the energies the brush would give, as the gains and as the halos (no sound to measure) ; sx_msim : its view + 1
+    sx_msim = ((pp[prx_spv] <= 0) && (pk + 1 <= MS_NPRJ)) ? ms_simV[pk + 1] : 0;
+    (pp[prx_spv] > 0) ? sx_SpGains(pk) : (sx_msim > 0) ?
+        sx_DirectList(ms_simK + (sx_msim - 1) * MS_KMAX, ms_simE + (sx_msim - 1) * MS_KMAX, ms_simN[sx_msim - 1]) : sx_Direct(pp);
+    k = 0;
+    loop(s3d_nspk,
+        s3d_spk[k * s3d_st + s3d_fl] = (sx_msim > 0) ? s3d_spk[k * s3d_st + s3d_fg] : max(0, min(1, HP_Power[k] / 15));
+        k += 1;
+    );
     // (a placement : the trajectory placed alone, see sx_PlcIn ; else the path of the projector)
     (pp[prx_spv] <= 0) ? (s3d_ntrj = 0) :
     (sx_plc >= 0) ? sp_MkSlot(sx_TrjGet(sxc_A + sx_plc), sx_plc, sx_trjr, sp_TpQ(pk, 0)) : (
@@ -1489,6 +1530,21 @@ local(h1, hv, hneed, zz, zzmi, x, y, w, h, dr, p, pk, s, pp, sp, i, q, g, st)
                     pad_S3D_Colrs[sxc_Reset] = Col_InfoA;
                     pad_S3D_Colrs[sxc_Place] = Color_Goldenrod;
                 );
+                // (2026-11-23) the roles (GUI rubric) : line 1 the projector (Navigation ; spatial : selected), Options
+                // (Action), the source, the view, the law (Choice), Reach, Level (Value), Adapt, Restart (Action) ; line 2 the
+                // trajectories A ... D (Object : placed, selected ; outside the mix, drawn disabled ; during its placement,
+                // Alert), Mix (Value), Glide, Anim, Dyn (Choice), Radius (Value) ; line 3 Mouse, Frame (Choice), Spread, Size,
+                // Yaw, Pitch, Roll (Value), Reset (Danger), Place (Action) ; during a placement : its 7 values (Value), Reset
+                // (Danger), Placing (Alert) ; the other modes from the colors (d3_Pad_Modes)
+                ui_jpad_roles_set(pad_S3D, 0, "nacccvvaaoooovcccv");
+                ui_jpad_roles_set(pad_S3D, sxc_Mouse, (sx_plc < 0) ? "ccvvvvvda" : "vvvvvvvda");
+                d3_Pad_Modes(pad_S3D, pad_S3D_Labs, pad_S3D_Colrs, pad_S3D_Siz);
+                ui_jpad_mark(pad_S3D, sxc_Law, 0, 0);
+                ui_jpad_mark(pad_S3D, sxc_Anim, sx_anim, 0);
+                ((sx_plc >= 0) && (sx_plc < 4)) ? (
+                    ui_jpad_role(pad_S3D, sxc_A + sx_plc, ui_jpad_rl_alert); ui_jpad_mark(pad_S3D, sxc_A + sx_plc, 0, 0);
+                    ui_jpad_role(pad_S3D, sxc_Place, ui_jpad_rl_alert); ui_jpad_mark(pad_S3D, sxc_Place, 0, 0);
+                );
                 zz = control_jpad(pad_S3D);
                 dr = sx_Drag(blockId); // the cells of values : a drag (see sx_Drag)
                 (zz > 0) ? (
@@ -1543,6 +1599,11 @@ local(h1, hv, hneed, zz, zzmi, x, y, w, h, dr, p, pk, s, pp, sp, i, q, g, st)
             (s3d_ntrj > 0) ? (i = 0; loop(s3d_ntrj, s3d_presZ += s3d_trj[3 * i + 2]; i += 1;); s3d_presZ /= s3d_ntrj;);
             s3d_pvOn = s3d_plmode; s3d_pvx = sp_pvx; s3d_pvy = sp_pvy; s3d_pvz = sp_pvz;
             s3d_draw(x, y, w, h);
+            // (2026-11-23) the simulation of a MetaSurface (see sx_Show) : said in the view
+            (sx_msim > 0) ? (
+                sprintf(#sx_msl, "MetaSurface %c : simulated", 'A' + sx_msim - 1);
+                gfx_set(1, 0.85, 0.1, 0.9); gfx_x = x + 6; gfx_y = y + 4; gfx_drawstr(#sx_msl);
+            );
             // (2026-11-21) the cursors of the view, a kind for each combination of Shift, Cmd and Alt (as s3d_mouse) : an
             // open hand (the orbit) ; Shift, a fist up - down (the size) ; Cmd, two fists (the trajectory, a placement,
             // the group of sources turned) ; Alt, 4 arrows (it moves ; the group of sources : its roll, left - right) ;

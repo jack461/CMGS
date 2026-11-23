@@ -19,11 +19,15 @@
                                         pns_GrpTtl[g] = ">Name"; pns_GrpSum[g] = summary module (0 : none);
                                         pns_GrpFst[g] = first module; pns_GrpNb[g] = count of modules; pns_GrpCnt = g + 1;
         and before pns_Init() :
-            dcbTabsCount             number of tabs (uix_jG_menuscr), altTabsNames (alternate tabs names)
+            dcbTabsMax               16 : the capacity (2026-11-23 : the user chooses the count of the tabs, 1 ... 16, see
+                                     mSL_Tabs, included before : the host names 16 screens in uix_jG_menuscr, then calls
+                                     tbs_Init(its default count), which sets dcbTabsCount, the tabs shown) ; altTabsNames
+                                     (alternate tabs names, dcbTabsMax of them)
             serialBlock, Pr7_StudConf, Pr7_StudRat, Pr7_StudLive
-                                     the panes configuration is in serialBlock + Pr7_StudConf (dcbTabsCount words : panes count),
-                                     serialBlock + Pr7_StudRat (dcbTabsCount * 4 : panes widths),
-                                     serialBlock + Pr7_StudLive (dcbTabsCount : 1 if the tab uses the "live" display)
+                                     the panes configuration is in serialBlock + Pr7_StudConf (dcbTabsMax words : panes count),
+                                     serialBlock + Pr7_StudRat (dcbTabsMax * 4 : panes widths),
+                                     serialBlock + Pr7_StudLive (dcbTabsMax : 1 if the tab uses the "live" display) ; until
+                                     2026-11-23 at 8, 16 and 48, 8 tabs (the old projects : see pns_Migrate)
             dcbBlocksAll             (optional) where to keep the modules lists, dcbBSize words ; allocated if 0
         and include mSL_Serialize.jsfx-inc, then call ser_Init() (for pns_Serialize).
             ui_MinSize1Pane...       (optional) panes sizes ; defaults as in Interstys
@@ -55,7 +59,7 @@ local (i, p)
     dcbPannelsMax = 4; // up to 4 pannels in each tabulation
     dcbMSize = 32; // max number of different displayable modules in each pane
     dcbMax = dcbMSize - 1;
-    dcbMCount = dcbTabsCount * dcbPannelsMax; // number of different modules sets
+    dcbMCount = dcbTabsMax * dcbPannelsMax; // number of different modules sets (2026-11-23 : all the possible tabs)
     // we currently use 64 * 2 words, so 128 for each menu
     dcbWSize = dcbMSize * 2;
     dcbBSize = dcbWSize * dcbMCount;
@@ -65,11 +69,11 @@ local (i, p)
 
     // Panes configuration : 1 pane, standard widths, no "live" display
     p = serialBlock + Pr7_StudConf;
-    i = 0; loop(dcbTabsCount, p[i] = 1; i += 1;);
+    i = 0; loop(dcbTabsMax, p[i] = 1; i += 1;);
     p = serialBlock + Pr7_StudRat;
-    i = 0; loop(dcbTabsCount * 4, p[i] = 600; i += 1;);
+    i = 0; loop(dcbTabsMax * 4, p[i] = 600; i += 1;);
     p = serialBlock + Pr7_StudLive;
-    i = 0; loop(dcbTabsCount, p[i] = 0; i += 1;);
+    i = 0; loop(dcbTabsMax, p[i] = 0; i += 1;);
 
     // Panes sizes
     (ui_MinSize1Pane == 0) ? (
@@ -83,7 +87,7 @@ local (i, p)
     );
 
     // The Studio menu
-    dcbNamesCnt = 160; // up to 160 strings in the dcb Menu (63 entries, the modules of the host, 32 user modules)
+    dcbNamesCnt = 240; // up to 240 strings in the dcb Menu (63 entries, 34 for the tabs (2026-11-23), the modules of the host, 32 user modules)
     GUI_Main_Menu_Block = mSL_StM_Alloc(ui_jmenu_items+dcbNamesCnt, 'Menu', mSL_StM_FlClear);
     blockDispNames = make_array(dcbNamesCnt);
     blockDispIdts = make_array(dcbNamesCnt);
@@ -239,11 +243,7 @@ local (i, j, g, it, othFirst, tmp, itdsp, blockStrSpace, blockThemeBlack, blockT
     blockDispNames[blockReset] = "&/Reset Sizes";
     (itdsp += 1); // separator
     blockPaneClear = (itdsp += 1);
-    blockDispNames[blockPaneClear] = "&/Clear Pane";
-    blockTabClear = (itdsp += 1);
-    blockDispNames[blockTabClear] = "&/Clear Tab"; // (the panes of the current tab ; Clear All Tabs : all the tabs)
-    blockAllPaneClear = (itdsp += 1);
-    blockDispNames[blockAllPaneClear] = "&/<Clear All Tabs";
+    blockDispNames[blockPaneClear] = "&/<Clear Pane"; // (2026-11-23, the user : Clear Tab, Clear All Tabs in Tabs Management)
     //
     (itdsp += 1); // separator
     blockDispNames[(itdsp += 1)] = ">Tabs Management";
@@ -254,8 +254,14 @@ local (i, j, g, it, othFirst, tmp, itdsp, blockStrSpace, blockThemeBlack, blockT
     blockDispNames[blockTabShftRight] = "&/Shift tabs right"; //
     blockTabLive = (itdsp += 1);
     blockDispNames[blockTabLive] = "&/Live display"; // see genericLiveTab
+    itdsp = tbs_MenuDecl(blockDispNames, itdsp); // (2026-11-23) Number of tabs, Exchange with tab (mSL_Tabs)
     blockTabRename = (itdsp += 1);
-    blockDispNames[blockTabRename] = "&/<Rename tab..."; //
+    blockDispNames[blockTabRename] = "&/Rename tab..."; //
+    (itdsp += 1); // separator
+    blockTabClear = (itdsp += 1);
+    blockDispNames[blockTabClear] = "&/Clear Tab"; // (the panes of the current tab ; Clear All Tabs : all the tabs)
+    blockAllPaneClear = (itdsp += 1);
+    blockDispNames[blockAllPaneClear] = "&/<Clear All Tabs";
     //
     (itdsp += 1); // separator
     blockDispNames[(itdsp += 1)] = ">Theme";
@@ -629,11 +635,21 @@ local(i)
 
 /*
     Save / load of the tabs and panes configuration : to call in @serialize ; returns 1 if a configuration was loaded.
-    Format : ['tnm2', tabs count, 0, 0], the tabs names (file_string), ['std2', serialSize, dcbBSize, 0],
-    serialBlock, dcbBlocksAll ; the doubles are saved as two singles (save_mem, load_mem : mSL_Serialize.jsfx-inc).
+    Format : ['tnm2', count of names, count of tabs shown, 0], the tabs names (file_string), ['std2', serialSize, dcbBSize,
+    layout], serialBlock, dcbBlocksAll ; the doubles are saved as two singles (save_mem, load_mem : mSL_Serialize.jsfx-inc).
+    (2026-11-23) The count of tabs shown (until then 0 : as many as the names, 8 or 5) and the layout 2 : the tabs data of
+    serialBlock (Pr7_StudConf ...) sized for 16 tabs, by the host ; an older layout (0 : at 8, 16, 48 for 8 tabs) is moved
+    there (pns_Migrate) ; a configuration smaller than serialSize, dcbBSize is read too (the rest : the defaults).
 */
+// the tabs data of an older project (until 2026-11-23 : Diffusion-3, the FilePlayer, the ScriptMaster : serialBlock + 8 the
+// panes counts, + 16 the widths, + 48 the live displays, 8 tabs) moved to their places (Pr7_StudConf ...)
+function pns_Migrate() local(i)
+(
+    i = 0; loop(8, serialBlock[Pr7_StudConf + i] = serialBlock[8 + i]; serialBlock[Pr7_StudLive + i] = serialBlock[48 + i]; i += 1;);
+    i = 0; loop(32, serialBlock[Pr7_StudRat + i] = serialBlock[16 + i]; i += 1;);
+);
 function pns_Serialize()
-local (ok, i, n, p)
+local (ok, i, n, p, c)
 (
     ok = 0;
     (file_avail(0) >= 0) ? (
@@ -643,15 +659,19 @@ local (ok, i, n, p)
             load_mem(0, ser_hdr, 4);
             (ser_hdr[0] === 'tnm2') ? (
                 n = ser_hdr[1];
+                c = (ser_hdr[2] > 0) ? ser_hdr[2] : n; // (the count of tabs shown ; until 2026-11-23 : all of them)
                 i = 0; loop(n,
-                    (i < dcbTabsCount) ? file_string(0, altTabsNames[i]) : file_string(0, #pns_skip);
+                    (i < dcbTabsMax) ? file_string(0, altTabsNames[i]) : file_string(0, #pns_skip);
                     i += 1;
                 );
                 memset(ser_hdr, 0, 4);
                 load_mem(0, ser_hdr, 4);
-                ((ser_hdr[0] === 'std2') && (ser_hdr[1] === serialSize) && (ser_hdr[2] === dcbBSize)) ? (
-                    load_mem(0, serialBlock, serialSize);
-                    load_mem(0, dcbBlocksAll, dcbBSize);
+                ((ser_hdr[0] === 'std2') && (ser_hdr[1] > 0) && (ser_hdr[1] <= serialSize) && (ser_hdr[2] > 0) &&
+                    (ser_hdr[2] <= dcbBSize)) ? (
+                    load_mem(0, serialBlock, ser_hdr[1]);
+                    load_mem(0, dcbBlocksAll, ser_hdr[2]);
+                    (ser_hdr[3] < 2) ? pns_Migrate(); // (an older layout of the tabs data)
+                    tbs_Pend = max(1, min(dcbTabsMax, c)); // (applied in @gfx, tbs_Frame)
                     ok = 1;
                 );
             );
@@ -663,16 +683,16 @@ local (ok, i, n, p)
             ui_jzoom_set(ui_jzoom_find(serialBlock[Pr7_UiSize], ui_jzoomDef)); // display size (percent ; 0 : the default)
             // Check panes configurations
             p = serialBlock + Pr7_StudConf;
-            i = 0; loop(dcbTabsCount, p[i] = max(1, min(4, 0|p[i])); i += 1;);
+            i = 0; loop(dcbTabsMax, p[i] = max(1, min(4, 0|p[i])); i += 1;);
             p = serialBlock + Pr7_StudRat;
-            i = 0; loop(dcbTabsCount*4, p[i] = max(20, min(20000, p[i])); i += 1;); // (2026-11-21 : the borders dragged)
+            i = 0; loop(dcbTabsMax*4, p[i] = max(20, min(20000, p[i])); i += 1;); // (2026-11-21 : the borders dragged)
         );
     ) : (
         // ===SAVE===
-        ser_hdr[0] = 'tnm2'; ser_hdr[1] = dcbTabsCount; ser_hdr[2] = ser_hdr[3] = 0;
+        ser_hdr[0] = 'tnm2'; ser_hdr[1] = dcbTabsMax; ser_hdr[2] = dcbTabsCount; ser_hdr[3] = 0;
         save_mem(0, ser_hdr, 4);
-        i = 0; loop(dcbTabsCount, file_string(0, altTabsNames[i]); i += 1;);
-        ser_hdr[0] = 'std2'; ser_hdr[1] = serialSize; ser_hdr[2] = dcbBSize; ser_hdr[3] = 0;
+        i = 0; loop(dcbTabsMax, file_string(0, altTabsNames[i]); i += 1;);
+        ser_hdr[0] = 'std2'; ser_hdr[1] = serialSize; ser_hdr[2] = dcbBSize; ser_hdr[3] = 2; // (layout 2, 2026-11-23)
         save_mem(0, ser_hdr, 4);
         save_mem(0, serialBlock, serialSize);
         save_mem(0, dcbBlocksAll, dcbBSize);
@@ -741,6 +761,7 @@ local(xx, igb, u, v, i, j, k, p, s, wst, kit, x, d, e, pn_in)
             s = p[block1Pane -1 + studDispPrf];
             str_setchar(s, 1, '!');
             (serialBlock[Pr7_StudLive + TabIdt]) ? str_setchar(p[blockTabLive], 1, '!');
+            tbs_MenuRefresh(p, TabIdt); // (2026-11-23) the count of the tabs, the tabs to exchange with
             str_setchar(p[blockStyle0 + (ui_jstyle != 0)], 1, '!'); // the current style, the current variation :
             str_setchar(p[blockVar0 + ((ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0))], 1, '!');
             str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
@@ -791,6 +812,9 @@ local(xx, igb, u, v, i, j, k, p, s, wst, kit, x, d, e, pn_in)
                     ui_screen_open("control.prompt");
                     ui_screen_arg(0, altTabsNames[TabIdt]);
                     ui_screen_arg(1, #pns_tmp);
+                ) :
+                tbs_MenuClick(kit, TabIdt) ? (
+                    0; // (2026-11-23) Number of tabs, Exchange with tab (mSL_Tabs)
                 ) :
                 ui_jzoom_menu_click(kit) ? (
                     0; // a display size (see ui-lib-JJ-GUI)
@@ -914,6 +938,7 @@ local (p, i, xx, kit)
     i = 0; while (i < blockMenuITC) ( str_setchar(p[i], 1, ui_jmenu_chSP); i += 1; );
     str_setchar(p[block1Pane -1 + studDispPrf], 1, '!');
     str_setchar(p[blockTabLive], 1, '!');
+    tbs_MenuRefresh(p, TabIdt); // (2026-11-23) the count of the tabs, the tabs to exchange with
     str_setchar(p[blockStyle0 + (ui_jstyle != 0)], 1, '!'); // the current style, the current variation :
     str_setchar(p[blockVar0 + ((ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0))], 1, '!');
     str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
@@ -931,6 +956,9 @@ local (p, i, xx, kit)
             ui_screen_open("control.prompt");
             ui_screen_arg(0, altTabsNames[TabIdt]);
             ui_screen_arg(1, #pns_tmp);
+        ) :
+        tbs_MenuClick(kit, TabIdt) ? (
+            0; // (2026-11-23) Number of tabs, Exchange with tab (mSL_Tabs)
         ) :
         ui_jzoom_menu_click(kit) ? (
             0; // a display size (see ui-lib-JJ-GUI)
@@ -1029,6 +1057,7 @@ local (ww, p)
 function pns_ShowTabs(scr)
 local (i, tb)
 (
+    tbs_Frame(); // (2026-11-23) the count of tabs loaded ; the tab shown inside the count (mSL_Tabs)
     tb = -1; i = 0;
     while ((tb < 0) && (i < dcbTabsCount)) (
         (scr === uix_jG_menuscr[i]) ? tb = i;

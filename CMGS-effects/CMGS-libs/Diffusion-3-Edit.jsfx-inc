@@ -154,6 +154,17 @@ ed_sDiv = 18;               // the squares of the grids per unit : 1 ... 10 (the
 ed_sSnap = 19;              // 1 : the points placed or moved go to the intersections of the grids
 ed_sClosed = 20;            // Trajectory : 1 closed (a segment from the point N to the point 1)
 ed_sSmooth = 21;            // Trajectory : 1 smooth (at each point, the mean of the tangents of its two segments)
+ed_sBall = 22;              // (2026-11-23, the user) the size of the balls of the points : x 0.25 ... x 4 (menu of the view, as
+                            // "Size of ..." of the views Space ; 0 in the projects saved before : 1)
+ed_sPan = 23;               // (2026-11-23, the user) 23, 24, 25 : the point the camera looks at (moved : Cmd + drag on nothing ;
+                            // 0, 0, 0 : the centre of the room) ; in the frame of the view (Follow : that of the MetaSurface)
+ed_sZoom = 26;              // the zoom : the focal multiplied, 1 ... 16 (the wheel, once the camera is at its nearest ; 0 : 1)
+ed_sLock = 28;              // (2026-11-23, the user) Lock 2D : the points in the plane z = 0 (their z, their bends forced to 0 at
+                            // each frame, ed_Frame), the view from the top (a drag on nothing : the view moved ; Shift + drag :
+                            // turned around the vertical ; no orbit, no depth) ; another view chosen : unlocked
+ed_sFollow = 27;            // 1 : the view follows the MetaSurface whose path is this editor (the same orientation, the same
+                            // placement as its view ; the camera in the frame of the path, ed_CamBuild) ; 0 : the path as it is
+                            // (the surface placed under it the other way)
 ed_oNum = 1;                // the numbers of the points
 ed_oProj = 2;               // the projections of the current point (or of the barycentre)
 ed_oBary = 4;               // the barycentre of the selection
@@ -171,6 +182,12 @@ ed_ord = make_array(ED_MAXP);                   // the order of drawing : far po
 ed_cam = make_array(24);                        // the camera of "Space 3D", saved
 ed_iw = make_array(ED_NV); ed_ih = make_array(ED_NV); // the sizes of the images
 ed_md = make_array(ED_NV);                      // the left button : 0 up, 1 pressed in the view, -1 pressed elsewhere
+ed_fk = ed_zm = 1;          // (2026-11-23) the scale of the camera Follow (the placement), the zoom : the balls keep their size
+// (2026-11-23) the backdrop of a MetaSurface mapped onto the plane z = 0 (ed_MsBack, gfx_transformblit) : the points of the
+// image under ED_TGN x ED_TGN points of the view (the table must not cross a boundary of 65536 words)
+ED_TGN = 32;
+ed_tbl0 = make_array(4 * ED_TGN * ED_TGN + 8);
+ed_tbl = ((ed_tbl0 % 65536) + 2 * ED_TGN * ED_TGN > 65536) ? ed_tbl0 + 65536 - (ed_tbl0 % 65536) : ed_tbl0;
 ed_seen = make_array(ED_NV);                    // the last frame drawn (gfx_executed) where the view was shown
 ed_rn = make_array(ED_NV);                      // the renumbering by Alt + clic : the next number - 1 (0 : 1)
 ed_nm = make_array(ED_NV);                      // the names (strings)
@@ -342,6 +359,8 @@ local(st)
     (v === 2) ? ed_AzEl(e, 0, 1.55) :
     (ed_AzEl(e, s3d_Az3D, s3d_El3D); st[ed_sDist] = s3d_Dist3D;);
     st[ed_sView] = v;
+    st[ed_sPan] = st[ed_sPan + 1] = st[ed_sPan + 2] = 0; st[ed_sZoom] = 1; // (2026-11-23 : no move, no zoom)
+    (v !== 2) ? st[ed_sLock] = 0; // (Lock 2D : the view from the top only)
 );
 
 // The configuration e : empty, its defaults
@@ -353,7 +372,7 @@ local(st)
     st[ed_sN] = 0; st[ed_sCur] = -1; st[ed_sKind] = 0; st[ed_sMode] = 2;
     st[ed_sOpt] = ed_oNum | ed_oProj;
     st[ed_sGrid] = 0; st[ed_sZ] = 0; st[ed_sDiv] = 6; st[ed_sRays] = 24; st[ed_sSnap] = 0; st[ed_sFree] = 0;
-    st[ed_sClosed] = 0; st[ed_sSmooth] = 0;
+    st[ed_sClosed] = 0; st[ed_sSmooth] = 0; st[ed_sBall] = 1;
     ed_SetView(e, 3);
     memset(ed_P(e, 0), 0, ED_MAXP * ED_PS);
 );
@@ -380,6 +399,11 @@ local(e, st, k, p)
         st[ed_sDiv] = max(1, min(10, 0|st[ed_sDiv]));
         st[ed_sRays] = (st[ed_sRays] >= 2) ? min(40, 0|st[ed_sRays]) : min(40, 4 * st[ed_sDiv]); // (none saved : 4 d)
         st[ed_sSnap] = !!st[ed_sSnap];
+        st[ed_sBall] = (st[ed_sBall] > 0) ? max(0.25, min(4, st[ed_sBall])) : 1;
+        st[ed_sPan] = max(-12, min(12, st[ed_sPan])); st[ed_sPan + 1] = max(-12, min(12, st[ed_sPan + 1]));
+        st[ed_sPan + 2] = max(-12, min(12, st[ed_sPan + 2]));
+        st[ed_sZoom] = (st[ed_sZoom] >= 1) ? min(16, st[ed_sZoom]) : 1; st[ed_sFollow] = !!st[ed_sFollow];
+        st[ed_sLock] = !!st[ed_sLock];
         ed_Ortho(e); // (the camera)
         ed_rn[e] = 0;
         k = 0; loop(st[ed_sN],
@@ -452,6 +476,27 @@ local(st, u, n, c, r, sm)
         !st[ed_sFree] ? (
             c = 0; loop(n, r = ed_P(e, c); r[0] = ed_Lim(r[0]); r[1] = ed_Lim(r[1]); r[2] = ed_Lim(r[2]); c += 1;);
         );
+    );
+);
+
+// (2026-11-23, the user) Lock 2D : the points of the editor e in the plane z = 0 (their z and the z of their bends)
+function ed_Flat(e)
+local(st, k, p)
+(
+    st = ed_St(e);
+    k = 0; loop(st[ed_sN], p = ed_P(e, k); p[2] = 0; p[6] = 0; k += 1;);
+);
+// Lock 2D on (kept for Undo : the points flattened ; the view from the top, its move and its zoom kept) or off
+function ed_Lock2D(e, on)
+local(st)
+(
+    st = ed_St(e);
+    on ? (
+        ed_Keep(e); ed_Flat(e);
+        ed_AzEl(e, 0, 1.55); st[ed_sView] = 2; st[ed_sPan + 2] = 0;
+        st[ed_sLock] = 1;
+    ) : (
+        st[ed_sLock] = 0;
     );
 );
 
@@ -531,6 +576,22 @@ local(st, n)
         (j < k) ? memcpy(ed_P(e, j + 1), ed_P(e, j), (k - j) * ED_PS) : memcpy(ed_P(e, k), ed_P(e, k + 1), (j - k) * ED_PS);
         memcpy(ed_P(e, j), ed_tmp, ED_PS);
         (st[ed_sCur] === k) ? (st[ed_sCur] = j);
+    );
+);
+
+// (2026-11-23, the user) A circular renumbering of the editor e : the point k becomes the point 1, the order kept (k + 1
+// becomes 2 ... k - 1 becomes N) : a closed trajectory starts elsewhere, the same shape (the bend of each segment stays with
+// the point it starts from) ; open, the segment from the point k - 1 to k is the one removed, and N to 1 appears
+function ed_Restart(e, k)
+local(st, n)
+(
+    st = ed_St(e); n = st[ed_sN];
+    ((k > 0) && (k < n)) ? (
+        memcpy(ed_tmp, ed_P(e, k), (n - k) * ED_PS);
+        memcpy(ed_tmp + (n - k) * ED_PS, ed_P(e, 0), k * ED_PS);
+        memcpy(ed_P(e, 0), ed_tmp, n * ED_PS);
+        st[ed_sCur] = (st[ed_sCur] >= 0) ? (st[ed_sCur] - k + n) % n : -1;
+        ed_rn[e] = 0;
     );
 );
 
@@ -880,12 +941,14 @@ function ed_CamRestore()
     s3d_roll = ed_cam[20];
 );
 
-// The camera of the editor e, for a view of w x h pixels (ed_CamRestore after use) : the globals of s3d_camera, from
-// the free camera of the editor (see ed_Orbit)
-function ed_CamSet(e, w, h)
-local(st, f, u, d)
+// The camera of the editor e, for a view of w x h pixels : the globals of s3d_camera, from the free camera of the editor
+// (see ed_Orbit), looking at the point ed_sPan, its focal multiplied by the zoom (2026-11-23) ; fl 1 : Follow (ed_sFollow,
+// the editor is the path of a MetaSurface, ms_EdBack : ms_eFk ... the placement of its path in the frame of the editors,
+// W(p) = k R p + t, z times k) : the camera brought into the frame of the path (W^-1 : the points drawn as placed on the
+// surface, as in its view) ; fl 0 : the camera of the frame of the view (the surface, Follow)
+function ed_CamBuild(e, w, h, fl)
+local(st, f, u, d, k, c, s, x, y)
 (
-    ed_CamSave();
     st = ed_St(e); f = st + ed_sFw; u = st + ed_sUp; d = st[ed_sDist];
     w = max(16, w|0); h = max(16, h|0);
     s3d_dist = d;
@@ -893,17 +956,36 @@ local(st, f, u, d)
     s3d_upx = u[0]; s3d_upy = u[1]; s3d_upz = u[2];
     // right = forward x up
     s3d_rgx = f[1] * u[2] - f[2] * u[1]; s3d_rgy = f[2] * u[0] - f[0] * u[2]; s3d_rgz = f[0] * u[1] - f[1] * u[0];
-    s3d_cpx = - d * f[0]; s3d_cpy = - d * f[1]; s3d_cpz = - d * f[2];
-    s3d_foc = 0.5 * min(w, h) / tan(0.5 * s3d_fov);
+    s3d_cpx = st[ed_sPan] - d * f[0]; s3d_cpy = st[ed_sPan + 1] - d * f[1]; s3d_cpz = st[ed_sPan + 2] - d * f[2];
+    ed_zm = max(1, min(16, st[ed_sZoom]));
+    s3d_foc = 0.5 * min(w, h) / tan(0.5 * s3d_fov) * ed_zm;
     s3d_ox = 0.5 * w; s3d_oy = 0.5 * h;
     s3d_zmin = d - 1.75; s3d_zmax = d + 1.75;
+    ed_fk = 1;
+    (fl && st[ed_sFollow] && (ms_edE[e] > 0)) ? (
+        k = max(0.01, ms_eFk[e]); c = ms_eFc[e]; s = ms_eFs[e];
+        // the position : W^-1 (q) = (R^-1 (q_xy - t) / k, q_z / k) ; the vectors : R^-1 (a turn around z)
+        x = s3d_cpx - ms_eFx[e]; y = s3d_cpy - ms_eFy[e];
+        s3d_cpx = (c * x + s * y) / k; s3d_cpy = (c * y - s * x) / k; s3d_cpz /= k;
+        x = s3d_fwx; y = s3d_fwy; s3d_fwx = c * x + s * y; s3d_fwy = c * y - s * x;
+        x = s3d_upx; y = s3d_upy; s3d_upx = c * x + s * y; s3d_upy = c * y - s * x;
+        x = s3d_rgx; y = s3d_rgy; s3d_rgx = c * x + s * y; s3d_rgy = c * y - s * x;
+        s3d_zmin /= k; s3d_zmax /= k;
+        ed_fk = k;
+    );
+);
+// the camera of the editor e set (ed_CamRestore after use) : that of its points (Follow : in the frame of the path)
+function ed_CamSet(e, w, h)
+(
+    ed_CamSave();
+    ed_CamBuild(e, w, h, 1);
 );
 
 // (2026-11-21) The levelling of the camera of the editor e (key 'a', the menu ; as all the 3D views) : started
 // (s3d_LevelStart, its id 11 + e), then turned at each frame around the line of sight (ed_LevelStep)
 function ed_Level(e)
 (
-    ed_CamSet(e, 16, 16);
+    ed_CamSave(); ed_CamBuild(e, 16, 16, 0); // (the camera of the frame of the view : that of the state)
     s3d_LevelStart(11 + e);
     ed_CamRestore();
 );
@@ -961,6 +1043,10 @@ function ed_NewPos(e, mx, my)
 local(st)
 (
     st = ed_St(e);
+    st[ed_sLock] ? (
+        // (Lock 2D : on the plane z = 0)
+        !ed_RayZ(mx, my, 0) ? ed_Ray(e, mx, my); ed_rz = 0;
+    ) :
     ed_PlaneZ(st[ed_sGrid]) ? (
         !ed_RayZ(mx, my, st[ed_sZ]) ? (ed_Ray(e, mx, my); ed_rz = st[ed_sZ];);
     ) : (
@@ -1102,9 +1188,9 @@ local(st, ns, hs, k, j, p, x0, y0, z0, ux, uy, dx, dy, d, tx, ty, bt, r)
 
 // The menu of the view (right clic ; 2026-11-21 : as all the 3D views, the levelling and the presentations of the room in
 // a sub-menu, the keys in parentheses) : 1 ... 4 the views, 5 the levelling, 6 ... 11 the grids (the presentations), 12
-// Snap, 13 ... 16 the display, 17 ... 19 the selection
+// Snap, 13 ... 16 the display, 17 ... 19 the selection, 20 ... 19 + s3d_kN the size of the balls (2026-11-23)
 function ed_ViewMenu(e)
-local(st, c, g)
+local(st, c, g, i, v)
 (
     st = ed_St(e); g = st[ed_sGrid];
     sprintf(#ed_mnu, "Front view|Side view|Top view|3D view (v : the next one)|Level the view (a)||>Presentation of the room (>)|%sThe far faces of the room|%sThe planes x = 0, y = 0, z = 0|%sThe axes only|%sThe plane z = %.2f (the new points)|%sThe circles of the plane z = %.2f (polar)|<%sNothing (no axes)|%sSnap to the grid (step 1/%d)||%sShow the numbers|%sShow the projections of the current point|%sShow the barycentre of the selection|%sFree points (beyond the room, up to %d)||Select all|Select none|Invert the selection",
@@ -1112,6 +1198,22 @@ local(st, c, g)
         (g === 4) ? "!" : "", st[ed_sZ], (g === 5) ? "!" : "", st[ed_sSnap] ? "!" : "", st[ed_sDiv],
         (st[ed_sOpt] & ed_oNum) ? "!" : "", (st[ed_sOpt] & ed_oProj) ? "!" : "", (st[ed_sOpt] & ed_oBary) ? "!" : "",
         st[ed_sFree] ? "!" : "", ED_FAR);
+    // (2026-11-23, the user) the size of the balls, as "Size of ..." of the views Space (s3d_kval) ; Follow ; the zoom and
+    // the move of the view reset
+    strcat(#ed_mnu, "||>Size of the points");
+    i = 0;
+    loop(s3d_kN,
+        v = s3d_kval(i);
+        sprintf(#ed_it, "|%s%sx %.2f", (i === s3d_kN - 1) ? "<" : "", (abs(st[ed_sBall] - v) < 0.001) ? "!" : "", v);
+        strcat(#ed_mnu, #ed_it);
+        i += 1;
+    );
+    (ms_edE[e] > 0) ? sprintf(#ed_it, "||%sFollow the MetaSurface MS%d (its orientation, the placement of the path)", st[ed_sFollow] ? "!" : "", ms_edE[e]) :
+        sprintf(#ed_it, "||%sFollow the MetaSurface (none follows this path)", st[ed_sFollow] ? "!" : "");
+    strcat(#ed_mnu, #ed_it);
+    strcat(#ed_mnu, "|Reset the zoom and the move of the view");
+    sprintf(#ed_it, "||%sLock 2D (the points in the plane z = 0, the view from the top)", st[ed_sLock] ? "!" : "");
+    strcat(#ed_mnu, #ed_it);
     gfx_x = mouse_x; gfx_y = mouse_y;
     c = gfx_showmenu(#ed_mnu);
     prv_MenuEnd(c > 0); // (the clic that chose the entry is not a new point)
@@ -1123,7 +1225,11 @@ local(st, c, g)
     (c === 14) ? (st[ed_sOpt] = st[ed_sOpt] ~ ed_oProj) :
     (c === 15) ? (st[ed_sOpt] = st[ed_sOpt] ~ ed_oBary) :
     (c === 16) ? ed_SetFree(e, !st[ed_sFree]) :
-    ((c >= 17) && (c <= 19)) ? ed_SelOp(e, c - 17);
+    ((c >= 17) && (c <= 19)) ? ed_SelOp(e, c - 17) :
+    ((c >= 20) && (c < 20 + s3d_kN)) ? (st[ed_sBall] = s3d_kval(c - 20)) :
+    (c === 20 + s3d_kN) ? (st[ed_sFollow] = !st[ed_sFollow]) :
+    (c === 21 + s3d_kN) ? (st[ed_sPan] = st[ed_sPan + 1] = st[ed_sPan + 2] = 0; st[ed_sZoom] = 1;) :
+    (c === 22 + s3d_kN) ? ed_Lock2D(e, !st[ed_sLock]);
     (c > 0) ? (ui_GFXdoNow |= 4);
 );
 
@@ -1131,10 +1237,11 @@ local(st, c, g)
 // A press is a press of ui-lib (uix_click1, uix_click2 : the button went down since the last frame drawn ; none after
 // a menu, while ui-lib blocks the clics) ; a drag goes on while the button stays down and the view is drawn.
 function ed_Mouse(e, x, y, w, h, wheel)
-local(st, mx, my, inside, used, dx, dy, f, p, cur, mode, grid, pz, dvx, dvy, dvz, ok, hit, hx, hy, ox, oy, oz)
+local(st, mx, my, inside, used, dx, dy, f, p, cur, mode, grid, pz, dvx, dvy, dvz, ok, hit, hx, hy, ox, oy, oz, lk)
 (
     used = 0;
-    st = ed_St(e); mode = st[ed_sMode]; grid = st[ed_sGrid]; pz = ed_PlaneZ(grid);
+    st = ed_St(e); mode = st[ed_sMode]; grid = st[ed_sGrid]; lk = st[ed_sLock];
+    pz = ed_PlaneZ(grid) || lk; // (Lock 2D : the moves in the plane of the point, z = 0)
     mx = mouse_x - x; my = mouse_y - y;
     inside = (mx >= 0) && (my >= 0) && (mx < w) && (my < h);
     // a view not drawn in the previous frame (another tab, another module) : no drag going on
@@ -1146,13 +1253,14 @@ local(st, mx, my, inside, used, dx, dy, f, p, cur, mode, grid, pz, dvx, dvy, dvz
             ed_md[e] = 1; ed_dmoved = 0; ed_dk = 0; ed_dmods = mouse_cap; ed_dnew = -1;
             ed_mx0 = ed_lmx = mouse_x; ed_my0 = ed_lmy = mouse_y;
             ed_dhit = ed_Pick(e, mx, my); // (-2 : the barycentre)
-            ((mode === 2) && (ed_dhit === -1) && !(mouse_cap & (8 | 16))) ? (
+            ((mode === 2) && (ed_dhit === -1) && !(mouse_cap & (4 | 8 | 16))) ? ( // (2026-11-23 : Cmd, the move of the view)
                 // Add : a new point under the mouse (alone selected, the current one)
                 ed_Keep(e);
                 ed_CamSet(e, w, h);
                 ed_NewPos(e, mx, my);
-                ed_Snap(e, ed_rx, ed_ry, ed_rz, (grid === 4) ? 8 : (grid === 3) ? 3 : ed_InPlane());
+                ed_Snap(e, ed_rx, ed_ry, ed_rz, (grid === 4) ? 8 : ((grid === 3) || lk) ? 3 : ed_InPlane());
                 ed_CamRestore();
+                lk ? ed_qz = 0;
                 ed_dnew = ed_Add(e, ed_qx, ed_qy, ed_qz);
                 ed_dhit = ed_dnew;
                 ui_GFXdoNow |= 4;
@@ -1165,7 +1273,11 @@ local(st, mx, my, inside, used, dx, dy, f, p, cur, mode, grid, pz, dvx, dvy, dvz
         (!ed_dmoved && (abs(mouse_x - ed_mx0) + abs(mouse_y - ed_my0) > 3)) ? (
             // the kind of the drag, at its start : a point or the barycentre moved (Move, Add/Del), or the orbit
             ed_dmoved = 1;
-            ed_dk = ((mode >= 1) && (ed_dhit !== -1) && !(ed_dmods & 8)) ? ((ed_dmods & 4) ? 3 : 2) : 1;
+            // (2026-11-23) Cmd on nothing (View : anywhere) : the view moved (4)
+            // (Lock 2D : a point moved in the plane, or the view moved, Shift : turned around the vertical (5) ; no orbit)
+            ed_dk = lk ? (((mode >= 1) && (ed_dhit !== -1) && !(ed_dmods & 8)) ? 2 : (ed_dmods & 8) ? 5 : 4) :
+                ((ed_dmods & 4) && !(ed_dmods & (8 | 16)) && ((ed_dhit === -1) || (mode === 0))) ? 4 :
+                ((mode >= 1) && (ed_dhit !== -1) && !(ed_dmods & 8)) ? ((ed_dmods & 4) ? 3 : 2) : 1;
             (ed_dk >= 2) ? (
                 (ed_dnew < 0) ? ed_Keep(e); // (a new point : already kept)
                 (ed_dhit >= 0) ? (
@@ -1186,8 +1298,22 @@ local(st, mx, my, inside, used, dx, dy, f, p, cur, mode, grid, pz, dvx, dvy, dvz
             );
         );
         ed_dmoved ? (
-            ui_cursor_drag((ed_dk === 1) ? 2 : (ed_dk === 3) ? 12 : 8); // (the orbit : a fist ; a place : 4 arrows, Cmd in depth)
+            ui_cursor_drag(((ed_dk === 1) || (ed_dk === 5)) ? 2 : (ed_dk === 3) ? 12 : 8); // (the orbit, a turn : a fist ; a place, a move : 4 arrows ; Cmd, in depth)
             dx = mouse_x - ed_lmx; dy = mouse_y - ed_lmy;
+            (ed_dk === 4) ? (
+                // (2026-11-23) the view moved : the point looked at, in the plane of the screen (the content follows the mouse)
+                ed_CamSave(); ed_CamBuild(e, w, h, 0);
+                f = st[ed_sDist] / max(1, s3d_foc);
+                st[ed_sPan] = max(-12, min(12, st[ed_sPan] - f * (dx * s3d_rgx - dy * s3d_upx)));
+                st[ed_sPan + 1] = max(-12, min(12, st[ed_sPan + 1] - f * (dx * s3d_rgy - dy * s3d_upy)));
+                st[ed_sPan + 2] = max(-12, min(12, st[ed_sPan + 2] - f * (dx * s3d_rgz - dy * s3d_upz)));
+                ed_CamRestore();
+            ) :
+            (ed_dk === 5) ? (
+                // (2026-11-23, Lock 2D) the view turned around the vertical (the point looked at stays in the middle)
+                ed_Rot(st + ed_sFw, 0, 0, 1, - dx * 0.008); ed_Rot(st + ed_sUp, 0, 0, 1, - dx * 0.008);
+                ed_Ortho(e);
+            ) :
             (ed_dk === 1) ? (
                 ed_oax = ed_Orbit(e, dx, dy, mouse_cap & 8); // (Shift read at each frame : around x, y or z while held)
                 st[ed_sView] = -1;
@@ -1291,7 +1417,14 @@ local(st, mx, my, inside, used, dx, dy, f, p, cur, mode, grid, pz, dvx, dvy, dvz
     );
     (uix_click2 && inside && !(mouse_cap & 8)) ? ed_ViewMenu(e); // (Shift + right clic : left to the host)
     (inside && (wheel != 0)) ? (
-        st[ed_sDist] = max(1.8, min(st[ed_sFree] ? 60 : 12, st[ed_sDist] * exp(- wheel / 1000)));
+        // the camera nearer (down to 1.8), then (2026-11-23) the zoom (up to x 16) ; back : the zoom first
+        (wheel > 0) ? (
+            (st[ed_sDist] > 1.8001) ? (st[ed_sDist] = max(1.8, st[ed_sDist] * exp(- wheel / 1000))) :
+                (st[ed_sZoom] = min(16, max(1, st[ed_sZoom]) * exp(wheel / 1000)));
+        ) : (
+            (st[ed_sZoom] > 1.0001) ? (st[ed_sZoom] = max(1, st[ed_sZoom] * exp(wheel / 1000))) :
+                (st[ed_sDist] = min(st[ed_sFree] ? 60 : 12, st[ed_sDist] * exp(- wheel / 1000)));
+        );
         used = 1;
     );
     used;
@@ -1307,7 +1440,10 @@ function ed_Cursors(e, x, y, w, h)
 local(st, mode, k, sc, g, r, kp, km)
 (
     st = ed_St(e); mode = st[ed_sMode];
-    (mode === 2) ? ui_cursor_zone8(x, y, w, h, 10, 1, 10, 1, 1, 1, 1, 1) : ui_cursor_zone8(x, y, w, h, 1, 1, 1, 1, 1, 1, 1, 1);
+    // (2026-11-23 : Cmd on nothing, the view moved : 4 arrows)
+    // (Lock 2D : on nothing, the view moved, 4 arrows ; Shift, turned, an open hand)
+    st[ed_sLock] ? ui_cursor_zone8(x, y, w, h, (mode === 2) ? 10 : 8, 1, 8, 1, 1, 1, 1, 1) :
+    (mode === 2) ? ui_cursor_zone8(x, y, w, h, 10, 1, 8, 1, 1, 1, 1, 1) : ui_cursor_zone8(x, y, w, h, 1, 1, 8, 1, 1, 1, 1, 1);
     (mode >= 1) ? (
         r = 12; // (as ed_Pick)
         km = (mode === 2) ? 10 : 8; kp = (mode === 2) ? 4 : 8;
@@ -1330,6 +1466,48 @@ local(st, mode, k, sc, g, r, kp, km)
 );
 
 // Draws the view of the editor e (x, y, w, h : screen pixels)
+// (2026-11-23) The MetaSurface whose brush follows the path of the editor e (Diffusion-3-MetaSurface, step 5 : ms_edE[e] its
+// entry + 1) : its zones under the points, in the view from the top (the plane z = 0 ; the surface in the square [-1, 1],
+// its long side across it, see ms_XY2U), its image MS_IMGE + e half transparent, its configurations (small squares) ; the
+// image turned as the screen shows the plane (ms_edFl : 1 left - right, 2 up - down ; ms_EdBack draws it again)
+function ed_MsBack(e, w, h) local(x0, y0, x1, y1, nx, ny, i, j, q)
+(
+    // (2026-11-23 : the image of ms_EdBack, opaque, mixed with the background, drawn under the grids ; mapped onto the plane
+    // z = 0 as the camera sees it, any view, zoom, move or turn : for ED_TGN x ED_TGN points of the view, the point of the
+    // image under them (a ray that misses the plane : a corner of the image, the background ; beyond the image : its edge,
+    // the background) ; the plane seen edge-on : nothing)
+    x0 = ms_edX0[e]; y0 = ms_edY0[e]; x1 = ms_edX1[e]; y1 = ms_edY1[e]; nx = ms_edW[e]; ny = ms_edH[e];
+    ((nx > 0) && (ny > 0) && (x1 > x0) && (y1 > y0) && (abs(s3d_fwz) > 0.1)) ? (
+        j = 0;
+        loop(ED_TGN,
+            i = 0;
+            loop(ED_TGN,
+                q = ed_tbl + 2 * (j * ED_TGN + i);
+                ed_RayZ(w * i / (ED_TGN - 1), h * j / (ED_TGN - 1), 0) ? (
+                    q[0] = max(0, min(nx, (ed_rx - x0) / (x1 - x0) * nx));
+                    q[1] = max(0, min(ny, (y1 - ed_ry) / (y1 - y0) * ny));
+                ) : (
+                    q[0] = q[1] = 0;
+                );
+                i += 1;
+            );
+            j += 1;
+        );
+        gfx_a = 1; gfx_mode = 2; // (the alpha of the image ignored)
+        gfx_transformblit(MS_IMGE + e, 0, 0, w, h, ED_TGN, ED_TGN, ed_tbl);
+        gfx_mode = 0;
+    );
+);
+// the configurations of the MetaSurface (squares), over the grids
+function ed_MsMarks(e) local(i)
+(
+    i = 0;
+    loop(ms_edN[e],
+        s3d_proj(ms_edU[e * MS_MAXC + i], ms_edV[e * MS_MAXC + i], 0) ? (gfx_set(1, 1, 1, 0.85); gfx_rect(s3d_px - 3, s3d_py - 3, 7, 7, 0););
+        i += 1;
+    );
+);
+
 function ed_Draw(e, x, y, w, h)
 local(od, st, n, cur, img, ax, s, sc, k, j, i, p, r, cr, cg, cb, grid, aa, px, py, pz, ty, gn, ns, bo, g, qx, qy, qz, hq)
 (
@@ -1354,7 +1532,13 @@ local(od, st, n, cur, img, ax, s, sc, k, j, i, p, r, cr, cg, cb, grid, aa, px, p
     // the presentation of the room (2026-11-21 : that of all the 3D views, s3d_grids of mSL_ui_Space3D) : the far faces of
     // the room, the planes x = 0, y = 0, z = 0 (where the current point is projected), the axes only, the plane z = val
     // (where the new points are created : its square grid, or its circles and rays), or nothing ; the axes over it
+    // (2026-11-23) the MetaSurface that follows this path : its zones under the grids and the points (the view from the top
+    // only), its configurations over the grids
+    // (Follow : the surface in the frame of the view, ed_CamBuild 0 ; the grids, the points in the frame of the path)
+    // (any view : the plane z = 0 as the camera sees it)
+    (ms_edE[e] > 0) ? (ed_CamBuild(e, w, h, 0); ed_MsBack(e, w, h); ed_CamBuild(e, w, h, 1););
     s3d_grids(grid, st[ed_sZ], st[ed_sDiv], st[ed_sRays]);
+    (ms_edE[e] > 0) ? (ed_CamBuild(e, w, h, 0); ed_MsMarks(e); ed_CamBuild(e, w, h, 1););
 
     // the projections of the points on the screen (kept for the mouse), the order of drawing : far first
     sc = ed_scr + e * ED_MAXP * 3;
@@ -1402,7 +1586,8 @@ local(od, st, n, cur, img, ax, s, sc, k, j, i, p, r, cr, cg, cb, grid, aa, px, p
         k = ed_ord[j];
         (sc[3 * k + 2] > 0) ? (
             p = ed_P(e, k);
-            r = max(3, 0.035 * s3d_foc / sc[3 * k + 2]);
+            r = max(min(3, 3 * st[ed_sBall]), 0.035 * s3d_foc / (sc[3 * k + 2] * ed_fk * ed_zm) * st[ed_sBall]); // (2026-11-23 : their
+            // size ; the same with the zoom and Follow)
             (k === cur) ? (r *= 1.35);
             (st[ed_sKind] === 0) ? (cr = 0.45; cg = 0.75; cb = 1;) : (st[ed_sKind] === 1) ? (cr = 1; cg = 0.6; cb = 0.25;) :
                 (cr = 0.55; cg = 0.9; cb = 0.6;);
@@ -1450,6 +1635,16 @@ local(od, st, n, cur, img, ax, s, sc, k, j, i, p, r, cr, cg, cb, grid, aa, px, p
     st[ed_sFree] ? (
         gfx_set(1, 0.6, 0.3, 1);
         sprintf(#ed_lbl, "Free points (up to %d)", ED_FAR);
+        gfx_x = 8; gfx_y = ty;
+        gfx_drawstr(#ed_lbl);
+        ty -= s3d_th + 2;
+    );
+    // (2026-11-23) Follow, the zoom
+    (st[ed_sFollow] || (st[ed_sZoom] > 1.001) || st[ed_sLock]) ? (
+        gfx_set(0.6, 0.9, 1, 1);
+        strcpy(#ed_lbl, st[ed_sLock] ? "Lock 2D   " : "");
+        st[ed_sFollow] ? ((ms_edE[e] > 0) ? sprintf(#ed_lbl, "Follows MS%d", ms_edE[e]) : strcpy(#ed_lbl, "Follow : no MetaSurface"));
+        (st[ed_sZoom] > 1.001) ? (sprintf(#ed_it, "%sZoom x %.1f", st[ed_sFollow] ? "   " : "", st[ed_sZoom]); strcat(#ed_lbl, #ed_it););
         gfx_x = 8; gfx_y = ty;
         gfx_drawstr(#ed_lbl);
         ty -= s3d_th + 2;
@@ -1871,6 +2066,8 @@ local(st, f, n, k, p, q, fr, out)
 function ed_Frame()
 local(e, n, k, q, r, st)
 (
+    // (2026-11-23) Lock 2D : the points in the plane z = 0 (after any change : drags, transforms, Undo, loads)
+    e = 0; loop(ED_NV, st = ed_St(e); st[ed_sLock] ? ed_Flat(e); e += 1;);
     // the configurations read by the mSL "settings"
     e = 0; loop(ED_NV, ed_tq[e] ? ( ed_tq[e] = 0; ed_TbTake(e); ); e += 1;);
     // (the trajectories of the editors : a live link, tr_EdSync in Diffusion-3-Trajectories ; or a copy into the library,
@@ -1949,6 +2146,28 @@ local(st, i, m)
     m = gfx_showmenu(#ed_mnu) - 2; // (the title is the item 1)
     prv_MenuEnd(m > -2);
     m;
+);
+
+// (2026-11-23) The menu of the number of the point k : its number (the others renumbered : 0 ... N - 1), or the numbering
+// started at a point (circular : N ... 2 N - 1, the point chosen becomes 1) ; -1 : none
+function ed_NumMenu(e, k)
+local(st, n, i, m)
+(
+    st = ed_St(e); n = st[ed_sN];
+    sprintf(#ed_mnu, "#The point %d|>Its number (the others renumbered)", k + 1);
+    i = 0;
+    loop(n, sprintf(#ed_it, "|%s%s%d", (i === n - 1) ? "<" : "", (i === k) ? "!" : "", i + 1); strcat(#ed_mnu, #ed_it); i += 1;);
+    strcat(#ed_mnu, "|>Start the numbering at (circular : the order kept)");
+    i = 0;
+    loop(n,
+        sprintf(#ed_it, (i === k) ? "|%s%d (this point)" : "|%s%d", (i === n - 1) ? "<" : "", i + 1);
+        strcat(#ed_mnu, #ed_it);
+        i += 1;
+    );
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#ed_mnu) - 2; // (the title is the item 1)
+    prv_MenuEnd(m > -2);
+    ((m >= 0) && (m < 2 * n)) ? m : -1;
 );
 
 // The path of the editor e copied into the trajectory i of the library of the spatial projectors (Diffusion-3-Spatial ;
@@ -2107,8 +2326,18 @@ local(st, rc, m, v)
         (m === 4) ? (ed_Keep(e); st[ed_sN] = 0; st[ed_sCur] = -1;);
     ) :
     (c === 8) ? (
-        m = rc ? prv_Menu(ed_ViewNames, 4, st[ed_sView]) : (max(-1, st[ed_sView]) + 1) % 4;
-        (m >= 0) ? ed_SetView(e, m);
+        // (2026-11-23) the views, Lock 2D (right : the menu ; left, locked : nothing)
+        rc ? (
+            sprintf(#ed_mnu, "%sFront|%sSide|%sTop|%s3D||%sLock 2D (the points in the plane z = 0, the view from the top)",
+                (st[ed_sView] === 0) ? "!" : "", (st[ed_sView] === 1) ? "!" : "", (st[ed_sView] === 2) ? "!" : "",
+                (st[ed_sView] === 3) ? "!" : "", st[ed_sLock] ? "!" : "");
+            gfx_x = mouse_x; gfx_y = mouse_y;
+            m = gfx_showmenu(#ed_mnu);
+            prv_MenuEnd(m > 0);
+            ((m >= 1) && (m <= 4)) ? ed_SetView(e, m - 1) : (m === 5) ? ed_Lock2D(e, !st[ed_sLock]);
+        ) : !st[ed_sLock] ? (
+            ed_SetView(e, (max(-1, st[ed_sView]) + 1) % 4);
+        );
     ) :
     (c === 9) ? (
         m = rc ? prv_Menu(ed_GridNames, 6, st[ed_sGrid]) : (st[ed_sGrid] + 1) % 6;
@@ -2179,14 +2408,16 @@ local(st, rc, sh, n, cur, ok, m, v)
         );
     ) :
     (c === 1) ? (
+        // (right : its number, the others renumbered ; 2026-11-23 : or the numbering started at a point, circular)
         (ok && rc) ? (
-            m = ed_PointMenu(e, cur, "#Its number");
-            ((m >= 0) && (m !== cur)) ? (ed_Keep(e); ed_Move(e, cur, m););
+            m = ed_NumMenu(e, cur);
+            ((m >= 0) && (m < n) && (m !== cur)) ? (ed_Keep(e); ed_Move(e, cur, m);) :
+            ((m > n) && (m < 2 * n)) ? (ed_Keep(e); ed_Restart(e, m - n););
         );
     ) :
     ((c >= 2) && (c <= 4)) ? (
-        // the coordinate of the current point, or of the barycentre (Bary on) : the selection moves
-        ok ? (
+        // the coordinate of the current point, or of the barycentre (Bary on) : the selection moves (Lock 2D : not z)
+        (ok && !(st[ed_sLock] && (c === 4))) ? (
             v = ed_RefC(e, c - 2);
             v = ed_LimP(e, rc ? prv_MenuVal(ed_Coords, 9, v) : sh ? 0 : v) - v;
             (v != 0) ? (ed_Keep(e); ed_Shift(e, cur, (c === 2) * v, (c === 3) * v, (c === 4) * v););
@@ -2203,8 +2434,8 @@ local(st, rc, sh, n, cur, ok, m, v)
         );
     ) :
     ((c >= 6) && (c <= 8)) ? (
-        // Rot X, Y, Z (right : the menu, degrees ; left : a drag, see ed_Drag)
-        (ok && rc) ? (
+        // Rot X, Y, Z (right : the menu, degrees ; left : a drag, see ed_Drag ; Lock 2D : Rot Z only)
+        (ok && rc && !(st[ed_sLock] && (c !== 8))) ? (
             v = prv_MenuVal(ed_RotList, 11, 0);
             (v != 0) ? ed_Xform1(e, c - 5, v);
         );
@@ -2235,7 +2466,7 @@ function ed_Drag(blockId, e, c)
 local(st, n, cur, d, v, b)
 (
     st = ed_St(e); n = st[ed_sN]; cur = st[ed_sCur]; b = ed_Bnd(e);
-    (ui_jdrag_can_start() && (cur >= 0) && (cur < n) && (c >= 1) && (c <= 8)) ? (
+    (ui_jdrag_can_start() && (cur >= 0) && (cur < n) && (c >= 1) && (c <= 8) && !(st[ed_sLock] && ((c === 4) || (c === 6) || (c === 7)))) ? (
         ed_de = e; ed_dkept = 0;
         (c === 1) ? ui_jdrag_start(blockId, 1, cur + 1, 1, max(1, n), max(60, 8 * n), 2) : // (integer)
         (c <= 4) ? ui_jdrag_start(blockId, c, ed_RefC(e, c - 2), - b, b, 300 * b, 0) :
@@ -2319,7 +2550,7 @@ local(h1, hl, hv, hneed, wl, zz, zzmi, st, n, cur, ok, p, c, dr, x, y, w, h, i, 
             zzmi ? (
                 ((GM_key_mods() & 4) && (GM_key_take('a') || GM_key_take(1))) ? (ed_SelOp(e, 0); ui_GFXdoNow |= 4;) :
                 ((GM_key_mods() & 4) && (GM_key_take('e') || GM_key_take(5))) ? (ed_SelOp(e, 1); ui_GFXdoNow |= 4;) :
-                GM_key_take('v') ? (ed_SetView(e, (max(-1, st[ed_sView]) + 1) % 4); ui_GFXdoNow |= 4;) :
+                GM_key_take('v') ? (!st[ed_sLock] ? ed_SetView(e, (max(-1, st[ed_sView]) + 1) % 4); ui_GFXdoNow |= 4;) : // (Lock 2D : no)
                 GM_key_take('a') ? (ed_Level(e); ui_GFXdoNow |= 4;) :
                 GM_key_take('m') ? (st[ed_sMode] = 1; ui_GFXdoNow |= 4;) :
                 GM_key_take('p') ? (st[ed_sMode] = 2; ui_GFXdoNow |= 4;) :
@@ -2352,6 +2583,7 @@ local(h1, hl, hv, hneed, wl, zz, zzmi, st, n, cur, ok, p, c, dr, x, y, w, h, i, 
                 strcpy(pad_EDT_Labs[6], "Add/Del");
                 sprintf(pad_EDT_Labs[7], "Points %d", n);
                 (st[ed_sView] >= 0) ? sx_Nth(ed_ViewNames, st[ed_sView], pad_EDT_Labs[8]) : strcpy(pad_EDT_Labs[8], "Custom");
+                st[ed_sLock] ? strcpy(pad_EDT_Labs[8], "Top : Lock 2D"); // (2026-11-23)
                 sx_Nth(ed_GridNames, st[ed_sGrid], pad_EDT_Labs[9]);
                 sprintf(pad_EDT_Labs[10], "z= %.2f", st[ed_sZ]);
                 sprintf(pad_EDT_Labs[11], "Step 1/%d", st[ed_sDiv]);
@@ -2378,6 +2610,16 @@ local(h1, hl, hv, hneed, wl, zz, zzmi, st, n, cur, ok, p, c, dr, x, y, w, h, i, 
                 pad_EDT_Colrs[15] = (st[ed_sOpt] & ed_oBary) ? Color_Limegreen : Col_InfoA;
                 pad_EDT_Colrs[16] = (st[ed_sOpt] & ed_oProj) ? Color_Limegreen : Col_InfoA;
                 pad_EDT_Colrs[17] = Col_P1;
+                // (2026-11-23) the roles (GUI rubric) : the name, Points, Action (Action ; no name : Alert), the kind,
+                // Open / Closed, Straight / Smooth, the modes View Move Add/Del, the view, the grid, Snap, Free / Room, Bary,
+                // Proj (Choice), z, Step, Rays (Value : z and Rays drawn disabled when the grid does not use them) ; the
+                // modes from the colors (d3_Pad_Modes)
+                ui_jpad_roles_set(pad_EDT, 0, "accccccaccvvvcccca");
+                d3_Pad_Modes(pad_EDT, pad_EDT_Labs, pad_EDT_Colrs, pad_EDT_Siz);
+                (strlen(ed_nm[e]) === 0) ? (ui_jpad_role(pad_EDT, 0, ui_jpad_rl_alert); ui_jpad_mark(pad_EDT, 0, 0, 0););
+                ui_jpad_mark(pad_EDT, 10, 0, !ed_PlaneZ(st[ed_sGrid]));
+                ui_jpad_mark(pad_EDT, 12, 0, st[ed_sGrid] !== 4);
+                ui_jpad_mark(pad_EDT, 8, st[ed_sLock], 0); // (Lock 2D : lit)
                 zz = control_jpad(pad_EDT);
                 c = ui_jpad_cell_at();
                 dr = ed_DragTop(blockId, e, c); // the cells z= val, Step, Rays : a drag
@@ -2435,9 +2677,16 @@ local(h1, hl, hv, hneed, wl, zz, zzmi, st, n, cur, ok, p, c, dr, x, y, w, h, i, 
                     pad_EDL_Colrs[1] = ok ? Col_P1 : Col_Inactive;
                     i = 2; loop(3, pad_EDL_Colrs[i] = !ok ? Col_Inactive : bo ? Color_Heliotrope : Col_P1; i += 1;);
                     i = 5; loop(4, pad_EDL_Colrs[i] = (ns > 1) ? Col_P1 : Col_Inactive; i += 1;);
+                    st[ed_sLock] ? (pad_EDL_Colrs[4] = pad_EDL_Colrs[6] = pad_EDL_Colrs[7] = Col_Inactive;); // (Lock 2D : no z)
                     pad_EDL_Colrs[9] = (ns > 0) ? Color_Goldenrod : Col_InfoA;
                     pad_EDL_Colrs[10] = ok ? Col_P6 : Col_Inactive;
                     pad_EDL_Colrs[11] = (st[ed_sUndo] > 0) ? Col_P1 : Col_Inactive;
+                    // (2026-11-23) the roles (GUI rubric) : the current point (Navigation), its number, X Y Z, Scale, Rot
+                    // X Y Z (Value ; the barycentre : selected), Sel (Action ; a selection : selected), Delete (Danger),
+                    // Undo (Action) ; drawn disabled when they do nothing (no point, no selection, no undo)
+                    ui_jpad_roles_set(pad_EDL, 0, "nvvvvvvvvada");
+                    d3_Pad_Modes(pad_EDL, pad_EDL_Labs, pad_EDL_Colrs, pad_EDL_Siz);
+                    ui_jpad_role(pad_EDL, 10, ui_jpad_rl_danger);
                     zz = control_jpad(pad_EDL);
                     c = ui_jpad_cell_at();
                     dr = ed_Drag(blockId, e, c); // the cells of values : a drag

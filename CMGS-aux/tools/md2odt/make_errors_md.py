@@ -15,8 +15,11 @@ rows.sort(key=lambda r: int(r[0]))
 
 def cell(t):
     t = t.replace('`set(`pval, …)`', '`` set(`pval, …) ``').replace('`thread(`new, …)`', '`` thread(`new, …) ``')
-    # (2026-11-19) a lone backquote (2303 : "` suivi d'un caractère") would open a code span over the next rows
-    t = re.sub(r'(?<![`\w])`(?=\s)', r'\\`', t)
+    # (2026-11-19) a lone backquote (2303 : "` suivi d'un caractère") would open a code span over the next rows ;
+    # (2026-11-22) only when the backquotes are odd in count : the closing one of `settings(data( GUI ... ))` is followed
+    # by a space too
+    if t.count('`') % 2 == 1:
+        t = re.sub(r'(?<![`\w])`(?=\s)', r'\\`', t, count=1)
     return t.replace('|', '\\|')
 
 secs = [(100, 999, 'Codes 0100 à 0999'), (1000, 1999, 'Codes 1000 à 1999'), (2000, 2999, 'Codes 2000 à 2999'),

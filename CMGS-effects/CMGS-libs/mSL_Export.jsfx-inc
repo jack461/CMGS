@@ -17,6 +17,8 @@
         xpt_Ready()                         0 : the script can write ; else why it can't : 1 not running, 2 too old, 3 busy
         xpt_Send(file)                      the text is sent to the script (the folder is created if needed)
         xpt_Poll()                          each frame : 1 the file is written, -1 it could not be, 0 nothing new
+    (2026-11-23) Several requesters in one application (the module GUI, mSL_GUI, in all of them) : xpt_Who set just before
+    xpt_Send (0 by default) ; xpt_Poll sees only the requests of xpt_Who 0, xpt_PollFor(who) those of "who".
 */
 
 <? _suppress=1; ?>
@@ -31,6 +33,7 @@ xpt_Sz = min(0x40000, gmemLimit - xpt_B - 1);
 xpt_J = xpt_Ov = 0;
 xpt_Wid = 118; // the width of the lines of xpt_Block
 xpt_Req = 0; // the date of the request (0 : none)
+xpt_Who = 0; xpt_Own = 0; // (2026-11-23) the requester of the next xpt_Send, of the pending request
 #xpt_Sp = "                                "; // (32 spaces : xpt_Block)
 
 function xpt_Clean(str) local(i, c)
@@ -116,16 +119,18 @@ function xpt_Send(file) local(i)
     gmem[scptPar3] = xpt_B;
     // the command first, the dates last : the script (another thread) starts on the dates
     gmem[cmndKode] = 30;
+    xpt_Own = xpt_Who; xpt_Who = 0;
     xpt_Req = time_precise() + timeD;
     gmem[dateRqst] = gmem[dateCfrm] = xpt_Req;
 );
 
-function xpt_Poll() local(r)
+function xpt_PollFor(who) local(r)
 (
     r = 0;
-    ((xpt_Req > 0) && (gmem[dateDone] > xpt_Req)) ? (
+    ((xpt_Req > 0) && (xpt_Own === who) && (gmem[dateDone] > xpt_Req)) ? (
         r = (gmem[rtrnVal3] > 0) ? 1 : -1;
         xpt_Req = 0;
     );
     r;
 );
+function xpt_Poll() ( xpt_PollFor(0); );

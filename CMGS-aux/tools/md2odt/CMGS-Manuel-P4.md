@@ -121,6 +121,7 @@ plus utilisés : ils concernaient les anciens fichiers de configuration séparé
 | 0253 | Diffusion-3 | Table de diffusion : position y attendue, un nombre (hppos ; le cadre est vérifié à la fin : 2426). |
 | 0254 | Diffusion-3 | Table de diffusion : position z attendue, un nombre (hppos ; le cadre est vérifié à la fin : 2426). |
 | 0255 | Diffusion-3 | Table de diffusion : On, Off, « , » ou « ; » attendu (hppos). |
+| 0256 | Diffusion-3 | Table de diffusion : la configuration est trop grande (plus de 34 000 mots ; conf). |
 | 0257 | Game Master | Liste d'actions trop longue. |
 | 0258 | Game Master | Liste d'actions : adresse incorrecte (trop basse). |
 | 0259 | Diffusion-3 | Table de diffusion : invert : une diffusion déclarée avant (et pas celle-ci) est attendue. |
@@ -284,6 +285,9 @@ plus utilisés : ils concernaient les anciens fichiers de configuration séparé
 | 1631 | tous | `poke` : arguments ou adresse incorrects. |
 | 1632 | tous | `settings` (ou `table`) appelé sans argument. |
 | 1633 | tous | `settings` : plus de 1024 arguments (utiliser un bloc `data`). |
+| 1640 | tous | `settings(data( GUI ... ))` : une clé est attendue (theme, shade, size, style, tabs, variant, fonts, palette, hue, chroma, light, danger, hover, disabled, adjust, ptext, bold, ftext, fbold, fwidth, gapx, gapy, corners, fade, extend, select, contrast, frame, radius, thick, color, opacity, defaults, default, restore) ; après default (le défaut de l'utilisateur), theme et size ne sont pas acceptés, ni restore. |
+| 1641 | tous | `settings(data( GUI ... ))` : une valeur hors de sa plage. |
+| 1642 | tous | `settings(data( GUI ... ))` : une valeur parmi celles de la clé est attendue (frame : None, Rect, Round ; color : Cell, Lighter, Darker, Grey ; extend, bold, fbold : Off, On ; style : Classic, Soft ; tabs : Style, Always, Hover ; variant : Std, Faded, Text, Outline ; palette : Theme, Mono, Analog, Complement, Spectrum, Muted, Pastel, Contrast ; danger : Red, Palette ; adjust : un rôle (Action, Choice, Navigation, Value, Object, State, Danger, Alert, Information, Empty), une palette ou reset ; theme : 0 ... 11 ou un nom entre guillemets, "Default", "Black", "Tron", "Light Cyan", "Orange", "Blue", "Dark Cyan", "Dark Green", "Dark Red", "Light Amber", "Neon Green", "Light Magenta"). |
 | 1666 | tous | Les mots 0 à 7 de la mémoire ont été modifiés (erreur grave, mémoire endommagée). |
 | 1667 | tous | Les mots 0 à 7 de la mémoire ont été modifiés (erreur grave, mémoire endommagée). |
 | 1668 | tous | Les mots 0 à 7 de la mémoire ont été modifiés (erreur grave, mémoire endommagée). |
@@ -420,6 +424,13 @@ plus utilisés : ils concernaient les anciens fichiers de configuration séparé
 | 2496 | Diffusion-3 | « , » ou « ; » attendu (source). |
 | 2497 | Diffusion-3 | Space (préset) : la source n’est pas déclarée. |
 | 2498 | Diffusion-3 | Space (préset) : un numéro de source est attendu. |
+| 2501 | Diffusion-3 | Conf Editor : la configuration n’est pas définie (chargement, Add, Subtract). |
+| 2502 | Diffusion-3 | Conf Editor : un numéro de configuration entre 1 et 4094 est attendu (Save as, Rename). |
+| 2503 | Diffusion-3 | Conf Editor : (plus utilisé depuis le 2026-11-21 : une matrice vide est enregistrée comme une configuration sans source). |
+| 2504 | Diffusion-3 | Conf Editor : plus de mémoire pour la configuration. |
+| 2505 | Diffusion-3 | Conf Editor : le ring est plein (64 configurations) : en retirer une d’abord. |
+| 2506 | Diffusion-3 | Conf Editor : plus de numéro libre pour une nouvelle configuration. |
+| 2507 | Diffusion-3 | Conf Editor : un facteur entre 0.1 et 10 (ou entre -20 dB et +20 dB) est attendu (cellule 3, Other value). |
 | 2601 | Interstys | Numéro de lecteur (Reader) invalide. |
 | 2602 | Interstys | Numéro d'enregistreur (Writer) invalide. |
 | 2603 | Interstys | Lecteur non défini, ou pas en mode délai. |

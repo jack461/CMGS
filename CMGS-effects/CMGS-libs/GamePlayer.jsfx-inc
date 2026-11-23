@@ -2112,7 +2112,8 @@ Pr7_StudRat = Pr7_StudConf + dcbTabsMax;  // size : dcbTabsMax * 4
 Pr7_StudLive = Pr7_StudRat + dcbTabsMax * 4; // size : dcbTabsMax -- 1 if the tab uses the "live" display
 Pr7_UiStyle = Pr7_StudLive + dcbTabsMax; // ui_jstyle (look of the GUI)
 Pr7_UiSize = Pr7_UiStyle + 1; // the display size, in percent (0 : the default, see ui_jzoom_set)
-Pr7_Free = Pr7_UiSize + 1; // 226 to 511 : free
+Pr7_TabCount = Pr7_UiSize + 1; // (2026-11-23) the count of the tabs shown (mSL_Tabs ; 0 : an older preset, 16)
+Pr7_Free = Pr7_TabCount + 1; // 227 to 511 : free
 
 
 // Initialize studio configuration
@@ -3262,6 +3263,8 @@ i__ii = 0; loop(6,
 //
 //
 // Update the default menu screen
+// (2026-11-23) The count of the tabs : chosen by the user, 1 ... 16 (mSL_Tabs ; kept in serialBlock[Pr7_TabCount]) ; 16 by default
+<? include("CMGS-libs/mSL_Tabs.jsfx-inc"); ?>
 uix_jG_menuscr[i__ii=0] = "Tab1";
 uix_jG_menuscr[i__ii+=1] = "Tab2";
 uix_jG_menuscr[i__ii+=1] = "Tab3";
@@ -3278,19 +3281,16 @@ uix_jG_menuscr[i__ii+=1] = "Tab13";
 uix_jG_menuscr[i__ii+=1] = "Tab14";
 uix_jG_menuscr[i__ii+=1] = "Tab15";
 uix_jG_menuscr[i__ii+=1] = "Tab16";
-uix_jG_menuscr[i__ii+=1] = -1;
 //——————————————
-dcbTabsCount = i__ii; // menu bar max -- number of tabs
-(dcbTabsCount > dcbTabsMax) ? err_sys_ini = 9923; // too many tabs
+tbs_Init(dcbTabsMax); // (dcbTabsCount, the end of uix_jG_menuscr, uix_jG_menuscrSz ; until 2026-11-23 : always 16)
 uix_jmbsel = 0;
 uix_jmbprv = 0;
 uix_switch = 0;
-uix_jG_menuscrSz = dcbTabsCount + 2; // add some size to display sound indicator
 
 dcbPannelsMax = 4; // up to 4 pannels in each tabulation
 dcbMSize = 32; // max number of different displayable modules in each pane
 dcbMax = dcbMSize - 1;
-dcbMCount = dcbTabsCount * dcbPannelsMax; // number of different modules sets - used for main, studios A, B , etc.
+dcbMCount = dcbTabsMax * dcbPannelsMax; // number of different modules sets - used for main, studios A, B , etc.
 // we currently use 64 * 2 words, so 128 for each menu
 dcbWSize = dcbMSize * 2;
 dcbBSize = dcbWSize * dcbMCount;
@@ -3301,7 +3301,7 @@ dcbBSize = dcbWSize * dcbMCount;
 */
 
 // The GM Main menu
-dcbNamesCnt = 160; // up to 160 strings in the dcb Menu - 98 + 32 user modules used (the sizes 150 % and 200 % : 130)
+dcbNamesCnt = 200; // up to 200 strings in the dcb Menu - 98 + 32 user modules used (the sizes 150 % and 200 % : 130 ; 2026-11-23 : the tabs, 164)
 // memory block for the menu
 GUI_Main_Menu_Block = mSL_StM_Alloc(ui_jmenu_items+dcbNamesCnt, 'Menu', mSL_StM_FlClear);
 
@@ -3499,11 +3499,7 @@ local (j, i, tmp, bln, blu, blockStrSpace, blockThemeBlack, blockThemeTron, bloc
     blockDispNames[blockReset] = "&/Reset Sizes";
     (itdsp += 1); // separator
     blockPaneClear = (itdsp += 1);
-    blockDispNames[blockPaneClear] = "&/Clear Pane";
-    blockTabClear = (itdsp += 1);
-    blockDispNames[blockTabClear] = "&/Clear Tab"; // (the panes of the current tab ; Clear All Tabs : all the tabs)
-    blockAllPaneClear = (itdsp += 1);
-    blockDispNames[blockAllPaneClear] = "&/<Clear All Tabs";
+    blockDispNames[blockPaneClear] = "&/<Clear Pane"; // (2026-11-23, the user : Clear Tab, Clear All Tabs in Tabs Management)
     //
     (itdsp += 1); // separator
     blockDispNames[(itdsp += 1)] = ">Tabs Management";
@@ -3514,8 +3510,14 @@ local (j, i, tmp, bln, blu, blockStrSpace, blockThemeBlack, blockThemeTron, bloc
     blockDispNames[blockTabShftRight] = "&/Shift tabs right"; //
     blockTabLive = (itdsp += 1);
     blockDispNames[blockTabLive] = "&/Live display"; // see genericLiveTab
+    itdsp = tbs_MenuDecl(blockDispNames, itdsp); // (2026-11-23) Number of tabs, Exchange with tab (mSL_Tabs)
     blockTabRename = (itdsp += 1);
-    blockDispNames[blockTabRename] = "&/<Rename tab..."; //
+    blockDispNames[blockTabRename] = "&/Rename tab..."; //
+    (itdsp += 1); // separator
+    blockTabClear = (itdsp += 1);
+    blockDispNames[blockTabClear] = "&/Clear Tab"; // (the panes of the current tab ; Clear All Tabs : all the tabs)
+    blockAllPaneClear = (itdsp += 1);
+    blockDispNames[blockAllPaneClear] = "&/<Clear All Tabs";
     //
     (itdsp += 1); // separator
     blockDispNames[(itdsp += 1)] = ">Theme";
@@ -4022,8 +4024,10 @@ aliasesStrCount = 0;
 aliasesCount = 0;
 padclips = make_jpad(
            ui_jpad_ty_act | ui_jpad_mk_colors |  ui_jpad_mk_altcolors
-           | ui_jpad_mk_values,
+           | ui_jpad_mk_values | ui_jpad_mk_fades, // (2026-11-23 : the cells fade, see gm_Rl_Clips)
            10, 10, clInBank);
+gm_ClLit = make_array(clInBank); // (2026-11-23) the clips of the group shown that a player plays (gm_Rl_Clips)
+gm_ClFadeB = -1; // (the group of the fades)
 
 padXclrs = padclips + padclips[ui_jpad_clrs]; // addresses of colors
 padclips[ui_jpad_coff] = 0;
@@ -5369,7 +5373,7 @@ padSensNL = 3;
 padSensNC = 3;
 padSensSiz = padSensNL * padSensNC;
 padSensrs = make_jpad(
-    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
+    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values | ui_jpad_mk_fades, // (2026-11-23 : the cells fade)
     padSensNL, padSensNC, padSensSiz);
 padSensLabs = padSensrs + padSensrs[ui_jpad_labs]; // addresses of labels
 padSensColrs = padSensrs + padSensrs[ui_jpad_clrs]; // addresses of colors
@@ -8896,6 +8900,10 @@ mm_highblocks[0] = 'High'; mm_highblocks[1] = '_Mem';
 // module : in @gfx, after keepBlockInfos)
 <? mcon_part = 1; include("CMGS-libs/mSL_Console.jsfx-inc"); ?>
 
+// (2026-11-23) the short name of the application in the names of the files it exports (Export GUI settings)
+#jg_App = "gm";
+// A text file written by CMGS-auxiliary.eel in a folder of the project (Export GUI settings, mSL_GUI ; before the module GUI)
+<? include("CMGS-libs/mSL_Export.jsfx-inc"); ?>
 // The rubric "GUI" (2026-11-21, see mSL_GUI), part 1 : the settings of the look, the record, the pad of the module
 <? jg_part = 1; include("CMGS-libs/mSL_GUI.jsfx-inc"); ?>
 // 2 slots for the context of the mSL Console (its incremental mode : the tables of its variables, see mSL_Console)
@@ -18434,6 +18442,8 @@ loadMode ? (
         // Check pannels configurations
         z__p = serialBlock + Pr7_StudConf;
         z__i = 0; loop(dcbTabsMax, z__p[z__i] = max(1, min(4, 0|z__p[z__i])); z__i += 1;);
+        // (2026-11-23) the count of the tabs (an older preset : 16), applied in @gfx (tbs_Frame, mSL_Tabs)
+        tbs_Pend = (serialBlock[Pr7_TabCount] > 0) ? max(1, min(dcbTabsMax, serialBlock[Pr7_TabCount])) : dcbTabsMax;
         z__p = serialBlock + Pr7_StudRat;
         z__i = 0; loop(dcbTabsMax*4, z__p[z__i] = max(20, min(20000, z__p[z__i])); z__i += 1;); // (2026-11-21 : the borders dragged)
 
@@ -19711,6 +19721,245 @@ local (xx, p, pp, k, m, par, ent, label, fmt, value, ty, fo, e, zPm)
     );
 );
 
+/*
+   (2026-11-23) The roles of the cells of the pads of the Game Master (rubric GUI, step 3 ; see ui_jpad_rl_action in
+   mSL_ui_Pads, d3_Pad_Modes in Diffusion-3, its_Pad_Roles in Interstys) : each module sets the roles of its pad, then
+   gm_Pad_Modes, then its own marks, just before control_jpad ; the colors of the pads are not used any more by the cells
+   with a role (they still give some modes here). The conventions :
+     lit (selected) : on, running, changed ; Off, paused, stopped : at rest ; dim (disabled : no effect now) : the cells
+     drawn in Col_Inactive until then ; an error : Alert ; Remove, Reset, Kill, Stop : Danger ; the item chosen by the user
+     in a grid : the color 1 (index 0) of the identity series ; the kinds (of markers, of units, of sources, the levels of
+     the speakers ...) : the identity series from the color 2 (index 1).
+   The flag "selected" of some pads holds a state : the Studio pad (a cell armed ; ui_jpad_ct_round : playing, saved in
+   padStFlags), the units (a player locked, set by @block too), the clips (the clip chosen, cellAlt), the banks (the current
+   group), the group lock of Banks Definitions, the show mode of Dyn Params (cell 7) : those pads keep it (gm_Pad_Bit touches
+   one flag) ; the units and the Studio pad : their roles only (the cells flags are never written here), with a mode imposed
+   when needed (ui_jpad_rl_force).
+*/
+// one flag (ui_jpad_ct_selec, ui_jpad_ct_dim, ui_jpad_ct_lock) of the cell np : on 1, off 0
+function gm_Pad_Bit(pad, np, bit, on) local(d)
+(
+    ((np >= 0) && (np < pad[ui_jpad_siz])) ? (
+        d = pad + pad[ui_jpad_cells];
+        d[np] = on ? (d[np] | bit) : (d[np] & (-1 ~ bit));
+    );
+);
+// the role r in the color k (0 ... 15) of the identity series
+function gm_Ident(r, k)
+(
+    r + ui_jpad_rl_ident * (1 + (k & 15));
+);
+// the cells 0 ... n - 1 : the role r
+function gm_Pad_All(pad, n, r) local(i)
+(
+    i = 0; loop(n, ui_jpad_role(pad, i, r); i += 1;);
+);
+// the modes of the cells 0 ... n - 1 from their labels and their colors (labs 0 : the pad has no label) : no label ("" or
+// " ", except a cell that shows its value) : Empty ; Col_Error : Alert ; Col_Inactive : dim ; never locked ; the flag
+// "selected" : as the module set it
+function gm_Pad_Modes(pad, labs, colrs, n) local(i, cl, e, c)
+(
+    cl = pad + pad[ui_jpad_cells];
+    i = 0;
+    loop(n,
+        c = colrs[i];
+        e = (labs != 0) && ((cl[i] & ui_jpad_ct_showval) == 0) && (labs[i] != 0) &&
+            ((strlen(labs[i]) === 0) || (strcmp(labs[i], " ") === 0));
+        e ? ui_jpad_role(pad, i, ui_jpad_rl_empty) : (c === Col_Error) ? ui_jpad_role(pad, i, ui_jpad_rl_alert);
+        gm_Pad_Bit(pad, i, ui_jpad_ct_dim, !e && (c === Col_Inactive));
+        gm_Pad_Bit(pad, i, ui_jpad_ct_lock, 0);
+        i += 1;
+    );
+);
+// the kinds shown by their colors (the sources and the links of the module Links) : the index in the identity series (-1 :
+// none)
+function gm_Col_Ident(c)
+(
+    (c === Color_Goldenrod) ? 1 : (c === Color_Peach_Yellow) ? 2 : (c === Color_Std_Orange) ? 3 :
+    (c === Color_Limegreen) ? 4 : (c === Color_Forest_Green) ? 5 : (c === Color_Blue_Bell) ? 6 :
+    (c === Color_Std_Brown) ? 7 : -1;
+);
+// the cells first ... first + n - 1 : their role in the color of their kind (gm_Col_Ident ; the others : unchanged)
+function gm_Rl_Kinds(pad, colrs, first, n) local(i, k)
+(
+    i = first;
+    loop(n,
+        ((k = gm_Col_Ident(colrs[i])) >= 0) ? ui_jpad_role(pad, i, gm_Ident(ui_jpad_role_of(pad, i), k));
+        i += 1;
+    );
+);
+// The module Sensors, the sensors (Action, in the color of the MIDI mode) : lit for 0.5 s after an event, then back to rest
+// in the fade time of the rubric GUI (they fade : ui_jpad_fadeon ; until then, the colors MIDI_Colors_Set, 36 s) ; locked
+// (hatched) : inhibited
+function gm_Rl_Sensors(n, mode) local(i)
+(
+    i = 0;
+    loop(n,
+        ui_jpad_role(padSensrs, i, gm_Ident(ui_jpad_rl_action, mode));
+        ui_jpad_mark(padSensrs, i, !padSensInhib[i] && ((ui_j_UnixTime - MIDIDates[i]) < 0.5), 0);
+        ui_jpad_lock(padSensrs, i, padSensInhib[i]);
+        ui_jpad_fadeon(padSensrs, i, 1);
+        i += 1;
+    );
+);
+// The module Clips, the groups of the bank set (Navigation ; the current group : selected, kept) : dim when none of its clips
+// is available (all missing or in error ; never the current group : the mode disabled hides the mode selected)
+function gm_Rl_Banks() local(i, u)
+(
+    i = 0;
+    loop(clBSSize,
+        u = slBankset * clBSSize + i;
+        ui_jpad_role(padbanks, i, ui_jpad_rl_nav);
+        gm_Pad_Bit(padbanks, i, ui_jpad_ct_dim, (i !== slGroupNum) && (aclnBused[u] === 0) && (aclnBunav[u] > 0));
+        gm_Pad_Bit(padbanks, i, ui_jpad_ct_lock, 0);
+        i += 1;
+    );
+);
+// The module Clips, the clips of the group (Object ; they fade, ui_jpad_fadeon) : played by a player now : selected, then
+// back in the fade time of the rubric GUI to their level : the clips played, between 0.15 (the least played of the group)
+// and 0.75 (the most played ; all played as many times : 0.45), the others 0 (rest) ; no file (-404) : Empty ; not checked
+// yet : dim ; too long (-499 : played in long mode) : Alert ; another error : Alert, selected ; the clip chosen (cellAlt) :
+// the color 1 of the identity series ; another group shown : the fades stopped
+function gm_Rl_Clips(curB) local(i, uv, uw, r, a, u, n, mn, mx)
+(
+    (curB !== gm_ClFadeB) ? (ui_jpad_fade_reset(padclips); gm_ClFadeB = curB;);
+    memset(gm_ClLit, 0, clInBank);
+    i = 0;
+    loop(uCnt,
+        u = UGAddr + UCBSize * i;
+        ((gmem[u + cbType] === uPlayer) && (gmem[u + cbStat] === uSBusy)) ? (
+            n = gmem[u + RCB_ClipNb] - curB;
+            ((n >= 0) && (n < clInBank)) ? gm_ClLit[n] = 1;
+        );
+        i += 1;
+    );
+    mn = 10^9; mx = 0;
+    i = 0; loop(clInBank, uv = gmem[clInfStart + curB + i]; (uv > 0) ? (mn = min(mn, uv); mx = max(mx, uv);); i += 1;);
+    i = 0;
+    loop(clInBank,
+        uv = gmem[clInfStart + curB + i]; uw = gmem[clClInfos + curB + i];
+        a = (cellAlt === curB + i);
+        r = (uv === -404) ? ui_jpad_rl_empty : (uv < 0) ? ui_jpad_rl_alert : ui_jpad_rl_object;
+        ui_jpad_role(padclips, i, (a && (r !== ui_jpad_rl_empty)) ? gm_Ident(r, 0) : r);
+        ui_jpad_mark(padclips, i, gm_ClLit[i] || ((uv < 0) && (uv !== -404) && (uv !== -499)), !a && (uv === 0) && (uw === 0));
+        ui_jpad_lock(padclips, i, 0);
+        ui_jpad_fadeon(padclips, i, 1);
+        ui_jpad_level(padclips, i, (uv > 0) ? ((mx > mn) ? 0.15 + 0.6 * (uv - mn) / (mx - mn) : 0.45) : 0);
+        i += 1;
+    );
+);
+// The module Units (its roles only : the flag "selected" of a player, its lock, is also set by @block) : a player : Object ;
+// playing (Play, Loop, Edit, Save) : selected ; halting : at rest ; locked : hatched ; muted : Alert ; the last one played,
+// ready : the color 1 of the identity series ; starting, unused : dim ; in error : Alert ; unreachable : Alert, dim ; the
+// other units : Object, in the color of their kind ; no unit : Empty
+function gm_Rl_Units() local(i, un, ty, st, wg, r)
+(
+    i = 0;
+    loop(uCnt,
+        ((un = padUNAddr[i]) === 0) ? (r = ui_jpad_rl_empty) : (
+            ty = gmem[un + cbType]; st = gmem[un + cbStat];
+            (ty === uPlayer) ? (
+                wg = gmem[un + RCB_Cl_Flgs];
+                r = (st & uSWorking) ? ((wg & 2) ? ui_jpad_rl_alert : ui_jpad_rl_object) +
+                        ui_jpad_rl_force * (1 + ((wg & 1) ? 5 : (st === uSHalting) ? 0 : 3)) :
+                    (st === uSReady) ? ((lstPlyCell === un) ? gm_Ident(ui_jpad_rl_object, 0) : ui_jpad_rl_object) :
+                    ((st === uSStarting) || (st === uSUnused)) ? ui_jpad_rl_object + ui_jpad_rl_force * 5 :
+                    ((st === uSError) || (st === uSSError)) ? ui_jpad_rl_alert :
+                    (st === uSUnreachable) ? ui_jpad_rl_alert + ui_jpad_rl_force * 5 :
+                    ui_jpad_rl_object;
+            ) : (
+                r = gm_Ident(ui_jpad_rl_object, (ty === uMainMixer) ? 1 : ((ty === uMIDI_In) || (ty === uMIDI_Out)) ? 2 :
+                    (ty === uDetector) ? 3 : (ty === uCalibrator) ? 4 : (ty === uTracer) ? 5 : (ty === uSoundGen) ? 6 :
+                    ((ty === uAPCmini_In) || (ty === uAPCmini_Out)) ? 7 : ((ty === nanoPAD2_In) || (ty === nanoPAD2_Out)) ? 8 : 9);
+            );
+        );
+        ui_jpad_role(padunits, i, r);
+        i += 1;
+    );
+);
+// The module HP Config, the speakers (Object, in the color of their level : low, middle, high ; a sequence : without) : not in
+// the configuration : dim ; no cell (cleared) : Empty
+function gm_Rl_HPSets() local(i, c, cl, e)
+(
+    cl = padHPSets + padHPSets[ui_jpad_cells];
+    i = 0;
+    loop(padHPSSiz,
+        c = padHPSColrs[i]; e = (cl[i] & ui_jpad_ct_cclear) != 0;
+        ui_jpad_role(padHPSets, i, e ? ui_jpad_rl_empty :
+            (c === HPCDown) ? gm_Ident(ui_jpad_rl_object, 1) : (c === HPCMidd) ? gm_Ident(ui_jpad_rl_object, 2) :
+            (c === HPCUp) ? gm_Ident(ui_jpad_rl_object, 3) : ui_jpad_rl_object);
+        ui_jpad_mark(padHPSets, i, 0, !e && (c === Col_Inactive));
+        ui_jpad_lock(padHPSets, i, 0);
+        i += 1;
+    );
+);
+// The module Play Log, the markers (Object, in the color of their type ; inactive : dim) : with Ctrl, Cmd (a clic sets a
+// marker) : Action ; with Ctrl + Alt (a clic frees it) : Danger ; the loop points : the color 1 of the identity series,
+// selected ; the marker just modified : selected ; no marker : Empty
+function gm_Rl_PlayStore(jmc) local(i, da, s, lp, md)
+(
+    md = (jmc === 0x20) || (jmc === 0x30) || (jmc === 0x04);
+    i = 0;
+    loop(padPlayStoreSiz,
+        da = clTabE[i];
+        lp = (i === lppLoop1) || (i === lppLoop2);
+        (da > 0) ? (
+            s = (da[lppEFlgs] & lppEFlgInact) ? 0 : da[lppEType];
+            ui_jpad_role(padPlayStorep, i, (jmc === 0x30) ? ui_jpad_rl_danger : md ? ui_jpad_rl_action :
+                lp ? gm_Ident(ui_jpad_rl_object, 0) : (s > 0) ? gm_Ident(ui_jpad_rl_object, s) : ui_jpad_rl_object);
+            gm_Pad_Bit(padPlayStorep, i, ui_jpad_ct_dim, (s === 0) && !md && !lp);
+        ) : (
+            ui_jpad_role(padPlayStorep, i, lp ? gm_Ident(ui_jpad_rl_object, 0) : ui_jpad_rl_empty);
+            gm_Pad_Bit(padPlayStorep, i, ui_jpad_ct_dim, 0);
+        );
+        gm_Pad_Bit(padPlayStorep, i, ui_jpad_ct_selec, lp || ((da > 0) && (i === padPlayStoreMod)));
+        gm_Pad_Bit(padPlayStorep, i, ui_jpad_ct_lock, 0);
+        i += 1;
+    );
+);
+// The module Dyn Params, the bits of the flags word shown (Choice, in the color of the word : F1, F2, And, Or) : set :
+// selected
+function gm_Rl_DynFlg(fs) local(i)
+(
+    i = 0;
+    loop(padDynFlgSiz,
+        ui_jpad_role(padDynFlgW, i, ((fs >= 1) && (fs <= 4)) ? gm_Ident(ui_jpad_rl_choice, fs) : ui_jpad_rl_choice);
+        ui_jpad_mark(padDynFlgW, i, padDynFlgVals[i] != 0, 0);
+        ui_jpad_lock(padDynFlgW, i, 0);
+        i += 1;
+    );
+);
+// The module Dyn Params, the sets of parameters (Object) : empty : dim ; the last one used : selected, in the color of the
+// operation done
+function gm_Rl_DynPrst() local(i, t, l, pa)
+(
+    i = 0;
+    loop(padDynPrstSiz,
+        pa = arrDyns + i * paramDynSiz; t = pa[paramType];
+        l = (i === currLastSet) && (t > 0);
+        ui_jpad_role(padDynPrstW, i, l ? gm_Ident(ui_jpad_rl_object, t) : ui_jpad_rl_object);
+        ui_jpad_mark(padDynPrstW, i, l, t === 0);
+        ui_jpad_lock(padDynPrstW, i, 0);
+        i += 1;
+    );
+);
+// The Studio pad (its roles only : its cells flags are saved in padStFlags ; armed : selected, playing : a round cell) : a
+// pad that plays (Action, in the color of what it shows : partial, group, group and bank, range, clip, action, MIDI) ; an
+// error : Alert ("No err." : Information) ; an unused cell : Empty
+function gm_Rl_Studio() local(i, ty)
+(
+    i = 0;
+    loop(padStSiz,
+        ty = padStFlags[i + padStOffset] & padStFlDisp;
+        ((StdnumUnchkd > 0) && (StdnumUnchkd < 16)) ? ty = StdnumUnchkd;
+        ui_jpad_role(padStudio, i, ((ty === padStDispErr) || (ty & padStFlErrbit)) ?
+                (padStErrors[i + padStOffset] ? ui_jpad_rl_alert : ui_jpad_rl_info) :
+            (ty === padStDispNone) ? ui_jpad_rl_empty :
+            ((ty >= padStDispPar) && (ty <= padStDispSpec)) ? gm_Ident(ui_jpad_rl_action, ty) : ui_jpad_rl_action);
+        i += 1;
+    );
+);
+
 // Used in a displayer
 // Purpose : use a "global" parameter to modify a "local" value
 // Means: save value, use parameter slider, restore value
@@ -19922,6 +20171,13 @@ local(upla, WUAdd, id, u, uix_jneed, unitmod, uix_jmini, zzmi, h1, h2, h3, ix, v
                     padBplColrs[5] = Color_Dark_Orange;
                     padBplLabs[5] = "Settings";
 
+                    // (2026-11-23) the roles (GUI rubric) : the view (Choice), the reader (Navigation : lit while it plays
+                    // or loops), the clip (Value), Current / Modified (State : modified lit), the channels (Value), the
+                    // settings (Action : the menu)
+                    ui_jpad_roles_set(padBplayer, 0, "cnvsva");
+                    gm_Pad_Modes(padBplayer, padBplLabs, padBplColrs, 6);
+                    ui_jpad_mark(padBplayer, 1, (gmem[WUAdd+RCB_cbCKmd] === KmdPlay) || (gmem[WUAdd+RCB_cbCKmd] === KmdLoop), 0);
+                    ui_jpad_mark(padBplayer, 3, gmem[WUAdd+RCB_ClipDup] != gmem[WUAdd+RCB_ClipNb], 0);
                     zz = control_jpad(padBplayer);
                     (zz > 0) ? (
                         ui_GFXdoNow |= 1; ui_GFXReason = 40;
@@ -20241,6 +20497,13 @@ local (str, ij, h1, uix_jneed, uix_jmini, color, k, w, r, jmc, zz, zzch, zzent, 
                 sprintf(padSnsKLabs[3], "Mode: %d", MIDI_Sens_mode);
                 padSnsKColrs[3] = MIDI_Colors_Base[MIDI_Sens_mode % MIDI_Colors_Siz];
 
+                // (2026-11-23) the roles (GUI rubric) : the sensors, the play control (Choice : on lit, off at rest),
+                // Unlock / Stop (Danger), the MIDI mode (Choice, in its color of the identity series, as the sensors), the
+                // sequence (Information ; an error : Alert)
+                ui_jpad_roles_set(padSnsKmd, 0, "ccdci.");
+                gm_Pad_Modes(padSnsKmd, padSnsKLabs, padSnsKColrs, padSnsKSiz);
+                ui_jpad_role(padSnsKmd, 3, gm_Ident(ui_jpad_rl_choice, MIDI_Sens_mode));
+                ui_jpad_mark(padSnsKmd, 0, SensorsActive, 0); ui_jpad_mark(padSnsKmd, 1, UplayControl, 0);
                 zz = control_jpad(padSnsKmd);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1; ui_GFXReason = 35;
@@ -20331,6 +20594,7 @@ local (str, ij, h1, uix_jneed, uix_jmini, color, k, w, r, jmc, zz, zzch, zzent, 
                     ij += 1;
                 );
 
+                gm_Rl_Sensors(padSensSiz, MIDI_Sens_mode); // (2026-11-23, GUI rubric)
                 zz = control_jpad(padSensrs);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1; ui_GFXReason = 34;
@@ -20883,7 +21147,10 @@ local(str, str2, zz, zzch, zzent, zzmcl, zzc, zzmi, zzmmd, key, jmc, xx, co, TT,
 
                 ui_pad(2,2,6,2);
 
-
+                // (2026-11-23) the roles (GUI rubric) : the play mode shown (Value), the version, the count (Information ;
+                // an error : Alert), the cells without text (Empty)
+                ui_jpad_roles_set(padPModes, 0, "v....ii.");
+                gm_Pad_Modes(padPModes, padPMLabs, padPMColrs, padPMSiz);
                 zz = control_jpad(padPModes);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1; ui_GFXReason = 16;
@@ -21016,6 +21283,10 @@ local(str, str2, uix_jneed, uix_jmini, key, jmc, val, zz, zzch, zzent, zzmcl, zz
 
 
                 ui_pad(0,2,4,2);
+                // (2026-11-23) the roles (GUI rubric) : the clip shown (Value), its volume, its format, its duration, the
+                // folder, the version, the count (Information ; an error : Alert ; no clip : Empty)
+                ui_jpad_roles_set(padVlClips, 0, "viiiiii.");
+                gm_Pad_Modes(padVlClips, padVllabs, padVlclrs, padVlNC);
                 zz = control_jpad(padVlClips);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1; ui_GFXReason = 18;
@@ -21147,6 +21418,7 @@ local(i, ic, iw, ix, iy, iz, str, uv, uw, ux, zz, zzmi, m, mcc, r, cc, sr, ds, d
                     iz += 1;
                 );
                 padBCells[slGroupNum] |= ui_jpad_ct_selec;
+                gm_Rl_Banks(); // (2026-11-23, GUI rubric)
                 zz = control_jpad(padbanks);
                 (zz > 0) ? (
                     rerun = 1;
@@ -21278,6 +21550,7 @@ local(i, ic, iw, ix, iy, iz, str, uv, uw, ux, zz, zzmi, m, mcc, r, cc, sr, ds, d
                 emin === 9999999 ? emin = 0;
                 emin === emax ? ehcnt = elcnt;
 
+                gm_Rl_Clips(curB); // (2026-11-23, GUI rubric)
                 zz = control_jpad(padclips);
                 (zz > 0) ? (
                     rerun = 1;
@@ -22021,6 +22294,7 @@ local(pid, uid, pid, cidUn, str, tmp, ty, c, r, w, rd, st, Un, zz, zzmd, zzch, h
                 );
                 padcNl_Units = max(1, 0|((pid + c -1)/c));
 
+                gm_Rl_Units(); // (2026-11-23, GUI rubric)
                 zz = control_jpad(padunits, padcNl_Units, c, 3);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1; ui_GFXReason = 23;
@@ -22427,6 +22701,12 @@ local(str, str2, zz, zzch, zzent, zzmcl, zzmi, zzmmd, nhp, pcf, pcfsiz, ig, ih, 
                 padHPLabs[HPpMsg] = str;
                 padHPLabs[HPpVer] = str2;
 
+                // (2026-11-23) the roles (GUI rubric) : the configuration shown (Value), Sequence / Positions (Choice, at
+                // rest), the count of speakers (Information ; none : Empty), the version, the count (Information ; an
+                // error : Alert)
+                ui_jpad_roles_set(padHPModes, 0, "vci..ii.");
+                gm_Pad_Modes(padHPModes, padHPLabs, padHPColrs, padHPSiz);
+                ui_jpad_mark(padHPModes, 1, 0, 0);
                 zz = control_jpad(padHPModes);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1; ui_GFXReason = 27;
@@ -22518,6 +22798,7 @@ local(str, str2, zz, zzch, zzent, zzmcl, zzmi, zzmmd, nhp, pcf, pcfsiz, ig, ih, 
                     padHPColrs[2] = Col_InfoC;
                 );
 
+                gm_Rl_HPSets(); // (2026-11-23, GUI rubric)
                 zz = control_jpad(padHPSets);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1; ui_GFXReason = 28;
@@ -22642,6 +22923,10 @@ local(str, str2, key, val, xx, zz, cc, cq, cx, zzch, zzent, zzmcl, zzmmd, zzmi, 
 
 
                 ui_pad(2,2,6,2);
+                // (2026-11-23) the roles (GUI rubric) : the space mode shown (Value), the version, the count (Information ;
+                // an error : Alert), the cells without text (Empty)
+                ui_jpad_roles_set(padSModes, 0, "v....ii.");
+                gm_Pad_Modes(padSModes, padSMLabs, padSMColrs, padSMSiz);
                 zz = control_jpad(padSModes);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1; ui_GFXReason = 30;
@@ -22876,6 +23161,12 @@ local(str, str2, zz, key, val, xx, zz, zzch, zzent, zzmcl, zzmmd, ce, cc, cq, cl
                     padBKLabs[14] = ""; padBKLabs[15] = "";
                 );
 
+                // (2026-11-23) the roles (GUI rubric) : line 1 the partial shown (Value), the group (Choice : locked to
+                // it, selected, kept from BnkGrpLock), the bank, its number, the clip count (none : dim), the version, the
+                // count (Information ; an error : Alert) ; line 2 the clips, the play mode, the space mode (Navigation :
+                // shown in their modules), the weight, the flags, the volumes (Information) ; no partial : Empty
+                ui_jpad_roles_set(padBKSets, 0, "vciiiii.iinniiii");
+                gm_Pad_Modes(padBKSets, padBKLabs, padBKColrs, padBKSiz);
                 zz = control_jpad(padBKSets);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1; ui_GFXReason = 33;
@@ -23078,6 +23369,23 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
                     sprintf(padSettingsLabs[7], "0x%X", v);
                 );
 
+                // (2026-11-23) the roles (GUI rubric) : Refresh (Action ; with Cmd, Reset : Danger), Load script (Choice :
+                // on lit), Scripts (Action ; with Cmd, Kill Scripts : Danger), Profile (Action ; undefined : dim ; with
+                // Cmd or Alt, Remove / Reset : Danger), Configuration (Action), the auxiliary script (Action : running lit,
+                // late Alert, absent dim ; with Cmd, Stop : Danger), the setting (Choice), its value (Value)
+                ui_jpad_roles_set(padSettingsp, 0, "acaaaacv");
+                gm_Pad_Modes(padSettingsp, padSettingsLabs, padSettingsColrs, padSettingsSiz);
+                (jmc & cmdCap) ? (
+                    ui_jpad_role(padSettingsp, 0, ui_jpad_rl_danger); ui_jpad_role(padSettingsp, 2, ui_jpad_rl_danger);
+                    ui_jpad_role(padSettingsp, 3, ui_jpad_rl_danger);
+                ) :
+                (jmc & altCap) ? ui_jpad_role(padSettingsp, 3, ui_jpad_rl_danger);
+                ui_jpad_mark(padSettingsp, 1, flagDoLoadScripts, 0);
+                (gmem[versionGMScript] != 0) ? (
+                    (jmc & cmdCap) ? ui_jpad_role(padSettingsp, 5, ui_jpad_rl_danger) :
+                    (padSettingsColrs[5] === Color_Brownish_Orange) ? ui_jpad_role(padSettingsp, 5, ui_jpad_rl_alert) :
+                    ui_jpad_mark(padSettingsp, 5, 1, 0);
+                );
                 zz = control_jpad(padSettingsp);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1;
@@ -23318,6 +23626,10 @@ local (h1, h2, uix_jneed, uix_jmini, ig, u, v, ifg, jmc, zz, zzch, zzent, zzmcl,
                     doneDroppedMsl();
                 );
 
+                // (2026-11-23) the roles (GUI rubric) : the scripts (Action ; with Cmd, a clic removes : Danger ; no
+                // script : Empty)
+                gm_Pad_All(padSScriptsp, K_padSScriptsSiz, (jmc & cmdCap) ? ui_jpad_rl_danger : ui_jpad_rl_action);
+                gm_Pad_Modes(padSScriptsp, padSScriptsLabs, padSScriptsColrs, K_padSScriptsSiz);
                 zz = control_jpad(padSScriptsp);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1;
@@ -23492,6 +23804,21 @@ local (h1, h2, h3, h3min, uix_jneed, uix_jmini, da, dl, elc, flPl, ig, ij, is, i
                 );
                 !replayUnMute ? (padPlayLogColrs[7] = Color_Brownish_Orange;);
 
+                // (2026-11-23) the roles (GUI rubric), all Choice (a clic switches) : the recording (Recording : Alert,
+                // lit ; Paused, Stopped : at rest), its date (locked sounds : lit), its count (recorded replays : lit),
+                // the auto-play (on : lit ; with Cmd, Stop Play : Danger), the replay (Replaying : lit), its date (repeat
+                // : lit), the marker (marks the replays : lit), the next event (play control : lit ; muted : Alert)
+                ui_jpad_roles_set(padPlayLogp, 0, "cccccccc");
+                gm_Pad_Modes(padPlayLogp, padPlayLogLabs, padPlayLogColrs, padPlayLogSiz);
+                (recordMode === recModeOn) ? ui_jpad_role(padPlayLogp, 0, ui_jpad_rl_alert);
+                ui_jpad_mark(padPlayLogp, 0, recordMode === recModeOn, 0);
+                ui_jpad_mark(padPlayLogp, 1, recOptLockSnds, 0); ui_jpad_mark(padPlayLogp, 2, recOptRecReplay, 0);
+                (paramValues[p_GvAutoMd] && (jmc === 0x04)) ? ui_jpad_role(padPlayLogp, 3, ui_jpad_rl_danger);
+                ui_jpad_mark(padPlayLogp, 3, paramValues[p_GvAutoMd] != 0, 0);
+                ui_jpad_mark(padPlayLogp, 4, replayMode === replayModeOn, 0);
+                ui_jpad_mark(padPlayLogp, 5, playRepeatMd, 0); ui_jpad_mark(padPlayLogp, 6, recOptMarkReplay, 0);
+                !replayUnMute ? ui_jpad_role(padPlayLogp, 7, ui_jpad_rl_alert);
+                ui_jpad_mark(padPlayLogp, 7, UplayControl, 0);
                 zz = control_jpad(padPlayLogp);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1; ui_GFXReason = 40;
@@ -23755,6 +24082,7 @@ local (h1, h2, h3, h3min, uix_jneed, uix_jmini, da, dl, elc, flPl, ig, ij, is, i
 
 
                 // Log Play Pad Interaction
+                gm_Rl_PlayStore(jmc); // (2026-11-23, GUI rubric)
                 zz = control_jpad(padPlayStorep);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1; ui_GFXReason = 40;
@@ -24410,6 +24738,10 @@ local (h1, h2, h3, uix_jneed, uix_jmini, ig, jmc, zz, zzmi)
                 padPresetsLabs[1] = "Standard";
                 padPresetsColrs[1] = Color_Clear_Yellow;
 
+                // (2026-11-23) the roles (GUI rubric) : the title (Information), the mode (Choice), the others (Empty)
+                ui_jpad_roles_set(padPresetsp, 0, "ic......");
+                gm_Pad_Modes(padPresetsp, padPresetsLabs, padPresetsColrs, padPresetsSiz);
+                ui_jpad_mark(padPresetsp, 0, 0, 0); ui_jpad_mark(padPresetsp, 1, 0, 0);
                 zz = control_jpad(padPresetsp);
                 zz ? (
                     ui_GFXdoNow |= 1;
@@ -24619,6 +24951,21 @@ local(k, h1, h2, h3, h4, h5, uix_jmini, uix_jneed, zzmi, zzch, zzmcl, zzmmd, zze
                 );
                 padDynParColrs[7] = v;
 
+                // (2026-11-23) the roles (GUI rubric) : the configuration (Navigation), the player and its clip (Object :
+                // lit while it plays ; not current : disabled, as set above), the copy mode (Choice), the words F1, F2,
+                // And, Or (Choice, in the colors 2 ... 5 of the identity series, as the bits of the flags pad ; the word
+                // shown : lit), the bit under the mouse or the word (Choice, in the color of the word ; a bit not set :
+                // dim ; the show mode ffmode : selected, kept)
+                ui_jpad_roles_set(padDynParW, 0, "nocccccc");
+                gm_Pad_Modes(padDynParW, padDynParLabs, padDynParColrs, padDynParSiz);
+                ui_jpad_mark(padDynParW, 1, (currpmode === KmdPlay) || (currpmode === KmdLoop), 0);
+                ui_jpad_role(padDynParW, 3, gm_Ident(ui_jpad_rl_choice, 1)); ui_jpad_mark(padDynParW, 3, ffshow == 1, 0);
+                ui_jpad_role(padDynParW, 4, gm_Ident(ui_jpad_rl_choice, 2)); ui_jpad_mark(padDynParW, 4, ffshow == 2, 0);
+                ui_jpad_role(padDynParW, 5, gm_Ident(ui_jpad_rl_choice, 3)); ui_jpad_mark(padDynParW, 5, ffshow == 3, 0);
+                ui_jpad_role(padDynParW, 6, gm_Ident(ui_jpad_rl_choice, 4)); ui_jpad_mark(padDynParW, 6, ffshow == 4, 0);
+                ((ffshow >= 1) && (ffshow <= 4)) ? ui_jpad_role(padDynParW, 7, gm_Ident(ui_jpad_rl_choice, ffshow));
+                gm_Pad_Bit(padDynParW, 7, ui_jpad_ct_dim, ((ffdisp === 0) || (ffshow < 1) || (ffshow > 4)) &&
+                    !(xtval & uix_bit_set[kcell]));
                 zz = control_jpad(padDynParW);
                 (zz > 0) ? (
                     zzch = padDynParW[ui_jpad_lkey];
@@ -24881,6 +25228,7 @@ local(k, h1, h2, h3, h4, h5, uix_jmini, uix_jneed, zzmi, zzch, zzmcl, zzmmd, zze
                     ig += 1;
                 );
 
+                gm_Rl_DynFlg(ffshow); // (2026-11-23, GUI rubric)
                 zz = control_jpad(padDynFlgW);
                 (zz > 0) ? (
                     zzch = padDynFlgW[ui_jpad_lkey];
@@ -25004,6 +25352,7 @@ local(k, h1, h2, h3, h4, h5, uix_jmini, uix_jneed, zzmi, zzch, zzmcl, zzmmd, zze
                     ig +=1;
                 );
 
+                gm_Rl_DynPrst(); // (2026-11-23, GUI rubric)
                 zz = control_jpad(padDynPrstW);
                 (zz > 0) ? (
                     zzch = padDynPrstW[ui_jpad_lkey];
@@ -25451,6 +25800,17 @@ local (h1, h2, uix_jneed, uix_jmini, str, p, u, par_reduce, cty, col, ig, sic, t
 
                 //======================================================================
 
+                // (2026-11-23) the roles (GUI rubric) : line 1 Learn (Choice : on lit), the source (Choice), its value
+                // (Choice) and its detail (Information) in the color of its kind (identity series : CC, CC/SV or note,
+                // PC, unknown, slider, key, event), the target (Choice : its number, its name), its range (Value) ; line 2
+                // the MIDI log (Choice : on lit), Link (Action : linked lit), the link of the source (Danger : a clic
+                // removes it ; its name : Information), the link found (Danger : a clic removes it ; its detail and its
+                // range in the color of its kind) ; Learn off : the others dim
+                ui_jpad_roles_set(padLinksp, 0, "ccciccvvcadidiaa");
+                gm_Pad_Modes(padLinksp, padLinksLabs, padLinksColrs, padLinksSiz);
+                gm_Rl_Kinds(padLinksp, padLinksColrs, 2, 2); gm_Rl_Kinds(padLinksp, padLinksColrs, 13, 3);
+                ui_jpad_mark(padLinksp, 0, SysLinksActive, 0); ui_jpad_mark(padLinksp, 8, MIDILogActive, 0);
+                ui_jpad_mark(padLinksp, 9, lst === 1, 0);
                 zz = control_jpad(padLinksp);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1;
@@ -25793,6 +26153,7 @@ local(h1, rc, str, zz, zzch, zzent, zzmcl, zzmi, zzmmd, rtc, part, select, u, u_
                 );
                 AA = padStudio[ui_jpad_gloff]; // padStudio[ui_jpad_gloff] = 0;
 
+                gm_Rl_Studio(); // (2026-11-23, GUI rubric)
                 zz = control_jpad(padStudio);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 1;
@@ -26000,6 +26361,16 @@ local (h1, pl, uix_jneed, zz, zzch, zzent, zzmcl, zx, zzmi, zzmmd, key, jmc, val
                     c = 0|(w/ui_jpad_cl_minWidth);
                 );
                 padcNl_PCtrl = max(1, 0|((padAcSiz + c - 1)/c));
+                // (2026-11-23) the roles (GUI rubric) : line 1 the auto-play (Choice : on lit, off at rest), Default
+                // (Action), the mode (Choice), the group, the bank, the partial, the play and space modes (Value ; not used
+                // by the mode : dim) ; line 2 Stop Play (Danger), the players playing (Information : lit while one plays),
+                // the last clip, its modes (Information ; none : dim), the error (Information ; an error : Alert), the clip,
+                // the range (Value ; not used : dim)
+                ui_jpad_roles_set(padActions, 0, "cacvvvvvdiiiivvv");
+                gm_Pad_Modes(padActions, padAcLabs, padAcColrs, padAcSiz);
+                ui_jpad_mark(padActions, 0, paramValues[p_GvAutoMd] != 0, 0);
+                ui_jpad_mark(padActions, 9, pl > 0, 0);
+                (Krtc != 0) ? (ui_jpad_role(padActions, 12, ui_jpad_rl_alert); ui_jpad_mark(padActions, 12, 0, 0));
                 zz = control_jpad(padActions, padcNl_PCtrl, c, 3);
                 //*/
 
@@ -26929,6 +27300,7 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in, x
             s = p[block1Pane -1 + studDispPrf];
             str_setchar(s, 1, '!');
             (serialBlock[Pr7_StudLive + TabIdt]) ? str_setchar(p[blockTabLive], 1, '!');
+            tbs_MenuRefresh(p, TabIdt); // (2026-11-23) the count of the tabs, the tabs to exchange with
             str_setchar(p[blockStyle0 + (ui_jstyle != 0)], 1, '!'); // the current style, the current variation :
             str_setchar(p[blockVar0 + ((ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0))], 1, '!');
             str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
@@ -27004,6 +27376,9 @@ local(xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in, x
                     ui_screen_open("control.prompt");
                     ui_screen_arg(0, altTabsNames[TabIdt]);
                     ui_screen_arg(1, #tmp);
+                ) :
+                tbs_MenuClick(kit, TabIdt) ? (
+                    0; // (2026-11-23) Number of tabs, Exchange with tab (mSL_Tabs)
                 ) :
                 ui_jzoom_menu_click(kit) ? (
                     0; // a display size (see ui-lib-JJ-GUI)
@@ -27245,6 +27620,7 @@ local (p, i, xx, kit)
     i = 0; while (i < blockMenuITC) ( str_setchar(p[i], 1, ui_jmenu_chSP); i += 1; );
     str_setchar(p[block1Pane -1 + studDispPrf], 1, '!');
     str_setchar(p[blockTabLive], 1, '!');
+    tbs_MenuRefresh(p, TabIdt); // (2026-11-23) the count of the tabs, the tabs to exchange with
     str_setchar(p[blockStyle0 + (ui_jstyle != 0)], 1, '!'); // the current style, the current variation :
     str_setchar(p[blockVar0 + ((ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0))], 1, '!');
     str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
@@ -27262,6 +27638,9 @@ local (p, i, xx, kit)
             ui_screen_open("control.prompt");
             ui_screen_arg(0, altTabsNames[TabIdt]);
             ui_screen_arg(1, #tmp);
+        ) :
+        tbs_MenuClick(kit, TabIdt) ? (
+            0; // (2026-11-23) Number of tabs, Exchange with tab (mSL_Tabs)
         ) :
         ui_jzoom_menu_click(kit) ? (
             0; // a display size (see ui-lib-JJ-GUI)
@@ -27532,6 +27911,7 @@ must_do_gfx() ? (
     //colMouseWasIn = -1;
 
     //SCREEN—TABS (Main, Studios, Lives)
+    tbs_Frame(); // (2026-11-23) the count of tabs loaded ; the tab shown inside the count (mSL_Tabs)
     tbFound = -1; tbIdx = 0; // (not "ii" : @block uses it, and runs concurrently)
     while ((tbFound < 0) && (tbIdx < dcbTabsCount)) (
         (currScreen === uix_jG_menuscr[tbIdx]) ? tbFound = tbIdx;

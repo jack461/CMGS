@@ -1,0 +1,207 @@
+/*
+    mSL_Tabs.jsfx-inc  (2026-11-23)
+    The tabs of a CMGS application : their count (1 ... dcbTabsMax = 16), chosen by the user (the sub-menu "Number of tabs"
+    of the Studio menu, Tabs Management ; the cell "Tab count" of the module GUI ; the key tabcount of settings(data( GUI
+    ... ))), and the exchange of two tabs (the sub-menu "Exchange with tab" : the current tab and the one chosen exchange
+    their names, their panes, their widths, their modules, their live display ; the screen follows the current tab).
+    Shared by the 5 applications : works on their common data (mSL_Panes for Diffusion-3, the FilePlayer, the ScriptMaster ;
+    their own copies in the Game Master and Interstys) :
+        dcbTabsMax                  16 : the capacity (the arrays below are sized for it)
+        dcbTabsCount                the count of the tabs shown (the menu bar)
+        uix_jG_menuscr              the ids of the screens of the tabs (ui-lib-JJ-GUI), ended by -1 after the last tab shown
+        uix_jG_menuscrSz            the width of the tabs bar
+        altTabsNames                the names given by the user ("Rename tab...")
+        serialBlock + Pr7_StudConf  (dcbTabsMax) the count of panes of each tab ; + Pr7_StudRat (dcbTabsMax * 4) their
+                                    widths ; + Pr7_StudLive (dcbTabsMax) 1 if the tab uses the live display
+        dcbBlocksAll                dcbTabsMax * dcbPannelsMax panes of dcbWSize words : the modules shown by each pane
+        scbTempCopy                 dcbWSize words (a temporary copy of a pane)
+        uix_jmbsel                  the tab shown (also currScreenNb)
+        Pr7_TabCount                (> 0 : the Game Master) where the count is kept in serialBlock (saved with its presets)
+    A tab is empty when none of its panes shows a module and it does not use the live display. The count goes down only by
+    removing empty tabs : the last ones first, then the empty ones in between (the tabs after them take their places,
+    renumbered) ; never a tab that shows something (tbs_SetCount refuses). The new tabs (the count goes up) are empty.
+    Include in @init, after ui-lib-JJ-GUI and mSL_Utilities, before mSL_GUI part 1 (its key and its cell use it) and before
+    the tabs of the host. The host : names the dcbTabsMax screens of its tabs in uix_jG_menuscr (0 ... 15), then calls
+    tbs_Init(its default count) ; its @serialize gives the count loaded to tbs_Pend (tbs_Frame applies it in @gfx, before the
+    tabs are drawn) ; its Studio menu : tbs_MenuDecl (the items), tbs_MenuRefresh (before it is shown), tbs_MenuClick.
+*/
+
+(dcbTabsMax <= 0) ? dcbTabsMax = 16;
+tbs_Ids = make_array(16); // the ids of the screens of the tabs (uix_jG_menuscr at tbs_Init)
+tbs_Pend = 0; // a count loaded by @serialize, applied in @gfx (tbs_Frame)
+tbs_mCnt = tbs_mXch = -1; // the first items of the sub-menus "Number of tabs", "Exchange with tab" (tbs_MenuDecl)
+
+// The tabs bar : n tabs (1 ... dcbTabsMax)
+function tbs_Bar(n) local(i)
+(
+    dcbTabsCount = n = max(1, min(dcbTabsMax, floor(n + 0.5)));
+    i = 0; loop(n, uix_jG_menuscr[i] = tbs_Ids[i]; i += 1;);
+    uix_jG_menuscr[n] = -1;
+    uix_jG_menuscrSz = n + 2;
+    (Pr7_TabCount > 0) ? serialBlock[Pr7_TabCount] = n;
+    ui_GFXdoNow |= 1;
+);
+// The ids of the screens of the tabs (the host named them in uix_jG_menuscr), n tabs shown
+function tbs_Init(n) local(i)
+(
+    tbs_Def = n; // (the default of the application : the module GUI marks another count)
+    i = 0; loop(dcbTabsMax, tbs_Ids[i] = uix_jG_menuscr[i]; i += 1;);
+    tbs_Bar(n);
+);
+// The tab t shown
+function tbs_Goto(t)
+(
+    t = max(0, min(dcbTabsCount - 1, floor(t)));
+    uix_jmbsel = currScreenNb = t;
+    ui_screen_switch(uix_jG_menuscr[t]);
+    ui_GFXdoNow |= 1;
+);
+// In @gfx, before the tabs are drawn : a count loaded (tbs_Pend) ; the tab shown inside the count
+function tbs_Frame()
+(
+    (tbs_Pend > 0) ? (tbs_Bar(tbs_Pend); tbs_Pend = 0;);
+    (uix_jmbsel >= dcbTabsCount) ? tbs_Goto(dcbTabsCount - 1);
+);
+// The tab whose screen is scr (one of the tabs shown) ; -1 : none
+function tbs_Find(scr) local(i, t)
+(
+    t = -1; i = 0;
+    while ((t < 0) && (i < dcbTabsCount)) ((scr === uix_jG_menuscr[i]) ? t = i; i += 1;);
+    t;
+);
+// The tab t is empty (no module in its panes, no live display)
+function tbs_Empty(t) local(k, e, p)
+(
+    e = (serialBlock[Pr7_StudLive + t] == 0);
+    k = 0;
+    loop(dcbPannelsMax,
+        p = dcbBlocksAll + (t * dcbPannelsMax + k) * dcbWSize;
+        (p[0] != 0) ? e = 0;
+        k += 1;
+    );
+    e;
+);
+// the count of the empty tabs (among those shown)
+function tbs_EmptyN() local(i, n) ( n = i = 0; loop(dcbTabsCount, tbs_Empty(i) ? n += 1; i += 1;); n; );
+// The tabs a and b exchanged (their names, panes, widths, modules, live display)
+function tbs_Swap(a, b) local(k, pa, pb, v, s)
+(
+    ((a !== b) && (a >= 0) && (b >= 0) && (a < dcbTabsMax) && (b < dcbTabsMax)) ? (
+        k = 0;
+        loop(dcbPannelsMax,
+            pa = dcbBlocksAll + (a * dcbPannelsMax + k) * dcbWSize; pb = dcbBlocksAll + (b * dcbPannelsMax + k) * dcbWSize;
+            memcpy(scbTempCopy, pa, dcbWSize); memcpy(pa, pb, dcbWSize); memcpy(pb, scbTempCopy, dcbWSize);
+            v = serialBlock[Pr7_StudRat + 4 * a + k];
+            serialBlock[Pr7_StudRat + 4 * a + k] = serialBlock[Pr7_StudRat + 4 * b + k]; serialBlock[Pr7_StudRat + 4 * b + k] = v;
+            k += 1;
+        );
+        v = serialBlock[Pr7_StudConf + a]; serialBlock[Pr7_StudConf + a] = serialBlock[Pr7_StudConf + b]; serialBlock[Pr7_StudConf + b] = v;
+        v = serialBlock[Pr7_StudLive + a]; serialBlock[Pr7_StudLive + a] = serialBlock[Pr7_StudLive + b]; serialBlock[Pr7_StudLive + b] = v;
+        s = altTabsNames[a]; altTabsNames[a] = altTabsNames[b]; altTabsNames[b] = s;
+        ui_GFXdoNow |= 1;
+    );
+);
+// The tab t made empty : one pane, the standard widths, no live display, no name
+function tbs_Clear(t) local(k)
+(
+    memset(dcbBlocksAll + t * dcbPannelsMax * dcbWSize, 0, dcbPannelsMax * dcbWSize);
+    serialBlock[Pr7_StudConf + t] = 1; serialBlock[Pr7_StudLive + t] = 0;
+    k = 0; loop(4, serialBlock[Pr7_StudRat + 4 * t + k] = 600; k += 1;);
+    (altTabsNames[t] != 0) ? strcpy(altTabsNames[t], "");
+);
+// The tab t removed : the following ones take its place, the last one shown made empty (dcbTabsCount : unchanged)
+function tbs_Remove(t) local(i)
+(
+    i = t; while (i < dcbTabsCount - 1) (tbs_Swap(i, i + 1); i += 1;);
+    tbs_Clear(dcbTabsCount - 1);
+);
+// n tabs possible : more, or less if as many empty tabs exist
+function tbs_CanCount(n)
+(
+    n = floor(n + 0.5);
+    (n >= 1) && (n <= dcbTabsMax) && ((n >= dcbTabsCount) || (tbs_EmptyN() >= dcbTabsCount - n));
+);
+// n tabs (returns 1 ; 0 : refused, not enough empty tabs, nothing changed) ; the tab shown stays shown (or its neighbour)
+function tbs_SetCount(n) local(i, k, cur)
+(
+    n = floor(n + 0.5);
+    tbs_CanCount(n) ? (
+        cur = uix_jmbsel;
+        (n > dcbTabsCount) ? (
+            i = dcbTabsCount; loop(n - dcbTabsCount, tbs_Clear(i); i += 1;);
+        ) : (
+            k = dcbTabsCount - n; i = dcbTabsCount - 1;
+            while ((k > 0) && (i >= 0)) (
+                tbs_Empty(i) ? (
+                    tbs_Remove(i); dcbTabsCount -= 1; k -= 1;
+                    (i < cur) ? cur -= 1;
+                );
+                i -= 1;
+            );
+        );
+        tbs_Bar(n);
+        tbs_Goto(min(cur, n - 1));
+        sprintf(#tbs_m, "Tabs : %d", n); mSL_log(SysLogBox, #tbs_m);
+        1;
+    ) : (
+        sprintf(#tbs_m, "Tabs : %d refused (%d tabs, %d of them empty : only the empty tabs are removed)", n, dcbTabsCount, tbs_EmptyN());
+        mSL_log(SysLogBox, #tbs_m);
+        0;
+    );
+);
+
+// The Studio menu (inside Tabs Management) : the sub-menus "Number of tabs" (1 ... dcbTabsMax) and "Exchange with tab" (the
+// tabs shown), declared into the names of the items (blockDispNames) from itdsp + 1 ; returns the last item used
+function tbs_MenuDecl(names, itdsp) local(i, s)
+(
+    names[(itdsp += 1)] = ">Number of tabs";
+    tbs_mCnt = itdsp + 1;
+    i = 0; loop(dcbTabsMax, s = mSL_Str_Perm(); sprintf(s, (i === dcbTabsMax - 1) ? "&/<%d" : "&/%d", i + 1); names[(itdsp += 1)] = s; i += 1;);
+    names[(itdsp += 1)] = ">Exchange with tab";
+    tbs_mXch = itdsp + 1;
+    i = 0; loop(dcbTabsMax, s = mSL_Str_Perm(); sprintf(s, (i === dcbTabsMax - 1) ? "&/<Tab %d" : "&/Tab %d", i + 1); names[(itdsp += 1)] = s; i += 1;);
+    itdsp;
+);
+// Before the menu is shown (p : its items, menu + ui_jmenu_items ; cur : the current tab) : the count ticked, those that are
+// not possible greyed ; the tabs to exchange with : those shown, by number and name (the current one greyed), the others hidden
+function tbs_MenuRefresh(p, cur) local(i, s, a)
+(
+    (tbs_mCnt > 0) ? (
+        i = 0;
+        loop(dcbTabsMax,
+            s = p[tbs_mCnt + i];
+            str_setchar(s, 1, (i + 1 === dcbTabsCount) ? '!' : ui_jmenu_chSP);
+            str_setchar(s, 3, tbs_CanCount(i + 1) ? ui_jmenu_chSP : '#');
+            s = p[tbs_mXch + i];
+            (i < dcbTabsCount) ? (
+                str_setchar(s, 0, '*'); str_setchar(s, 2, ui_jmenu_noSel);
+                str_setchar(s, 3, (i === cur) ? '#' : ui_jmenu_chSP);
+                str_setchar(s, 5, (i === dcbTabsCount - 1) ? '<' : ui_jmenu_chSP);
+                strncpy(#tbs_t, s, ui_jmenu_prefx);
+                a = altTabsNames[i];
+                ((a != 0) && (strlen(a) > 0)) ? sprintf(#tbs_u, "%d  %s", i + 1, a) : sprintf(#tbs_u, "%d  %s", i + 1, tbs_Ids[i]);
+                strcat(#tbs_t, #tbs_u); strcpy(s, #tbs_t);
+            ) : (
+                // (hidden : neither shown nor counted by the result of the menu)
+                str_setchar(s, 0, ui_jmenu_chSP); str_setchar(s, 2, ui_jmenu_noDisp); str_setchar(s, 5, ui_jmenu_chSP);
+            );
+            i += 1;
+        );
+    );
+);
+// The item kit of the Studio menu chosen (cur : the current tab) : 1 if it is one of these sub-menus
+function tbs_MenuClick(kit, cur) local(t)
+(
+    ((tbs_mCnt > 0) && (kit >= tbs_mCnt) && (kit < tbs_mCnt + dcbTabsMax)) ? (
+        tbs_SetCount(kit - tbs_mCnt + 1);
+        1;
+    ) :
+    ((tbs_mXch > 0) && (kit >= tbs_mXch) && (kit < tbs_mXch + dcbTabsMax)) ? (
+        t = kit - tbs_mXch;
+        ((t < dcbTabsCount) && (t !== cur)) ? (
+            tbs_Swap(cur, t); tbs_Goto(t);
+            sprintf(#tbs_m, "Tabs : %d and %d exchanged", cur + 1, t + 1); mSL_log(SysLogBox, #tbs_m);
+        );
+        1;
+    ) : 0;
+);

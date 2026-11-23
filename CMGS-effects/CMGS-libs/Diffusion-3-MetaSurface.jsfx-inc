@@ -1,0 +1,2437 @@
+/*
+    Diffusion-3-MetaSurface.jsfx-inc  (2026-11-23)
+
+    ====================================== The MetaSurfaces ======================================
+
+    The design : CMGS-Internals, chapter "La MetaSurface de Diffusion-3 (projet)" (its source :
+    CMGS-aux/tools/md2odt/D3-MetaSurface-conception.md). A MetaSurface : a rectangle where configurations of the library
+    (2 ... MS_MAXC) are placed, each one at a point with a weight ; a brush over it mixes the matrices of the neighbouring
+    configurations (an interpolation at constant power, as the Hyper Slider : configurations on a line give exactly its
+    effect) into the target matrix of a projector.
+
+    Step 1 (this file, 2026-11-23) : the library MS1 ... MS32 and the views "MetaSurface A" ... "D" in the mode Edit : the
+    surface, its band, the configurations placed on it, their zones of influence (a weighted Voronoi diagram : the
+    distance to a configuration divided by its weight) ; no sound yet (the mode Play only stops the editing).
+
+    Step 2 (2026-11-23) : the brush, in the mode Play (no sound yet) : a yellow halo (its contour, the contour where its
+    energy is half, its centre, the place of the mouse ; held : dashed), its settings on the second line of the pad (Spread,
+    Power, Shape, Stretch, Offset, Rotation, Angle ; the brush on the mouse or held), the shares of the configurations under
+    it (written next to them) and its coverage of the surface. The shares (ms_Shares) : the brush sampled (8 rings x 24
+    rays, weighted by its energy) ; each sample inside the surface : its coordinates among the configurations (ms_Coords :
+    barycentric in the Delaunay triangulation of the configurations, ms_Triangulate ; outside their hull, on its nearest
+    edge ; configurations on a line : between the two neighbours), each one b -> sin^2(pi b / 2), times the weight of its
+    configuration, normalized : on a line, exactly the Hyper Slider. The mouse : the brush follows it inside the surface
+    and its band, stays where it is when the mouse goes elsewhere ; Alt + clic (or the cell Brush) : held / attached again ;
+    the wheel : Spread (Shift : Power).
+
+    Step 3 (2026-11-23) : the sound (see "The sound" below) : a view in Play drives the projector of its MetaSurface from
+    its first start ; a clic on the surface (or the cell of the state) : left, start with a fade-in (Attack : the spread and
+    the volume from 0) / stop with a fade-out (Release) ; right, at once ; the halo green while it sounds ; the third line
+    of the pad : Volume, Latency (fixed, or for each tenth of the diagonal moved), Attack, Release, the state.
+
+    Step 5 (2026-11-23) : the surface (the cell Aspect : 9 aspects, portraits too ; a quarter turn either way, flipped up -
+    down or left - right : its configurations, the brush, its angle with it ; a rectangle or a disk, an ellipse when it is
+    not square) ; the trajectories (the fourth line of the pad : the brush on the mouse or on a path ; the path : none, the
+    editor Edit A ... D (live : in its view from the top, the zones of the MetaSurface under its points, ed_MsBack) or a
+    trajectory T1 ... T128 of the library ; its duration ; Once, Loop, Back and forth ; the speed constant along it or the
+    same time between its points ; Simulate : the brush on the path without sound ; Record : the brush on the mouse
+    recorded every 50 ms into a trajectory of the library, which becomes the path).
+
+    Then (2026-11-23, the user) : Play / Edit as a bypass (ms_Bypass : back in Play, the sound and the motion go on from
+    where they were) ; Pause (cell 22 : the motion and the rotation stopped, the sound going on) ; the cell 18 "Rule" ;
+    Loop reverse ; the path placed on the surface (line 5 of the pad : x, y, turn, scale around its centre, ms_TfGet,
+    ms_TfFwd, ms_TfInv ; Placement : reset, centre, fit ; the editors show the surface placed under their path, ms_ZonesEd)
+    ; the path drawn well visible on all the themes, in Edit too (ms_PathDraw).
+
+    The library (ms_lib + e * MS_ES, e = 0 ... MS_NLIB - 1, "MS1" ... "MS32") : [ms_eUsed] 1 when it has been used
+    (a configuration, a name), [ms_eN] the count of its configurations, [ms_eSet + k] its settings (ms_s... ; those of
+    the next steps already there, with their defaults : the format saved stays the same), [ms_eName + k] its name (the
+    codes of its characters, 0 at the end), [ms_eCf + 4 i] the configuration i : its number (conflist), its place x, y
+    (0 ... 1 : the surface, x to the right, y down), its weight (0.1 ... 10 ; 1 : its zone as the others). ms_seq[e]
+    counts its changes (the views draw it again).
+    The views (ms_vw + v * MS_VS, v = 0 ... MS_NV - 1) : the entry shown, the mode (0 Edit, 1 Play), the configuration
+    selected (-1 : none). The drawing of a view : its background, the band, the zones, the frame of the surface in an
+    offscreen image (MS_IMG + v ; the zones : MS_IMGZ + v, one pixel per node of their grid, enlarged with the filtering
+    of gfx_blit), drawn again only when the entry, its configurations, the size or the theme change ;
+    the configurations (marks, numbers, names, weights) over it at each frame.
+    The background : that of the theme (uix_jbg_color, ui-lib-JJ-GUI ; with its shade). The zones : each configuration has its color, a light pastel (its hue from its number : the same configuration has the
+    same color everywhere), going to white (light themes) or to black (dark themes) near the frontiers (the relative gap
+    between the two nearest distances, over 3 cells at least) ; computed at the nodes of a grid (coarser while a
+    configuration is dragged).
+    The mouse, mode Edit : right clic on the surface, add a configuration there (the menu of the library of the
+    configurations) ; on a configuration, its menu (another configuration, its weight, remove it) ; left drag of a
+    configuration : moved ; Alt + vertical drag : its weight ; a clic : selected. The mode Play never moves them.
+    The pad : the MetaSurface shown (left : the next one, Shift : the previous one ; right : the menu of the library),
+    the mode, the count of configurations, the aspect of the surface, the band, the projector (used from step 3), the
+    weight of the configuration selected (a drag), Actions (rename, duplicate, remove).
+    Saved with the project : ms_Serialize, record 'msf1' (the last record of @serialize).
+    Included in @init after Diffusion-3-ConfEditor (ce_NmCmp, ce_srt), Diffusion-3-Projectors (prv_MenuEnd), mSL_Panes
+    part 1 (keepBlockInfos) ; functions only, except the data below.
+*/
+
+MS_NLIB = 32;               // the library : MS1 ... MS32
+MS_MAXC = 32;               // the configurations of a MetaSurface
+MS_NV = 4;                  // the views "MetaSurface A" ... "D"
+MS_NS = 32;                 // the settings of a MetaSurface
+MS_NMLEN = 32;              // the characters of a name
+MS_ES = 200;                // an entry of the library
+ms_eUsed = 0; ms_eN = 1; ms_eSet = 2; ms_eName = ms_eSet + MS_NS; ms_eCf = ms_eName + MS_NMLEN; // (ms_eCf + 4 * MS_MAXC <= MS_ES)
+// the settings (ms_eSet + k) : the surface (aspect : its width / its height ; band : the width of the band around it, in
+// heights of the surface ; the projector it drives, 1 ...) ; the brush, the times (steps 2 and 3, see the design)
+ms_sAspect = 0; ms_sBand = 1; ms_sProj = 2; ms_sSpread = 3; ms_sPower = 4; ms_sShape = 5; ms_sStretch = 6;
+ms_sOffset = 7; ms_sRot = 8; ms_sAngle = 9; ms_sVol = 10; ms_sLat = 11; ms_sLatMode = 12; ms_sAtt = 13; ms_sRel = 14;
+ms_sRotMem = 15; // (the rotation before Shift + clic on the cell Rotation set it Off : restored by the next one)
+// (step 5, 2026-11-23) the shape of the surface (0 a rectangle, 1 a disk : an ellipse when it is not square) ; the trajectory
+// (its source : 0 none, 1 ... 128 the trajectory T1 ... T128 of the library, 129 ... 132 the path of the editor Edit A ... D ;
+// its duration, s ; its mode : 0 Once, 1 Loop, 2 Back and forth ; its speed : 0 constant along the path, 1 the same time
+// between its points ; the brush : 0 on the mouse, 1 on the path)
+ms_sSurf = 16; ms_sTraj = 17; ms_sDur = 18; ms_sLoop = 19; ms_sSpeedM = 20; ms_sPath = 21;
+// (2026-11-23, the user) the motion : 3 Loop reverse too ; the path placed on the surface, around its centre : moved
+// (ms_sTx : a part of its width, to the right ; ms_sTy : of its height, up), turned (ms_sTa : degrees, clockwise), scaled
+// (ms_sTk : 0.1 ... 10 ; 0, in the entries saved before : 1)
+ms_sTx = 22; ms_sTy = 23; ms_sTa = 24; ms_sTk = 25;
+ms_lib = make_array(MS_NLIB * MS_ES);
+ms_seq = make_array(MS_NLIB);
+// the views
+MS_VS = 16; ms_vE = 0; ms_vMode = 1; ms_vSel = 2;
+// (step 2) Edit : the brush shown (held, moved by its cross and its shape) ; the brush saved (ms_bx, ms_by, ms_att ; ms_vInit 1)
+ms_vBrush = 3; ms_vBx = 4; ms_vBy = 5; ms_vAtt = 6; ms_vInit = 7;
+ms_vw = make_array(MS_NV * MS_VS);
+// (not saved) the offscreen images and the keys of their drawings (entry, seq, w, h, background, cell size, aspect, band)
+MS_IMG = 80;                // MS_IMG ... MS_IMG + 3
+i__k = 0; loop(MS_NV, ui_reserve_image(MS_IMG + i__k); i__k += 1;);
+MS_IKS = 8;
+ms_ik = make_array(MS_NV * MS_IKS);
+// the surface in each view (screen pixels : its rectangle, the band around it) ; the mouse (the drag, its view seen)
+ms_gx = make_array(MS_NV); ms_gy = make_array(MS_NV); ms_gw = make_array(MS_NV); ms_gh = make_array(MS_NV);
+ms_gb = make_array(MS_NV);
+ms_md = make_array(MS_NV); ms_seen = make_array(MS_NV); ms_hov = make_array(MS_NV);
+ms_dmv = ms_dc = ms_mx0 = ms_my0 = ms_dalt = ms_w0 = 0;
+ms_drag = 0;                // a configuration dragged (the zones drawn coarser)
+// the zones : a small image (one pixel per node of their grid, MS_ZMAX x MS_ZMAX at most), enlarged (see ms_Render)
+MS_IMGZ = 84;               // MS_IMGZ ... MS_IMGZ + 3
+i__k = 0; loop(MS_NV, ui_reserve_image(MS_IMGZ + i__k); i__k += 1;);
+MS_ZMAX = 1024;
+// the menus of the configurations : the number of each item
+ms_map = make_array(4200);
+ms_pend = 0;                // a rename asked (view + 1, see ms_Prompted)
+MS_ASP = "1:1|4:3|3:2|16:9|2:1|3:4|2:3|9:16|1:2"; // (2026-11-23 : the portraits too, see ms_Turn)
+MS_NASP = 9;
+
+// (Step 2, 2026-11-23) The brush of each view (not saved) : its point (ms_bx, ms_by : the place of the mouse, in the surface,
+// 0 ... 1 ; in the band : beyond), attached to the mouse or held (ms_att : 1 the brush follows the mouse inside the surface
+// and its band ; Alt + clic : held / attached again ; the mouse elsewhere : it stays), the phase of its rotation (ms_ph, in
+// turns ; ms_lt : the time of the last update), the shares of the configurations (ms_sh + v * MS_MAXC, sum 1), the
+// coverage (ms_cov : the part of its energy inside the surface)
+ms_bx = make_array(MS_NV); ms_by = make_array(MS_NV); ms_att = make_array(MS_NV);
+ms_ph = make_array(MS_NV); ms_lt = make_array(MS_NV); ms_cov = make_array(MS_NV);
+i__k = 0; loop(MS_NV, ms_bx[i__k] = ms_by[i__k] = 0.5; ms_att[i__k] = 1; i__k += 1;);
+// the drag of the brush (ms_bd : 1 its cross, 2 its shape ; ms_bmv : moved ; ms_gvx, ms_gvy : the centre from the mouse)
+ms_bd = make_array(MS_NV); ms_bmv = ms_gvx = ms_gvy = 0;
+ms_bq = make_array(2 * 49); // (the points of a contour of the brush, ms_DrawBrush)
+// (2026-11-23) the placement of the path dragged (ms_qk : 0 none, 1 moved, 2 scaled, 3 turned, 4 turned and scaled ; the
+// button, the press, the placement then ; its centre on the screen)
+ms_qk = make_array(MS_NV); ms_qb = ms_qx0 = ms_qy0 = ms_qtx = ms_qty = ms_qta = ms_qtk = ms_qcx = ms_qcy = 0;
+ms_hlt = 0;                 // (a light theme : the colors of the halo, ms_HaloSet)
+ms_sh = make_array(MS_NV * MS_MAXC);
+MS_RINGS = 8; MS_RAYS = 24;  // the samples of the brush : rings x rays
+// The interpolation (see ms_Coords) : the Delaunay triangulation of the configurations of the entry shown by each view (kept
+// until the entry or its configurations change : ms_tkE, ms_tkS), its triangles (ms_tri : 3 indices each, MS_TMAX at most),
+// the edges of its hull (ms_hul : 2 indices each) ; configurations on a line (ms_lin 1 ; or two only) : their order along it
+// (ms_ord, their abscissas ms_ta, from the configuration ms_l0 in the direction ms_ldx, ms_ldy)
+MS_TMAX = 2 * MS_MAXC;
+ms_tri = make_array(MS_NV * MS_TMAX * 3); ms_ntri = make_array(MS_NV);
+ms_hul = make_array(MS_NV * MS_MAXC * 2 * 2); ms_nhul = make_array(MS_NV);
+ms_ord = make_array(MS_NV * MS_MAXC); ms_ta = make_array(MS_NV * MS_MAXC);
+ms_lin = make_array(MS_NV); ms_l0 = make_array(MS_NV); ms_ldx = make_array(MS_NV); ms_ldy = make_array(MS_NV);
+ms_tkE = make_array(MS_NV); ms_tkS = make_array(MS_NV);
+i__k = 0; loop(MS_NV, ms_tkE[i__k] = -1; i__k += 1;);
+// the work of the triangulation (Bowyer-Watson) : the points (the configurations, then the 3 of the super triangle), the
+// triangles (a, b, c, the centre and the square of the radius of their circumcircle, alive), the edges of the cavity
+MS_WTN = 4 * MS_MAXC + 16;
+ms_X = make_array(MS_MAXC + 3); ms_Y = make_array(MS_MAXC + 3);
+ms_wt = make_array(MS_WTN * 7); ms_ed = make_array(MS_WTN * 3 * 2);
+
+// The entry e, the configuration i of the entry e
+function ms_E(e) ( ms_lib + max(0, min(MS_NLIB - 1, e|0)) * MS_ES; );
+function ms_C(e, i) ( ms_E(e) + ms_eCf + 4 * i; );
+// (the values through functions : EEL2 does not index the result of a function)
+function ms_N(e) local(b) ( b = ms_E(e); b[ms_eN]; );
+function ms_Cv(e, i, k) local(p) ( p = ms_C(e, i); p[k]; );
+function ms_CSet(e, i, k, x) local(p) ( p = ms_C(e, i); p[k] = x; ms_seq[e] += 1; );
+function ms_VGet(v, k) local(p) ( p = ms_vw + v * MS_VS; p[k]; );
+function ms_VSet(v, k, x) local(p) ( p = ms_vw + v * MS_VS; p[k] = x; );
+// An angle in degrees brought into [0, 360) (EEL2 : % works on integers, and not as needed on negative numbers)
+function ms_Wrap360(d) ( d - 360 * floor(d / 360); );
+// The settings of the entry e (the value k)
+function ms_S(e, k) local(b) ( b = ms_E(e); b[ms_eSet + k]; );
+function ms_SSet(e, k, x) local(b) ( b = ms_E(e); b[ms_eSet + k] = x; b[ms_eUsed] = 1; );
+// (step 5) The point u, v (0 ... 1 : the rectangle of the surface) inside the surface of the entry e enlarged by m (in
+// heights : 0 the surface, the band : surface and band) : a rectangle, or a disk (an ellipse : in u, v the circle of
+// radius 0.5 around 0.5, 0.5)
+function ms_InUV(e, u, v, m) local(a)
+(
+    a = max(0.5, min(4, ms_S(e, ms_sAspect)));
+    ms_S(e, ms_sSurf) ? (sqr((u - 0.5) * a / (a / 2 + m)) + sqr((v - 0.5) / (0.5 + m)) <= 1) :
+        ((u >= -m / a) && (u <= 1 + m / a) && (v >= -m) && (v <= 1 + m));
+);
+// the point u, v brought inside the surface enlarged by m : ms_cu, ms_cv
+function ms_Clamp(e, u, v, m) local(a, x, y, r)
+(
+    a = max(0.5, min(4, ms_S(e, ms_sAspect)));
+    ms_S(e, ms_sSurf) ? (
+        x = (u - 0.5) * a / (a / 2 + m); y = (v - 0.5) / (0.5 + m); r = sqrt(x * x + y * y);
+        (r > 1) ? (x /= r; y /= r;);
+        ms_cu = 0.5 + x * (a / 2 + m) / a; ms_cv = 0.5 + y * (0.5 + m);
+    ) : (
+        ms_cu = max(-m / a, min(1 + m / a, u)); ms_cv = max(-m, min(1 + m, v));
+    );
+);
+// A filled ellipse (screen pixels : its centre, its half axes), a line of pixels at a time ; its contour (n segments)
+// (the color : gfx_r, gfx_g, gfx_b ; the pixels of the edges partly covered : their alpha, 2026-11-23)
+function ms_FillEll(cx, cy, rx, ry) local(y, d, w, xl, xr, il, ir, r, g, b)
+(
+    r = gfx_r; g = gfx_g; b = gfx_b;
+    y = floor(cy - ry);
+    loop(ceil(2 * ry) + 2,
+        d = (y + 0.5 - cy) / max(1, ry);
+        (abs(d) < 1) ? (
+            w = rx * sqrt(1 - d * d); xl = cx - w; xr = cx + w; il = floor(xl); ir = floor(xr);
+            gfx_set(r, g, b, 1);
+            (ir > il + 1) ? gfx_rect(il + 1, y, ir - il - 1, 1);
+            gfx_set(r, g, b, 1 - (xl - il)); gfx_rect(il, y, 1, 1);
+            (ir > il) ? (gfx_set(r, g, b, xr - ir); gfx_rect(ir, y, 1, 1););
+        );
+        y += 1;
+    );
+    gfx_set(r, g, b, 1);
+);
+// The rectangle sx, sy, sw, sh painted outside the ellipse inscribed in it (r, g, b ; the pixels of the edge partly outside :
+// their alpha) : the zones of a disk cut exactly, not at the resolution of their grid (2026-11-23, the user : crenels)
+function ms_MaskEll(sx, sy, sw, sh, r, g, b) local(y, cx, cy, rx, ry, d, w, xl, xr, il, ir)
+(
+    cx = sx + sw / 2; cy = sy + sh / 2; rx = sw / 2; ry = sh / 2;
+    y = sy;
+    loop(sh,
+        d = (y + 0.5 - cy) / max(1, ry);
+        gfx_set(r, g, b, 1);
+        (abs(d) >= 1) ? gfx_rect(sx, y, sw, 1) : (
+            w = rx * sqrt(1 - d * d); xl = cx - w; xr = cx + w; il = floor(xl); ir = floor(xr);
+            (il > sx) ? gfx_rect(sx, y, il - sx, 1);
+            (ir + 1 < sx + sw) ? gfx_rect(ir + 1, y, sx + sw - ir - 1, 1);
+            gfx_set(r, g, b, xl - il); gfx_rect(il, y, 1, 1);
+            gfx_set(r, g, b, 1 - (xr - ir)); gfx_rect(ir, y, 1, 1);
+        );
+        y += 1;
+    );
+);
+function ms_LineEll(cx, cy, rx, ry) local(k, x0, y0, x1, y1)
+(
+    x0 = cx + rx; y0 = cy;
+    k = 1;
+    loop(96, x1 = cx + rx * cos(2 * $pi * k / 96); y1 = cy + ry * sin(2 * $pi * k / 96); gfx_line(x0, y0, x1, y1, 1); x0 = x1; y0 = y1; k += 1;);
+);
+// The surface of the entry e turned (step 5, 2026-11-23 ; kind : 1 a quarter turn clockwise, 2 counterclockwise, 3 flipped
+// up - down, 4 left - right) : its configurations, its aspect (a quarter turn : inverted), the brushes of the views that show
+// it, the angle of the brush (and the direction of its rotation when flipped)
+function ms_Turn(e, kind) local(i, p, u, v, b, vw)
+(
+    i = 0;
+    loop(ms_N(e),
+        p = ms_C(e, i); u = p[1]; v = p[2];
+        (kind === 1) ? (p[1] = 1 - v; p[2] = u;) : (kind === 2) ? (p[1] = v; p[2] = 1 - u;) :
+        (kind === 3) ? (p[2] = 1 - v) : (p[1] = 1 - u);
+        i += 1;
+    );
+    b = 0;
+    loop(MS_NV,
+        vw = ms_vw + b * MS_VS;
+        (vw[ms_vE] === e) ? (
+            u = ms_bx[b]; v = ms_by[b];
+            (kind === 1) ? (ms_bx[b] = 1 - v; ms_by[b] = u;) : (kind === 2) ? (ms_bx[b] = v; ms_by[b] = 1 - u;) :
+            (kind === 3) ? (ms_by[b] = 1 - v) : (ms_bx[b] = 1 - u);
+        );
+        b += 1;
+    );
+    ((kind === 1) || (kind === 2)) ? ms_SSet(e, ms_sAspect, 1 / max(0.5, min(4, ms_S(e, ms_sAspect))));
+    ms_SSet(e, ms_sAngle, ms_Wrap360((kind === 1) ? ms_S(e, ms_sAngle) + 90 : (kind === 2) ? ms_S(e, ms_sAngle) - 90 :
+        (kind === 3) ? 180 - ms_S(e, ms_sAngle) : -ms_S(e, ms_sAngle)));
+    (kind >= 3) ? (ms_SSet(e, ms_sRot, -ms_S(e, ms_sRot)); ms_SSet(e, ms_sRotMem, -ms_S(e, ms_sRotMem)););
+    ms_seq[e] += 1;
+);
+
+function ms_Aspect(k) ( (k === 0) ? 1 : (k === 1) ? 4 / 3 : (k === 2) ? 1.5 : (k === 3) ? 16 / 9 : (k === 4) ? 2 :
+    (k === 5) ? 3 / 4 : (k === 6) ? 2 / 3 : (k === 7) ? 9 / 16 : 0.5; );
+// the nearest of the aspects of the list
+function ms_AspK(a) local(k, m, d, r) ( r = 0; m = 10^9; k = 0; loop(MS_NASP, d = abs(log(max(0.01, a) / ms_Aspect(k))); (d < m) ? (m = d; r = k;); k += 1;); r; );
+
+// The settings of the entry e at their defaults
+function ms_SetDefaults(e) local(b, s)
+(
+    b = ms_E(e); s = b + ms_eSet;
+    memset(s, 0, MS_NS);
+    s[ms_sAspect] = 1.5; s[ms_sBand] = 0.08; s[ms_sProj] = 1;
+    s[ms_sSpread] = 0.15; s[ms_sPower] = 0; s[ms_sShape] = 0; s[ms_sStretch] = 1; s[ms_sOffset] = 0;
+    s[ms_sRot] = 0; s[ms_sAngle] = 0; s[ms_sVol] = 0; s[ms_sLat] = 80; s[ms_sLatMode] = 0; s[ms_sAtt] = 2; s[ms_sRel] = 4;
+    s[ms_sSurf] = 0; s[ms_sTraj] = 0; s[ms_sDur] = 20; s[ms_sLoop] = 1; s[ms_sSpeedM] = 0; s[ms_sPath] = 0;
+    s[ms_sTx] = s[ms_sTy] = s[ms_sTa] = 0; s[ms_sTk] = 1;
+);
+// The entry e emptied (no configuration, no name, the defaults)
+function ms_Clear(e) local(b)
+(
+    b = ms_E(e);
+    memset(b, 0, MS_ES);
+    ms_SetDefaults(e);
+    ms_seq[e] += 1;
+);
+function ms_Init() local(e, v, vw)
+(
+    e = 0; loop(MS_NLIB, ms_Clear(e); e += 1;);
+    v = 0; loop(MS_NV, vw = ms_vw + v * MS_VS; memset(vw, 0, MS_VS); vw[ms_vE] = v; vw[ms_vSel] = -1; v += 1;);
+);
+ms_Init();
+
+// The name of the entry e into s (empty : none) ; returns s
+function ms_Name(e, s) local(b, k, c)
+(
+    strcpy(s, "");
+    b = ms_E(e) + ms_eName; k = 0;
+    while ((k < MS_NMLEN) && ((c = b[k]) > 0)) (sprintf(#ms_ch, "%c", c); strcat(s, #ms_ch); k += 1;);
+    s;
+);
+// its new name (the quotes become ', | becomes / : as cf_NewW)
+function ms_SetName(e, s) local(b, k, l, c)
+(
+    b = ms_E(e) + ms_eName; memset(b, 0, MS_NMLEN);
+    l = min(MS_NMLEN - 1, strlen(s)); k = 0;
+    loop(l, c = str_getchar(s, k, 'cu'); b[k] = (c === '"') ? 39 : (c === '|') ? '/' : (c < 32) ? 32 : c; k += 1;);
+    b = ms_E(e); (l > 0) ? b[ms_eUsed] = 1;
+    ms_seq[e] += 1;
+);
+// "MS3", "MS3 : name" into s ; returns s
+function ms_Label(e, s)
+(
+    sprintf(s, "MS%d", e + 1);
+    (strlen(ms_Name(e, #ms_nm)) > 0) ? (strcat(s, " : "); strcat(s, #ms_nm););
+    s;
+);
+
+// A configuration c placed at u, v (0 ... 1) on the entry e, weight 1 : its index (-1 : full)
+function ms_Add(e, c, u, v) local(b, p, i)
+(
+    b = ms_E(e); i = -1;
+    (b[ms_eN] < MS_MAXC) ? (
+        i = b[ms_eN]; p = ms_C(e, i);
+        p[0] = c; p[1] = max(0, min(1, u)); p[2] = max(0, min(1, v)); p[3] = 1;
+        b[ms_eN] += 1; b[ms_eUsed] = 1;
+        ms_seq[e] += 1;
+    );
+    i;
+);
+// The configuration i of the entry e removed (the following ones take its place)
+function ms_Del(e, i) local(b, n)
+(
+    b = ms_E(e); n = b[ms_eN];
+    ((i >= 0) && (i < n)) ? (
+        (i < n - 1) ? memcpy(ms_C(e, i), ms_C(e, i + 1), 4 * (n - 1 - i));
+        memset(ms_C(e, n - 1), 0, 4);
+        b[ms_eN] = n - 1;
+        ms_seq[e] += 1;
+    );
+);
+
+// The colors of the configuration c (ms_pr, ms_pg, ms_pb : its pastel ; ms_kr, ms_kg, ms_kb : its mark), on a light
+// background (lt 1) or a dark one
+function ms_Colors(c, lt) local(h, q)
+(
+    h = (c * 137.508) % 360;
+    q = hsv_to_prgb(h, lt ? 0.30 : 0.42, lt ? 0.98 : 0.74);
+    ms_pr = ((q >> 16) & 255) / 255; ms_pg = ((q >> 8) & 255) / 255; ms_pb = (q & 255) / 255;
+    q = hsv_to_prgb(h, lt ? 0.78 : 0.62, lt ? 0.78 : 0.98);
+    ms_kr = ((q >> 16) & 255) / 255; ms_kg = ((q >> 8) & 255) / 255; ms_kb = (q & 255) / 255;
+);
+
+// The surface of the view v in the rectangle x, y, w, h (screen pixels) : ms_gx[v] ... (its rectangle), ms_gb[v] (the band)
+function ms_Geo(v, e, x, y, w, h) local(s, a, bd, hs)
+(
+    s = ms_E(e) + ms_eSet;
+    a = max(0.5, min(4, s[ms_sAspect])); bd = max(0, min(0.5, s[ms_sBand]));
+    hs = max(8, min(h / (1 + 2 * bd), w / (a + 2 * bd)));
+    ms_gw[v] = floor(a * hs); ms_gh[v] = floor(hs); ms_gb[v] = floor(bd * hs);
+    ms_gx[v] = floor(x + (w - ms_gw[v]) / 2); ms_gy[v] = floor(y + (h - ms_gh[v]) / 2);
+);
+
+// The configurations of the entry e brought inside its surface (a disk : those outside, onto its edge)
+function ms_ClampAll(e) local(i, p)
+(
+    i = 0; loop(ms_N(e), p = ms_C(e, i); ms_Clamp(e, p[1], p[2], 0); p[1] = ms_cu; p[2] = ms_cv; i += 1;);
+);
+
+// The color of the point u, v (0 ... 1) of the surface of the entry e (aspect a ; n configurations ; edge : the color of
+// the frontiers) : ms_r, ms_g, ms_b
+function ms_NodeColor(e, n, a, u, v, lt, er, eg, eb) local(i, p, d, d1, d2, i1, c1, t, f)
+(
+    // the nearest configuration (d1), then the nearest one of another number (d2 : the same configuration placed twice,
+    // near each other, makes one zone, no frontier between them ; 2026-11-23, the user)
+    d1 = d2 = 10^9; i1 = -1;
+    i = 0;
+    loop(n,
+        p = ms_C(e, i);
+        d = sqrt(sqr((u - p[1]) * a) + sqr(v - p[2])) / max(0.1, p[3]);
+        (d < d1) ? (d1 = d; i1 = i;);
+        i += 1;
+    );
+    (i1 >= 0) ? (
+        c1 = ms_Cv(e, i1, 0);
+        i = 0;
+        loop(n,
+            p = ms_C(e, i);
+            (p[0] !== c1) ? (d = sqrt(sqr((u - p[1]) * a) + sqr(v - p[2])) / max(0.1, p[3]); (d < d2) ? d2 = d;);
+            i += 1;
+        );
+    );
+    (i1 < 0) ? (
+        ms_r = er; ms_g = eg; ms_b = eb;
+    ) : (
+        ms_Colors(ms_Cv(e, i1, 0), lt);
+        // the gap between the two nearest distances : 0 on a frontier ; the gradient over 22 % of their sum, but at least
+        // ms_gmin (about 3 cells of the grid : two configurations close to each other, their frontier stays smooth, not
+        // in steps ; 2026-11-23, the user) ; one configuration : no frontier
+        t = (d2 < 10^8) ? (d2 - d1) / max(ms_gmin, 0.22 * (d2 + d1)) : 1; // (no other configuration : no frontier)
+        f = max(0, min(1, t)); f = f * f * (3 - 2 * f);
+        ms_r = er + (ms_pr - er) * f; ms_g = eg + (ms_pg - eg) * f; ms_b = eb + (ms_pb - eb) * f;
+    );
+);
+
+// The zones of the entry e into the image img, one pixel per node of a grid nx x ny (enlarged by gfx_blit) ; lt : a light
+// background ; er, eg, eb : the color of the frontiers ; orr, og, ob : that of the points outside a disk (step 5)
+// (the same, flipped : fl 1 left - right, 2 up - down : the backdrop of an editor, see ms_EdBack ; fl 4 : a disk not masked,
+// the zones computed on the whole rectangle : the view cuts them exactly, ms_MaskEll)
+function ms_ZonesF(e, img, nx, ny, lt, er, eg, eb, orr, og, ob, fl) local(n, a, i, j, u, v, dk)
+(
+    n = ms_N(e); a = max(0.5, min(4, ms_S(e, ms_sAspect))); dk = ms_S(e, ms_sSurf);
+    gfx_setimgdim(img, nx + 1, ny + 1);
+    gfx_dest = img;
+    j = 0;
+    loop(ny + 1,
+        i = 0;
+        loop(nx + 1,
+            u = (fl & 1) ? 1 - i / nx : i / nx; v = (fl & 2) ? 1 - j / ny : j / ny;
+            (dk && !(fl & 4) && !ms_InUV(e, u, v, 0)) ? (ms_r = orr; ms_g = og; ms_b = ob;) : ms_NodeColor(e, n, a, u, v, lt, er, eg, eb);
+            gfx_x = i; gfx_y = j; gfx_setpixel(ms_r, ms_g, ms_b);
+            i += 1;
+        );
+        j += 1;
+    );
+);
+function ms_Zones(e, img, nx, ny, lt, er, eg, eb, orr, og, ob) local(n, a, i, j, u, v, dk)
+(
+    ms_ZonesF(e, img, nx, ny, lt, er, eg, eb, orr, og, ob, 0);
+);
+// The drawing of the view v (background, band, zones, frame) into its image, w x h pixels ; cs : the size of the cells
+function ms_Render(v, e, w, h, cs) local(od, b, n, a, lt, er, eg, eb, sx, sy, sw, sh, bd, nx, ny, i, j, t, dk, br, bgc, bb)
+(
+    od = gfx_dest;
+    gfx_setimgdim(MS_IMG + v, w, h);
+    gfx_dest = MS_IMG + v;
+    gfx_mode = 0;
+    b = ms_E(e); n = b[ms_eN]; a = max(0.5, min(4, b[ms_eSet + ms_sAspect]));
+    lt = (0.299 * ms_bgr + 0.587 * ms_bgg + 0.114 * ms_bgb) > 0.5;
+    er = eg = eb = lt ? 1 : 0;
+    gfx_set(ms_bgr, ms_bgg, ms_bgb, 1);
+    gfx_rect(0, 0, w, h);
+    // (the surface, in the image)
+    sx = ms_gx[v] - ms_vx; sy = ms_gy[v] - ms_vy; sw = ms_gw[v]; sh = ms_gh[v]; bd = ms_gb[v];
+    // the band : a little darker (light themes) or lighter ; around a disk, a ring (step 5)
+    dk = ms_S(e, ms_sSurf);
+    t = (bd > 0) ? (lt ? -0.06 : 0.06) : 0;
+    br = ms_bgr + t; bgc = ms_bgg + t; bb = ms_bgb + t;
+    (bd > 0) ? (
+        gfx_set(br, bgc, bb, 1);
+        dk ? ms_FillEll(sx + sw / 2, sy + sh / 2, sw / 2 + bd, sh / 2 + bd) : gfx_rect(sx - bd, sy - bd, sw + 2 * bd, sh + 2 * bd);
+    );
+    // the zones : one pixel per node of a grid (every cs pixels) in a small image (MS_IMGZ + v), enlarged onto the surface
+    // by gfx_blit, whose filtering (bilinear) gives continuous gradients (2026-11-23 : the cells drawn by gfx_gradrect from
+    // three of their corners made steps along the oblique frontiers)
+    nx = min(MS_ZMAX, max(1, ceil(sw / cs))); ny = min(MS_ZMAX, max(1, ceil(sh / cs)));
+    ms_gmin = 3 * max(ms_csf, sw / MS_ZMAX) / max(1, sh); // (the narrowest gradient of a frontier : 3 fine cells, in
+                                                          // heights of the surface ; the same during a drag)
+    ms_ZonesF(e, MS_IMGZ + v, nx, ny, lt, er, eg, eb, br, bgc, bb, 4);
+    gfx_dest = MS_IMG + v;
+    gfx_a = 1; gfx_mode = 2; // (the alpha of the small image ignored ; its filtering kept)
+    gfx_blit(MS_IMGZ + v, 1, 0, 0.5, 0.5, nx, ny, sx, sy, sw, sh);
+    gfx_mode = 0;
+    dk ? ms_MaskEll(sx, sy, sw, sh, br, bgc, bb); // (a disk : cut exactly)
+    // the frame of the surface
+    t = lt ? 0.35 : 0.7;
+    gfx_set(t, t, t, 0.8);
+    dk ? ms_LineEll(sx + sw / 2 - 0.5, sy + sh / 2 - 0.5, sw / 2, sh / 2) : (
+        gfx_line(sx, sy, sx + sw - 1, sy); gfx_line(sx + sw - 1, sy, sx + sw - 1, sy + sh - 1);
+        gfx_line(sx + sw - 1, sy + sh - 1, sx, sy + sh - 1); gfx_line(sx, sy + sh - 1, sx, sy);
+    );
+    gfx_dest = od;
+);
+
+// ====== Step 2 : the brush, the shares
+
+// The brush of the view v is shown (Play ; Edit : the cell Brush) ; held (shown, not following the mouse : Edit always)
+function ms_Shown(v) local(vw) ( vw = ms_vw + v * MS_VS; vw[ms_vMode] || vw[ms_vBrush]; );
+function ms_Held(v) local(vw, b) ( vw = ms_vw + v * MS_VS; b = ms_lib + vw[ms_vE] * MS_ES; ms_Shown(v) && (!vw[ms_vMode] || !ms_att[v] || b[ms_eSet + ms_sPath]); );
+
+// The contour of the brush in the direction phi (radians), for its shape S (0 circle, 1 square, 2 cross ; between them, the
+// mixture) : its distance from the centre (the circle : 1 ; the square : its corners at sqrt(2))
+function ms_Rho(phi, S) local(c, sa, q, x, t1, t2, w)
+(
+    c = abs(cos(phi)); sa = abs(sin(phi));
+    q = 1 / max(c, sa); // (the square)
+    (S <= 1) ? (
+        1 + (q - 1) * max(0, S);
+    ) : (
+        // the cross : two arms of half width w ; the ray leaves the arm along x at t1, the arm along y at t2
+        w = 0.35;
+        t1 = min((c > 0.000001) ? 1 / c : 10^6, (sa > 0.000001) ? w / sa : 10^6);
+        t2 = min((c > 0.000001) ? w / c : 10^6, (sa > 0.000001) ? 1 / sa : 10^6);
+        x = max(t1, t2);
+        q + (x - q) * min(1, S - 1);
+    );
+);
+// The energy of the brush at the radius r (0 its centre ... 1 its edge) for the power P (-1 ... 1) : (1 - r)^(8^P) ; 0 : a
+// cone, -1 : nearly the same everywhere, 1 : near the centre
+function ms_Prof(r, P) ( (r >= 1) ? 0 : (1 - r) ^ (8 ^ max(-1, min(1, P))); );
+
+// The circumcircle of the work triangle k (its points a, b, c) : the centre, the square of the radius ; aligned points : a
+// circle that contains everything (the triangle goes at the next point)
+function ms_Circ(k) local(t, a, b, c, ax, ay, bx, by, cx, cy, d, a2, b2, c2)
+(
+    t = ms_wt + 7 * k; a = t[0]; b = t[1]; c = t[2];
+    ax = ms_X[a]; ay = ms_Y[a]; bx = ms_X[b]; by = ms_Y[b]; cx = ms_X[c]; cy = ms_Y[c];
+    d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+    (abs(d) < 0.000000000001) ? (
+        t[3] = t[4] = 0; t[5] = 10^30;
+    ) : (
+        a2 = ax * ax + ay * ay; b2 = bx * bx + by * by; c2 = cx * cx + cy * cy;
+        t[3] = (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d;
+        t[4] = (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d;
+        t[5] = sqr(ax - t[3]) + sqr(ay - t[4]);
+    );
+    t[6] = 1;
+);
+// The triangulation of the configurations of the entry e for the view v (Bowyer-Watson ; the points in the metric of the
+// surface : x times its aspect) ; aligned configurations, or two only : their order along their line
+function ms_Triangulate(v, e) local(n, a, i, j, k, nt, ne, t, p, q, dup, ok, u, w, x, y, cx, cy, tri, hul, nh, d, dm, i0, i1)
+(
+    n = ms_N(e); a = max(0.5, min(4, ms_S(e, ms_sAspect)));
+    tri = ms_tri + v * MS_TMAX * 3; hul = ms_hul + v * MS_MAXC * 4;
+    ms_ntri[v] = 0; ms_nhul[v] = 0; ms_lin[v] = 0;
+    i = 0; loop(n, ms_X[i] = ms_Cv(e, i, 1) * a; ms_Y[i] = ms_Cv(e, i, 2); i += 1;);
+    (n >= 3) ? (
+        // the super triangle, around the surface
+        cx = a / 2; cy = 0.5;
+        ms_X[n] = cx - 100; ms_Y[n] = cy - 100; ms_X[n + 1] = cx + 100; ms_Y[n + 1] = cy - 100;
+        ms_X[n + 2] = cx; ms_Y[n + 2] = cy + 100;
+        t = ms_wt; t[0] = n; t[1] = n + 1; t[2] = n + 2; ms_Circ(0); nt = 1;
+        p = 0;
+        loop(n,
+            // (a configuration at the place of a previous one : left out, its share stays 0)
+            dup = 0; i = 0; loop(p, ((abs(ms_X[i] - ms_X[p]) < 0.000001) && (abs(ms_Y[i] - ms_Y[p]) < 0.000001)) ? dup = 1; i += 1;);
+            !dup ? (
+                // the triangles whose circumcircle contains the point : removed, their edges kept
+                ne = 0; k = 0;
+                loop(nt,
+                    t = ms_wt + 7 * k;
+                    (t[6] && (sqr(ms_X[p] - t[3]) + sqr(ms_Y[p] - t[4]) < t[5])) ? (
+                        t[6] = 0;
+                        (ne < MS_WTN * 3 - 3) ? (
+                            ms_ed[2 * ne] = t[0]; ms_ed[2 * ne + 1] = t[1];
+                            ms_ed[2 * ne + 2] = t[1]; ms_ed[2 * ne + 3] = t[2];
+                            ms_ed[2 * ne + 4] = t[2]; ms_ed[2 * ne + 5] = t[0];
+                            ne += 3;
+                        );
+                    );
+                    k += 1;
+                );
+                // the edges of the cavity (those of a single removed triangle) joined to the point
+                i = 0;
+                loop(ne,
+                    ok = 1; j = 0;
+                    loop(ne,
+                        ((j !== i) && (((ms_ed[2 * j] === ms_ed[2 * i]) && (ms_ed[2 * j + 1] === ms_ed[2 * i + 1])) ||
+                            ((ms_ed[2 * j] === ms_ed[2 * i + 1]) && (ms_ed[2 * j + 1] === ms_ed[2 * i])))) ? ok = 0;
+                        j += 1;
+                    );
+                    (ok && (nt < MS_WTN)) ? (
+                        t = ms_wt + 7 * nt; t[0] = ms_ed[2 * i]; t[1] = ms_ed[2 * i + 1]; t[2] = p; ms_Circ(nt); nt += 1;
+                    );
+                    i += 1;
+                );
+                // the list without the removed triangles
+                j = 0; k = 0;
+                loop(nt, t = ms_wt + 7 * k; t[6] ? ((j !== k) ? memcpy(ms_wt + 7 * j, t, 7); j += 1;); k += 1;);
+                nt = j;
+            );
+            p += 1;
+        );
+        // the triangles without a point of the super triangle, not flat
+        k = 0;
+        loop(nt,
+            t = ms_wt + 7 * k;
+            ((t[0] < n) && (t[1] < n) && (t[2] < n) && (t[5] < 10^29) && (ms_ntri[v] < MS_TMAX)) ? (
+                q = tri + 3 * ms_ntri[v]; q[0] = t[0]; q[1] = t[1]; q[2] = t[2];
+                ms_ntri[v] += 1;
+            );
+            k += 1;
+        );
+        // the edges of the hull : those of a single triangle
+        nh = 0; k = 0;
+        loop(ms_ntri[v] * 3,
+            u = tri[3 * floor(k / 3) + (k % 3)]; w = tri[3 * floor(k / 3) + ((k + 1) % 3)];
+            ok = 1; j = 0;
+            loop(ms_ntri[v] * 3,
+                ((j !== k) && (((tri[3 * floor(j / 3) + (j % 3)] === u) && (tri[3 * floor(j / 3) + ((j + 1) % 3)] === w)) ||
+                    ((tri[3 * floor(j / 3) + (j % 3)] === w) && (tri[3 * floor(j / 3) + ((j + 1) % 3)] === u)))) ? ok = 0;
+                j += 1;
+            );
+            (ok && (nh < MS_MAXC * 2)) ? (hul[2 * nh] = u; hul[2 * nh + 1] = w; nh += 1;);
+            k += 1;
+        );
+        ms_nhul[v] = nh;
+    );
+    // no triangle (two configurations, or all on a line) : their order along the line of the two farthest ones
+    ((ms_ntri[v] === 0) && (n >= 2)) ? (
+        ms_lin[v] = 1;
+        dm = -1; i0 = i1 = 0; i = 0;
+        loop(n, j = i + 1; loop(n - i - 1, d = sqr(ms_X[i] - ms_X[j]) + sqr(ms_Y[i] - ms_Y[j]); (d > dm) ? (dm = d; i0 = i; i1 = j;); j += 1;); i += 1;);
+        d = sqrt(max(0.000000000001, dm));
+        ms_l0[v] = i0; ms_ldx[v] = (ms_X[i1] - ms_X[i0]) / d; ms_ldy[v] = (ms_Y[i1] - ms_Y[i0]) / d;
+        i = 0;
+        loop(n,
+            x = (ms_X[i] - ms_X[i0]) * ms_ldx[v] + (ms_Y[i] - ms_Y[i0]) * ms_ldy[v];
+            // (insertion by abscissa)
+            j = i;
+            while ((j > 0) && (ms_ta[v * MS_MAXC + j - 1] > x)) (
+                ms_ta[v * MS_MAXC + j] = ms_ta[v * MS_MAXC + j - 1]; ms_ord[v * MS_MAXC + j] = ms_ord[v * MS_MAXC + j - 1]; j -= 1;
+            );
+            ms_ta[v * MS_MAXC + j] = x; ms_ord[v * MS_MAXC + j] = i;
+            i += 1;
+        );
+    );
+    ms_tkE[v] = e; ms_tkS[v] = ms_seq[e];
+);
+
+// The coordinates of the point X, Y (the metric of the surface) among the configurations of the view v (its triangulation) :
+// ms_cn of them (0 ... 3), the indices ms_c0 ... ms_c2, the coordinates ms_b0 ... ms_b2 (sum 1) : in a triangle, its
+// barycentric coordinates ; outside the hull, those of the nearest point of its nearest edge ; on a line, between the two
+// neighbours (beyond its ends : the end one) ; one configuration : itself
+function ms_Coords(v, e, X, Y) local(n, tri, hul, k, t, ax, ay, bx, by, cx, cy, d, l1, l2, l3, found, dm, u, w, ex, ey, ll, xa, i, o, ta)
+(
+    n = ms_N(e); ms_cn = 0;
+    (n === 1) ? (
+        ms_cn = 1; ms_c0 = 0; ms_b0 = 1;
+    ) : ms_lin[v] ? (
+        o = ms_ord + v * MS_MAXC; ta = ms_ta + v * MS_MAXC;
+        xa = (X - ms_X0[v]) * ms_ldx[v] + (Y - ms_Y0[v]) * ms_ldy[v];
+        (xa <= ta[0]) ? (ms_cn = 1; ms_c0 = o[0]; ms_b0 = 1;) :
+        (xa >= ta[n - 1]) ? (ms_cn = 1; ms_c0 = o[n - 1]; ms_b0 = 1;) : (
+            i = 0; while ((i < n - 2) && (xa > ta[i + 1])) (i += 1;);
+            ll = (xa - ta[i]) / max(0.000000000001, ta[i + 1] - ta[i]);
+            ms_cn = 2; ms_c0 = o[i]; ms_b0 = 1 - ll; ms_c1 = o[i + 1]; ms_b1 = ll;
+        );
+    ) : (n >= 3) ? (
+        tri = ms_tri + v * MS_TMAX * 3;
+        found = 0; k = 0;
+        while (!found && (k < ms_ntri[v])) (
+            t = tri + 3 * k;
+            ax = ms_PX[t[0]]; ay = ms_PY[t[0]]; bx = ms_PX[t[1]]; by = ms_PY[t[1]]; cx = ms_PX[t[2]]; cy = ms_PY[t[2]];
+            d = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
+            (abs(d) > 0.000000000001) ? (
+                l1 = ((by - cy) * (X - cx) + (cx - bx) * (Y - cy)) / d;
+                l2 = ((cy - ay) * (X - cx) + (ax - cx) * (Y - cy)) / d;
+                l3 = 1 - l1 - l2;
+                ((l1 >= -0.000000001) && (l2 >= -0.000000001) && (l3 >= -0.000000001)) ? (
+                    found = 1; ms_cn = 3;
+                    ms_c0 = t[0]; ms_b0 = max(0, l1); ms_c1 = t[1]; ms_b1 = max(0, l2); ms_c2 = t[2]; ms_b2 = max(0, l3);
+                );
+            );
+            k += 1;
+        );
+        // outside the hull : the nearest point of its edges
+        (!found && (ms_nhul[v] > 0)) ? (
+            hul = ms_hul + v * MS_MAXC * 4;
+            dm = 10^30; k = 0;
+            loop(ms_nhul[v],
+                u = hul[2 * k]; w = hul[2 * k + 1];
+                ex = ms_PX[w] - ms_PX[u]; ey = ms_PY[w] - ms_PY[u];
+                ll = max(0, min(1, ((X - ms_PX[u]) * ex + (Y - ms_PY[u]) * ey) / max(0.000000000001, ex * ex + ey * ey)));
+                d = sqr(X - ms_PX[u] - ll * ex) + sqr(Y - ms_PY[u] - ll * ey);
+                (d < dm) ? (dm = d; ms_cn = 2; ms_c0 = u; ms_b0 = 1 - ll; ms_c1 = w; ms_b1 = ll;);
+                k += 1;
+            );
+        );
+    );
+);
+// The places of the configurations of the entry e in the metric of the surface (ms_PX, ms_PY ; ms_X0, ms_Y0 : the origin of
+// the line of the view v) ; the triangulation made again if needed
+ms_PX = make_array(MS_MAXC); ms_PY = make_array(MS_MAXC); ms_X0 = make_array(MS_NV); ms_Y0 = make_array(MS_NV);
+function ms_Places(v, e) local(n, a, i)
+(
+    ((ms_tkE[v] !== e) || (ms_tkS[v] !== ms_seq[e])) ? ms_Triangulate(v, e);
+    n = ms_N(e); a = max(0.5, min(4, ms_S(e, ms_sAspect)));
+    i = 0; loop(n, ms_PX[i] = ms_Cv(e, i, 1) * a; ms_PY[i] = ms_Cv(e, i, 2); i += 1;);
+    ms_lin[v] ? (ms_X0[v] = ms_PX[ms_l0[v]]; ms_Y0[v] = ms_PY[ms_l0[v]];);
+);
+
+// The brush of the view v : its centre (ms_cx, ms_cy, in the metric of the surface), its angle (ms_th, radians), its radius
+// (ms_BR, in heights of the surface : Spread x the diagonal), the scales of its axes (ms_ax, ms_ay : Stretch, the same area)
+function ms_Brush(v, e) local(a, off)
+(
+    a = max(0.5, min(4, ms_S(e, ms_sAspect)));
+    // (step 3 : during a fade-in or a fade-out, the spread follows the envelope)
+    ms_BR = max(0.005, ms_S(e, ms_sSpread) * ((ms_st[v] === 0) ? 1 : ms_env[v])) * sqrt(a * a + 1);
+    // (the angle from the vertical, clockwise : 0 up, 90 to the right ; ms_th from the x axis, y down)
+    ms_th = (ms_S(e, ms_sAngle) / 360 + ms_ph[v]) * 2 * $pi - $pi / 2;
+    off = max(0, min(2, ms_S(e, ms_sOffset))) * ms_BR; // (2026-11-23, the user : up to 200 %)
+    ms_cx = ms_bx[v] * a + off * cos(ms_th); ms_cy = ms_by[v] + off * sin(ms_th);
+    ms_ax = sqrt(max(0.1, min(10, ms_S(e, ms_sStretch)))); ms_ay = 1 / ms_ax;
+);
+// The shares of the configurations under the brush of the view v (ms_sh + v * MS_MAXC) and its coverage (ms_cov[v]) : the
+// mean of the shares of its samples inside the surface, weighted by its energy ; the share of a sample : its coordinates
+// (ms_Coords) each one b -> sin^2(pi b / 2) (the law of the Hyper Slider : on a line, cos^2 and sin^2 of mergeconf), times
+// the weight of its configuration, normalized
+function ms_Shares(v, e) local(n, a, sh, P, S, j, k, r, pw, phi, rho, lx, ly, X, Y, wg, all, win, s0, s1, s2, sn, ct, st)
+(
+    n = ms_N(e); a = max(0.5, min(4, ms_S(e, ms_sAspect)));
+    sh = ms_sh + v * MS_MAXC; memset(sh, 0, MS_MAXC);
+    ms_Places(v, e); ms_Brush(v, e);
+    P = ms_S(e, ms_sPower); S = max(0, min(2, ms_S(e, ms_sShape)));
+    ct = cos(ms_th); st = sin(ms_th);
+    all = win = 0;
+    j = 0;
+    loop(MS_RINGS,
+        r = (j + 0.5) / MS_RINGS; pw = ms_Prof(r, P) * r;
+        k = 0;
+        loop(MS_RAYS,
+            phi = 2 * $pi * (k + 0.5 * (j & 1)) / MS_RAYS; rho = ms_Rho(phi, S);
+            lx = r * rho * cos(phi) * ms_ax * ms_BR; ly = r * rho * sin(phi) * ms_ay * ms_BR;
+            X = ms_cx + lx * ct - ly * st; Y = ms_cy + lx * st + ly * ct;
+            wg = pw * rho * rho;
+            all += wg;
+            ((n > 0) && ms_InUV(e, X / a, Y, 0)) ? (
+                win += wg;
+                ms_Coords(v, e, X, Y);
+                s0 = (ms_cn >= 1) ? sqr(sin($pi * ms_b0 / 2)) * ms_Cv(e, ms_c0, 3) : 0;
+                s1 = (ms_cn >= 2) ? sqr(sin($pi * ms_b1 / 2)) * ms_Cv(e, ms_c1, 3) : 0;
+                s2 = (ms_cn >= 3) ? sqr(sin($pi * ms_b2 / 2)) * ms_Cv(e, ms_c2, 3) : 0;
+                sn = s0 + s1 + s2;
+                (sn > 0) ? (
+                    (ms_cn >= 1) ? sh[ms_c0] += wg * s0 / sn;
+                    (ms_cn >= 2) ? sh[ms_c1] += wg * s1 / sn;
+                    (ms_cn >= 3) ? sh[ms_c2] += wg * s2 / sn;
+                );
+            );
+            k += 1;
+        );
+        j += 1;
+    );
+    (win > 0) ? (k = 0; loop(n, sh[k] /= win; k += 1;));
+    ms_cov[v] = (all > 0) ? win / all : 0;
+);
+// The brush of the view v moved by the time (its rotation), its shares computed ; returns 1 if it turns
+function ms_Update(v, e) local(t, rot)
+(
+    t = time_precise(); rot = ms_S(e, ms_sRot);
+    ((ms_lt[v] > 0) && (t > ms_lt[v]) && !ms_pz[v]) ? ms_ph[v] += rot * min(0.5, t - ms_lt[v]); // (paused : it stays)
+    ms_ph[v] -= floor(ms_ph[v]);
+    ms_lt[v] = t;
+    ms_Shares(v, e);
+    (rot != 0) && !ms_pz[v];
+);
+// The brush of the view v drawn (screen pixels : the surface at ms_gx ...) : yellow (in Play, not sounding : step 3 makes
+// it green), its contour, the contour where its energy is half, its centre, the place of the mouse ; held : dashed
+// A line drawn inside the rectangle of the view (ms_vx, ms_vy, ms_vrw, ms_vrh : the part outside it cut ; Liang-Barsky)
+function ms_Line(x0, y0, x1, y1) local(dx, dy, t0, t1, p, q, k, r, ok)
+(
+    dx = x1 - x0; dy = y1 - y0; t0 = 0; t1 = 1; ok = 1;
+    k = 0;
+    loop(4,
+        (k === 0) ? (p = -dx; q = x0 - ms_vx;) : (k === 1) ? (p = dx; q = ms_vx + ms_vrw - 1 - x0;) :
+        (k === 2) ? (p = -dy; q = y0 - ms_vy;) : (p = dy; q = ms_vy + ms_vrh - 1 - y0;);
+        (p == 0) ? (
+            (q < 0) ? ok = 0;
+        ) : (
+            r = q / p;
+            (p < 0) ? ((r > t1) ? ok = 0 : (r > t0) ? t0 = r;) : ((r < t0) ? ok = 0 : (r < t1) ? t1 = r;);
+        );
+        k += 1;
+    );
+    (ok && (t0 <= t1)) ? gfx_line(x0 + t0 * dx, y0 + t0 * dy, x0 + t1 * dx, y0 + t1 * dy, 1);
+);
+// (2026-11-23, the user) A line t pixels wide inside the view (parallel lines, ms_Line)
+function ms_TLine(x0, y0, x1, y1, t) local(d, nx, ny, k, n, o)
+(
+    d = sqrt(sqr(x1 - x0) + sqr(y1 - y0));
+    (d > 0.01) ? (
+        nx = (y0 - y1) / d; ny = (x1 - x0) / d;
+        n = max(1, ceil(t / 0.7));
+        k = 0;
+        loop(n,
+            o = (n > 1) ? (k / (n - 1) - 0.5) * (t - 1) : 0;
+            ms_Line(x0 + nx * o, y0 + ny * o, x1 + nx * o, y1 + ny * o);
+            k += 1;
+        );
+    );
+);
+// The color of the halo of the view v, its opacity al : yellow (not sounding), green (sounding, or fading ; step 3) ;
+// 2026-11-23 (the user : the path well visible, the brush less) : darker on the light themes (ms_hlt, set by ms_Draw)
+function ms_HaloSet(v, al)
+(
+    (ms_st[v] > 0) ? (ms_hlt ? gfx_set(0, 0.58, 0.2, al) : gfx_set(0.25, 0.95, 0.4, al)) :
+        (ms_hlt ? gfx_set(0.85, 0.5, 0, al) : gfx_set(1, 0.85, 0.1, al));
+);
+// The brush of the view v drawn : its contour and the contour where its energy is half (held : dashed), over a wider line
+// of the background (2026-11-23) ; its centre, the place of the mouse (a cross)
+function ms_DrawBrush(v, e) local(a, k, phi, rho, r, lx, ly, X, Y, px, py, qx, qy, ct, st, rs, r50, P, S, m, al, w, pass, hd, q)
+(
+    a = max(0.5, min(4, ms_S(e, ms_sAspect))); rs = uix_drawconfig_current[9];
+    ms_Brush(v, e); // (the brush of this view : ms_Frame computed those of all the views)
+    P = ms_S(e, ms_sPower); S = max(0, min(2, ms_S(e, ms_sShape)));
+    ct = cos(ms_th); st = sin(ms_th);
+    r50 = 1 - 0.5 ^ (1 / (8 ^ max(-1, min(1, P)))); // (the radius where the energy is half that of the centre)
+    hd = ms_Held(v);
+    m = 0;
+    loop(2,
+        r = (m === 0) ? 1 : r50; al = (m === 0) ? 1 : 0.6;
+        w = (m === 0) ? max(2, floor(1.5 * rs + 0.5)) : max(1, floor(rs + 0.5));
+        // the points of the contour (screen pixels)
+        k = 0;
+        loop(49,
+            phi = 2 * $pi * k / 48; rho = ms_Rho(phi, S);
+            lx = r * rho * cos(phi) * ms_ax * ms_BR; ly = r * rho * sin(phi) * ms_ay * ms_BR;
+            X = ms_cx + lx * ct - ly * st; Y = ms_cy + lx * st + ly * ct;
+            ms_bq[2 * k] = ms_gx[v] + X / a * ms_gw[v]; ms_bq[2 * k + 1] = ms_gy[v] + Y * ms_gh[v];
+            k += 1;
+        );
+        pass = 0;
+        loop(2,
+            (pass === 0) ? gfx_set(ms_bgr, ms_bgg, ms_bgb, 0.6 * al) : ms_HaloSet(v, al);
+            k = 1;
+            loop(48,
+                (!hd || (k & 1)) ? ms_TLine(ms_bq[2 * k - 2], ms_bq[2 * k - 1], ms_bq[2 * k], ms_bq[2 * k + 1], (pass === 0) ? w + 2 : w);
+                k += 1;
+            );
+            pass += 1;
+        );
+        m += 1;
+    );
+    // the centre of the brush, the place of the mouse (when the offset moves the centre away from it : a line)
+    px = ms_gx[v] + ms_cx / a * ms_gw[v]; py = ms_gy[v] + ms_cy * ms_gh[v];
+    qx = ms_gx[v] + ms_bx[v] * ms_gw[v]; qy = ms_gy[v] + ms_by[v] * ms_gh[v];
+    ((abs(px - qx) + abs(py - qy)) > 2) ? (ms_HaloSet(v, 0.6); ms_TLine(qx, qy, px, py, max(1, floor(rs + 0.5))););
+    ((px - 5 * rs >= ms_vx) && (py - 5 * rs >= ms_vy) && (px + 5 * rs < ms_vx + ms_vrw) && (py + 5 * rs < ms_vy + ms_vrh)) ? (
+        gfx_set(ms_bgr, ms_bgg, ms_bgb, 0.7); gfx_circle(px, py, 3 * rs + 1.5, 1, 1);
+        ms_HaloSet(v, 1); gfx_circle(px, py, 3 * rs, 1, 1);
+    );
+    q = 6 * rs; w = max(2, floor(1.5 * rs + 0.5));
+    gfx_set(ms_bgr, ms_bgg, ms_bgb, 0.6);
+    ms_TLine(qx - q - 1, qy, qx + q + 1, qy, w + 2); ms_TLine(qx, qy - q - 1, qx, qy + q + 1, w + 2);
+    ms_HaloSet(v, 1);
+    ms_TLine(qx - q, qy, qx + q, qy, w); ms_TLine(qx, qy - q, qx, qy + q, w);
+);
+
+// The brush of the view v under the mouse (mx, my : screen pixels) : 1 its cross (the place of the mouse), 2 its shape (inside
+// its contour, or near it), 0 none
+function ms_BrushHit(v, e, mx, my) local(a, rs, qx, qy, X, Y, dx, dy, ct, st, lx, ly, phi, r)
+(
+    a = max(0.5, min(4, ms_S(e, ms_sAspect))); rs = uix_drawconfig_current[9];
+    ms_Brush(v, e);
+    qx = ms_gx[v] + ms_bx[v] * ms_gw[v]; qy = ms_gy[v] + ms_by[v] * ms_gh[v];
+    (sqr(mx - qx) + sqr(my - qy) <= sqr(7 * rs)) ? 1 : (
+        X = (mx - ms_gx[v]) / max(1, ms_gw[v]) * a; Y = (my - ms_gy[v]) / max(1, ms_gh[v]);
+        dx = X - ms_cx; dy = Y - ms_cy; ct = cos(ms_th); st = sin(ms_th);
+        lx = (dx * ct + dy * st) / (ms_ax * ms_BR); ly = (dy * ct - dx * st) / (ms_ay * ms_BR);
+        phi = atan2(ly, lx);
+        r = sqrt(lx * lx + ly * ly) / ms_Rho(phi, max(0, min(2, ms_S(e, ms_sShape))));
+        (r <= 1 + 6 * rs / max(1, ms_BR * ms_gh[v])) ? 2 : 0;
+    );
+);
+// Shift + clic on the cell Rotation : Off, then back to the rotation before
+function ms_RotToggle(e) local(r)
+(
+    r = ms_S(e, ms_sRot);
+    (r != 0) ? (ms_SSet(e, ms_sRotMem, r); ms_SSet(e, ms_sRot, 0);) :
+    (ms_S(e, ms_sRotMem) != 0) ? ms_SSet(e, ms_sRot, ms_S(e, ms_sRotMem));
+);
+
+// ---- Step 5 : the trajectories
+
+// A point x, y of the frame of the editors (the plane of the trajectories, -1 ... 1) in the surface of the entry e (ms_cu,
+// ms_cv), and back (ms_cx2, ms_cy2) : the surface in the square [-1, 1], its long side across it, centred ; x to the right,
+// y forward (up in the view from the top) : v down
+function ms_XY2U(e, x, y) local(a)
+(
+    a = max(0.5, min(4, ms_S(e, ms_sAspect)));
+    (a >= 1) ? (ms_cu = (x + 1) / 2; ms_cv = (1 - y * a) / 2;) : (ms_cu = (x / a + 1) / 2; ms_cv = (1 - y) / 2;);
+);
+function ms_U2XY(e, u, v) local(a)
+(
+    a = max(0.5, min(4, ms_S(e, ms_sAspect)));
+    (a >= 1) ? (ms_cx2 = 2 * u - 1; ms_cy2 = (1 - 2 * v) / a;) : (ms_cx2 = (2 * u - 1) * a; ms_cy2 = 1 - 2 * v;);
+);
+// (2026-11-23, the user) The placement of the path on the surface of the entry e (ms_sTx ... ms_sTk), in the metric of the
+// surface (x in heights, y down) : ms_tfx, ms_tfy the shift, ms_tfc, ms_tfs the rotation (clockwise), ms_tfk the scale,
+// ms_tfa the aspect
+function ms_TfGet(e) local(k)
+(
+    ms_tfa = max(0.5, min(4, ms_S(e, ms_sAspect)));
+    ms_tfx = ms_S(e, ms_sTx) * ms_tfa; ms_tfy = -ms_S(e, ms_sTy);
+    ms_tfc = cos(ms_S(e, ms_sTa) * $pi / 180); ms_tfs = sin(ms_S(e, ms_sTa) * $pi / 180);
+    k = ms_S(e, ms_sTk); ms_tfk = (k > 0) ? max(0.1, min(10, k)) : 1;
+);
+// a point u, v of the path (ms_XY2U) placed on the surface (ms_TfGet done) : ms_cu, ms_cv ; and back, a point of the
+// surface into the frame of the path (then ms_U2XY : the frame of the editors)
+function ms_TfFwd(u, v) local(dx, dy)
+(
+    dx = (u - 0.5) * ms_tfa; dy = v - 0.5;
+    ms_cu = 0.5 + (ms_tfx + ms_tfk * (ms_tfc * dx - ms_tfs * dy)) / ms_tfa;
+    ms_cv = 0.5 + ms_tfy + ms_tfk * (ms_tfs * dx + ms_tfc * dy);
+);
+function ms_TfInv(u, v) local(dx, dy)
+(
+    dx = (u - 0.5) * ms_tfa - ms_tfx; dy = v - 0.5 - ms_tfy;
+    ms_cu = 0.5 + (ms_tfc * dx + ms_tfs * dy) / ms_tfk / ms_tfa;
+    ms_cv = 0.5 + (ms_tfc * dy - ms_tfs * dx) / ms_tfk;
+);
+// The name of the source k of a trajectory into s (0 none, 1 ... 128 the library, 129 ... 132 Edit A ... D) ; returns s
+function ms_TrName(k, s)
+(
+    (k <= 0) ? strcpy(s, "none") :
+    (k <= SP_NTRJ) ? (sprintf(s, "T%d", k); (strlen(sp_NmGet(k - 1, #ms_t4)) > 0) ? (strcat(s, " "); strcat(s, #ms_t4););) :
+    (k <= 132) ? sprintf(s, "Edit %c", 'A' + k - 129) : strcpy(s, "?");
+    s;
+);
+// The path of the view v (entry e) built again if needed (2026-11-23 : placed on the surface, ms_TfFwd)
+function ms_PathLoad(v, e) local(src, a, n, i, pts, cl, st, o, L, k)
+(
+    src = ms_S(e, ms_sTraj); a = max(0.5, min(4, ms_S(e, ms_sAspect)));
+    ((ms_pkS[v] !== src) || (ms_pkL[v] !== sp_libSeq) || (ms_pkA[v] !== a) || (ms_pkE[v] !== e) ||
+        (ms_pkX[v] !== ms_S(e, ms_sTx)) || (ms_pkY[v] !== ms_S(e, ms_sTy)) || (ms_pkR[v] !== ms_S(e, ms_sTa)) ||
+        (ms_pkK[v] !== ms_S(e, ms_sTk))) ? (
+        ms_pkS[v] = src; ms_pkL[v] = sp_libSeq; ms_pkA[v] = a; ms_pkE[v] = e;
+        ms_pkX[v] = ms_S(e, ms_sTx); ms_pkY[v] = ms_S(e, ms_sTy); ms_pkR[v] = ms_S(e, ms_sTa); ms_pkK[v] = ms_S(e, ms_sTk);
+        ms_TfGet(e);
+        n = 0; cl = 0; pts = ms_ptmp;
+        ((src >= 1) && (src <= SP_NTRJ)) ? (
+            n = min(SP_MAXTRJ, sp_trN[src - 1]); cl = sp_trC[src - 1]; pts = sp_trP + (src - 1) * SP_MAXTRJ * 3;
+        ) : ((src >= 129) && (src <= 132)) ? (
+            n = ed_Path(src - 129, ms_ptmp, SP_MAXTRJ); st = ed_St(src - 129); cl = st[ed_sClosed];
+        );
+        o = v * MS_PMAX; L = 0; k = 0;
+        i = 0;
+        loop(n + ((cl && (n > 1)) ? 1 : 0),
+            ms_XY2U(e, pts[3 * (i % max(1, n))], pts[3 * (i % max(1, n)) + 1]); // (closed : the first point again at the end)
+            ms_TfFwd(ms_cu, ms_cv);
+            ms_pu[o + k] = ms_cu; ms_pv[o + k] = ms_cv;
+            (k > 0) ? L += sqrt(sqr((ms_pu[o + k] - ms_pu[o + k - 1]) * a) + sqr(ms_pv[o + k] - ms_pv[o + k - 1]));
+            ms_pd[o + k] = L;
+            k += 1; i += 1;
+        );
+        ms_pn[v] = k; ms_ptot[v] = L;
+    );
+);
+// The place at the progress s (0 ... 1) along the path of the view v : ms_cu, ms_cv (bp 1 : the same time between its
+// points ; 0 : a constant speed along it)
+function ms_PathAt(v, s, bp) local(o, n, i, f, t, L, g)
+(
+    o = v * MS_PMAX; n = ms_pn[v];
+    (n === 1) ? (ms_cu = ms_pu[o]; ms_cv = ms_pv[o];) : (n >= 2) ? (
+        bp ? (
+            f = max(0, min(1, s)) * (n - 1); i = min(n - 2, floor(f)); t = f - i;
+        ) : (
+            L = max(0, min(1, s)) * ms_ptot[v]; i = 0;
+            while ((i < n - 2) && (ms_pd[o + i + 1] < L)) (i += 1;);
+            g = ms_pd[o + i + 1] - ms_pd[o + i]; t = (g > 0) ? (L - ms_pd[o + i]) / g : 0;
+        );
+        ms_cu = ms_pu[o + i] + t * (ms_pu[o + i + 1] - ms_pu[o + i]);
+        ms_cv = ms_pv[o + i] + t * (ms_pv[o + i + 1] - ms_pv[o + i]);
+    );
+);
+// The motion started (from the start of the path ; Loop reverse : from its end) if it is not running
+function ms_MoveStart(v) ( !ms_mv[v] ? (ms_mv[v] = 1; ms_mx[v] = 0; ms_mlt[v] = time_precise(); ms_mlp[v] = -1;); );
+// (2026-11-23) The place s (0 ... 1, the part of the duration) on the path for the progress x (in durations) of the motion
+// lp (0 Once, 1 Loop, 2 Back and forth, 3 Loop reverse) ; its direction : ms_dir (1 forward, -1 backward)
+function ms_SOf(lp, x) local(y)
+(
+    (lp === 0) ? (ms_dir = 1; max(0, min(1, x))) :
+    (lp === 1) ? (ms_dir = 1; x - floor(x)) :
+    (lp === 3) ? (ms_dir = -1; 1 - (x - floor(x))) :
+    (y = x / 2 - floor(x / 2); ms_dir = (y < 0.5) ? 1 : -1; (y < 0.5) ? 2 * y : 2 - 2 * y);
+);
+// (2026-11-23, the user) The pause of the view v (on 1, 0 : off) : the motion along the path and the rotation of the brush
+// stopped where they are, the sound going on (the shares do not change) ; off : they go on from there
+function ms_PauseSet(v, on) local(t)
+(
+    t = time_precise();
+    (on && !ms_pz[v]) ? (ms_pz[v] = 1; ms_pzt[v] = t;) :
+    (!on && ms_pz[v]) ? (ms_pz[v] = 0; ms_lt[v] = t; ms_mlt[v] = t;);
+);
+
+// The path of the view v (entry e, built : ms_PathLoad ; lt : a light background), 2026-11-23 (the user : hardly visible) :
+// a line in a color seen on all the themes (a dark magenta on the light ones, a light one on the dark ones) over a wider
+// line of the background ; its start (a dot) ; its direction (an arrow at its middle ; Loop reverse : backwards)
+function ms_PathDraw(v, e, lt) local(o, i, rs, w, m, x0, y0, x1, y1, cr, cg, cb, dx, dy, d, px, py)
+(
+    o = v * MS_PMAX; rs = uix_drawconfig_current[9];
+    w = max(2, floor(1.3 * rs + 0.5)); // (2026-11-23 : a little thinner and lighter, the brush over it stays readable)
+    cr = lt ? 0.62 : 1; cg = lt ? 0.06 : 0.5; cb = lt ? 0.52 : 0.95;
+    m = 0;
+    loop(2,
+        (m === 0) ? gfx_set(ms_bgr, ms_bgg, ms_bgb, 0.5) : gfx_set(cr, cg, cb, 0.75);
+        x0 = ms_gx[v] + ms_pu[o] * ms_gw[v]; y0 = ms_gy[v] + ms_pv[o] * ms_gh[v];
+        i = 1;
+        loop(ms_pn[v] - 1,
+            x1 = ms_gx[v] + ms_pu[o + i] * ms_gw[v]; y1 = ms_gy[v] + ms_pv[o + i] * ms_gh[v];
+            // (the points closer than 2 pixels : one segment ; a recording has one point every 50 ms)
+            ((abs(x1 - x0) + abs(y1 - y0) >= 2) || (i === ms_pn[v] - 1)) ? (
+                ms_TLine(x0, y0, x1, y1, (m === 0) ? w + 2 : w);
+                x0 = x1; y0 = y1;
+            );
+            i += 1;
+        );
+        m += 1;
+    );
+    // the start
+    px = ms_gx[v] + ms_pu[o] * ms_gw[v]; py = ms_gy[v] + ms_pv[o] * ms_gh[v];
+    ((px - 5 * rs >= ms_vx) && (py - 5 * rs >= ms_vy) && (px + 5 * rs < ms_vx + ms_vrw) && (py + 5 * rs < ms_vy + ms_vrh)) ? (
+        gfx_set(ms_bgr, ms_bgg, ms_bgb, 0.8); gfx_circle(px, py, 3.5 * rs + 1, 1, 1);
+        gfx_set(cr, cg, cb, 1); gfx_circle(px, py, 3.5 * rs, 1, 1);
+    );
+    // the direction : an arrow at the middle of the path
+    (ms_ptot[v] > 0.001) ? (
+        ms_PathAt(v, 0.49, 0); x0 = ms_gx[v] + ms_cu * ms_gw[v]; y0 = ms_gy[v] + ms_cv * ms_gh[v];
+        ms_PathAt(v, 0.51, 0); x1 = ms_gx[v] + ms_cu * ms_gw[v]; y1 = ms_gy[v] + ms_cv * ms_gh[v];
+        dx = x1 - x0; dy = y1 - y0; d = sqrt(dx * dx + dy * dy);
+        (((ms_mv[v] ? ms_mdr[v] : (ms_S(e, ms_sLoop) === 3) ? -1 : 1)) < 0) ? (dx = -dx; dy = -dy;); // (the direction now)
+        px = (x0 + x1) / 2; py = (y0 + y1) / 2;
+        ((d > 0.01) && (px - 8 * rs >= ms_vx) && (py - 8 * rs >= ms_vy) && (px + 8 * rs < ms_vx + ms_vrw) && (py + 8 * rs < ms_vy + ms_vrh)) ? (
+            dx /= d; dy /= d;
+            gfx_set(cr, cg, cb, 1);
+            gfx_triangle(px + dx * 6 * rs, py + dy * 6 * rs, px - dx * 4 * rs - dy * 4.5 * rs, py - dy * 4 * rs + dx * 4.5 * rs,
+                px - dx * 4 * rs + dy * 4.5 * rs, py - dy * 4 * rs - dx * 4.5 * rs);
+        );
+    );
+    // a placement turned or scaled with the mouse (ms_PlMouse) : its centre, a line to the mouse
+    ((ms_qk[v] > 1) && (ms_qcx - 7 * rs >= ms_vx) && (ms_qcy - 7 * rs >= ms_vy) && (ms_qcx + 7 * rs < ms_vx + ms_vrw) &&
+        (ms_qcy + 7 * rs < ms_vy + ms_vrh)) ? (
+        gfx_set(cr, cg, cb, 0.95);
+        gfx_circle(ms_qcx, ms_qcy, 4 * rs, 0, 1);
+        ms_Line(ms_qcx - 6 * rs, ms_qcy, ms_qcx + 6 * rs, ms_qcy); ms_Line(ms_qcx, ms_qcy - 6 * rs, ms_qcx, ms_qcy + 6 * rs);
+        gfx_set(cr, cg, cb, 0.5); ms_Line(ms_qcx, ms_qcy, mouse_x, mouse_y);
+    );
+);
+
+// (2026-11-23) The path of the view v (entry e) centred on the surface (fit 1 : scaled first to fill 90 % of it)
+function ms_PlFit(v, e, fit) local(o, i, u0, u1, v0, v1, k)
+(
+    k = 0;
+    loop(fit ? 2 : 1,
+        ms_PathLoad(v, e);
+        (ms_pn[v] > 0) ? (
+            o = v * MS_PMAX; u0 = v0 = 10^9; u1 = v1 = -(10^9);
+            i = 0;
+            loop(ms_pn[v],
+                u0 = min(u0, ms_pu[o + i]); u1 = max(u1, ms_pu[o + i]); v0 = min(v0, ms_pv[o + i]); v1 = max(v1, ms_pv[o + i]);
+                i += 1;
+            );
+            (fit && (k === 0)) ? (
+                ms_SSet(e, ms_sTk, max(0.1, min(10, ((ms_S(e, ms_sTk) > 0) ? ms_S(e, ms_sTk) : 1) * 0.9 / max(0.001, max(u1 - u0, v1 - v0)))));
+            ) : (
+                ms_SSet(e, ms_sTx, max(-1, min(1, ms_S(e, ms_sTx) - ((u0 + u1) / 2 - 0.5))));
+                ms_SSet(e, ms_sTy, max(-1, min(1, ms_S(e, ms_sTy) + ((v0 + v1) / 2 - 0.5))));
+            );
+        );
+        k += 1;
+    );
+);
+
+// The configuration of the entry e under the mouse (mx, my : screen pixels) in the view v : its index, or -1
+function ms_Pick(v, e, mx, my) local(b, i, p, d, dm, k, rs)
+(
+    b = ms_E(e); rs = uix_drawconfig_current[9];
+    k = -1; dm = sqr(9 * rs);
+    i = 0;
+    loop(b[ms_eN],
+        p = ms_C(e, i);
+        d = sqr(mx - (ms_gx[v] + p[1] * ms_gw[v])) + sqr(my - (ms_gy[v] + p[2] * ms_gh[v]));
+        (d <= dm) ? (dm = d; k = i;);
+        i += 1;
+    );
+    k;
+);
+
+// The drawing of the view v (x, y, w, h : screen pixels) : its image, drawn again when needed, then the configurations
+function ms_Draw(v, x, y, w, h) local(vw, e, b, n, k, i, p, px, py, rs, sz, lt, cs, c, tw, th, sel, hov)
+(
+    vw = ms_vw + v * MS_VS; e = vw[ms_vE]; b = ms_E(e); n = b[ms_eN];
+    w = max(16, w|0); h = max(16, h|0);
+    ms_vx = x; ms_vy = y; ms_vrw = w; ms_vrh = h; // (the rectangle of the view : the brush drawn inside it, ms_Line)
+    uix_jbg_color(); ms_bgr = uix_jbg_r; ms_bgg = uix_jbg_g; ms_bgb = uix_jbg_b; // (the background of the theme, its shade)
+    rs = uix_drawconfig_current[9];
+    ms_csf = floor(6 * max(1, rs)); // (the cells of the gradients ; coarser while a configuration is dragged)
+    cs = ms_drag ? 2 * ms_csf : ms_csf;
+    k = ms_ik + v * MS_IKS;
+    ((k[0] !== e) || (k[1] !== ms_seq[e]) || (k[2] !== w) || (k[3] !== h) || (k[4] !== ms_bgr + 2 * ms_bgg + 4 * ms_bgb) ||
+        (k[5] !== cs) || (k[6] !== ms_gw[v] + 10000 * ms_S(e, ms_sSurf)) || (k[7] !== ms_gb[v])) ? (
+        k[0] = e; k[1] = ms_seq[e]; k[2] = w; k[3] = h; k[4] = ms_bgr + 2 * ms_bgg + 4 * ms_bgb; k[5] = cs;
+        k[6] = ms_gw[v] + 10000 * ms_S(e, ms_sSurf); k[7] = ms_gb[v];
+        ms_Render(v, e, w, h, cs);
+    );
+    gfx_x = x; gfx_y = y;
+    gfx_a = 1; gfx_mode = 2; // (the alpha of the image ignored)
+    gfx_blit(MS_IMG + v, 1, 0);
+    gfx_mode = 0;
+    // the configurations : a square in their color, their number (and name, and weight if not 1)
+    sz = max(3, floor(4.5 * rs));
+    lt = (0.299 * ms_bgr + 0.587 * ms_bgg + 0.114 * ms_bgb) > 0.5;
+    ms_hlt = lt;
+    sel = vw[ms_vSel]; hov = ms_hov[v];
+    i = 0;
+    loop(n,
+        p = ms_C(e, i); c = p[0];
+        px = floor(ms_gx[v] + p[1] * ms_gw[v]); py = floor(ms_gy[v] + p[2] * ms_gh[v]);
+        ms_Colors(c, lt);
+        ((i === sel) || (i === hov)) ? (
+            gfx_set(lt ? 0 : 1, lt ? 0 : 1, lt ? 0 : 1, (i === sel) ? 0.9 : 0.5);
+            gfx_rect(px - sz - 2 * rs, py - sz - 2 * rs, 2 * sz + 4 * rs + 1, 2 * sz + 4 * rs + 1, 0);
+        );
+        gfx_set(ms_kr, ms_kg, ms_kb, 1);
+        gfx_rect(px - sz, py - sz, 2 * sz + 1, 2 * sz + 1);
+        gfx_set(lt ? 0.15 : 0.9, lt ? 0.15 : 0.9, lt ? 0.15 : 0.9, 0.9);
+        gfx_rect(px - sz, py - sz, 2 * sz + 1, 2 * sz + 1, 0);
+        sprintf(#ms_lbl, "%d", c);
+        (strlen(cf_Name(c, #ms_t2)) > 0) ? (strcat(#ms_lbl, " "); strcat(#ms_lbl, #ms_t2););
+        (abs(p[3] - 1) > 0.001) ? (sprintf(#ms_t2, " x%.2f", p[3]); strcat(#ms_lbl, #ms_t2););
+        // (Play) its share under the brush
+        (ms_Shown(v) && (ms_sh[v * MS_MAXC + i] >= 0.005)) ? (
+            sprintf(#ms_t2, "  %d %%", floor(100 * ms_sh[v * MS_MAXC + i] + 0.5)); strcat(#ms_lbl, #ms_t2);
+        );
+        (conflist[c] <= 0) ? strcat(#ms_lbl, " (undefined)");
+        gfx_measurestr(#ms_lbl, tw, th);
+        gfx_x = min(px + sz + 4 * rs, x + w - tw - 2); gfx_y = py - th / 2;
+        gfx_drawstr(#ms_lbl);
+        i += 1;
+    );
+    // (step 5) the path of the brush (the brush on the path ; 2026-11-23 : in Edit too, where it is placed)
+    ms_S(e, ms_sPath) ? (
+        ms_PathLoad(v, e);
+        (ms_pn[v] > 1) ? ms_PathDraw(v, e, lt);
+    );
+    // (Play) the brush
+    ms_Shown(v) ? ms_DrawBrush(v, e);
+    // an empty surface : what to do
+    (n === 0) ? (
+        strcpy(#ms_lbl, (vw[ms_vMode] === 0) ? "Right clic : add a configuration here" : "Edit : place configurations here");
+        gfx_set(lt ? 0.2 : 0.85, lt ? 0.2 : 0.85, lt ? 0.2 : 0.85, 0.85);
+        gfx_measurestr(#ms_lbl, tw, th);
+        gfx_x = floor(ms_gx[v] + (ms_gw[v] - tw) / 2); gfx_y = floor(ms_gy[v] + (ms_gh[v] - th) / 2);
+        gfx_drawstr(#ms_lbl);
+    );
+);
+
+// The menu of the configurations defined (those with a name first, as the module Conf Editor ; then all of them, by
+// hundreds in sub-menus when there are more than 40), the configuration cur checked, after the title ttl (an item "#...") :
+// the configuration chosen, or 0
+function ms_ConfMenu(ttl, cur) local(n, k, b, e, c, m, sub, i, nn, nl, j, v, w)
+(
+    strcpy(#ms_mnu, ttl);
+    i = 2;
+    n = 0; k = 1; loop(conflsize - 2, (conflist[k] > 0) ? n += 1; k += 1;);
+    sub = (n > 40);
+    nn = 0; k = 1;
+    loop(CE_COPY, ((conflist[k] > 0) && ((w = cf_W(k)) > 0) && (w[2] > 0)) ? (ce_srt[nn] = k; nn += 1;); k += 1;);
+    j = 1;
+    loop(nn - 1,
+        v = ce_srt[j]; k = j;
+        while ((k > 0) && (ce_NmCmp(cf_wts[ce_srt[k - 1]], cf_wts[v]) > 0)) (ce_srt[k] = ce_srt[k - 1]; k -= 1;);
+        ce_srt[k] = v;
+        j += 1;
+    );
+    nl = min(nn, 100);
+    (nl > 0) ? (
+        sprintf(#ms_it, "|>Named (%d)", nn); strcat(#ms_mnu, #ms_it);
+        j = 0;
+        loop(nl,
+            k = ce_srt[j];
+            cf_Name(k, #ms_t2);
+            c = str_getchar(#ms_t2, 0, 'cu');
+            sprintf(#ms_it, "|%s%s%s%s  (%d)", (j === nl - 1) ? "<" : "", (k === cur) ? "!" : "",
+                ((c === '#') || (c === '!') || (c === '<') || (c === '>')) ? " " : "", #ms_t2, k);
+            strcat(#ms_mnu, #ms_it); ms_map[i] = k; i += 1;
+            j += 1;
+        );
+    );
+    (n === 0) ? (
+        strcat(#ms_mnu, "|#No configuration defined"); ms_map[i] = 0; i += 1;
+    ) : (
+        b = 0;
+        while ((b < conflsize - 1) && (strlen(#ms_mnu) < 11000)) (
+            e = min(conflsize - 2, b + 99);
+            c = 0; k = max(1, b); loop(e - max(1, b) + 1, (conflist[k] > 0) ? c += 1; k += 1;);
+            (c > 0) ? (
+                sub ? (sprintf(#ms_it, "|>%d ... %d", max(1, b), e); strcat(#ms_mnu, #ms_it););
+                k = max(1, b); m = 0;
+                loop(e - max(1, b) + 1,
+                    (conflist[k] > 0) ? (
+                        m += 1;
+                        sprintf(#ms_it, "|%s%s%d%s%s", (sub && (m === c)) ? "<" : "", (k === cur) ? "!" : "", k,
+                            (strlen(cf_Name(k, #ms_t2)) > 0) ? "  " : "", #ms_t2);
+                        strcat(#ms_mnu, #ms_it); ms_map[i] = k; i += 1;
+                    );
+                    k += 1;
+                );
+            );
+            b += 100;
+        );
+    );
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#ms_mnu);
+    prv_MenuEnd(m > 0);
+    ((m >= 2) && (m < i)) ? ms_map[m] : 0;
+);
+
+// The menu of the library (the entry cur checked) after the title ttl : the entry chosen, or -1
+function ms_LibMenu(ttl, cur) local(e, m)
+(
+    strcpy(#ms_mnu, ttl);
+    e = 0;
+    loop(MS_NLIB,
+        ms_Label(e, #ms_t2);
+        sprintf(#ms_it, "|%s%s%s", (e === cur) ? "!" : "", #ms_t2, (ms_N(e) > 0) ? "" : "  (empty)");
+        strcat(#ms_mnu, #ms_it);
+        e += 1;
+    );
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#ms_mnu);
+    prv_MenuEnd(m > 0);
+    (m >= 2) ? m - 2 : -1;
+);
+
+// The menu of the configuration i of the view v (right clic on it)
+function ms_CfMenu(v, e, i) local(p, m, c, w)
+(
+    p = ms_C(e, i); w = p[3];
+    cf_Name(p[0], #ms_t2);
+    sprintf(#ms_mnu, "#Configuration %d  %s|Another configuration...|>Weight (the extent of its zone)", p[0], #ms_t2);
+    sprintf(#ms_it, "|%s0.25|%s0.5|%s0.75|%s1|%s1.5|%s2|%s3|<%s4||Remove", (w === 0.25) ? "!" : "", (w === 0.5) ? "!" : "",
+        (w === 0.75) ? "!" : "", (w === 1) ? "!" : "", (w === 1.5) ? "!" : "", (w === 2) ? "!" : "", (w === 3) ? "!" : "",
+        (w === 4) ? "!" : "");
+    strcat(#ms_mnu, #ms_it);
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#ms_mnu);
+    prv_MenuEnd(m > 0);
+    (m === 2) ? (
+        ((c = ms_ConfMenu("#Another configuration here", p[0])) > 0) ? (p[0] = c; ms_seq[e] += 1;);
+    ) :
+    ((m >= 3) && (m <= 10)) ? (
+        p[3] = (m === 3) ? 0.25 : (m === 4) ? 0.5 : (m === 5) ? 0.75 : (m === 6) ? 1 : (m === 7) ? 1.5 : (m === 8) ? 2 :
+            (m === 9) ? 3 : 4;
+        ms_seq[e] += 1;
+    ) :
+    (m === 11) ? (
+        ms_Del(e, i); ms_VSet(v, ms_vSel, -1);
+    );
+);
+
+// ====== Step 3 : the sound
+
+/*
+    A view in Play drives the projector of its MetaSurface (ms_ownp[v] ; ms_own[p] : the view + 1) from its first start
+    (a clic) until it leaves Play or chooses another projector (released : ms_relq[p], @block loads its configuration
+    again) ; meanwhile the projector is in the manual mode, active, and silent when the MetaSurface does not sound. Its
+    configurations (outdiff x configuration x indiff, as confload, with the work areas of this file) give a list of the
+    coefficients used by any of them (ms_Build : K entries, each one its index in the matrix and the N gains ; a block of
+    the dynamic memory, retired by cf_Retire), built again when the configurations, their blocks, the projector or its
+    diffusions change. Each run of @gfx (ms_Frame, even when the window is closed) : the envelope (Off, Fade-in, On,
+    Fade-out : ms_st ; ms_env 0 ... 1, the spread and the volume), the shares, then the publication for @block when they
+    or the amplitude changed (ms_Publish : the shares in a double buffer, the amplitude A = envelope x volume x
+    sqrt(coverage), the time of the interpolation, a sequence number written last). @block (ms_BlockHook, in the loop of the
+    projectors, Diffusion-3) : the matrix of the projector (prx_pcons) = A sqrt(sum w_i g_i^2) for each entry of the list,
+    then its interpolation (buildiff) in that time ; the loads of a configuration ignored ; released : its configuration
+    loaded again.
+*/
+MS_NPRJ = projucnt;
+ms_st = make_array(MS_NV); ms_env = make_array(MS_NV); ms_et0 = make_array(MS_NV); ms_e0 = make_array(MS_NV);
+ms_imm = make_array(MS_NV); ms_turn = make_array(MS_NV);
+ms_ownp = make_array(MS_NV);
+ms_own = make_array(MS_NPRJ + 1); ms_relq = make_array(MS_NPRJ + 1);
+// the publication (@gfx -> @block) : the list, its generation, the amplitude, the time, the sequence ; the shares (2 buffers)
+// (2026-11-23 : EEL2 ignores the case of the names : ms_pG was ms_pg, a color of ms_Colors, now ms_pGn ; the same day
+// ms_pl -> ms_pd (it was ms_pL), MS_WT -> MS_WTN (it was ms_wt), ms_R -> ms_BR (it was ms_r))
+ms_pL = make_array(MS_NV); ms_pGn = make_array(MS_NV); ms_pA = make_array(MS_NV); ms_pT = make_array(MS_NV);
+ms_pSeq = make_array(MS_NV); ms_pW = make_array(MS_NV * 2 * MS_MAXC);
+ms_bSeq = make_array(MS_NV); ms_bG = make_array(MS_NV); // (@block : the last sequence, the last generation merged)
+// the last values published (their changes), the key of the list built (entry, count, projector, blocks)
+ms_lA = make_array(MS_NV); ms_lW = make_array(MS_NV * MS_MAXC); ms_lX = make_array(MS_NV); ms_lY = make_array(MS_NV);
+ms_lk = make_array(MS_NV * 4);
+i__k = 0; loop(MS_NV, ms_lk[4 * i__k] = -1; i__k += 1;);
+// the work areas of ms_Build (a matrix composed, the diffusion of the inputs transposed, the entries of the list)
+MS_KMAX = 4096;
+ms_dense = make_array(matrsiz); ms_inT = make_array(matrsiz); ms_kmap = make_array(matrsiz); ms_klist = make_array(matrsiz);
+// (Step 4) The simulation for the views "Space A" ... "D" (Diffusion-3-Space3D, sx_Show) : the projector p shown by a view
+// Space, the target of a MetaSurface whose brush is shown and which does not sound (Edit with Brush shown ; Play, not
+// started, or stopped) : ms_simV[p] the view + 1 (0 : none ; the first view of the projector), the coefficients of its list
+// (ms_simK + v * MS_KMAX : their indices in the matrix) and the energies the brush would give them (ms_simE : sum w_i g_i^2),
+// ms_simN[v] of them ; the view Space shows them instead of the matrix of the projector (crosses and halos), "simulated"
+ms_simV = make_array(MS_NPRJ + 1);
+ms_simK = make_array(MS_NV * MS_KMAX); ms_simE = make_array(MS_NV * MS_KMAX); ms_simN = make_array(MS_NV);
+// (Step 5) The trajectories : the path of each view (its points in the surface, u, v, and their distances from the start
+// along it ; ms_pn of them, ms_ptot its length ; built again when its source, the library or the editors (sp_libSeq), the
+// aspect or the entry change), the motion (ms_mv 1 : the brush follows the path ; ms_msim : simulated, no sound ; ms_mpr :
+// the place on the path 0 ... 1), the recording (ms_rec 1 : the place of the brush
+// every 50 ms into ms_rb, ms_rn points ; at its end, a trajectory of the library) ; the backdrop of the editors Edit A ...
+// D (ms_edE[k] : the entry + 1 whose path is the editor k ; its zones in the image MS_IMGE + k, ms_edW x ms_edH nodes,
+// flipped as the editor asks, ms_edFl ; its aspect ms_edA ; its configurations ms_edU, ms_edV, ms_edN of them)
+MS_PMAX = SP_MAXTRJ + 2;
+ms_pu = make_array(MS_NV * MS_PMAX); ms_pv = make_array(MS_NV * MS_PMAX); ms_pd = make_array(MS_NV * MS_PMAX);
+ms_pn = make_array(MS_NV); ms_ptot = make_array(MS_NV);
+ms_pkS = make_array(MS_NV); ms_pkL = make_array(MS_NV); ms_pkA = make_array(MS_NV); ms_pkE = make_array(MS_NV);
+i__k = 0; loop(MS_NV, ms_pkS[i__k] = -1; i__k += 1;);
+ms_ptmp = make_array(SP_MAXTRJ * 3 + 3);
+ms_mv = make_array(MS_NV); ms_msim = make_array(MS_NV); ms_mpr = make_array(MS_NV);
+// (2026-11-23, the motion integrated : ms_mx the progress in durations, ms_mlt the time of the last step, ms_mlp the mode seen
+// at the last step, -1 : none ; ms_mdr the direction, 1 or -1 ; the start time ms_mt0 and the time elapsed ms_mel are gone)
+ms_mx = make_array(MS_NV); ms_mlt = make_array(MS_NV); ms_mlp = make_array(MS_NV); ms_mdr = make_array(MS_NV);
+// (2026-11-23, the user) the placement of the path in the key of each path (ms_PathLoad) ; the pause (ms_pz 1, since ms_pzt :
+// the motion and the rotation stopped, ms_PauseSet) ; Play / Edit as a bypass (ms_Bypass : the state kept when the view
+// left Play, ms_bpS sounding, ms_bpM moving, ms_bpI simulated, ms_bpE the progress of the motion ; ms_lm the mode of the view
+// at the previous run of @gfx, -1 : none yet)
+ms_pkX = make_array(MS_NV); ms_pkY = make_array(MS_NV); ms_pkR = make_array(MS_NV); ms_pkK = make_array(MS_NV);
+ms_pz = make_array(MS_NV); ms_pzt = make_array(MS_NV);
+ms_bpS = make_array(MS_NV); ms_bpM = make_array(MS_NV); ms_bpI = make_array(MS_NV); ms_bpE = make_array(MS_NV);
+ms_lm = make_array(MS_NV);
+i__k = 0; loop(MS_NV, ms_lm[i__k] = -1; i__k += 1;);
+MS_RDT = 0.05;
+ms_rec = make_array(MS_NV); ms_rn = make_array(MS_NV); ms_rt0 = make_array(MS_NV); ms_rlt = make_array(MS_NV);
+ms_rb = make_array(MS_NV * SP_MAXTRJ * 2);
+MS_IMGE = 76;               // MS_IMGE ... MS_IMGE + 3 : the backdrops of Edit A ... D
+i__k = 0; loop(4, ui_reserve_image(MS_IMGE + i__k); i__k += 1;);
+ms_edE = make_array(4); ms_edA = make_array(4); ms_edW = make_array(4); ms_edH = make_array(4); ms_edFl = make_array(4);
+ms_edN = make_array(4); ms_edU = make_array(4 * MS_MAXC); ms_edV = make_array(4 * MS_MAXC);
+// (the key of each backdrop drawn : entry, seq, flips, aspect, the placement of the path, the background ; 2026-11-23 :
+// the box of the backdrop in the frame of the editor, ms_edX0 ... ms_edY1 : the surface placed under the path)
+MS_EKS = 10;
+ms_edK = make_array(4 * MS_EKS);
+ms_edX0 = make_array(4); ms_edY0 = make_array(4); ms_edX1 = make_array(4); ms_edY1 = make_array(4);
+// (2026-11-23) the placement of the path in the frame of the editors, W(p) = k R p + t (ms_eFk, ms_eFc = cos, ms_eFs = sin,
+// ms_eFx, ms_eFy) : for the camera of an editor that follows its MetaSurface (Diffusion-3-Edit, ed_CamBuild)
+ms_eFk = make_array(4); ms_eFc = make_array(4); ms_eFs = make_array(4); ms_eFx = make_array(4); ms_eFy = make_array(4);
+
+// The diffusion of the inputs ind (its block) transposed into ms_inT (as confload : the gain from the input p to the channel l)
+function ms_InT(ind) local(k, p, tg)
+(
+    memset(ms_inT, 0, matrsiz);
+    k = ind + 1;
+    while ((p = k[0] - 1) >= 0) (
+        k += 1;
+        while ((tg = k[0]) > 0) ( ms_inT[(tg - 1) * chmax + p] += k[1]; k += 2; );
+        k += 1;
+    );
+);
+// The block of gains chcnf (0 : none) composed with the diffusions ind (ms_inT ready), oud into ms_dense (as confload)
+function ms_Compose(chcnf, ind, oud) local(pcf, src, dstx, tg, g, k, p, a, ql)
+(
+    memset(ms_dense, 0, matrsiz);
+    (chcnf > 0) ? (
+        pcf = chcnf + 1;
+        ((ind === 0) && (oud === 0)) ? (
+            while ((src = pcf[0] - 1) >= 0) (
+                dstx = ms_dense + src * chmax; pcf += 1;
+                while ((tg = pcf[0]) > 0) ( dstx[tg - 1] = pcf[1]; pcf += 2; );
+                pcf += 1;
+            );
+        ) : (
+            while ((src = pcf[0] - 1) >= 0) (
+                pcf += 1;
+                while ((tg = pcf[0]) > 0) (
+                    g = pcf[1];
+                    ql = (oud > 0) ? cf_Src(oud, tg) : 0;
+                    p = 0;
+                    loop((ind > 0) ? chinmax : 1,
+                        a = (ind > 0) ? ms_inT[src * chmax + p] : 1;
+                        (a != 0) ? (
+                            dstx = ms_dense + ((ind > 0) ? p : src) * chmax;
+                            (oud > 0) ? (
+                                k = ql;
+                                while ((k > 0) && (k[0] > 0)) ( dstx[k[0] - 1] += a * g * k[1]; k += 2; );
+                            ) : (
+                                dstx[tg - 1] += a * g;
+                            );
+                        );
+                        p += 1;
+                    );
+                    pcf += 2;
+                );
+                pcf += 1;
+            );
+        );
+    );
+);
+// The block of gains of the configuration c (0 : not defined)
+function ms_CfBlk(c) ( ((c > 0) && (c < conflsize) && (conflist[c] > 0)) ? conflist[c] : 0; );
+// The key of the list of the entry e for the projector p (its configurations, their blocks, the diffusions of p)
+function ms_Key(e, p) local(n, i, c, h)
+(
+    n = ms_N(e); h = 0; i = 0;
+    loop(n, c = ms_Cv(e, i, 0); h += (i + 1) * (c * 7919 + ms_CfBlk(c)); i += 1;);
+    h + 7 * cf_Blk(serialBlock[Pr7_PrjInD + p - 1]) + 13 * cf_Blk(serialBlock[Pr7_PrjOutD + p - 1]);
+);
+// The list of the coefficients of the configurations of the entry e for the projector p : a block [K, N, then K x (index,
+// N gains)] (0 : no memory)
+function ms_Build(v, e, p) local(n, i, ind, oud, nk, L, j, k, ok)
+(
+    n = ms_N(e);
+    ind = cf_Blk(serialBlock[Pr7_PrjInD + p - 1]); oud = cf_Blk(serialBlock[Pr7_PrjOutD + p - 1]);
+    (ind > 0) ? ms_InT(ind);
+    memset(ms_kmap, 0, matrsiz); nk = 0; ok = 1;
+    i = 0;
+    loop(n,
+        ms_Compose(ms_CfBlk(ms_Cv(e, i, 0)), ind, oud);
+        k = 0;
+        loop(matrsiz,
+            ((ms_dense[k] != 0) && (ms_kmap[k] === 0)) ? (
+                (nk < MS_KMAX) ? (ms_klist[nk] = k; nk += 1; ms_kmap[k] = nk;) : (ok = 0);
+            );
+            k += 1;
+        );
+        i += 1;
+    );
+    L = mSL_Dyn_Alloc(2 + max(1, nk) * (1 + n), 'msl1', 0);
+    (L > 0) ? (
+        L[0] = nk; L[1] = n;
+        j = 0; loop(nk, L[2 + j * (1 + n)] = ms_klist[j]; j += 1;);
+        i = 0;
+        loop(n,
+            ms_Compose(ms_CfBlk(ms_Cv(e, i, 0)), ind, oud);
+            j = 0; loop(nk, L[2 + j * (1 + n) + 1 + i] = ms_dense[ms_klist[j]]; j += 1;);
+            i += 1;
+        );
+        !ok ? (sprintf(#ms_msg, "MetaSurface MS%d : more than %d coefficients, the others ignored", e + 1, MS_KMAX); mSL_log(SysLogBox, #ms_msg););
+    ) : (
+        sprintf(#ms_msg, "MetaSurface MS%d : no memory for its coefficients", e + 1); mSL_log(SysLogBox, #ms_msg);
+    );
+    L;
+);
+
+// The view v takes the projector p (refused if another view drives it) : its manual mode, active ; returns 1
+function ms_Take(v, p) local(o, pro)
+(
+    o = ms_own[p] - 1;
+    ((o >= 0) && (o !== v)) ? (
+        sprintf(#ms_msg, "MetaSurface : the projector %d is driven by the view MetaSurface %c", p, 'A' + o); mSL_log(SysLogBox, #ms_msg);
+        0;
+    ) : (
+        ms_own[p] = v + 1; ms_ownp[v] = p; ms_relq[p] = 0;
+        pro = projectors + (p - 1) * projsize;
+        (pro[prx_flgopmod] & (rndmodon | hypmodon)) ? updtopmod(pro, 1, 0); // (manual : no random, no Hyper Slider)
+        (pro[prx_savprjst] === prx__statoff) ? updpstatus(pro, prx__statactive, 0);
+        1;
+    );
+);
+// The view v releases its projector (@block loads its configuration again) ; its sound stopped
+function ms_Release(v) local(p)
+(
+    p = ms_ownp[v];
+    (p > 0) ? (
+        ms_own[p] = 0; ms_relq[p] = 1; ms_ownp[v] = 0;
+        (ms_pL[v] > 0) ? (cf_Retire(ms_pL[v]); ms_pL[v] = 0;);
+        ms_lk[4 * v] = -1;
+    );
+    ms_st[v] = 0; ms_env[v] = 0;
+);
+// Start (fade 1 : with a fade-in ; 0 : at once) and stop (fade 1 : with a fade-out ; 0 : at once) the view v
+function ms_Start(v, e, fade) local(p)
+(
+    p = ms_S(e, ms_sProj);
+    ((ms_N(e) > 0) && (p >= 1) && (p <= MS_NPRJ)) ? (
+        ms_Take(v, p) ? (
+            fade ? (ms_st[v] = 1; ms_e0[v] = ms_env[v]; ms_et0[v] = time_precise();) : (ms_st[v] = 2; ms_env[v] = 1; ms_imm[v] = 1;);
+            ms_PauseSet(v, 0); // (2026-11-23 : a start ends the pause)
+            ms_S(e, ms_sPath) ? ms_MoveStart(v); // (step 5 : the brush on the path, from its start unless it already moves)
+        );
+    ) : (
+        sprintf(#ms_msg, "MetaSurface MS%d : no configuration, or no projector", e + 1); mSL_log(SysLogBox, #ms_msg);
+    );
+);
+function ms_Stop(v, fade)
+(
+    fade ? (ms_st[v] = 3; ms_e0[v] = ms_env[v]; ms_et0[v] = time_precise();) : (ms_st[v] = 0; ms_env[v] = 0; ms_imm[v] = 1;);
+);
+// A clic that starts or stops (left : with a fade ; right : at once)
+function ms_Toggle(v, e, fade) ( ((ms_st[v] === 0) || (ms_st[v] === 3)) ? ms_Start(v, e, fade) : ms_Stop(v, fade); );
+// (2026-11-23, the user) Play / Edit as a bypass : leaving Play (play 0), the state of the view v kept (sounding or not, the
+// motion along the path and its time) ; back in Play (play 1), it goes on at once from there (the pause kept)
+function ms_Bypass(v, e, play) local(t, p)
+(
+    t = time_precise();
+    play ? (
+        ms_bpM[v] ? (ms_mv[v] = 1; ms_msim[v] = ms_bpI[v]; ms_mx[v] = ms_bpE[v]; ms_mlt[v] = t;);
+        ms_bpS[v] ? (
+            p = ms_S(e, ms_sProj);
+            ((ms_N(e) > 0) && (p >= 1) && (p <= MS_NPRJ)) ? (
+                ms_Take(v, p) ? (ms_st[v] = 2; ms_env[v] = 1; ms_imm[v] = 1;);
+            );
+        );
+        ms_bpS[v] = ms_bpM[v] = ms_bpI[v] = 0;
+    ) : (
+        ms_bpS[v] = (ms_st[v] === 1) || (ms_st[v] === 2);
+        ms_bpM[v] = ms_mv[v]; ms_bpI[v] = ms_msim[v];
+        ms_bpE[v] = ms_mx[v];
+    );
+);
+// The envelope of the view v at the time t (Attack, Release : seconds ; linear)
+function ms_Env(v, e, t)
+(
+    (ms_st[v] === 1) ? (
+        ms_env[v] = min(1, ms_e0[v] + (t - ms_et0[v]) / max(0.01, ms_S(e, ms_sAtt)));
+        (ms_env[v] >= 1) ? ms_st[v] = 2;
+    ) : (ms_st[v] === 3) ? (
+        ms_env[v] = max(0, ms_e0[v] - (t - ms_et0[v]) / max(0.01, ms_S(e, ms_sRel)));
+        (ms_env[v] <= 0) ? ms_st[v] = 0;
+    ) : (ms_st[v] === 2) ? (ms_env[v] = 1) : (ms_env[v] = 0);
+);
+// The publication of the view v (projector p) for @block : the list built again if needed ; the shares, the amplitude,
+// the time of the interpolation, when they changed (immediate : 5 ms ; fixed : Latency ; per distance : Latency for each
+// tenth of the diagonal moved ; 40 ms at least, the steps of @gfx smoothed)
+// The list of the view v (entry e, projector p) built again if needed (see ms_Key) ; returns 1 if it was
+function ms_List(v, e, p) local(k, n, L)
+(
+    k = ms_lk + 4 * v; n = ms_N(e);
+    ((k[0] !== e) || (k[1] !== n) || (k[2] !== p) || (k[3] !== ms_Key(e, p))) ? (
+        L = ms_Build(v, e, p);
+        (ms_pL[v] > 0) ? cf_Retire(ms_pL[v]);
+        ms_pL[v] = L; ms_pGn[v] += 1;
+        k[0] = e; k[1] = n; k[2] = p; k[3] = ms_Key(e, p);
+        1;
+    ) : 0;
+);
+function ms_Publish(v, e, p) local(k, n, L, amp, T, d, ch, sh, buf, i, a, lat)
+(
+    n = ms_N(e);
+    ch = ms_List(v, e, p);
+    sh = ms_sh + v * MS_MAXC;
+    amp = (ms_st[v] === 0) ? 0 : ms_env[v] * 10 ^ (ms_S(e, ms_sVol) / 20) * sqrt(max(0, ms_cov[v]));
+    (abs(amp - ms_lA[v]) > 0.0001) ? ch = 1;
+    i = 0; loop(n, (abs(sh[i] - ms_lW[v * MS_MAXC + i]) > 0.0001) ? ch = 1; i += 1;);
+    ms_imm[v] ? ch = 1;
+    ch ? (
+        lat = max(0.005, ms_S(e, ms_sLat) / 1000);
+        a = max(0.5, min(4, ms_S(e, ms_sAspect)));
+        d = sqrt(sqr((ms_bx[v] - ms_lX[v]) * a) + sqr(ms_by[v] - ms_lY[v])) / (0.1 * sqrt(a * a + 1));
+        T = ms_imm[v] ? 0.005 : max(0.04, ms_S(e, ms_sLatMode) ? lat * d : lat);
+        ms_imm[v] = 0;
+        buf = ms_pW + (v * 2 + ((ms_pSeq[v] + 1) & 1)) * MS_MAXC;
+        i = 0; loop(n, buf[i] = sh[i]; ms_lW[v * MS_MAXC + i] = sh[i]; i += 1;);
+        ms_pA[v] = ms_lA[v] = amp; ms_pT[v] = min(10, T);
+        ms_lX[v] = ms_bx[v]; ms_lY[v] = ms_by[v];
+        ms_pSeq[v] += 1; // (written last : @block reads the buffer of this sequence)
+    );
+);
+// The motion of the view v at the time t : the progress (Once : at the end, the brush stays there, the sound fades out ;
+// Loop ; Back and forth ; 2026-11-23 : Loop reverse, from the end to the start), the brush on the path ; a motion without
+// sound and without simulation : stopped. 2026-11-23 (the user) : the progress ms_mx (in durations) grows with the time
+// (paused : it stays ; a new duration : only the speed changes) ; a new mode while it moves : the brush stays where it is
+// on the path, only its direction follows the new mode (Back and forth : the same direction)
+function ms_Motion(v, e, t) local(x, s, lp, d)
+(
+    (ms_mv[v] && (ms_st[v] === 0) && !ms_msim[v]) ? ms_mv[v] = 0;
+    ms_mv[v] ? (
+        lp = ms_S(e, ms_sLoop);
+        ((ms_mlp[v] >= 0) && (ms_mlp[v] !== lp)) ? (
+            s = ms_SOf(ms_mlp[v], ms_mx[v]); d = ms_dir;
+            ms_mx[v] = (lp === 0) ? s : (lp === 1) ? min(0.999999, s) : (lp === 3) ? min(0.999999, 1 - s) : ((d > 0) ? s : 2 - s);
+        );
+        ms_mlp[v] = lp;
+        ms_mx[v] += (ms_pz[v] ? 0 : max(0, t - ms_mlt[v])) / max(0.1, ms_S(e, ms_sDur));
+        ms_mlt[v] = t;
+        x = ms_mx[v];
+        s = ms_SOf(lp, x);
+        ((lp === 0) && (x >= 1)) ? (ms_mv[v] = 0; ms_msim[v] = 0; ((ms_st[v] === 1) || (ms_st[v] === 2)) ? ms_Stop(v, 1););
+        ms_mpr[v] = s; ms_mdr[v] = ms_dir;
+        ms_PathLoad(v, e);
+        (ms_pn[v] > 0) ? (ms_PathAt(v, s, ms_S(e, ms_sSpeedM)); ms_bx[v] = ms_cu; ms_by[v] = ms_cv;);
+    );
+);
+// The recording of the view v : started ; ended (the points become a trajectory of the library : the first one empty, named
+// "MSn rec" ; the path of the MetaSurface, its duration that of the recording, the same time between its points)
+function ms_RecStart(v) ( ms_rec[v] = 1; ms_rn[v] = 0; ms_rt0[v] = time_precise(); ms_rlt[v] = -1; );
+function ms_RecEnd(v, e) local(i, k, n, q, rb)
+(
+    ms_rec[v] = 0; n = ms_rn[v];
+    (n >= 2) ? (
+        i = -1; k = 0; while ((i < 0) && (k < SP_NTRJ)) ((sp_trN[k] <= 0) ? i = k; k += 1;);
+        (i >= 0) ? (
+            q = sp_trP + i * SP_MAXTRJ * 3; rb = ms_rb + v * SP_MAXTRJ * 2;
+            ms_TfGet(e); // (the placement of the path undone : the path placed gives the recording again)
+            k = 0;
+            loop(n,
+                ms_TfInv(rb[2 * k], rb[2 * k + 1]); ms_U2XY(e, ms_cu, ms_cv);
+                q[3 * k] = ms_cx2; q[3 * k + 1] = ms_cy2; q[3 * k + 2] = 0;
+                k += 1;
+            );
+            sp_trN[i] = n; sp_trC[i] = 0;
+            sprintf(#ms_t4, "MS%d rec", e + 1); sp_NmSet(i, #ms_t4);
+            sp_libSeq += 1;
+            ms_SSet(e, ms_sTraj, i + 1); ms_SSet(e, ms_sDur, max(0.1, (n - 1) * MS_RDT)); ms_SSet(e, ms_sSpeedM, 1);
+            sprintf(#ms_msg, "MetaSurface MS%d : recorded, %d points, %.1f s : the trajectory T%d", e + 1, n, (n - 1) * MS_RDT, i + 1);
+        ) : (
+            sprintf(#ms_msg, "MetaSurface MS%d : the library of trajectories is full (%d)", e + 1, SP_NTRJ);
+        );
+        mSL_log(SysLogBox, #ms_msg);
+    );
+);
+// The recording at the time t : the place of the brush every MS_RDT seconds (full : ended)
+function ms_RecStep(v, e, t) local(rb)
+(
+    (ms_rec[v] && ((ms_rlt[v] < 0) || (t - ms_rlt[v] >= MS_RDT))) ? (
+        ms_rlt[v] = (ms_rlt[v] < 0) ? t : ms_rlt[v] + MS_RDT;
+        rb = ms_rb + v * SP_MAXTRJ * 2;
+        rb[2 * ms_rn[v]] = ms_bx[v]; rb[2 * ms_rn[v] + 1] = ms_by[v]; ms_rn[v] += 1;
+        (ms_rn[v] >= SP_MAXTRJ) ? ms_RecEnd(v, e);
+    );
+);
+// (2026-11-23) The backdrop of an editor : the zones of the entry e under the path (the placement undone : ms_TfGet done ;
+// Follow : none) into the image img, nx x ny nodes over X0 ... X1, Y0 ... Y1 of the frame of the editor (y up ; the node
+// i, j at x = X0 + (X1 - X0) i / nx, y = Y1 - (Y1 - Y0) j / ny) : the background of the editors (s3d_bgr ...) everywhere,
+// the zones computed on the nodes i0 ... i1, j0 ... j1 only (the box of the surface), mixed with it (55 % of the zones ; the
+// edge of the surface smoothed over a node). The editor maps it onto the plane z = 0 as its camera sees it (ed_MsBack :
+// gfx_transformblit, any view, zoom, move, turn)
+function ms_ZonesEd(e, img, nx, ny, X0, Y0, X1, Y1, i0, i1, j0, j1) local(n, a, i, j, x, y, u, w, dk, sp, hw, d, cov, lt, er, r)
+(
+    n = ms_N(e); a = max(0.5, min(4, ms_S(e, ms_sAspect))); dk = ms_S(e, ms_sSurf);
+    lt = (0.299 * s3d_bgr + 0.587 * s3d_bgg + 0.114 * s3d_bgb) > 0.5; er = lt ? 1 : 0;
+    // a node, in the metric of the surface (the frame of the editors : 2 / a or 2 per height ; the scale of the placement)
+    sp = max((X1 - X0) / nx, (Y1 - Y0) / ny) * ((a >= 1) ? a / 2 : 0.5) * ms_tfk;
+    ms_gmin = 3 * sp; hw = 1.2 * sp;
+    gfx_setimgdim(img, nx + 1, ny + 1);
+    gfx_dest = img;
+    gfx_set(s3d_bgr, s3d_bgg, s3d_bgb, 1); gfx_mode = 0;
+    gfx_rect(0, 0, nx + 1, ny + 1);
+    j = max(0, j0);
+    loop(min(ny, j1) - max(0, j0) + 1,
+        i = max(0, i0);
+        loop(min(nx, i1) - max(0, i0) + 1,
+            x = X0 + (X1 - X0) * i / nx; y = Y1 - (Y1 - Y0) * j / ny;
+            ms_XY2U(e, x, y); ms_TfFwd(ms_cu, ms_cv); u = ms_cu; w = ms_cv;
+            // the distance to the edge of the surface (inside : > 0)
+            dk ? (
+                r = sqrt(sqr((u - 0.5) * 2) + sqr((w - 0.5) * 2)); d = (1 - r) * min(a / 2, 0.5);
+            ) : (
+                d = min(min(u * a, (1 - u) * a), min(w, 1 - w));
+            );
+            cov = max(0, min(1, 0.5 + d / hw)) * 0.55;
+            (cov > 0) ? (
+                ms_NodeColor(e, n, a, u, w, lt, er, er, er);
+                ms_r = s3d_bgr + cov * (ms_r - s3d_bgr); ms_g = s3d_bgg + cov * (ms_g - s3d_bgg); ms_b = s3d_bgb + cov * (ms_b - s3d_bgb);
+                gfx_x = i; gfx_y = j; gfx_setpixel(ms_r, ms_g, ms_b);
+            );
+            i += 1;
+        );
+        j += 1;
+    );
+);
+// The backdrops of the editors Edit A ... D (each run of @gfx) : for each one, the first view whose MetaSurface follows its
+// path ; the placement of its path in the frame of the editors (ms_eFk ... : the camera Follow) ; its zones drawn again in
+// its image when needed (entry, changes, aspect, shape, the placement of the path, the background, Follow ; only for an
+// editor shown : ed_seen) ; its configurations. 2026-11-23 : the surface placed under the path (the placement undone :
+// turned, moved, scaled the other way) or as it is (Follow) ; the image : the box of the surface in the frame of the editor,
+// 256 nodes on its long side, and a margin as wide as the box on each side (ms_edX0 ... ms_edY1 : the whole image)
+function ms_EdBack() local(k, v, vw, e, a, nx, ny, q, i, od, x0, y0, x1, y1, bk, fw, st, d, res, ex0, ey0, ex1, ey1)
+(
+    od = gfx_dest;
+    bk = s3d_bgr + 2 * s3d_bgg + 4 * s3d_bgb;
+    k = 0;
+    loop(4,
+        ms_edE[k] = 0;
+        v = 0;
+        loop(MS_NV,
+            vw = ms_vw + v * MS_VS; e = vw[ms_vE];
+            ((ms_edE[k] === 0) && (ms_S(e, ms_sTraj) === 129 + k)) ? ms_edE[k] = e + 1;
+            v += 1;
+        );
+        (ms_edE[k] > 0) ? (
+            e = ms_edE[k] - 1; a = max(0.5, min(4, ms_S(e, ms_sAspect)));
+            ms_TfGet(e);
+            // (2026-11-23) the placement in the frame of the editors : the images of (0, 0) and (1, 0)
+            ms_XY2U(e, 0, 0); ms_TfFwd(ms_cu, ms_cv); ms_U2XY(e, ms_cu, ms_cv); x0 = ms_cx2; y0 = ms_cy2;
+            ms_XY2U(e, 1, 0); ms_TfFwd(ms_cu, ms_cv); ms_U2XY(e, ms_cu, ms_cv);
+            ms_eFk[k] = sqrt(sqr(ms_cx2 - x0) + sqr(ms_cy2 - y0));
+            ms_eFc[k] = (ms_cx2 - x0) / max(0.000001, ms_eFk[k]); ms_eFs[k] = (ms_cy2 - y0) / max(0.000001, ms_eFk[k]);
+            ms_eFx[k] = x0; ms_eFy[k] = y0;
+            // Follow (the state of the editor, ed_sFollow) : the surface as it is (the placement drawn by the camera)
+            st = ed_St(k); fw = st[ed_sFollow];
+            fw ? (ms_tfx = ms_tfy = ms_tfs = 0; ms_tfc = ms_tfk = 1;);
+            q = ms_edK + MS_EKS * k;
+            ((ed_seen[k] >= gfx_executed - 2) &&
+                ((q[0] !== e) || (q[1] !== ms_seq[e]) || (q[3] !== a + 10 * ms_S(e, ms_sSurf)) ||
+                (q[4] !== ms_S(e, ms_sTx)) || (q[5] !== ms_S(e, ms_sTy)) || (q[6] !== ms_S(e, ms_sTa)) ||
+                (q[7] !== ms_S(e, ms_sTk)) || (q[8] !== bk) || (q[9] !== fw))) ? (
+                q[0] = e; q[1] = ms_seq[e]; q[2] = 0; q[3] = a + 10 * ms_S(e, ms_sSurf);
+                q[4] = ms_S(e, ms_sTx); q[5] = ms_S(e, ms_sTy); q[6] = ms_S(e, ms_sTa); q[7] = ms_S(e, ms_sTk); q[8] = bk; q[9] = fw;
+                // the box of the 4 corners of the surface in the frame of the editor
+                x0 = y0 = 10^9; x1 = y1 = -(10^9);
+                i = 0;
+                loop(4,
+                    ms_TfInv(i & 1, (i >> 1) & 1); ms_U2XY(e, ms_cu, ms_cv);
+                    x0 = min(x0, ms_cx2); x1 = max(x1, ms_cx2); y0 = min(y0, ms_cy2); y1 = max(y1, ms_cy2);
+                    i += 1;
+                );
+                d = max(0.01, max(x1 - x0, y1 - y0)); res = 256 / d; // (nodes per unit)
+                ex0 = x0 - d; ey0 = y0 - d; ex1 = x1 + d; ey1 = y1 + d;
+                nx = ceil((ex1 - ex0) * res); ny = ceil((ey1 - ey0) * res);
+                ms_ZonesEd(e, MS_IMGE + k, nx, ny, ex0, ey0, ex1, ey1,
+                    floor((x0 - ex0) * res) - 1, ceil((x1 - ex0) * res) + 1, floor((ey1 - y1) * res) - 1, ceil((ey1 - y0) * res) + 1);
+                gfx_dest = od; gfx_mode = 0;
+                ms_edW[k] = nx; ms_edH[k] = ny; ms_edA[k] = a;
+                ms_edX0[k] = ex0; ms_edY0[k] = ey0; ms_edX1[k] = ex1; ms_edY1[k] = ey1;
+                ui_GFXdoNow |= 4;
+            );
+            // the configurations, in the frame of the editor
+            ms_edN[k] = ms_N(e);
+            i = 0;
+            loop(ms_edN[k],
+                ms_TfInv(ms_Cv(e, i, 1), ms_Cv(e, i, 2)); ms_U2XY(e, ms_cu, ms_cv);
+                ms_edU[k * MS_MAXC + i] = ms_cx2; ms_edV[k * MS_MAXC + i] = ms_cy2;
+                i += 1;
+            );
+        );
+        k += 1;
+    );
+);
+
+// The simulation of the view v (step 4) : the energy that the brush would give to each coefficient of its list (the shares,
+// no amplitude) ; returns 1 if there is a list
+function ms_Sim(v, e) local(L, K, N, j, q, s, i, g, sh, kk, ee)
+(
+    L = ms_pL[v]; ms_simN[v] = 0;
+    (L > 0) ? (
+        K = min(MS_KMAX, L[0]); N = L[1]; sh = ms_sh + v * MS_MAXC;
+        kk = ms_simK + v * MS_KMAX; ee = ms_simE + v * MS_KMAX;
+        j = 0;
+        loop(K,
+            q = L + 2 + j * (1 + N);
+            s = 0; i = 0; loop(N, g = q[1 + i]; s += sh[i] * g * g; i += 1;);
+            kk[j] = q[0]; ee[j] = s;
+            j += 1;
+        );
+        ms_simN[v] = K;
+    );
+    L > 0;
+);
+// Each run of @gfx (even when the window is closed) : for each view, its projector released if it left Play or chose
+// another one ; its envelope ; its shares (its brush shown) ; its publication (it drives a projector)
+function ms_Frame() local(v, vw, e, p, t)
+(
+    t = time_precise();
+    v = 0;
+    loop(MS_NV,
+        vw = ms_vw + v * MS_VS; e = vw[ms_vE];
+        // (2026-11-23, the user) Play / Edit as a bypass : the state kept when the view leaves Play, taken again at its return
+        ((ms_lm[v] >= 0) && (ms_lm[v] !== vw[ms_vMode])) ? ms_Bypass(v, e, vw[ms_vMode]);
+        ms_lm[v] = vw[ms_vMode];
+        p = ms_ownp[v];
+        ((p > 0) && (!vw[ms_vMode] || (ms_S(e, ms_sProj) !== p))) ? ms_Release(v);
+        ms_Env(v, e, t);
+        // (step 5) the brush on the path (the mode Path : while it sounds, or simulated) ; the recording
+        (vw[ms_vMode] && ms_S(e, ms_sPath)) ? ms_Motion(v, e, t) : (ms_mv[v] = ms_msim[v] = 0);
+        ms_rec[v] ? (vw[ms_vMode] ? ms_RecStep(v, e, t) : ms_RecEnd(v, e));
+        ms_turn[v] = ms_Shown(v) ? ms_Update(v, e) : 0;
+        ((p = ms_ownp[v]) > 0) ? ms_Publish(v, e, p);
+        v += 1;
+    );
+    // (step 5) the backdrops of the editors
+    ms_EdBack();
+    // (step 4) the simulation for the views Space
+    memset(ms_simV, 0, MS_NPRJ + 1);
+    v = 0;
+    loop(MS_NV,
+        vw = ms_vw + v * MS_VS; e = vw[ms_vE]; p = ms_S(e, ms_sProj);
+        (ms_Shown(v) && (p >= 1) && (p <= MS_NPRJ) && (ms_N(e) > 0) && (ms_simV[p] === 0) &&
+            !((ms_ownp[v] === p) && (ms_st[v] > 0))) ? (
+            ms_List(v, e, p);
+            ms_Sim(v, e) ? ms_simV[p] = v + 1;
+        );
+        v += 1;
+    );
+);
+// @block, in the loop of the projectors (the projector prid, its block ppro) : the matrix of a projector driven by a view
+// (a new publication : merged, its interpolation in the time published ; the loads of a configuration ignored) ; a
+// projector released : its configuration loaded again. Returns 1 when its matrix changed (cfchng)
+function ms_BlockHook(prid, ppro) local(v, L, K, N, cons, buf, A, j, q, s, i, g, r, blkw)
+(
+    r = 0;
+    ((prid >= 1) && (prid <= MS_NPRJ)) ? (
+        ms_relq[prid] ? (
+            ms_relq[prid] = 0;
+            prvchcnf = -1; // (the cache of confload : the matrix is no more that of the configuration)
+            ppro[prx_cnfupdt] = (ppro[prx_ptrconf] > 0);
+            ppro[prx_savpmrph] = -1; // (the time of the interpolation of the projector computed again from its Morph)
+        ) : ((v = ms_own[prid] - 1) >= 0) ? (
+            ppro[prx_cnfupdt] = 0;
+            ((ms_pSeq[v] !== ms_bSeq[v]) && ((L = ms_pL[v]) > 0)) ? (
+                ms_bSeq[v] = ms_pSeq[v];
+                cons = ppro[prx_pcons];
+                (ms_pGn[v] !== ms_bG[v]) ? (memset(cons, 0, matrsiz); ms_bG[v] = ms_pGn[v];); // (a new list : the others to 0)
+                K = L[0]; N = L[1]; A = ms_pA[v];
+                buf = ms_pW + (v * 2 + (ms_pSeq[v] & 1)) * MS_MAXC;
+                j = 0;
+                loop(K,
+                    q = L + 2 + j * (1 + N);
+                    s = 0; i = 0; loop(N, g = q[1 + i]; s += buf[i] * g * g; i += 1;);
+                    cons[q[0]] = A * sqrt(s);
+                    j += 1;
+                );
+                blkw = max(16, ms_pT[v] * srate);
+                ppro[prx_steps] = blkw; ppro[prx_coefinc] = 2 / (blkw * (blkw + 1)); ppro[prx_index] = 0;
+                r = 1;
+            );
+        );
+    );
+    r;
+);
+
+// (2026-11-23, the user) The placement of the path with the mouse (the brush on the path, Edit or Play) : Cmd + left drag,
+// moved (Path x, Path y) ; Cmd + Shift + left drag, scaled ; Cmd + right drag, turned ; Cmd + Shift + right drag, turned and
+// scaled ; around the centre of the placement (the centre of the surface moved by Path x, Path y : the scale and the turn
+// keep it in place). Returns 1 while a drag goes on (the other uses of the mouse ignored)
+function ms_PlMouse(v, e, mx, my, inside) local(cx, cy, d0, d1, k, ag)
+(
+    ((uix_click1 || uix_click2) && inside && (mouse_cap & 4) && ms_S(e, ms_sPath)) ? (
+        ms_qk[v] = (uix_click1 ? 1 : 3) + ((mouse_cap & 8) ? 1 : 0); // (1 moved, 2 scaled, 3 turned, 4 turned and scaled)
+        ms_qb = uix_click1 ? 1 : 2; // (the button held)
+        ms_qx0 = mx; ms_qy0 = my;
+        ms_qtx = ms_S(e, ms_sTx); ms_qty = ms_S(e, ms_sTy); ms_qta = ms_S(e, ms_sTa);
+        ms_qtk = (ms_S(e, ms_sTk) > 0) ? ms_S(e, ms_sTk) : 1;
+    );
+    (ms_qk[v] > 0) ? (
+        (uix_mcap & ms_qb) ? (
+            k = ms_qk[v];
+            cx = ms_gx[v] + (0.5 + ms_qtx) * ms_gw[v]; cy = ms_gy[v] + (0.5 - ms_qty) * ms_gh[v];
+            (k === 1) ? (
+                ms_SSet(e, ms_sTx, max(-1, min(1, ms_qtx + (mx - ms_qx0) / max(1, ms_gw[v]))));
+                ms_SSet(e, ms_sTy, max(-1, min(1, ms_qty - (my - ms_qy0) / max(1, ms_gh[v]))));
+                ui_cursor_drag(8);
+            ) : (
+                d0 = sqrt(sqr(ms_qx0 - cx) + sqr(ms_qy0 - cy)); d1 = sqrt(sqr(mx - cx) + sqr(my - cy));
+                ((k === 2) || (k === 4)) ? ms_SSet(e, ms_sTk, max(0.1, min(10, ms_qtk * d1 / max(8, d0))));
+                ((k === 3) || (k === 4)) ? (
+                    // (the screen : y down, an angle growing clockwise, as Path turn)
+                    ag = ms_qta + (atan2(my - cy, mx - cx) - atan2(ms_qy0 - cy, ms_qx0 - cx)) * 180 / $pi;
+                    ag -= 360 * floor((ag + 180) / 360);
+                    ms_SSet(e, ms_sTa, floor(ag * 10 + 0.5) / 10);
+                );
+                ui_cursor_drag((k === 2) ? 12 : 2);
+            );
+            ms_qcx = cx; ms_qcy = cy; // (the centre, drawn during the drag)
+            ui_GFXdoNow |= 4;
+        ) : (
+            ms_qk[v] = 0; ui_GFXdoNow |= 4;
+        );
+    );
+    ms_qk[v] > 0;
+);
+
+// The mouse over the view v (x, y, w, h : screen pixels ; wheel : the wheel since the last frame) ; returns 1 when the wheel
+// was used. First the brush held (Play : not on the mouse ; Edit : shown) : a press on its cross moves it (Play : a clic,
+// not moved, attaches it again to the mouse, at its place) ; on its shape, its Offset and its Angle follow (the centre of the
+// brush around the cross) ; then the mode : Edit, the configurations ; Play, the brush follows the mouse
+function ms_Mouse(v, x, y, w, h, wheel) local(vw, e, b, mx, my, inside, p, c, i, rs, used, a, bd, u, q, hit, bp, tx, ty, vx, vy, off, pg)
+(
+    vw = ms_vw + v * MS_VS; e = vw[ms_vE]; b = ms_E(e);
+    rs = uix_drawconfig_current[9];
+    ms_Geo(v, e, x, y, w, h);
+    mx = mouse_x; my = mouse_y;
+    inside = (mx >= x) && (my >= y) && (mx < x + w) && (my < y + h);
+    a = max(0.5, min(4, ms_S(e, ms_sAspect))); bd = max(0, ms_S(e, ms_sBand));
+    u = (mx - ms_gx[v]) / max(1, ms_gw[v]); q = (my - ms_gy[v]) / max(1, ms_gh[v]);
+    // a view not drawn in the previous frame (another tab, another module) : no drag going on
+    (ms_seen[v] < gfx_executed - 1) ? (ms_md[v] = 0; ms_bd[v] = 0; ms_qk[v] = 0;);
+    ms_seen[v] = gfx_executed;
+    ms_hov[v] = inside ? ms_Pick(v, e, mx, my) : -1;
+    // (2026-11-23) the placement of the path : Cmd + drags
+    pg = ms_PlMouse(v, e, mx, my, inside);
+    // ---- the brush held
+    hit = (inside && ms_Held(v)) ? ms_BrushHit(v, e, mx, my) : 0;
+    ((hit === 1) && vw[ms_vMode] && ms_S(e, ms_sPath)) ? hit = 0; // (step 5 : on the path, its cross is not moved)
+    (uix_click1 && inside && !pg && !(uix_mcap & 2) && !(mouse_cap & 16) && (hit > 0)) ? (
+        ms_bd[v] = hit; ms_bmv = 0; ms_mx0 = mx; ms_my0 = my;
+        ms_gvx = ms_cx - u * a; ms_gvy = ms_cy - q;
+        ms_md[v] = 0;
+    );
+    bp = (ms_bd[v] > 0);
+    (bp && (uix_mcap & 1)) ? (
+        (!ms_bmv && (abs(mx - ms_mx0) + abs(my - ms_my0) > 3)) ? ms_bmv = 1;
+        ms_bmv ? (
+            (ms_bd[v] === 1) ? (
+                // the cross : the place of the brush (inside the surface and its band)
+                ms_Clamp(e, u, q, bd); ms_bx[v] = ms_cu; ms_by[v] = ms_cv;
+                ui_cursor_drag(8);
+            ) : (
+                // the shape : its centre from the cross, Offset (in radii, 2 at most) and Angle (from the vertical, clockwise)
+                tx = u * a + ms_gvx; ty = q + ms_gvy;
+                vx = tx - ms_bx[v] * a; vy = ty - ms_by[v];
+                ms_Brush(v, e);
+                off = min(2, sqrt(vx * vx + vy * vy) / max(0.0001, ms_BR));
+                ms_SSet(e, ms_sOffset, floor(100 * off + 0.5) / 100);
+                (off > 0.005) ? ms_SSet(e, ms_sAngle, ms_Wrap360(floor(ms_Wrap360(atan2(vx, -vy) * 180 / $pi - 360 * ms_ph[v]) + 0.5)));
+                ui_cursor_drag(2);
+            );
+            ui_GFXdoNow |= 4;
+        );
+    ) : bp ? (
+        // released : a clic on the cross of the brush held (Play) attaches it again to the mouse
+        ((ms_bd[v] === 1) && !ms_bmv && vw[ms_vMode]) ? ms_att[v] = 1;
+        ms_bd[v] = 0; ui_GFXdoNow |= 4;
+    );
+    // ---- the mode
+    (vw[ms_vMode] === 0) ? (
+        // Edit : a press of the left button (not with the right one), not on the brush
+        (uix_click1 && !bp && !pg) ? (
+            (inside && !(uix_mcap & 2)) ? (
+                ms_md[v] = 1; ms_dmv = 0; ms_dc = ms_hov[v]; ms_mx0 = mx; ms_my0 = my; ms_dalt = mouse_cap & 16;
+                vw[ms_vSel] = ms_dc;
+                (ms_dc >= 0) ? (ms_w0 = ms_Cv(e, ms_dc, 3));
+                ui_GFXdoNow |= 4;
+            ) : (
+                ms_md[v] = -1;
+            );
+        ) : ((uix_mcap & 1) && (ms_md[v] === 1) && (ms_dc >= 0) && (ms_dc < b[ms_eN])) ? (
+            (!ms_dmv && (abs(mx - ms_mx0) + abs(my - ms_my0) > 3)) ? ms_dmv = 1;
+            ms_dmv ? (
+                p = ms_C(e, ms_dc);
+                ms_dalt ? (
+                    // Alt : its weight (up : larger ; 80 pixels : x 2)
+                    p[3] = max(0.1, min(10, ms_w0 * 2 ^ ((ms_my0 - my) / (80 * rs))));
+                    ui_cursor_drag(12);
+                ) : (
+                    ms_Clamp(e, u, q, 0); p[1] = ms_cu; p[2] = ms_cv;
+                    ui_cursor_drag(8);
+                );
+                ms_drag = 1;
+                ms_seq[e] += 1; ui_GFXdoNow |= 4;
+            );
+        ) : !(uix_mcap & 1) ? (
+            (ms_md[v] !== 0) ? (ms_md[v] = 0; ms_drag = 0; ui_GFXdoNow |= 4;);
+        );
+        // a right clic (Shift + right clic : the Studio menu, left to the host) : on a configuration, its menu ; on the
+        // surface, add one there
+        (uix_click2 && inside && !pg && !(mouse_cap & 8)) ? (
+            ((i = ms_hov[v]) >= 0) ? (
+                vw[ms_vSel] = i;
+                ms_CfMenu(v, e, i);
+            ) : ms_InUV(e, u, q, 0) ? (
+                (b[ms_eN] >= MS_MAXC) ? (
+                    sprintf(#ms_msg, "MetaSurface MS%d : %d configurations at most", e + 1, MS_MAXC); mSL_log(SysLogBox, #ms_msg);
+                ) : (
+                    sprintf(#ms_t3, "#Add a configuration here (MS%d)", e + 1);
+                    ((c = ms_ConfMenu(#ms_t3, 0)) > 0) ? (vw[ms_vSel] = ms_Add(e, c, u, q));
+                );
+            );
+            ui_GFXdoNow |= 4;
+        );
+    ) : (
+        // Play (2026-11-23, step 2) : the brush follows the mouse inside the surface and its band, unless it is held
+        // (Alt + clic : held, or attached again ; a clic on its cross : attached again) ; the mouse elsewhere : it stays
+        ms_md[v] = 0; ms_drag = 0;
+        (uix_click1 && inside && !pg && (mouse_cap & 16)) ? (ms_att[v] = !ms_att[v]; ui_GFXdoNow |= 4;);
+        // (step 3) a clic on the surface or its band (not Alt, not on the brush held) : left, start with a fade-in / stop
+        // with a fade-out ; right (Shift + right : the Studio menu), start / stop at once (5 ms)
+        ms_InUV(e, u, q, bd) ? (
+            (uix_click1 && inside && !pg && !(uix_mcap & 2) && !(mouse_cap & 16) && !bp) ? (ms_Toggle(v, e, 1); ui_GFXdoNow |= 4;);
+            (uix_click2 && inside && !pg && !(mouse_cap & 8)) ? (ms_Toggle(v, e, 0); ui_GFXdoNow |= 4;);
+        );
+        (ms_att[v] && !bp && !ms_S(e, ms_sPath) && ms_InUV(e, u, q, bd)) ? (ms_bx[v] = u; ms_by[v] = q;);
+        inside ? uix_jmove = 1; // (drawn again when the mouse moves, see must_do_gfx)
+    );
+    // the wheel (the brush shown) : Spread (Shift : Power)
+    (inside && (wheel != 0) && ms_Shown(v)) ? (
+        (mouse_cap & 8) ? ms_SSet(e, ms_sPower, max(-1, min(1, ms_S(e, ms_sPower) + wheel / 1200))) :
+            ms_SSet(e, ms_sSpread, max(0.01, min(1, ms_S(e, ms_sSpread) * exp(wheel / 1000))));
+        used = 1; ui_GFXdoNow |= 4;
+    );
+    used;
+);
+
+// The rename of a MetaSurface (the prompt of ui-lib, see ed_Prompt)
+function ms_Prompt(v)
+(
+    ms_pend = v + 1;
+    ms_Name(ms_VGet(v, ms_vE), #ms_prm);
+    ui_screen_open("control.prompt");
+    ui_screen_arg(0, #ms_prm);
+    ui_screen_arg(1, "The name of the MetaSurface");
+);
+function ms_Prompted()
+(
+    ((ms_pend > 0) && !(ui_screen() == "control.prompt")) ? (
+        ms_SetName(ms_VGet(ms_pend - 1, ms_vE), #ms_prm);
+        ms_pend = 0;
+    );
+);
+
+// The pad of the views (shared : its labels are set before each drawing) : line 1 the surface, line 2 the brush (step 2),
+// line 3 the sound (step 3), line 4 the trajectory (step 5), line 5 the placement of the path (2026-11-23)
+MS_PSIZ = 40;
+pad_MSV = make_jpad(ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors, 5, 8, MS_PSIZ);
+pad_MSV_Labs = pad_MSV + pad_MSV[ui_jpad_labs];
+pad_MSV_Colrs = pad_MSV + pad_MSV[ui_jpad_clrs];
+i__k = 0; loop(MS_PSIZ, pad_MSV_Colrs[i__k] = Col_Inactive; pad_MSV_Labs[i__k] = ""; i__k += 1;);
+
+// The cells of values : 4 the band, 6 the weight of the configuration selected, 8 ... 14 the brush (Spread, Power, Shape,
+// Stretch, Offset, Rotation, Angle), 16 Volume (dB), 17 Latency (ms), 19 Attack, 20 Release (s) : their value for a drag (ms_DV), back to the setting (ms_DSet), their range (ms_DRange :
+// ms_lo, ms_hi ; 0 : not a cell of value), their default (ms_DDef), their menu (ms_ml[c] : its items, ms_vv : their values ;
+// 2026-11-23 : it was ms_mv, the name of the motion too) ; 32 ... 35 the placement of the path (x %, y %, turn, scale)
+function ms_DV(v, e, c) local(i)
+(
+    i = ms_VGet(v, ms_vSel);
+    (c === 4) ? 100 * ms_S(e, ms_sBand) : (c === 6) ? max(0.1, min(10, ms_Cv(e, i, 3))) :
+    (c === 8) ? 100 * ms_S(e, ms_sSpread) : (c === 9) ? 100 * ms_S(e, ms_sPower) : (c === 10) ? 100 * ms_S(e, ms_sShape) :
+    (c === 11) ? max(0.1, min(10, ms_S(e, ms_sStretch))) : (c === 12) ? 100 * ms_S(e, ms_sOffset) :
+    (c === 13) ? 100 * ms_S(e, ms_sRot) : (c === 14) ? ms_S(e, ms_sAngle) :
+    (c === 16) ? ms_S(e, ms_sVol) : (c === 17) ? max(5, ms_S(e, ms_sLat)) : (c === 19) ? max(0.01, ms_S(e, ms_sAtt)) :
+    (c === 20) ? max(0.01, ms_S(e, ms_sRel)) : (c === 26) ? max(0.5, ms_S(e, ms_sDur)) :
+    (c === 32) ? 100 * ms_S(e, ms_sTx) : (c === 33) ? 100 * ms_S(e, ms_sTy) : (c === 34) ? ms_S(e, ms_sTa) :
+    (c === 35) ? ((ms_S(e, ms_sTk) > 0) ? max(0.1, min(10, ms_S(e, ms_sTk))) : 1) : 0;
+);
+function ms_DSet(v, e, c, x) local(i)
+(
+    i = ms_VGet(v, ms_vSel);
+    (c === 4) ? (ms_SSet(e, ms_sBand, max(0, min(50, floor(x + 0.5))) / 100); ms_seq[e] += 1;) :
+    (c === 6) ? (((i >= 0) && (i < ms_N(e))) ? ms_CSet(e, i, 3, max(0.1, min(10, x)))) :
+    (c === 8) ? ms_SSet(e, ms_sSpread, max(1, min(100, floor(x + 0.5))) / 100) :
+    (c === 9) ? ms_SSet(e, ms_sPower, max(-100, min(100, floor(x + 0.5))) / 100) :
+    (c === 10) ? ms_SSet(e, ms_sShape, max(0, min(200, floor(x + 0.5))) / 100) :
+    (c === 11) ? ms_SSet(e, ms_sStretch, max(0.1, min(10, x))) :
+    (c === 12) ? ms_SSet(e, ms_sOffset, max(0, min(200, floor(x + 0.5))) / 100) :
+    (c === 13) ? ms_SSet(e, ms_sRot, max(-400, min(400, floor(x + 0.5))) / 100) :
+    (c === 14) ? ms_SSet(e, ms_sAngle, ms_Wrap360(floor(x + 0.5))) :
+    (c === 16) ? ms_SSet(e, ms_sVol, max(-60, min(12, floor(x + 0.5)))) :
+    (c === 17) ? ms_SSet(e, ms_sLat, max(5, min(2000, floor(x + 0.5)))) :
+    (c === 19) ? ms_SSet(e, ms_sAtt, max(0.01, min(60, x))) :
+    (c === 20) ? ms_SSet(e, ms_sRel, max(0.01, min(60, x))) :
+    (c === 26) ? ms_SSet(e, ms_sDur, max(0.5, min(600, x))) :
+    (c === 32) ? ms_SSet(e, ms_sTx, max(-100, min(100, floor(x + 0.5))) / 100) :
+    (c === 33) ? ms_SSet(e, ms_sTy, max(-100, min(100, floor(x + 0.5))) / 100) :
+    (c === 34) ? ms_SSet(e, ms_sTa, floor(x + 0.5) - 360 * floor((floor(x + 0.5) + 180) / 360)) : // (-180 ... 180, the drag goes on)
+    (c === 35) ? ms_SSet(e, ms_sTk, max(0.1, min(10, x)));
+    ui_GFXdoNow |= 4;
+);
+function ms_DRange(c)
+(
+    (c === 4) ? (ms_lo = 0; ms_hi = 50;) : (c === 6) ? (ms_lo = 0.1; ms_hi = 10;) : (c === 8) ? (ms_lo = 1; ms_hi = 100;) :
+    (c === 9) ? (ms_lo = -100; ms_hi = 100;) : (c === 10) ? (ms_lo = 0; ms_hi = 200;) : (c === 11) ? (ms_lo = 0.1; ms_hi = 10;) :
+    (c === 12) ? (ms_lo = 0; ms_hi = 200;) : (c === 13) ? (ms_lo = -400; ms_hi = 400;) :
+    // (2026-11-23, the user : the angles turn on as long as the mouse moves : 100 turns, wrapped by ms_DSet)
+    ((c === 14) || (c === 34)) ? (ms_lo = -36000; ms_hi = 36000;) :
+    (c === 16) ? (ms_lo = -60; ms_hi = 12;) : (c === 17) ? (ms_lo = 5; ms_hi = 2000;) :
+    ((c === 19) || (c === 20)) ? (ms_lo = 0.01; ms_hi = 60;) : (c === 26) ? (ms_lo = 0.5; ms_hi = 600;) :
+    ((c === 32) || (c === 33)) ? (ms_lo = -100; ms_hi = 100;) :
+    (c === 35) ? (ms_lo = 0.1; ms_hi = 10;) :
+    (ms_lo = ms_hi = 0;);
+    ms_hi > ms_lo;
+);
+function ms_DDef(c) ( (c === 4) ? 8 : (c === 8) ? 15 : ((c === 6) || (c === 11) || (c === 35)) ? 1 : (c === 17) ? 80 : (c === 19) ? 2 : (c === 20) ? 4 : (c === 26) ? 20 : 0; );
+// the cells dragged continuously, logarithmic (the others : integers)
+function ms_DLog(c) ( (c === 6) || (c === 11) || (c === 17) || (c === 19) || (c === 20) || (c === 26) || (c === 35); );
+MS_MVW = 10;
+ms_vv = make_array(MS_PSIZ * MS_MVW); ms_mn = make_array(MS_PSIZ); ms_ml = make_array(MS_PSIZ);
+function ms_MVSet(c, list, n, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9) local(q)
+(
+    ms_ml[c] = list; ms_mn[c] = n; q = ms_vv + c * MS_MVW;
+    q[0] = a0; q[1] = a1; q[2] = a2; q[3] = a3; q[4] = a4; q[5] = a5; q[6] = a6; q[7] = a7; q[8] = a8; q[9] = a9;
+);
+ms_MVSet(4, "0 %|4 %|8 %|12 %|16 %|25 %|33 %|50 %", 8, 0, 4, 8, 12, 16, 25, 33, 50, 0, 0);
+ms_MVSet(6, "0.25|0.5|0.75|1|1.5|2|3|4", 8, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 0, 0);
+ms_MVSet(8, "2 %|5 %|10 %|15 %|20 %|30 %|50 %|75 %|100 %", 9, 2, 5, 10, 15, 20, 30, 50, 75, 100, 0);
+ms_MVSet(9, "-1 : wide|-0.5|0 : a cone|0.5|1 : near the centre", 5, -100, -50, 0, 50, 100, 0, 0, 0, 0, 0);
+ms_MVSet(10, "Circle|Circle - square|Square|Square - cross|Cross", 5, 0, 50, 100, 150, 200, 0, 0, 0, 0, 0);
+ms_MVSet(11, "0.1|0.25|0.5|0.75|1|1.5|2|4|10", 9, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 4, 10, 0);
+ms_MVSet(12, "0 %|10 %|25 %|50 %|75 %|100 %|150 %|200 %", 8, 0, 10, 25, 50, 75, 100, 150, 200, 0, 0);
+ms_MVSet(13, "-1|-0.5|-0.25|-0.1|Off|0.1|0.25|0.5|1|2", 10, -100, -50, -25, -10, 0, 10, 25, 50, 100, 200);
+ms_MVSet(14, "0|45|90|135|180|225|270|315", 8, 0, 45, 90, 135, 180, 225, 270, 315, 0, 0);
+ms_MVSet(16, "-24 dB|-18 dB|-12 dB|-6 dB|-3 dB|0 dB|+3 dB|+6 dB", 8, -24, -18, -12, -6, -3, 0, 3, 6, 0, 0);
+ms_MVSet(17, "5 ms|20 ms|50 ms|80 ms|150 ms|300 ms|600 ms|1 s|2 s", 9, 5, 20, 50, 80, 150, 300, 600, 1000, 2000, 0);
+ms_MVSet(19, "0.05 s|0.2 s|0.5 s|1 s|2 s|4 s|8 s|15 s|30 s", 9, 0.05, 0.2, 0.5, 1, 2, 4, 8, 15, 30, 0);
+ms_MVSet(20, "0.05 s|0.2 s|0.5 s|1 s|2 s|4 s|8 s|15 s|30 s", 9, 0.05, 0.2, 0.5, 1, 2, 4, 8, 15, 30, 0);
+ms_MVSet(26, "5 s|10 s|20 s|30 s|1 min|2 min|5 min|10 min", 8, 5, 10, 20, 30, 60, 120, 300, 600, 0, 0);
+ms_MVSet(32, "-50 %|-25 %|-10 %|0 %|10 %|25 %|50 %", 7, -50, -25, -10, 0, 10, 25, 50, 0, 0, 0);
+ms_MVSet(33, "-50 %|-25 %|-10 %|0 %|10 %|25 %|50 %", 7, -50, -25, -10, 0, 10, 25, 50, 0, 0, 0);
+ms_MVSet(34, "-135|-90|-45|-15|0|15|45|90|135|180", 10, -135, -90, -45, -15, 0, 15, 45, 90, 135, 180);
+ms_MVSet(35, "0.25|0.5|0.75|0.9|1|1.1|1.25|1.5|2|4", 10, 0.25, 0.5, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 2, 4);
+// the menu of the values of the cell c : the value chosen set
+function ms_ValMenu(v, e, c) local(m, k, x, q)
+(
+    q = ms_vv + c * MS_MVW; x = ms_DV(v, e, c); k = -1;
+    m = 0; loop(ms_mn[c], (abs(q[m] - x) < 0.01) ? k = m; m += 1;);
+    ((m = prv_Menu(ms_ml[c], ms_mn[c], k)) >= 0) ? ms_DSet(v, e, c, q[m]);
+);
+
+// (step 5) The sources of the trajectories : the menu (cur checked ; returns the source chosen, -1 : none chosen), the next
+// one defined (d : 1 or -1)
+function ms_TrMenu(cur) local(k, m, n, c)
+(
+    sprintf(#ms_mnu, "#The path of the brush|%snone|>Editors (live)", (cur === 0) ? "!" : "");
+    k = 0; loop(4, sprintf(#ms_it, "|%s%sEdit %c", (k === 3) ? "<" : "", (cur === 129 + k) ? "!" : "", 'A' + k); strcat(#ms_mnu, #ms_it); k += 1;);
+    n = 0; k = 0; loop(SP_NTRJ, (sp_trN[k] > 0) ? n += 1; k += 1;);
+    (n > 0) ? (
+        strcat(#ms_mnu, "|>Library"); c = 0; k = 0;
+        loop(SP_NTRJ,
+            (sp_trN[k] > 0) ? (
+                c += 1; ms_TrName(k + 1, #ms_t3);
+                sprintf(#ms_it, "|%s%s%s", (c === n) ? "<" : "", (cur === k + 1) ? "!" : "", #ms_t3); strcat(#ms_mnu, #ms_it);
+                ms_map[6 + c] = k + 1;
+            );
+            k += 1;
+        );
+    ) : strcat(#ms_mnu, "|#Library : empty");
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#ms_mnu);
+    prv_MenuEnd(m > 0);
+    (m === 2) ? 0 : ((m >= 3) && (m <= 6)) ? 129 + m - 3 : ((m >= 7) && (n > 0) && (m <= 6 + n)) ? ms_map[m] : -1;
+);
+function ms_TrNext(cur, d) local(k, i, r)
+(
+    // the order : none, Edit A ... D, then the trajectories of the library defined
+    r = -1; i = 0; k = cur;
+    while ((r < 0) && (i < 133)) (
+        k = (d > 0) ? ((k === 0) ? 129 : (k === 132) ? 1 : (k >= 129) ? k + 1 : (k >= SP_NTRJ) ? 0 : k + 1) :
+                      ((k === 0) ? SP_NTRJ : (k === 1) ? 132 : (k === 129) ? 0 : k - 1);
+        ((k === 0) || ((k >= 129) && (k <= 132)) || ((k >= 1) && (k <= SP_NTRJ) && (sp_trN[k - 1] > 0))) ? r = k;
+        i += 1;
+    );
+    (r < 0) ? 0 : r;
+);
+
+// The cell c of the pad of the view v clicked (ev : the event of the pad)
+function ms_PadCell(v, c, ev) local(vw, e, b, s, rc, sh, m, k, i, p)
+(
+    vw = ms_vw + v * MS_VS; e = vw[ms_vE]; b = ms_E(e); s = b + ms_eSet;
+    rc = ev & ui_jpad_ev_rmc; sh = mouse_cap & 8;
+    (c === 0) ? (
+        // the MetaSurface shown : left, the next one (Shift : the previous one) ; right, the menu of the library
+        rc ? (
+            ((m = ms_LibMenu("#The MetaSurface shown", e)) >= 0) ? (vw[ms_vE] = m; vw[ms_vSel] = -1;);
+        ) : (
+            vw[ms_vE] = (e + (sh ? MS_NLIB - 1 : 1)) % MS_NLIB; vw[ms_vSel] = -1;
+        );
+    ) :
+    (c === 1) ? (
+        vw[ms_vMode] = !vw[ms_vMode]; vw[ms_vSel] = vw[ms_vMode] ? -1 : vw[ms_vSel];
+    ) :
+    (c === 3) ? (
+        // the aspect of the surface : left, the next one (Shift : the previous one) ; right, the menu : the aspects, the turns
+        // of the surface (its configurations with it), its shape (step 5)
+        k = ms_AspK(s[ms_sAspect]);
+        rc ? (
+            strcpy(#ms_mnu, "#The surface");
+            i = 0; loop(MS_NASP, sx_Nth(MS_ASP, i, #ms_t3); sprintf(#ms_it, "|%s%s", (i === k) ? "!" : "", #ms_t3); strcat(#ms_mnu, #ms_it); i += 1;);
+            sprintf(#ms_it, "||Rotate 90° clockwise|Rotate 90° counterclockwise|Flip up - down|Flip left - right||%sRectangle|%sDisk (an ellipse when not square)",
+                s[ms_sSurf] ? "" : "!", s[ms_sSurf] ? "!" : "");
+            strcat(#ms_mnu, #ms_it);
+            gfx_x = mouse_x; gfx_y = mouse_y;
+            m = gfx_showmenu(#ms_mnu);
+            prv_MenuEnd(m > 0);
+            ((m >= 2) && (m < 2 + MS_NASP)) ? (s[ms_sAspect] = ms_Aspect(m - 2); ms_seq[e] += 1;) :
+            ((m >= 2 + MS_NASP) && (m < 6 + MS_NASP)) ? ms_Turn(e, m - 1 - MS_NASP) :
+            (m === 6 + MS_NASP) ? (s[ms_sSurf] = 0; ms_seq[e] += 1;) :
+            (m === 7 + MS_NASP) ? (s[ms_sSurf] = 1; ms_ClampAll(e); ms_seq[e] += 1;);
+        ) : (
+            s[ms_sAspect] = ms_Aspect((k + (sh ? MS_NASP - 1 : 1)) % MS_NASP); ms_seq[e] += 1;
+        );
+    ) :
+    ((c === 4) || ((c >= 8) && (c <= 14)) || (c === 16) || (c === 17) || (c === 19) || (c === 20) || (c === 26) ||
+        ((c >= 32) && (c <= 35))) ? (
+        // the band, the brush, the sound, the duration, the placement of the path (left : a drag, see ms_Drag ; Shift + left :
+        // the default ; right : the menu of the values)
+        rc ? ms_ValMenu(v, e, c) : sh ? ((c === 13) ? ms_RotToggle(e) : ms_DSet(v, e, c, ms_DDef(c))); // (Rotation : Off and back)
+    ) :
+    (c === 24) ? (
+        // (step 5) the brush on the mouse or on the path
+        ms_SSet(e, ms_sPath, !ms_S(e, ms_sPath)); ms_mv[v] = ms_msim[v] = 0;
+    ) :
+    (c === 25) ? (
+        // the path : left, the next source defined (Shift : the previous one) ; right, the menu
+        rc ? (
+            ((m = ms_TrMenu(ms_S(e, ms_sTraj))) >= 0) ? ms_SSet(e, ms_sTraj, m);
+        ) : (
+            ms_SSet(e, ms_sTraj, ms_TrNext(ms_S(e, ms_sTraj), sh ? -1 : 1));
+        );
+    ) :
+    (c === 27) ? (
+        // the motion : Once, Loop, Back and forth, Loop reverse (2026-11-23)
+        rc ? (((m = prv_Menu("Once|Loop|Back and forth|Loop reverse", 4, ms_S(e, ms_sLoop))) >= 0) ? ms_SSet(e, ms_sLoop, m);) :
+            ms_SSet(e, ms_sLoop, (ms_S(e, ms_sLoop) + (sh ? 3 : 1)) % 4);
+    ) :
+    (c === 28) ? (
+        // the speed : constant along the path, or the same time between its points
+        ms_SSet(e, ms_sSpeedM, !ms_S(e, ms_sSpeedM));
+    ) :
+    (c === 29) ? (
+        // the simulation : the brush on the path without sound (Play, the brush on the path)
+        (vw[ms_vMode] && ms_S(e, ms_sPath)) ? (
+            ms_msim[v] ? (ms_msim[v] = 0) : (ms_msim[v] = 1; ms_MoveStart(v););
+        ) : (
+            sprintf(#ms_msg, "MetaSurface %c : Simulate needs Play and the brush on the path", 'A' + v); mSL_log(SysLogBox, #ms_msg);
+        );
+    ) :
+    (c === 30) ? (
+        // the recording of the brush (Play, the brush on the mouse) : started, ended (a trajectory of the library)
+        ms_rec[v] ? ms_RecEnd(v, e) : (vw[ms_vMode] && !ms_S(e, ms_sPath)) ? ms_RecStart(v) : (
+            sprintf(#ms_msg, "MetaSurface %c : Record needs Play and the brush on the mouse", 'A' + v); mSL_log(SysLogBox, #ms_msg);
+        );
+    ) :
+    (c === 18) ? (
+        // the rule of the latency : fixed, or for each tenth of the diagonal moved
+        ms_SSet(e, ms_sLatMode, !ms_S(e, ms_sLatMode));
+    ) :
+    (c === 22) ? (
+        // (2026-11-23, the user) the pause : the motion along the path and the rotation stopped, the sound going on
+        ms_PauseSet(v, !ms_pz[v]);
+    ) :
+    (c === 36) ? (
+        // (2026-11-23, the user) the placement of the path : a menu on both clics
+        sprintf(#ms_mnu, "#The placement of the path (MS%d)|Reset all|Reset the position|Reset the rotation|Reset the scale||Centre the path on the surface|Fit the path to the surface", e + 1);
+        gfx_x = mouse_x; gfx_y = mouse_y;
+        m = gfx_showmenu(#ms_mnu);
+        prv_MenuEnd(m > 0);
+        ((m === 2) || (m === 3)) ? (ms_SSet(e, ms_sTx, 0); ms_SSet(e, ms_sTy, 0););
+        ((m === 2) || (m === 4)) ? ms_SSet(e, ms_sTa, 0);
+        ((m === 2) || (m === 5)) ? ms_SSet(e, ms_sTk, 1);
+        (m === 6) ? ms_PlFit(v, e, 0) : (m === 7) ? ms_PlFit(v, e, 1);
+    ) :
+    (c === 21) ? (
+        // the sound : left, start with a fade-in / stop with a fade-out ; right, at once (as the clics on the surface, Play)
+        vw[ms_vMode] ? ms_Toggle(v, e, !rc);
+    ) :
+    (c === 15) ? (
+        // the brush : Play, on the mouse or held where it is (as Alt + clic on the surface) ; Edit, shown (held : moved by its
+        // cross, its shape) or hidden
+        vw[ms_vMode] ? (ms_att[v] = !ms_att[v]) : (vw[ms_vBrush] = !vw[ms_vBrush]);
+    ) :
+    (c === 5) ? (
+        // the projector driven (from step 3)
+        rc ? (
+            strcpy(#ms_t3, ""); i = 1; loop(projucnt, sprintf(#ms_it, (i === 1) ? "P%d" : "|P%d", i); strcat(#ms_t3, #ms_it); i += 1;);
+            ((m = prv_Menu(#ms_t3, projucnt, s[ms_sProj] - 1)) >= 0) ? (s[ms_sProj] = m + 1);
+        ) : (
+            s[ms_sProj] = (sh ? s[ms_sProj] + projucnt - 2 : s[ms_sProj]) % projucnt + 1;
+        );
+        b[ms_eUsed] = 1;
+    ) :
+    (c === 6) ? (
+        // the weight of the configuration selected (left : a drag ; Shift + left : 1 ; right : its menu)
+        i = vw[ms_vSel];
+        ((i >= 0) && (i < b[ms_eN])) ? (
+            rc ? ms_CfMenu(v, e, i) : sh ? ms_CSet(e, i, 3, 1);
+        );
+    ) :
+    (c === 7) ? (
+        // Actions
+        i = vw[ms_vSel];
+        sprintf(#ms_mnu, "#Actions (MS%d)|Rename...|>Duplicate into", e + 1);
+        k = 0;
+        loop(MS_NLIB,
+            ms_Label(k, #ms_t2);
+            sprintf(#ms_it, "|%s%s%s%s", (k === MS_NLIB - 1) ? "<" : "", (k === e) ? "#" : "", #ms_t2,
+                (ms_N(k) > 0) ? "  (replaced)" : "");
+            strcat(#ms_mnu, #ms_it);
+            k += 1;
+        );
+        sprintf(#ms_it, "||%sRemove the configuration selected|%sRemove all the configurations|Clear (configurations, name, settings)",
+            ((i >= 0) && (i < b[ms_eN])) ? "" : "#", (b[ms_eN] > 0) ? "" : "#");
+        strcat(#ms_mnu, #ms_it);
+        gfx_x = mouse_x; gfx_y = mouse_y;
+        m = gfx_showmenu(#ms_mnu);
+        prv_MenuEnd(m > 0);
+        (m === 2) ? ms_Prompt(v) :
+        ((m >= 3) && (m < 3 + MS_NLIB)) ? (
+            k = m - 3;
+            (k !== e) ? (memcpy(ms_E(k), ms_E(e), MS_ES); ms_seq[k] += 1; vw[ms_vE] = k; vw[ms_vSel] = -1;);
+        ) :
+        (m === 3 + MS_NLIB) ? (ms_Del(e, i); vw[ms_vSel] = -1;) :
+        (m === 4 + MS_NLIB) ? (memset(ms_C(e, 0), 0, 4 * MS_MAXC); b[ms_eN] = 0; ms_seq[e] += 1; vw[ms_vSel] = -1;) :
+        (m === 5 + MS_NLIB) ? (ms_Clear(e); vw[ms_vSel] = -1;);
+    );
+    ui_GFXdoNow |= 4;
+);
+// The cells of values of the pad of the view v : a drag (the band, the weight of the configuration selected, the brush)
+function ms_Drag(blockId, v, c) local(e, i, d)
+(
+    e = ms_VGet(v, ms_vE); i = ms_VGet(v, ms_vSel);
+    (ui_jdrag_can_start() && ms_DRange(c) && ((c !== 6) || ((i >= 0) && (i < ms_N(e))))) ? (
+        // (the weight, Stretch, Latency, Attack, Release : continuous, logarithmic ; the others : integers, see ms_DV)
+        ui_jdrag_start(blockId + 0.25, c, ms_DV(v, e, c), ms_lo, ms_hi, (c === 13) ? 600 : ((c === 14) || (c === 34)) ? 72000 : 300,
+            ms_DLog(c) ? 1 : 2); // (the angles : 1 degree per pixel)
+    );
+    d = ui_jdrag(blockId + 0.25);
+    ((d & 1) && ms_DRange(ui_jdrag_cell)) ? ms_DSet(v, e, ui_jdrag_cell, ui_jdrag_v);
+    d;
+);
+
+// The module "MetaSurface A" ... "D" (view v)
+function show_MetaSurface_Pad(blockId, v) local(h1, hv, hneed, zzmi, zz, c, dr, x, y, w, h, vw, e, b, s, i, n)
+(
+    ms_Prompted();
+    vw = ms_vw + v * MS_VS; e = vw[ms_vE]; b = ms_E(e); s = b + ms_eSet; n = b[ms_eN];
+    (vw[ms_vSel] >= n) ? vw[ms_vSel] = -1;
+    h1 = uix_jpadHeight(5);
+    hv = max(160, min(ui_width() * 0.62, ui_height() - h1 - ui_jd_ctgr - 8));
+    hneed = h1 + hv + ui_jd_ctgr + 8;
+    (ui_height() >= hneed) ? (
+        ui_split_top(hneed);
+            zzmi = ui_hover();
+            keepBlockInfos(blockId);
+            (zzmi) ? (
+                ui_push();
+                    ui_color(Col_Frame);
+                    ui_border();
+                ui_pop();
+            );
+            sprintf(#ms_ttl, "MetaSurface %c", 'A' + v);
+            control_group(#ms_ttl);
+            ui_pad(0, ui_cg_pad_top, 0, ui_cg_pad_bottom);
+            ui_split_top(h1);
+                ui_pad(1, 2, 2, 2);
+                mSL_setStrArray(pad_MSV_Labs, MS_PSIZ);
+                ms_Label(e, pad_MSV_Labs[0]);
+                strcpy(pad_MSV_Labs[1], vw[ms_vMode] ? "Play" : "Edit");
+                sprintf(pad_MSV_Labs[2], (n === 1) ? "1 configuration" : "%d configurations", n);
+                sx_Nth(MS_ASP, ms_AspK(s[ms_sAspect]), #ms_t3); sprintf(pad_MSV_Labs[3], s[ms_sSurf] ? "Aspect %s disk" : "Aspect %s", #ms_t3);
+                sprintf(pad_MSV_Labs[4], "Band %d %%", floor(s[ms_sBand] * 100 + 0.5));
+                sprintf(pad_MSV_Labs[5], "Projector %d", s[ms_sProj]);
+                i = vw[ms_vSel];
+                ((i >= 0) && (i < n)) ? sprintf(pad_MSV_Labs[6], "%d : weight %.2f", ms_Cv(e, i, 0), ms_Cv(e, i, 3)) :
+                    strcpy(pad_MSV_Labs[6], "No selection");
+                strcpy(pad_MSV_Labs[7], "Actions");
+                // line 2 : the brush (step 2)
+                sprintf(pad_MSV_Labs[8], "Spread %d %%", floor(100 * s[ms_sSpread] + 0.5));
+                (s[ms_sPower] === 0) ? strcpy(pad_MSV_Labs[9], "Power : cone") :
+                    sprintf(pad_MSV_Labs[9], (s[ms_sPower] > 0) ? "Power +%.2f" : "Power %.2f", s[ms_sPower]);
+                (s[ms_sShape] === 0) ? strcpy(pad_MSV_Labs[10], "Shape : circle") :
+                (s[ms_sShape] === 1) ? strcpy(pad_MSV_Labs[10], "Shape : square") :
+                (s[ms_sShape] === 2) ? strcpy(pad_MSV_Labs[10], "Shape : cross") : sprintf(pad_MSV_Labs[10], "Shape %.2f", s[ms_sShape]);
+                sprintf(pad_MSV_Labs[11], "Stretch %.2f", s[ms_sStretch]);
+                sprintf(pad_MSV_Labs[12], "Offset %d %%", floor(100 * s[ms_sOffset] + 0.5));
+                (s[ms_sRot] !== 0) ? sprintf(pad_MSV_Labs[13], "Rotation %.2f t/s", s[ms_sRot]) :
+                (s[ms_sRotMem] !== 0) ? sprintf(pad_MSV_Labs[13], "Rotation : off (%.2f)", s[ms_sRotMem]) :
+                    strcpy(pad_MSV_Labs[13], "Rotation : off");
+                sprintf(pad_MSV_Labs[14], "Angle %d deg", floor(s[ms_sAngle] + 0.5));
+                vw[ms_vMode] ? strcpy(pad_MSV_Labs[15], ms_att[v] ? "Brush : mouse" : "Brush : held") :
+                    strcpy(pad_MSV_Labs[15], vw[ms_vBrush] ? "Brush : shown" : "Brush : hidden");
+                ms_Shown(v) ? (sprintf(#ms_t3, ", %d %%", floor(100 * ms_cov[v] + 0.5)); strcat(pad_MSV_Labs[15], #ms_t3););
+                // line 3 : the sound (step 3)
+                sprintf(pad_MSV_Labs[16], (s[ms_sVol] > 0) ? "Volume +%d dB" : "Volume %d dB", s[ms_sVol]);
+                sprintf(pad_MSV_Labs[17], s[ms_sLatMode] ? "Latency %d ms / 10 %%" : "Latency %d ms", s[ms_sLat]);
+                strcpy(pad_MSV_Labs[18], s[ms_sLatMode] ? "Rule : distance" : "Rule : fixed"); // (2026-11-23, the user)
+                sprintf(pad_MSV_Labs[19], "Attack %.2f s", s[ms_sAtt]);
+                sprintf(pad_MSV_Labs[20], "Release %.2f s", s[ms_sRel]);
+                strcpy(pad_MSV_Labs[21], (ms_st[v] === 1) ? "Fade-in" : (ms_st[v] === 2) ? "On" : (ms_st[v] === 3) ? "Fade-out" : "Off");
+                (ms_ownp[v] > 0) ? (sprintf(#ms_t3, " : P%d", ms_ownp[v]); strcat(pad_MSV_Labs[21], #ms_t3););
+                strcpy(pad_MSV_Labs[22], ms_pz[v] ? "Paused" : "Pause"); // (2026-11-23, the user)
+                i = 8; loop(15, pad_MSV_Colrs[i] = Col_P1; i += 1;);
+                pad_MSV_Colrs[21] = vw[ms_vMode] ? Col_P1 : Col_Inactive; // (Edit : no sound)
+                // line 4 : the trajectory (step 5)
+                strcpy(pad_MSV_Labs[24], s[ms_sPath] ? "Brush : path" : "Brush : mouse");
+                strcpy(pad_MSV_Labs[25], "Path : "); strcat(pad_MSV_Labs[25], ms_TrName(s[ms_sTraj], #ms_t3));
+                (s[ms_sDur] >= 60) ? sprintf(pad_MSV_Labs[26], "Duration %.1f min", s[ms_sDur] / 60) : sprintf(pad_MSV_Labs[26], "Duration %.1f s", s[ms_sDur]);
+                strcpy(pad_MSV_Labs[27], (s[ms_sLoop] === 0) ? "Once" : (s[ms_sLoop] === 1) ? "Loop" : (s[ms_sLoop] === 3) ? "Loop reverse" : "Back and forth");
+                strcpy(pad_MSV_Labs[28], s[ms_sSpeedM] ? "Speed : points" : "Speed : path");
+                strcpy(pad_MSV_Labs[29], "Simulate");
+                ms_rec[v] ? sprintf(pad_MSV_Labs[30], "Recording %.1f s", ms_rn[v] * MS_RDT) : strcpy(pad_MSV_Labs[30], "Record");
+                // (2026-11-23, the user : the place on the path, in seconds, and the direction)
+                ms_mv[v] ? sprintf(pad_MSV_Labs[31], (ms_mdr[v] > 0) ? "%.1f / %.1f s >" : "< %.1f / %.1f s", ms_mpr[v] * s[ms_sDur], s[ms_sDur]) :
+                    strcpy(pad_MSV_Labs[31], "-");
+                i = 24; loop(7, pad_MSV_Colrs[i] = Col_P1; i += 1;);
+                pad_MSV_Colrs[31] = Col_InfoA;
+                // (no path : its settings dim ; Simulate : Play and the path ; Record : Play and the mouse)
+                (!s[ms_sPath]) ? (i = 25; loop(5, pad_MSV_Colrs[i] = Col_Inactive; i += 1;););
+                (!vw[ms_vMode] || !s[ms_sPath]) ? pad_MSV_Colrs[29] = Col_Inactive;
+                (!vw[ms_vMode] || s[ms_sPath]) ? pad_MSV_Colrs[30] = Col_Inactive;
+                ms_rec[v] ? pad_MSV_Colrs[30] = Col_P1;
+                // line 5 : the placement of the path on the surface (2026-11-23, the user ; no path : dim)
+                i = floor(100 * s[ms_sTx] + 0.5); sprintf(pad_MSV_Labs[32], (i > 0) ? "Path x +%d %%" : "Path x %d %%", i);
+                i = floor(100 * s[ms_sTy] + 0.5); sprintf(pad_MSV_Labs[33], (i > 0) ? "Path y +%d %%" : "Path y %d %%", i);
+                sprintf(pad_MSV_Labs[34], "Path turn %d deg", floor(s[ms_sTa] + 0.5));
+                sprintf(pad_MSV_Labs[35], "Path scale %.2f", (s[ms_sTk] > 0) ? s[ms_sTk] : 1);
+                strcpy(pad_MSV_Labs[36], "Placement");
+                i = 32; loop(5, pad_MSV_Colrs[i] = s[ms_sPath] ? Col_P1 : Col_Inactive; i += 1;);
+                i = vw[ms_vSel]; // (the selection, again)
+                pad_MSV_Colrs[0] = pad_MSV_Colrs[1] = pad_MSV_Colrs[3] = pad_MSV_Colrs[4] = Col_P1;
+                pad_MSV_Colrs[2] = Col_InfoA;
+                pad_MSV_Colrs[5] = Col_P1;
+                pad_MSV_Colrs[6] = ((i >= 0) && (i < n)) ? Col_P1 : Col_Inactive;
+                pad_MSV_Colrs[7] = Col_P1;
+                // the roles (GUI rubric) : the MetaSurface (Navigation), the mode (Choice : Play lit), the count
+                // (Information), the aspect (Choice), the band (Value), the projector (Choice ; no effect yet : dim), the
+                // weight of the selection (Value ; none : dim), Actions (Action)
+                ui_jpad_roles_set(pad_MSV, 0, "ncicvcvavvvvvvvcvvcvvcc.ccvccccsvvvva...");
+                d3_Pad_Modes(pad_MSV, pad_MSV_Labs, pad_MSV_Colrs, MS_PSIZ);
+                ui_jpad_mark(pad_MSV, 1, vw[ms_vMode], 0);
+                ui_jpad_mark(pad_MSV, 15, vw[ms_vMode] ? !ms_att[v] : vw[ms_vBrush], 0); // (Play : held lit ; Edit : shown lit)
+                ui_jpad_mark(pad_MSV, 5, ms_ownp[v] > 0, 0); // (the projector driven : lit)
+                ui_jpad_mark(pad_MSV, 21, ms_st[v] > 0, !vw[ms_vMode]); // (sounding : lit)
+                ui_jpad_mark(pad_MSV, 22, ms_pz[v], 0); // (paused : lit)
+                ui_jpad_mark(pad_MSV, 24, s[ms_sPath], 0); // (on the path : lit)
+                ui_jpad_mark(pad_MSV, 29, ms_msim[v], !vw[ms_vMode] || !s[ms_sPath]); // (simulated : lit)
+                ui_jpad_mark(pad_MSV, 30, ms_rec[v], !ms_rec[v] && (!vw[ms_vMode] || s[ms_sPath])); // (recording : lit)
+                ui_jpad_mark(pad_MSV, 31, ms_mv[v], !ms_mv[v]);
+                zz = control_jpad(pad_MSV);
+                c = ui_jpad_cell_at();
+                dr = ms_Drag(blockId, v, c);
+                (zz > 0) ? (
+                    ui_GFXdoNow |= 4;
+                    ((zz & (ui_jpad_ev_lmc | ui_jpad_ev_rmc)) && !((zz & ui_jpad_ev_lmc) && (dr & 2))) ? (
+                        ms_PadCell(v, pad_MSV[ui_jpad_last] - 1, zz);
+                    );
+                );
+            ui_pop();
+            // the view
+            ui_pad(2, 3, 2, 2);
+            x = ui_left_retina(); y = ui_top_retina(); w = ui_width_retina(); h = ui_height_retina(); // (screen pixels)
+            ms_Mouse(v, x, y, w, h, uix_scroll_y) ? uix_scroll_y = 0;
+            // (the brush : its rotation, its shares, its envelope, computed by ms_Frame) a brush that turns, a fade : drawn at
+            // each run (see must_do_gfx)
+            (ms_turn[v] || (ms_st[v] === 1) || (ms_st[v] === 3) || ms_mv[v] || ms_rec[v]) ? uix_janim = 1;
+            ms_Draw(v, x, y, w, h);
+        ui_pop();
+    );
+);
+
+// Save / load with the project : the library and the views (record 'msf1' : MS_NLIB, MS_ES, MS_NV * MS_VS)
+function ms_Serialize() local(e, vw)
+(
+    (file_avail(0) >= 0) ? (
+        // ===LOAD===
+        (file_avail(0) > 0) ? (
+            memset(ser_hdr, 0, 4);
+            load_mem(0, ser_hdr, 4);
+            ((ser_hdr[0] === 'msf1') && (ser_hdr[1] === MS_NLIB) && (ser_hdr[2] === MS_ES) && (ser_hdr[3] === MS_NV * MS_VS)) ? (
+                load_mem(0, ms_lib, MS_NLIB * MS_ES);
+                load_mem(0, ms_vw, MS_NV * MS_VS);
+                e = 0; loop(MS_NLIB, ms_seq[e] += 1; e += 1;);
+                // the brush of each view (step 2 ; saved since 2026-11-23 : ms_vInit 1)
+                e = 0;
+                loop(MS_NV,
+                    vw = ms_vw + e * MS_VS;
+                    vw[ms_vInit] ? (ms_bx[e] = vw[ms_vBx]; ms_by[e] = vw[ms_vBy]; ms_att[e] = vw[ms_vAtt];);
+                    e += 1;
+                );
+                mSL_log(SysLogBox, "MetaSurfaces : loaded");
+            );
+        );
+    ) : (
+        // ===SAVE===
+        e = 0; loop(MS_NV, vw = ms_vw + e * MS_VS; vw[ms_vBx] = ms_bx[e]; vw[ms_vBy] = ms_by[e]; vw[ms_vAtt] = ms_att[e]; vw[ms_vInit] = 1; e += 1;);
+        ser_hdr[0] = 'msf1'; ser_hdr[1] = MS_NLIB; ser_hdr[2] = MS_ES; ser_hdr[3] = MS_NV * MS_VS;
+        save_mem(0, ser_hdr, 4);
+        save_mem(0, ms_lib, MS_NLIB * MS_ES);
+        save_mem(0, ms_vw, MS_NV * MS_VS);
+    );
+);

@@ -13,6 +13,10 @@
                     "Display size" ; saved by the host)
         style k     Classic or Soft (as the sub-menu "Style" of the panes ; saved by the host, serialBlock[Pr7_UiStyle]) :
                     the borders of the cells, the sliders, the tabs bar
+        tabcount n  (2026-11-23) the count of the tabs of the application (1 ... 16, mSL_Tabs) : more tabs, empty ; fewer : only
+                    the empty tabs are removed (the last ones first, then those in between : the following ones take their
+                    places), otherwise error 1643 and nothing changes ; saved by the host (with the tabs), not part of the
+                    default of the user nor of Show GUI settings ; also the sub-menu "Number of tabs" of the Studio menu
         tabs k      (2026-11-22) the tabs bar : Style (as the style : Classic always shown, Soft shown when the mouse
                     comes near the top of the window, for 10 seconds after it left it), Always (shown), Hover (shown when
                     the mouse comes near the top)
@@ -40,6 +44,8 @@
                     adjust reset all : all the families ; also on the last line of the preview of the module
         hover n     the mode "hover" (the mouse on the cell) : its strength (0 ... 100 %)
         disabled n  the mode "disabled" : its strength (0 ... 100 %)
+        fadetime n  (2026-11-23) the cells that fade (the sensors, the clips of the Game Master ...) : the time of their
+                    return to rest after the mode "selected" (0 ... 60 seconds ; 0 : at once ; ui_jg_fadet, mSL_ui_Pads)
                     (the mode "selected" : select, below)
       the texts
         ptext n     the text of the cells of the pads : its size (80 ... 150 % of the texts ; above 100 %, the lines of
@@ -77,8 +83,8 @@
                     except theme and size ; style included ; adjust : the adjustments of the default ; defaults : no
                     default of the user any more) ; it starts from the factory defaults (style Classic)
       restore       the look back to the default of the user (or to the factory defaults if there is none) : the theme and the
-                    display size unchanged, its style imposed ; also the menu of the cell Defaults of the module
-                    (Save as default, Reset to default, Factory defaults). The Log settings write it after the current look :
+                    display size unchanged, its style imposed ; also the menu of the cell Actions of the module
+                    (Save as default, Reset to default, Factory defaults). Show GUI settings writes it after the current look :
                     "... default style Soft variant Outline ..." (saved with the project)
     Given by the module "GUI" (a pad : potentiometers and menus) or by the mSL settings, in a call of its own :
         settings(data( GUI fonts 110 variant Text bold On frame Round radius 6 color Lighter ));
@@ -103,9 +109,9 @@
 // The values (jg_Get, jg_Set ; saved in this order) : 0 gapx, 1 gapy, 2 frame, 3 radius, 4 thick, 5 color, 6 opacity,
 // 7 corners, 8 fade, 9 select, 10 extend, 11 bold, 12 ptext, 13 variant, 14 fonts, 15 ftext, 16 fwidth, 17 contrast,
 // 18 fbold, 19 shade ; (2026-11-22, the palette) 20 palette, 21 hue, 22 chroma, 23 light, 24 danger, 25 hover, 26 disabled ;
-// 27 tabs (the tabs bar, ui_jg_tabs in ui-lib-JJ-GUI) ;
+// 27 tabs (the tabs bar, ui_jg_tabs in ui-lib-JJ-GUI) ; (2026-11-23) 28 fadetime (the cells that fade, ui_jg_fadet) ;
 // the theme, the size and the style are saved by the host (jg_SetTheme, jg_SetSize, jg_SetStyle)
-JG_NF = 28;
+JG_NF = 29;
 JG_MAGIC = 47181;           // the record of @serialize
 jg_kGUI = mSL_symbol("GUI");
 jg_kEnd = mSL_symbol("End");
@@ -144,6 +150,8 @@ jg_kOff = mSL_symbol("Off"); jg_kOn = mSL_symbol("On");
 jg_kPalette = mSL_symbol("palette"); jg_kHue = mSL_symbol("hue"); jg_kChroma = mSL_symbol("chroma");
 jg_kLight = mSL_symbol("light"); jg_kDanger = mSL_symbol("danger"); jg_kHover = mSL_symbol("hover");
 jg_kDisabled = mSL_symbol("disabled");
+jg_kFadet = mSL_symbol("fadetime"); // (2026-11-23)
+jg_kTabCnt = mSL_symbol("tabcount"); // (2026-11-23)
 jg_kTabs = mSL_symbol("tabs"); jg_kStyleV = mSL_symbol("Style"); jg_kAlways = mSL_symbol("Always"); jg_kHoverV = mSL_symbol("Hover");
 jg_kThemeV = mSL_symbol("Theme"); jg_kMono = mSL_symbol("Mono"); jg_kAnalog = mSL_symbol("Analog");
 jg_kComplement = mSL_symbol("Complement"); jg_kSpectrum = mSL_symbol("Spectrum"); jg_kMuted = mSL_symbol("Muted");
@@ -204,7 +212,7 @@ function jg_Defaults() local(f, t)
     ui_jg_gapx = 40; ui_jg_gapy = 4; ui_jg_frame = 1; ui_jg_radius = 6; ui_jg_thick = 0; ui_jg_fcol = 1; ui_jg_falpha = 0.7;
     ui_jg_cround = -1; ui_jpad_fade = 40; ui_jpad_selmix = 0.35; ui_jg_extend = 0; ui_jg_bold = 0; ui_jg_ptext = 100;
     ui_jvariant = 3; ui_jg_ftext = 100; ui_jg_fwidth = 100; ui_jg_tcontrast = 0.35;
-    ui_jg_fbold = 0; ui_jg_bgk = 0; ui_jg_tabs = 1;
+    ui_jg_fbold = 0; ui_jg_bgk = 0; ui_jg_tabs = 1; ui_jg_fadet = 10;
     ui_jp_fam = 6; ui_jp_hue = -1; ui_jp_chroma = 50; ui_jp_light = 50; ui_jp_danger = 0; ui_jp_hover = 60; ui_jp_dis = 70;
     uix_jp_dirty = 1; // (the palette, see uix_jp_make in ui-lib-JJ-GUI)
     (ui_jg_fonts !== 100) ? ui_jtext_set(100);
@@ -222,7 +230,8 @@ function jg_Get(k)
     (k === 14) ? ui_jg_fonts : (k === 15) ? ui_jg_ftext : (k === 16) ? ui_jg_fwidth :
     (k === 17) ? floor(ui_jg_tcontrast * 100 + 0.5) : (k === 18) ? ui_jg_fbold : (k === 19) ? ui_jg_bgk :
     (k === 20) ? ui_jp_fam : (k === 21) ? ui_jp_hue : (k === 22) ? ui_jp_chroma : (k === 23) ? ui_jp_light :
-    (k === 24) ? ui_jp_danger : (k === 25) ? ui_jp_hover : (k === 26) ? ui_jp_dis : (k === 27) ? ui_jg_tabs : 0;
+    (k === 24) ? ui_jp_danger : (k === 25) ? ui_jp_hover : (k === 26) ? ui_jp_dis : (k === 27) ? ui_jg_tabs :
+    (k === 28) ? ui_jg_fadet : 0;
 );
 function jg_Set(k, v)
 (
@@ -254,7 +263,8 @@ function jg_Set(k, v)
     (k === 24) ? (ui_jp_danger = (v != 0)) :
     (k === 25) ? (ui_jp_hover = max(0, min(100, v))) :
     (k === 26) ? (ui_jp_dis = max(0, min(100, v))) :
-    (k === 27) ? (ui_jg_tabs = max(0, min(2, v)));
+    (k === 27) ? (ui_jg_tabs = max(0, min(2, v))) :
+    (k === 28) ? (ui_jg_fadet = max(0, min(60, v)));
     uix_jp_dirty = 1; // (the palette made again : the background, the selection, the palette)
     ui_GFXdoNow |= 1;
 );
@@ -265,7 +275,7 @@ function jg_Def(k)
     (k === 2) ? 1 : (k === 3) ? 6 : (k === 4) ? 0 : (k === 5) ? 1 : (k === 6) ? 70 : (k === 7) ? -1 : (k === 8) ? 40 :
     (k === 9) ? 35 : (k === 12) ? 100 : (k === 13) ? 3 : (k === 14) ? 100 : (k === 15) ? 100 : (k === 16) ? 100 :
     (k === 17) ? 35 : (k === 20) ? 6 : (k === 21) ? -1 : (k === 22) ? 50 : (k === 23) ? 50 : (k === 25) ? 60 :
-    (k === 26) ? 70 : (k === 27) ? 1 : 0;
+    (k === 26) ? 70 : (k === 27) ? 1 : (k === 28) ? 10 : 0;
 );
 // (2026-11-22) The palette : the name of the family f (0 ... 7), its symbol
 JG_NFAM = 8;
@@ -550,6 +560,7 @@ function jg_TextKeys(s, src) local(k, p, v, st, f)
     sprintf(#jg_t2, " palette %s hue %s chroma %d light %d danger %s hover %d disabled %d", jg_FamName(jg_V(20, src)), #jg_t3,
         jg_V(22, src), jg_V(23, src), jg_V(24, src) ? "Palette" : "Red", jg_V(25, src), jg_V(26, src));
     strcat(s, #jg_t2);
+    sprintf(#jg_t2, " fadetime %d", jg_V(28, src)); strcat(s, #jg_t2);
     sprintf(#jg_t2, " ptext %d bold %s ftext %d fbold %s fwidth %d", jg_V(12, src), jg_V(11, src) ? "On" : "Off", jg_V(15, src),
         jg_V(18, src) ? "On" : "Off", jg_V(16, src));
     strcat(s, #jg_t2);
@@ -600,8 +611,13 @@ function jg_Run(tbl, itc, p, emb, act) local(w, v, q, go)
         // (2026-11-22) default : the keys that follow define the default of the user ; restore : the look back to it
         (w === jg_kDefault) ? (jg_tgt = 1; act ? jg_DefInit()) :
         (w === jg_kRestore) ? (jg_tgt ? jg_Err(1640, "restore : not after default") : (act ? jg_Restore())) :
-        (jg_tgt && ((w === jg_kTheme) || (w === jg_kSize))) ? (
-            jg_Err(1640, "default : the theme and the display size are not part of the default of the user");
+        (jg_tgt && ((w === jg_kTheme) || (w === jg_kSize) || (w === jg_kTabCnt))) ? (
+            jg_Err(1640, "default : the theme, the display size and the count of the tabs are not part of the default of the user");
+        ) :
+        (w === jg_kTabCnt) ? (
+            ((v = jg_Num("tabcount", 1, 16)) !== Undef) ? (
+                (act && !tbs_SetCount(v)) ? jg_Err(1643, "tabcount : not enough empty tabs (only the empty tabs are removed)");
+            );
         ) :
         (w === jg_kTheme) ? (((v = jg_ThemeArg()) >= 0) ? (act ? jg_SetTheme(v))) :
         (w === jg_kSize) ? (((v = jg_Num("size", 50, 200)) !== Undef) ? (act ? jg_SetSize(v))) :
@@ -616,6 +632,7 @@ function jg_Run(tbl, itc, p, emb, act) local(w, v, q, go)
         (w === jg_kDanger) ? ((v = jg_Enum("danger", "Red or Palette", jg_kRed, jg_kPaletteV, 0, 0)) >= 0 ? jg_SetA(24, v)) :
         (w === jg_kHover) ? jg_NumK("hover", 25, 0, 100) :
         (w === jg_kDisabled) ? jg_NumK("disabled", 26, 0, 100) :
+        (w === jg_kFadet) ? jg_NumK("fadetime", 28, 0, 60) :
         (w === jg_kTabs) ? ((v = jg_Enum("tabs", "Style, Always or Hover", jg_kStyleV, jg_kAlways, jg_kHoverV, 0)) >= 0 ? jg_SetA(27, v)) :
         (w === jg_kFonts) ? jg_NumK("fonts", 14, 80, 150) :
         (w === jg_kPtext) ? jg_NumK("ptext", 12, 80, 150) :
@@ -641,7 +658,7 @@ function jg_Run(tbl, itc, p, emb, act) local(w, v, q, go)
         emb ? (
             go = 0; jg_ptr = q; // (the next block of the application)
         ) : (
-            jg_Err(1640, "a key (theme, shade, size, style, tabs, variant, fonts, palette, hue, chroma, light, danger, hover, disabled, adjust, ptext, bold, ftext, fbold, fwidth, gapx, gapy, corners, fade, extend, select, contrast, frame, radius, thick, color, opacity, defaults, default, restore) is expected");
+            jg_Err(1640, "a key (theme, shade, size, style, tabs, variant, fonts, palette, hue, chroma, light, danger, hover, disabled, fadetime, tabcount, adjust, ptext, bold, ftext, fbold, fwidth, gapx, gapy, corners, fade, extend, select, contrast, frame, radius, thick, color, opacity, defaults, default, restore) is expected");
         );
     );
     ((jg_err === 0) && act) ? (
@@ -705,7 +722,7 @@ pad_JGS = make_jpad(ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jp
 pad_JGS_Labs = pad_JGS + pad_JGS[ui_jpad_labs];
 pad_JGS_Colrs = pad_JGS + pad_JGS[ui_jpad_clrs];
 i__k = 0; loop(JG_PSIZ, pad_JGS_Colrs[i__k] = Col_Inactive; pad_JGS_Labs[i__k] = ""; i__k += 1;);
-ui_jpad_roles_set(pad_JGS, 0, "cvccccvvvcvvvvccvcvvvvc.acvvcvvvcvd");
+ui_jpad_roles_set(pad_JGS, 0, "cvccccvvvcvvvvvcvcvvvvc.vcvvcvvvcva"); // (2026-11-23 : 14 Fade time, 24 Tab count, 34 Actions)
 
 // The preview of the palette : 13 lines of 7 ; line 0 "Cell Type" and the modes, lines 1 ... 10 the roles (jg_PvRole : their
 // name, then the 6 modes imposed ; a mode that does not apply to the role : an empty cell "-"), line 11 the identity series
@@ -749,19 +766,20 @@ ui_jpad_roles_set(pad_JGV, 84, "cvvvad.");
 
 // The pad (5 lines of 7, 2026-11-22 : a column per subject ; the cells numbered column by column) : the whole look : 0 Theme,
 // 1 Background (shade), 2 Display size, 3 Style, 4 Tabs bar ; the palette : 5 Palette, 6 Hue, 7 Chroma, 8 Light, 9 Danger ;
-// the modes : 10 Selection, 11 Hover, 12 Disabled, 13 Contrast (the variation Text), 14 Preview ; the cells of the pads :
+// the modes : 10 Selection, 11 Hover, 12 Disabled, 13 Contrast (the variation Text), 14 Fade time (2026-11-23) ; the cells of the pads :
 // 15 Variation, 16 Pads text, 17 Pads bold, 18 Gap X, 19 Gap Y ; their fill : 20 Corners, 21 Fade, 22 Extend, 23 empty,
-// 24 Log settings ; the frames : 25 Frame, 26 Radius, 27 Thick, 28 Color, 29 Opacity ; the texts : 30 Fonts, 31 Faders
-// text, 32 Faders bold, 33 Faders width ; 34 Defaults
-// The cell c : its value (k : jg_Get) ; -2 the style, -3 Log settings, -4 Defaults, -5 the theme, -6 the display size,
-// -7 the preview ; -1 none
+// 24 Tab count (2026-11-23, mSL_Tabs) ; the frames : 25 Frame, 26 Radius, 27 Thick, 28 Frame Color, 29 Opacity ; the texts : 30 Fonts, 31 Faders
+// text, 32 Faders bold, 33 Faders width ; 34 Actions (2026-11-23 : a menu ; Show GUI settings, Export GUI settings, Preview,
+// the defaults ; until then the cells Log settings and Preview, and Defaults)
+// The cell c : its value (k : jg_Get) ; -2 the style, -4 Actions, -5 the theme, -6 the display size,
+// -7 the preview, -8 the count of the tabs ; -1 none
 function jg_CellK(c)
 (
     (c === 0) ? -5 : (c === 1) ? 19 : (c === 2) ? -6 : (c === 3) ? -2 : (c === 4) ? 27 :
     (c === 5) ? 20 : (c === 6) ? 21 : (c === 7) ? 22 : (c === 8) ? 23 : (c === 9) ? 24 :
-    (c === 10) ? 9 : (c === 11) ? 25 : (c === 12) ? 26 : (c === 13) ? 17 : (c === 14) ? -7 :
+    (c === 10) ? 9 : (c === 11) ? 25 : (c === 12) ? 26 : (c === 13) ? 17 : (c === 14) ? 28 :
     (c === 15) ? 13 : (c === 16) ? 12 : (c === 17) ? 11 : (c === 18) ? 0 : (c === 19) ? 1 :
-    (c === 20) ? 7 : (c === 21) ? 8 : (c === 22) ? 10 : (c === 24) ? -3 :
+    (c === 20) ? 7 : (c === 21) ? 8 : (c === 22) ? 10 : (c === 24) ? -8 :
     (c === 25) ? 2 : (c === 26) ? 3 : (c === 27) ? 4 : (c === 28) ? 5 : (c === 29) ? 6 :
     (c === 30) ? 14 : (c === 31) ? 15 : (c === 32) ? 18 : (c === 33) ? 16 : (c === 34) ? -4 : -1;
 );
@@ -819,6 +837,7 @@ function jg_Range(k)
     (k === 17) ? (jg_lo = 10; jg_hi = 80; strcpy(#jg_vl, "10|20|25|35|45|55|65|80"); jg_vn = 8;) :
     (k === 16) ? (jg_lo = 50; jg_hi = 200; strcpy(#jg_vl, "50|60|70|80|90|100|110|120|130|150|175|200"); jg_vn = 12;) :
     (k === 21) ? (jg_lo = -1; jg_hi = 359; strcpy(#jg_vl, "-1|0|30|60|90|120|150|180|210|240|270|300|330"); jg_vn = 13;) :
+    (k === 28) ? (jg_lo = 0; jg_hi = 60; strcpy(#jg_vl, "0|1|2|3|5|8|10|15|20|30|45|60"); jg_vn = 12;) :
     ((k === 22) || (k === 23) || (k === 25) || (k === 26)) ? (
         jg_lo = 0; jg_hi = 100; strcpy(#jg_vl, "0|10|20|30|40|50|60|70|80|90|100"); jg_vn = 11;
     ) :
@@ -871,6 +890,52 @@ function jg_ValMenu(k) local(i, v, m)
     ((m = jg_Menu(#jg_mnu)) > 0) ? jg_Set(k, jg_Int(jg_Nth(#jg_vl, m - 1, #jg_it)));
 );
 
+// (2026-11-23) Export GUI settings : the line of Show GUI settings in a file of the folder Data of the project,
+// "<name>-<app>-gui-<date>.mSL" (mSL_Export : written by the auxiliary script, command 30 ; #jg_App : the short name of
+// the application, given by the host) ; the name asked first (the prompt control.prompt, see jg_XpFrame)
+jg_xpOn = 0; // the prompt is open
+#jg_xpName = "";
+function jg_XpAsk()
+(
+    jg_xpOn = 1;
+    ui_screen_open("control.prompt");
+    ui_screen_arg(0, #jg_xpName);
+    ui_screen_arg(1, "The name of the exported GUI settings");
+);
+function jg_XpDo() local(c)
+(
+    ((c = xpt_Ready()) !== 0) ? (
+        sprintf(#jg_msg, "Export GUI settings : the auxiliary script CMGS-auxiliary.eel %s", (c === 1) ? "is not running" :
+            (c === 2) ? "is too old" : "is busy (try again)");
+        mSL_log(SysLogBox, #jg_msg);
+    ) : (
+        xpt_Clean(#jg_xpName);
+        xpt_Begin();
+        sprintf(#jg_xpT, "// GUI settings exported on %s : drop this file on a CMGS application to get this look", xpt_Date(#jg_xpD, 1));
+        xpt_Line(#jg_xpT);
+        xpt_Line("");
+        sprintf(#jg_xpT, "settings(data( %s ));", jg_Text(#jg_w));
+        xpt_Block(#jg_xpT, 0);
+        xpt_FileName(#jg_xpFile, #jg_xpName, (strlen(#jg_App) > 0) ? #jg_App : "cmgs", "gui");
+        xpt_Who = 'gui'; xpt_Send(#jg_xpFile);
+        sprintf(#jg_msg, "Export GUI settings : %s", #jg_xpFile);
+        mSL_log(SysLogBox, #jg_msg);
+    );
+);
+// each frame (show_GUI_Pad) : the prompt closed (Cancel or an empty name : no export), the file written
+function jg_XpFrame() local(r)
+(
+    (jg_xpOn && !(ui_screen() == "control.prompt")) ? (
+        jg_xpOn = 0;
+        (strlen(#jg_xpName) > 0) ? jg_XpDo();
+    );
+    ((r = xpt_PollFor('gui')) !== 0) ? (
+        sprintf(#jg_msg, (r > 0) ? "Export GUI settings : %s written in the folder of the project" :
+            "Export GUI settings : the file %s could not be written", #jg_xpFile);
+        mSL_log(SysLogBox, #jg_msg);
+    );
+);
+
 // A clic on the cell c (not a drag)
 function jg_PadCell(c, ev) local(rc, sh, k, n, v, m)
 (
@@ -916,20 +981,34 @@ function jg_PadCell(c, ev) local(rc, sh, k, n, v, m)
             jg_Set(k, sh ? (v + n - 1) % n : (v + 1) % n);
         );
     ) :
-    (k === -7) ? (
-        jg_prev = !jg_prev; // the preview of the palette : shown or hidden
-    ) :
-    (k === -3) ? (
-        // the settings in the System Log, ready to be copied into a file (settings(data( ... )))
-        sprintf(#jg_msg, "settings(data( %s ));", jg_Text(#jg_w));
-        mSL_log(SysLogBox, #jg_msg);
+    (k === -8) ? (
+        // (2026-11-23) the count of the tabs : right, the menu (the counts not possible : greyed) ; left, one more (Shift : one
+        // less, if an empty tab can be removed)
+        rc ? (
+            strcpy(#jg_mnu, "#The count of the tabs (fewer : only the empty tabs are removed)");
+            n = 1; loop(dcbTabsMax, strcat(#jg_mnu, "|"); strcat(#jg_mnu, tbs_CanCount(n) ? jg_Tk(dcbTabsCount, n) : "#");
+                strcat(#jg_mnu, sprintf(#jg_it, "%d", n)); n += 1;);
+            ((m = jg_Menu(#jg_mnu)) >= 2) ? tbs_SetCount(m - 1);
+        ) : (
+            sh ? ((dcbTabsCount > 1) ? tbs_SetCount(dcbTabsCount - 1)) : ((dcbTabsCount < dcbTabsMax) ? tbs_SetCount(dcbTabsCount + 1));
+        );
     ) :
     (k === -4) ? (
-        // (2026-11-22) the default of the user : reset to it, save the current look as it ; the factory defaults
-        sprintf(#jg_mnu, "#The look (the theme and the display size unchanged)|%s|Save as default (the current look, its style)|Factory defaults (Classic, Outline, Pastel, tabs always, gaps 40 x 4, frame Rect, thick none)",
+        // (2026-11-23) Actions : the settings in the System Log (ready to be copied into a file), exported in a file (the
+        // auxiliary script), the preview of the palette ; the default of the user (reset to it, save the current look as
+        // it ; the theme and the display size unchanged), the factory defaults
+        sprintf(#jg_mnu, "#Actions|Show GUI settings (in the System Log)|Export GUI settings...|%sPreview of the palette|%s|Save as default (the current look, its style)|Factory defaults (Classic, Outline, Pastel, tabs always, gaps 40 x 4, frame Rect, thick none)",
+            jg_prev ? "!" : "",
             jg_hasdef ? (jg_defStyle ? "Reset to default (its style : Soft)" : "Reset to default (its style : Classic)") :
                 "#Reset to default (none saved)");
-        ((m = jg_Menu(#jg_mnu)) === 2) ? jg_Restore() : (m === 3) ? jg_SaveDef() : (m === 4) ? jg_Factory();
+        m = jg_Menu(#jg_mnu);
+        (m === 2) ? (
+            sprintf(#jg_msg, "settings(data( %s ));", jg_Text(#jg_w));
+            mSL_log(SysLogBox, #jg_msg);
+        ) :
+        (m === 3) ? jg_XpAsk() :
+        (m === 4) ? (jg_prev = !jg_prev) :
+        (m === 5) ? jg_Restore() : (m === 6) ? jg_SaveDef() : (m === 7) ? jg_Factory();
     );
     ui_GFXdoNow |= 1;
 );
@@ -1082,6 +1161,7 @@ local(h1, h2, hl, hneed, zzmi, zz, dr, c, i, sf, fr, vr, pv, f)
     // (the preview : when asked, if the palette exists and if the module has the room)
     pv = jg_prev && (uix_jp_tab > 0) && (ui_height() >= hneed + h2 + hl + 4);
     pv ? hneed += h2 + hl + 4;
+    jg_XpFrame(); // (2026-11-23 : Export GUI settings, the prompt closed, the file written)
     (ui_height() >= hneed) ? (
         ui_split_top(hneed);
             zzmi = ui_hover();
@@ -1105,7 +1185,7 @@ local(h1, h2, hl, hneed, zzmi, zz, dr, c, i, sf, fr, vr, pv, f)
                     sprintf(pad_JGS_Labs[1], (ui_jg_bgk > 0) ? "Background +%d %%" : "Background %d %%", ui_jg_bgk);
                 sprintf(pad_JGS_Labs[2], "Size %d %%", ui_jzoom_pc(ui_jzoomK));
                 strcpy(pad_JGS_Labs[3], sf ? "Style: Soft" : "Style: Classic");
-                strcpy(pad_JGS_Labs[4], (ui_jg_tabs === 1) ? "Tabs: always" : (ui_jg_tabs === 2) ? "Tabs: hover" : "Tabs: style");
+                strcpy(pad_JGS_Labs[4], (ui_jg_tabs === 1) ? "Tabs bar: always" : (ui_jg_tabs === 2) ? "Tabs bar: hover" : "Tabs bar: style");
                 // the palette
                 strcpy(pad_JGS_Labs[5], "Palette: "); strcat(pad_JGS_Labs[5], jg_FamName(f));
                 (ui_jp_hue < 0) ? strcpy(pad_JGS_Labs[6], "Hue: theme") : sprintf(pad_JGS_Labs[6], "Hue %d", ui_jp_hue);
@@ -1117,7 +1197,8 @@ local(h1, h2, hl, hneed, zzmi, zz, dr, c, i, sf, fr, vr, pv, f)
                 sprintf(pad_JGS_Labs[11], "Hover %d %%", ui_jp_hover);
                 sprintf(pad_JGS_Labs[12], "Disabled %d %%", ui_jp_dis);
                 sprintf(pad_JGS_Labs[13], "Contrast %d %%", jg_Get(17));
-                strcpy(pad_JGS_Labs[14], jg_prev ? "Preview: On" : "Preview: Off");
+                (ui_jg_fadet === 0) ? strcpy(pad_JGS_Labs[14], "Fade time: none") : sprintf(pad_JGS_Labs[14], "Fade time %d s", ui_jg_fadet);
+
                 // the cells of the pads
                 strcpy(pad_JGS_Labs[15], (vr === 3) ? "Variation: Outline" : (vr === 2) ? "Variation: Text" : (vr === 1) ? "Variation: Faded" : "Variation: Std");
                 sprintf(pad_JGS_Labs[16], "Pads text %d %%", ui_jg_ptext);
@@ -1128,20 +1209,20 @@ local(h1, h2, hl, hneed, zzmi, zz, dr, c, i, sf, fr, vr, pv, f)
                 (ui_jg_cround < 0) ? strcpy(pad_JGS_Labs[20], "Corners: pads") : sprintf(pad_JGS_Labs[20], "Corners %d", ui_jg_cround);
                 sprintf(pad_JGS_Labs[21], "Fade %d", ui_jpad_fade);
                 strcpy(pad_JGS_Labs[22], ui_jg_extend ? "Extend: On" : "Extend: Off");
+                sprintf(pad_JGS_Labs[24], "Tab count %d", dcbTabsCount); // (2026-11-23, mSL_Tabs)
                 // the frames
                 strcpy(pad_JGS_Labs[25], (ui_jg_frame === 1) ? "Frame: Rect" : (ui_jg_frame === 2) ? "Frame: Round" : "Frame: None");
                 sprintf(pad_JGS_Labs[26], "Radius %d", ui_jg_radius);
                 (ui_jg_thick === 0) ? strcpy(pad_JGS_Labs[27], "Thick: none") : sprintf(pad_JGS_Labs[27], "Thick %d", ui_jg_thick);
-                strcpy(pad_JGS_Labs[28], (ui_jg_fcol === 0) ? "Color: Cell" : (ui_jg_fcol === 2) ? "Color: Darker" :
-                    (ui_jg_fcol === 3) ? "Color: Grey" : "Color: Lighter");
+                strcpy(pad_JGS_Labs[28], (ui_jg_fcol === 0) ? "Frame Color: Cell" : (ui_jg_fcol === 2) ? "Frame Color: Darker" :
+                    (ui_jg_fcol === 3) ? "Frame Color: Grey" : "Frame Color: Lighter");
                 sprintf(pad_JGS_Labs[29], "Opacity %d %%", jg_Get(6));
                 // the texts, the actions
                 sprintf(pad_JGS_Labs[30], "Fonts %d %%", ui_jg_fonts);
                 sprintf(pad_JGS_Labs[31], "Faders text %d %%", ui_jg_ftext);
                 strcpy(pad_JGS_Labs[32], ui_jg_fbold ? "Faders bold: On" : "Faders bold: Off");
                 sprintf(pad_JGS_Labs[33], "Faders width %d %%", ui_jg_fwidth);
-                strcpy(pad_JGS_Labs[24], "Log settings");
-                strcpy(pad_JGS_Labs[34], "Defaults");
+                strcpy(pad_JGS_Labs[34], "Actions");
                 // (a value changed : selected ; a cell without effect in the current look : disabled ; the palette draws them)
                 jg_Mark(0, uix_jtheme !== 0, 0);
                 jg_Mark(1, jg_Chg(19), 0);
@@ -1157,7 +1238,7 @@ local(h1, h2, hl, hneed, zzmi, zz, dr, c, i, sf, fr, vr, pv, f)
                 jg_Mark(11, jg_Chg(25), 0);
                 jg_Mark(12, jg_Chg(26), 0);
                 jg_Mark(13, jg_Chg(17), vr < 2);
-                jg_Mark(14, !jg_prev, 0);
+                jg_Mark(14, jg_Chg(28), 0);
                 jg_Mark(15, jg_Chg(13), 0); // (2026-11-22 : changed from the factory default, Outline)
                 jg_Mark(16, jg_Chg(12), 0);
                 jg_Mark(17, jg_Chg(11), 0);
@@ -1166,6 +1247,7 @@ local(h1, h2, hl, hneed, zzmi, zz, dr, c, i, sf, fr, vr, pv, f)
                 jg_Mark(20, jg_Chg(7), sf && ((vr === 1) || (vr === 2))); // (Classic : the border, the fill of a selected cell in Text ; Outline : its frame)
                 jg_Mark(21, jg_Chg(8), (vr === 0) || (vr === 3) || ui_jg_extend);
                 jg_Mark(22, jg_Chg(10), (vr === 0) || (vr === 3));
+                jg_Mark(24, dcbTabsCount !== tbs_Def, 0);
                 jg_Mark(25, jg_Chg(2), !sf);
                 jg_Mark(26, jg_Chg(3), !(fr && (ui_jg_frame === 2) && ((vr !== 0) || (ui_jg_cround <= 0)))); // (Std : the frame follows the corners)
                 jg_Mark(27, jg_Chg(4), sf && !fr && (vr !== 3)); // (Classic : the border of the cells, 0 none ; Outline : the frame of a selected cell)
@@ -1175,7 +1257,6 @@ local(h1, h2, hl, hneed, zzmi, zz, dr, c, i, sf, fr, vr, pv, f)
                 jg_Mark(31, jg_Chg(15), 0);
                 jg_Mark(32, jg_Chg(18), 0);
                 jg_Mark(33, jg_Chg(16), 0);
-                jg_Mark(34, jg_hasdef, 0); // (a default of the user saved)
                 zz = control_jpad(pad_JGS);
                 c = ui_jpad_cell_at();
                 dr = jg_DragPad(blockId, c); // the cells of values : a drag

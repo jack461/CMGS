@@ -1270,7 +1270,7 @@ ubx_sbox_more = 4;
 idx = SharedLowMemory + SharedLowMemorySize;
 serialSize = 12288; // size of a preset
 serialBlock = idx; // +++ 1024
-dcbBlocksAll = serialBlock+3072; //  at least 2048
+dcbBlocksAll = serialBlock+3072; //  at least 2048 (2026-11-23 : 4096, 16 tabs ; then the tabs data, Pr7_StudConf)
 
 idx += serialSize;
 K_savedStringsCnt = 192; // can save up to preset strings.
@@ -1306,16 +1306,27 @@ Pr7_pr_aux1 = 2;
 Pr7_pr_aux2 = 3;
 //
 Pr7_Partial0 = 32; // size:
-Pr7_StudConf = Pr7_Partial0 + 16;
-Pr7_StudRat = Pr7_StudConf + 8;  // size : 8 * 4
-Pr7_StudLive = Pr7_StudRat + 8 * 4; // size : 8 -- 1 if the tab uses the "live" display
-Pr7_UiStyle = Pr7_StudLive + 8; // ui_jstyle (look of the GUI) - saved with the 'stud' block
+// (48 ... 95 : the tabs data until 2026-11-23, 8 tabs : 48 the panes counts, 56 the widths, 88 the live displays ; the record
+// 'stud' of an older project moves them, see its_Tabs_Migrate)
+Pr7_UiStyle = 96; // ui_jstyle (look of the GUI) - saved with the 'stud' block
 Pr7_UiTheme = Pr7_UiStyle + 1; // uix_jtheme (theme of the GUI) - saved with the 'stud' block
 Pr7_UiSize = Pr7_UiTheme + 1; // the display size, in percent (0 : the default, see ui_jzoom_set) - 'stud' block
 Pr7_Free = Pr7_UiSize + 1;
+// (2026-11-23) the tabs data, 16 tabs (dcbTabsMax ; mSL_Tabs) : after dcbBlocksAll (serialBlock + 3072, 16 tabs x 4 panes x 64
+// words), saved after it in the record 'stud' (its_TabsData words)
+Pr7_StudConf = 3072 + 4096;  // size : 16 -- number of panes of each tab
+Pr7_StudRat = Pr7_StudConf + 16;  // size : 16 * 4 -- panes widths
+Pr7_StudLive = Pr7_StudRat + 16 * 4; // size : 16 -- 1 if the tab uses the "live" display
+its_TabsData = 96;
+// the tabs data of an older project (until 2026-11-23 : serialBlock + 48, 56, 88 ; 8 tabs) moved to their places
+function its_Tabs_Migrate() local(i)
+(
+    i = 0; loop(8, serialBlock[Pr7_StudConf + i] = serialBlock[48 + i]; serialBlock[Pr7_StudLive + i] = serialBlock[88 + i]; i += 1;);
+    i = 0; loop(32, serialBlock[Pr7_StudRat + i] = serialBlock[56 + i]; i += 1;);
+);
 
 // Update tabulations width
-i__tab = 0; loop (8,
+i__tab = 0; loop (16,
     i__p = serialBlock + Pr7_StudRat + 4 * i__tab;
     i__p[0] = i__p[1] = i__p[2] = i__p[3] = 600;
     i__tab += 1;
@@ -1595,7 +1606,7 @@ mm_lowblocks[0] = 'Low_'; mm_lowblocks[1] = '_Mem';
 */
 
 // The Main menu
-dcbNamesCnt = 224; // up to 224 strings in the dcb Menu (192 until the modules "VU meter", "Limiter" : 2026-11-17)
+dcbNamesCnt = 272; // up to 272 strings in the dcb Menu (192 until the modules "VU meter", "Limiter" : 2026-11-17 ; 224 until the tabs : 2026-11-23)
 // memory block for the menu
 GUI_Main_Menu_Block = mSL_StM_Alloc(ui_jmenu_items+dcbNamesCnt, 'Menu', mSL_StM_FlClear);
 
@@ -1710,6 +1721,9 @@ function its_wave_colors()
 
 // Update the default menu screen
 // (neutral names : the user renames the tabs, see "Rename tab..." ; these texts are also the ids of their screens, see @gfx)
+// (2026-11-23) 16 screens : the user chooses the count of the tabs, 1 ... 16 (mSL_Tabs) ; 8 by default
+<? include("CMGS-libs/mSL_Tabs.jsfx-inc"); ?>
+dcbTabsMax = 16;
 uix_jG_menuscr[i__ii=0] = "Tab1";
 uix_jG_menuscr[i__ii+=1] = "Tab2";
 uix_jG_menuscr[i__ii+=1] = "Tab3";
@@ -1718,15 +1732,21 @@ uix_jG_menuscr[i__ii+=1] = "Tab5";
 uix_jG_menuscr[i__ii+=1] = "Tab6";
 uix_jG_menuscr[i__ii+=1] = "Tab7";
 uix_jG_menuscr[i__ii+=1] = "Tab8";
-uix_jG_menuscr[i__ii+=1] = -1;
-dcbTabsCount = i__ii; // menu bar max -- number of tabs
-uix_jG_menuscrSz = dcbTabsCount + 2; // add some size to display sound indicator
+uix_jG_menuscr[i__ii+=1] = "Tab9";
+uix_jG_menuscr[i__ii+=1] = "Tab10";
+uix_jG_menuscr[i__ii+=1] = "Tab11";
+uix_jG_menuscr[i__ii+=1] = "Tab12";
+uix_jG_menuscr[i__ii+=1] = "Tab13";
+uix_jG_menuscr[i__ii+=1] = "Tab14";
+uix_jG_menuscr[i__ii+=1] = "Tab15";
+uix_jG_menuscr[i__ii+=1] = "Tab16";
+tbs_Init(8); // (2026-11-23) 8 tabs shown by default (dcbTabsCount, the end of uix_jG_menuscr, uix_jG_menuscrSz ; mSL_Tabs)
 
 
 dcbPannelsMax = 4; // up to 4 pannels in each tabulation
 dcbMSize = 32; // max number of different displayable modules in each pane
 dcbMax = dcbMSize - 1;
-dcbMCount = dcbTabsCount * dcbPannelsMax; // number of different modules sets - used for main, studios A, B , etc.
+dcbMCount = dcbTabsMax * dcbPannelsMax; // number of different modules sets - used for main, studios A, B , etc. (2026-11-23 : all the possible tabs)
 // we currently use 64 * 2 words, so 128 for each menu
 dcbWSize = dcbMSize * 2;
 dcbBSize = dcbWSize * dcbMCount;
@@ -2145,6 +2165,10 @@ local (i)
 // part 2 : the module (keepBlockInfos, the UI libraries and the colors are defined above)
 <? mcon_part = 2; include("CMGS-libs/mSL_Console.jsfx-inc"); ?>
 
+// (2026-11-23) the short name of the application in the names of the files it exports (Export GUI settings)
+#jg_App = "its";
+// A text file written by CMGS-auxiliary.eel in a folder of the project (Export GUI settings, mSL_GUI ; the exports of Interstys)
+<? include("CMGS-libs/mSL_Export.jsfx-inc"); ?>
 // The rubric "GUI" (2026-11-21, see mSL_GUI), part 1 : the settings of the look, the record, the pad of the module
 <? jg_part = 1; include("CMGS-libs/mSL_GUI.jsfx-inc"); ?>
 
@@ -4138,7 +4162,7 @@ function mSL_event_ops(argc, argv)
 
 
 
-// the global actions (the menu "Action" of the module Globals : entry n is the action n ; the table : None ... ClearAll)
+// the global actions (the menu "Actions" of the module Globals : entry n is the action n ; the table : None ... ClearAll)
 its_GlAct_None = 0;
 its_GlAct_StartAll = 1;
 its_GlAct_StopAll = 2;
@@ -5154,7 +5178,7 @@ menu_Glb_Action_N[4] = "Resume all";
 menu_Glb_Action_N[5] = "Rewind all";
 menu_Glb_Action_N[6] = "Mute all";
 menu_Glb_Action_N[7] = "Unmute all";
-menu_Glb_Action_N[8] = "Clear all";
+menu_Glb_Action_N[8] = "Clear all lines"; // (2026-11-23 : "Clear all" until then)
 menu_Glb_Action_N[9] = "---";
 menu_Glb_Action_N[10] = "Delete all structures";
 menu_Glb_Action = make_jmenu(
@@ -7651,11 +7675,7 @@ local (i, j, g, it, fid, sid, ttl, gl0, gl1, gl2, gl3, gl4, gl5, othFirst, tmp, 
     blockDispNames[blockReset] = "&/Reset Sizes";
     (itdsp += 1); // separator
     blockPaneClear = (itdsp += 1);
-    blockDispNames[blockPaneClear] = "&/Clear Pane";
-    blockTabClear = (itdsp += 1);
-    blockDispNames[blockTabClear] = "&/Clear Tab"; // (the panes of the current tab ; Clear All Tabs : all the tabs)
-    blockAllPaneClear = (itdsp += 1);
-    blockDispNames[blockAllPaneClear] = "&/<Clear All Tabs";
+    blockDispNames[blockPaneClear] = "&/<Clear Pane"; // (2026-11-23, the user : Clear Tab, Clear All Tabs in Tabs Management)
     //
     (itdsp += 1); // separator
     blockDispNames[(itdsp += 1)] = ">Tabs Management";
@@ -7666,8 +7686,14 @@ local (i, j, g, it, fid, sid, ttl, gl0, gl1, gl2, gl3, gl4, gl5, othFirst, tmp, 
     blockDispNames[blockTabShftRight] = "&/Shift tabs right"; //
     blockTabLive = (itdsp += 1);
     blockDispNames[blockTabLive] = "&/Live display"; // see genericLiveTab
+    itdsp = tbs_MenuDecl(blockDispNames, itdsp); // (2026-11-23) Number of tabs, Exchange with tab (mSL_Tabs)
     blockTabRename = (itdsp += 1);
-    blockDispNames[blockTabRename] = "&/<Rename tab..."; //
+    blockDispNames[blockTabRename] = "&/Rename tab..."; //
+    (itdsp += 1); // separator
+    blockTabClear = (itdsp += 1);
+    blockDispNames[blockTabClear] = "&/Clear Tab"; // (the panes of the current tab ; Clear All Tabs : all the tabs)
+    blockAllPaneClear = (itdsp += 1);
+    blockDispNames[blockAllPaneClear] = "&/<Clear All Tabs";
     //
     (itdsp += 1); // separator
     blockDispNames[(itdsp += 1)] = ">Theme";
@@ -12308,8 +12334,7 @@ local(res, kw, npar, pp, r, sr, n, cnt, i, j, v, chk, idt,
 );//mSL_gui_ops
 
 
-// A text file written by CMGS-auxiliary.eel, in a folder of the project (see "Exports (2)" below)
-<? include("CMGS-libs/mSL_Export.jsfx-inc"); ?>
+// (the text file written by CMGS-auxiliary.eel, mSL_Export : included before the module GUI, 2026-11-23)
 
 //============== mSL "settings" (formerly "table") : the description of a patch ===============
 /*
@@ -19078,7 +19103,8 @@ function its_Xp_PaneKey(w) local(i, r)
 // Tab n keys... (pass 3 ; a pane key : all the panes of the tab replaced, an unknown module : a message)
 function its_Tb_Tab() local(t, w, j, k, np, lv, nm, mn, pn, any, wdn, p, d)
 (
-    t = its_Tb_Int("Tab", 1, dcbTabsCount) - 1;
+    t = its_Tb_Int("Tab", 1, dcbTabsMax) - 1; // (2026-11-23 : 1 ... 16, more tabs shown if needed, see below)
+    ((its_Tb_mode === 3) && (its_Tb_error === 0) && (t >= dcbTabsCount)) ? tbs_SetCount(t + 1);
     (its_Tb_mode === 0) ? (its_Tb_hasTab = 1);
     np = lv = -1; nm = any = wdn = 0;
     memset(its_TbTabN, 0, dcbPannelsMax);
@@ -19406,10 +19432,12 @@ loadMode ? (
             );
         ) :
         (savtmp[0] === 'stud') ? (
-            // studio : tabs config (Pr7_*) and modules shown in each pane
-            ((savtmp[1] <= 128) && (savtmp[2] <= dcbBSize)) ? (
+            // studio : tabs config (Pr7_*) and modules shown in each pane ; (2026-11-23) then the tabs data (savtmp[3] words,
+            // 16 tabs ; until then 0 : in the 128 words, 8 tabs, moved by its_Tabs_Migrate)
+            ((savtmp[1] <= 128) && (savtmp[2] <= dcbBSize) && (savtmp[3] <= its_TabsData)) ? (
                 ldtotal += load_mem(0, serialBlock, savtmp[1]);
                 ldtotal += load_mem(0, dcbBlocksAll, savtmp[2]);
+                (savtmp[3] > 0) ? (ldtotal += load_mem(0, serialBlock + Pr7_StudConf, savtmp[3])) : its_Tabs_Migrate();
                 ldstud = 1;
                 ui_jstyle = (serialBlock[Pr7_UiStyle] != 0); // look of the GUI
                 uix_jtheme = max(0, min(uix_jtheme_rtc_max - 1, 0|serialBlock[Pr7_UiTheme])); // theme of the GUI
@@ -19591,9 +19619,11 @@ loadMode ? (
         (savtmp[0] === 'tnam') ? (
             ldtnam = savtmp[1]; // alternate tabs names (see "Rename tab...")
             z__si = 0; loop(savtmp[1],
-                (z__si < dcbTabsCount) ? file_string(0, altTabsNames[z__si]) : file_string(0, #tnam_skip);
+                (z__si < dcbTabsMax) ? file_string(0, altTabsNames[z__si]) : file_string(0, #tnam_skip);
                 z__si += 1;
             );
+            // (2026-11-23) the count of the tabs shown (until then 0 : all the names saved, 8), applied in @gfx (tbs_Frame)
+            tbs_Pend = max(1, min(dcbTabsMax, (savtmp[2] > 0) ? savtmp[2] : savtmp[1]));
         ) :
         (
             zzz_savtmp = savtmp[0];
@@ -19632,14 +19662,15 @@ loadMode ? (
     siz1 = save_mem(0, savarea, SVASIZ);
     svtotal += siz1;
     // Save the alternate tabs names (see "Rename tab...") : first, before the blocks
-    savtmp[0] = 'tnam'; savtmp[1] = dcbTabsCount; savtmp[2] = savtmp[3] = 0;
+    savtmp[0] = 'tnam'; savtmp[1] = dcbTabsMax; savtmp[2] = dcbTabsCount; savtmp[3] = 0; // (2026-11-23 : 16 names, the count)
     svtotal += save_mem(0, savtmp, TMPSIZ);
-    z__si = 0; loop(dcbTabsCount, file_string(0, altTabsNames[z__si]); z__si += 1;);
+    z__si = 0; loop(dcbTabsMax, file_string(0, altTabsNames[z__si]); z__si += 1;);
     // Save the studio : tabs config (Pr7_* : panes count and widths, live display) and modules of each pane
-    savtmp[0] = 'stud'; savtmp[1] = 128; savtmp[2] = dcbBSize; savtmp[3] = 0;
+    savtmp[0] = 'stud'; savtmp[1] = 128; savtmp[2] = dcbBSize; savtmp[3] = its_TabsData; // (2026-11-23 : the tabs data after)
     svtotal += save_mem(0, savtmp, TMPSIZ);
     svtotal += save_mem(0, serialBlock, 128);
     svtotal += save_mem(0, dcbBlocksAll, dcbBSize);
+    svtotal += save_mem(0, serialBlock + Pr7_StudConf, its_TabsData);
     // Save the display blocks of the modules (reader, line, writer, effect shown in "Reader A", ...)
     savtmp[0] = 'disp'; savtmp[1] = DispStructsSize; savtmp[2] = savtmp[3] = 0;
     svtotal += save_mem(0, savtmp, TMPSIZ);
@@ -21714,6 +21745,36 @@ function its_Gr_CrvClick(r, ev, sh) local(k, i, xx)
 );
 
 /*
+   (2026-11-23, the rubric GUI, step 2) The roles of the cells of a pad of Interstys, TRANSLATED from the colors set by its
+   module (labs, colrs : its labels and its colors, n cells ; the palette chosen in the module GUI draws them) : no text
+   Empty ; "Action" or "Actions" Action ; InfoA Information ; Heliotrope Object ; P6, Col_Error Alert ; the others Choice. Their modes :
+   Inactive disabled ; selected : P2, Limegreen, Goldenrod, Cornflower Blue, P7, according to "kind" :
+     kind 0 (most modules, the effects) : Dark Orange Alert (a warning : "Loop sat.") ;
+     kind 1 (states : Global, the summaries) : Limegreen (running) selected ; Dark Orange (paused), Goldenrod (bypassed),
+            Light Steel Blue (ready) at rest (the user : paused is not disabled) ;
+     kind 2 (Links) : Dark Orange (on : learn, rate, a toggle) selected ; P2 (an ordinary cell) at rest ;
+     kind 3 (lists : the instances) : Goldenrod (the current one) selected ; Limegreen (it exists) at rest
+   The module may then set some roles or modes itself (ui_jpad_role, ui_jpad_mark, ui_jpad_lock).
+*/
+function its_Pad_Roles(pad, labs, colrs, n, kind) local(i, c, r, sel)
+(
+    i = 0;
+    loop(n,
+        c = colrs[i];
+        r = (strlen(labs[i]) === 0) ? ui_jpad_rl_empty : ((strcmp(labs[i], "Action") === 0) || (strcmp(labs[i], "Actions") === 0)) ? ui_jpad_rl_action :
+            (c === Col_InfoA) ? ui_jpad_rl_info : (c === Color_Heliotrope) ? ui_jpad_rl_object :
+            ((c === Col_P6) || (c === Col_Error) || ((kind === 0) && (c === Color_Dark_Orange))) ? ui_jpad_rl_alert :
+            ui_jpad_rl_choice;
+        sel = ((c === Col_P2) && (kind !== 2)) || ((c === Color_Limegreen) && (kind !== 3)) || (c === Color_Cornflower_Blue) ||
+            (c === Col_P7) || ((c === Color_Goldenrod) && (kind !== 1)) || ((c === Color_Dark_Orange) && (kind === 2));
+        ui_jpad_role(pad, i, r);
+        ui_jpad_mark(pad, i, sel, c === Col_Inactive);
+        ui_jpad_lock(pad, i, 0);
+        i += 1;
+    );
+);
+
+/*
    (2026-11-22, the rubric GUI, step 2 : the pilot) The roles of the cells of the pad of a reader (their colors : the palette
    chosen in the module GUI, see ui_jpad_rl_action in mSL_ui_Pads ; the colors of pad_Rdr_Colrs are not used any more) :
      line 1 : the reader (Navigation : its menu), its status (State), its mode (Choice), its line (Object), the size or the
@@ -21724,7 +21785,7 @@ function its_Gr_CrvClick(r, ev, sh) local(k, i, xx)
      lines 4, 5 : the settings of the modes Stretch, Brage (Value ; the lag : Information) and Grains (Value ; the curve of
               the envelope : Object ; the count of grains : Information)
    Their modes : selected (lit) : the status Reading, a segment, Mute, Solo, a count of output channels chosen, the
-   transport running, a setting changed ; disabled (dim : no effect now) : the status Paused, a setting of another mode, a
+   transport running, a setting changed ; disabled (dim : no effect now) : a setting of another mode, a
    curve that is not an envelope, no reader yet (except its menu, its mode, its line and, in delay mode, the writer). The
    region (RDBL[6] 1, 2) : the cells 19 and 20 in a color of the identity series (until then, Heliotrope, Light Steel Blue).
    rok : the reader exists (rcbl), md its mode (or the mode chosen before it exists, RDBL[1])
@@ -21749,7 +21810,7 @@ function its_Rd_Roles(rcbl, rok, md, RDBL) local(i, k, f, d, st)
     );
     rok ? (
         st = rcbl[its_Rdr_Status];
-        ui_jpad_mark(pad_Reader, 1, st === its_RdrStat_Reading, st === its_RdrStat_Paused);
+        ui_jpad_mark(pad_Reader, 1, st === its_RdrStat_Reading, 0); // (2026-11-23 : paused, at rest ; dim would say "no clic")
         ui_jpad_mark(pad_Reader, 4, its_Rd_HasSeg(rcbl), 0);
         ui_jpad_mark(pad_Reader, 8, (rcbl[its_Rdr_StFlgs] & its_RdrFlg_mute) != 0, 0);
         ui_jpad_mark(pad_Reader, 9, (rcbl[its_Rdr_StFlgs] & its_RdrFlg_solo) != 0, 0);
@@ -22890,6 +22951,12 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lc
                     sprintf(pad_Lin_Labs[0],"Line %d", lnr+1);
                 strcpy(pad_Lin_Labs[7],"Action");
 
+                // (2026-11-23) the roles (the palette) : the line (Navigation), its status (Choice : Ready selected), its length
+                // (Value), its samples (Information), its channels (Choice), its frequency (Information), its error (Alert), Action
+                ui_jpad_roles_set(pad_Line, 0, "ncvici.a");
+                i = 0; loop(pad_Lin_Siz, ui_jpad_mark(pad_Line, i, 0, 0); (strlen(pad_Lin_Labs[i]) === 0) ? ui_jpad_role(pad_Line, i, ui_jpad_rl_empty); i += 1;);
+                (strlen(pad_Lin_Labs[6]) > 0) ? ui_jpad_role(pad_Line, 6, ui_jpad_rl_alert);
+                ui_jpad_mark(pad_Line, 1, lcbl !== 0, 0);
                 zz = control_jpad(pad_Line);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 34;
@@ -22986,6 +23053,8 @@ local (h1, h2, h3, h4, uix_jneed, uix_jmini, i, r, x, xx, zz, zzmi, jmc, lnr, lc
                     pad_LnF_Colrs[0] = Col_P1;
                 );
                 fsh ? (ui_GFXdoNow |= 4); // (the name comes back after its_LnFShowDur s)
+                // (2026-11-23) the file of the line : Object (its full name shown : selected)
+                ui_jpad_role(pad_LnF, 0, ui_jpad_rl_object); ui_jpad_mark(pad_LnF, 0, pad_LnF_Colrs[0] === Color_Goldenrod, 0);
                 zz = control_jpad(pad_LnF);
                 ((zz > 0) && (strlen(its_LnFile[lnr]) > 0)) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 34;
@@ -24750,6 +24819,54 @@ local (h)
         );
     );
 );
+/*
+   (2026-11-23, the rubric GUI, step 2) The roles of the cells of the pad of an effect (their colors : the palette chosen in
+   the module GUI ; the colors of pad_Efx_Colrs are still set by the fills of the types, FX_Type_Pad, and TRANSLATED here) :
+     the cells of the types (lines 2 to 4) : InfoA Information, Heliotrope Object, P6 Alert, Limegreen State (lit), the
+              others Choice ; P2, Goldenrod, Cornflower Blue : selected (a setting on, changed, a curve that exists) ;
+              Inactive : disabled ; Dark Orange : Alert (a warning : "Loop sat.") ; no text : Empty (its_Pad_Roles, kind 0)
+     line 1 : the effect (Navigation : its menu), its type, its phase (Choice), its status (Choice : On selected ; Bypass, Off
+              at rest), its channels, its output (Choice), its check (Information ; an error : Alert), Action
+     the modulation inputs (cell 16 "Modulation", the inputs from 17) : Choice ; connected : selected, switched off :
+              locked, not usable : disabled ; all switched off : "Modulation" locked
+     the limiter (cell 23) : Off at rest, active selected, limiting (more than 0.1 dB) : Alert
+   No effect yet : all disabled, except its menu and its type
+*/
+function its_Fx_Roles(fx, fok) local(i, n, j, p)
+(
+    its_Pad_Roles(pad_Effect, pad_Efx_Labs, pad_Efx_Colrs, pad_Efx_Siz, 0);
+    !fok ? (i = 2; loop(pad_Efx_Siz - 2, ui_jpad_mark(pad_Effect, i, 0, 1); i += 1;));
+    ui_jpad_roles_set(pad_Effect, 0, "nccccc.a");
+    ui_jpad_mark(pad_Effect, 2, 0, !fok);
+    fok ? (
+        // the status : On selected ; Bypass, Off at rest (2026-11-23, the user : paused is not disabled)
+        ui_jpad_role(pad_Effect, 3, ui_jpad_rl_choice); ui_jpad_lock(pad_Effect, 3, 0);
+        ui_jpad_mark(pad_Effect, 3, (fx[its_Efx_Status] !== its_EfxStat_Bypass) && (fx[its_Efx_Status] !== its_EfxStat_Off), 0);
+        ui_jpad_role(pad_Effect, 6, (fx[its_Efx_Status] !== its_EfxStat_Off) && (fx[its_Efx_Error] !== 0) ? ui_jpad_rl_alert :
+            ui_jpad_rl_info);
+        ui_jpad_mark(pad_Effect, 6, 0, 0);
+        // the modulation inputs : as the rows of the readers and the writers (its_Mod_Row)
+        its_Fx_HasMod(fx[its_Efx_Type]) ? (
+            n = its_Fx_ModN(fx[its_Efx_Type]);
+            ui_jpad_role(pad_Effect, 16, ui_jpad_rl_choice);
+            ui_jpad_mark(pad_Effect, 16, 0, 0);
+            ui_jpad_lock(pad_Effect, 16, its_Mod_BypState(fx + its_Efx_Mod1, n) === 2);
+            j = 0;
+            loop(n,
+                p = fx + its_Efx_Mod1 + j * its_ModDist;
+                ui_jpad_role(pad_Effect, 17 + j, ui_jpad_rl_choice);
+                ui_jpad_mark(pad_Effect, 17 + j, p[its_Mod_Src] !== 0, pad_Efx_Colrs[17 + j] === Col_Inactive);
+                ui_jpad_lock(pad_Effect, 17 + j, (p[its_Mod_Src] !== 0) && (p[its_Mod_Flags] & its_ModF_Byp));
+                j += 1;
+            );
+        );
+        // the limiter : limiting, an alert
+        (!its_Fx_Ctl(fx[its_Efx_Type]) && fx[its_Efx_Lim] && (fx[its_Efx_LimEnv] > 1.012)) ? (
+            ui_jpad_role(pad_Effect, 23, ui_jpad_rl_alert); ui_jpad_mark(pad_Effect, 23, 0, 0);
+        );
+    );
+);
+
 function show_Effect_Pad(RDBL, blockId)
 local (h1, h2, h3, h3d, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r, xx, wgh, zz, zzmcl, act)
 (
@@ -24865,6 +24982,7 @@ local (h1, h2, h3, h3d, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r,
                 // (the bypassed modulation inputs : a red dot in their cells, its room on the right of the texts)
                 k = (fok && its_Fx_HasMod(fx[its_Efx_Type])) ? its_Mod_BypCount(fx + its_Efx_Mod1, its_Fx_ModN(fx[its_Efx_Type])) : 0;
                 ui_jpad_txt_rpad = k ? 2 * its_ModDotR + 8 : 0;
+                its_Fx_Roles(fx, fok); // (2026-11-23 : the roles of the cells and their modes, from the colors set above)
                 zz = control_jpad(pad_Effect, RDBL[3], -1, 1);
                 k ? its_Mod_Dots(17, fx + its_Efx_Mod1, its_Fx_ModN(fx[its_Efx_Type]));
                 ui_jpad_txt_rpad = 0;
@@ -25054,7 +25172,7 @@ local (h1, h2, h3, h3d, uix_jneed, zzmi, jmc, fxn, fx, fok, dfCol, CL1, i, k, r,
      line 2 : the direction (Choice ; W-Mix : none), the source (Choice), the position (Information), the phase of the
               cycle of W-Mix (State), Action
    Their modes : selected (lit) : the status Writing, the direction while it goes backward (until then, orange), the phase
-   of W-Mix while it writes (fade-in, plateau, fade-out) ; disabled (dim) : the status Paused, no line (its size and
+   of W-Mix while it writes (fade-in, plateau, fade-out) ; disabled (dim) : no line (its size and
    channels), no writer yet (except its menu and its line). wok : the writer exists (wcbl), lok : it has a line
 */
 function its_Wr_Roles(wcbl, wok, lok) local(i, k, wm)
@@ -25068,7 +25186,7 @@ function its_Wr_Roles(wcbl, wok, lok) local(i, k, wm)
     );
     wok ? (
         k = wcbl[its_Wrt_Status];
-        ui_jpad_mark(pad_Writer, 1, k === its_WrtStat_Writing, k === its_WrtStat_Paused);
+        ui_jpad_mark(pad_Writer, 1, k === its_WrtStat_Writing, 0); // (2026-11-23 : paused, at rest)
         !wm ? ui_jpad_mark(pad_Writer, 8, wcbl[its_Wrt_Step] < 0, 0);
         wm ? (
             k = wcbl[its_Wrt_WPhase];
@@ -25458,6 +25576,7 @@ local (h1, h2, uix_jneed, zzmi, i, n, r, zz, zzmcl, pg, npg)
                     pad_Ctl_Colrs[1 + i] = (i === pg) ? Color_Limegreen : Col_P1;
                     i += 1;
                 );
+                its_Pad_Roles(pad_Controls, pad_Ctl_Labs, pad_Ctl_Colrs, pad_Ctl_Siz, 0); // (2026-11-23 : the roles, see its_Pad_Roles)
                 zz = control_jpad(pad_Controls);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 35;
@@ -26385,6 +26504,7 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, ki, ns, nt, n1, n2, n3, n4, n5, i, k, o
                 );
                 sprintf(pad_Sum_Labs[7], "Page %d / %d", pg + 1, npg);
                 pad_Sum_Colrs[7] = (npg > 1) ? Col_P3 : Col_Inactive;
+                its_Pad_Roles(pad_Sum, pad_Sum_Labs, pad_Sum_Colrs, pad_Sum_Siz, 1); // (2026-11-23 : the roles, states)
                 zz = control_jpad(pad_Sum);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 36;
@@ -26444,6 +26564,7 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, ki, ns, nt, n1, n2, n3, n4, n5, i, k, o
                     rr = max(2, min(0|(ui_jd_padline / 4), 0|((i - 32) / 4)));
                     ui_jpad_txt_rpad = hr ? 4 * rr + 12 : 2 * rr + 8;
                 );
+                its_Pad_Roles(pad_SumG, pad_SumG_Labs, pad_SumG_Colrs, pad_SumG_Siz, 1); // (2026-11-23 : the roles, states)
                 zz = control_jpad(pad_SumG, nl, -1, 1);
                 ui_jpad_txt_rpad = 0;
                 // readers : the circles mute and solo ; effects : the circle of the errors
@@ -26571,6 +26692,7 @@ local (h1, h2, h3, uix_jneed, zzmi, i, k, n, nt, mx, nl, zz, zzmcl, xx, hk, hx, 
                 pad_Ins_Colrs[1] = pad_Ins_Colrs[2] = Color_Heliotrope;
                 strcpy(pad_Ins_Labs[7], "Action");
                 pad_Ins_Colrs[7] = Col_P1;
+                its_Pad_Roles(pad_Ins, pad_Ins_Labs, pad_Ins_Colrs, pad_Ins_Siz, 0); // (2026-11-23 : the roles)
                 zz = control_jpad(pad_Ins);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 36;
@@ -26608,6 +26730,7 @@ local (h1, h2, h3, uix_jneed, zzmi, i, k, n, nt, mx, nl, zz, zzmcl, xx, hk, hx, 
                     );
                     i += 1;
                 );
+                its_Pad_Roles(pad_InsG, pad_InsG_Labs, pad_InsG_Colrs, pad_InsG_Siz, 3); // (2026-11-23 : the roles, a list)
                 zz = control_jpad(pad_InsG, nl, -1, 1);
                 // the instance under the mouse (geometry of the pad just drawn, see ui_jpad_cell_pos)
                 (ui_hover() && (ui_jpad_lst_wi > 0) && (ui_jpad_lst_he > 0)) ? (
@@ -26988,6 +27111,7 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                 // the current bank (orange : only its links shown, and those of all the banks)
                 sprintf(pad_Lk_Labs[8], flt ? "Bank %d only" : "Bank %d", its_LkBank);
                 pad_Lk_Colrs[8] = flt ? Color_Dark_Orange : Col_P1;
+                its_Pad_Roles(pad_Lk, pad_Lk_Labs, pad_Lk_Colrs, pad_Lk_Siz, 2); // (2026-11-23 : the roles, links)
                 zz = control_jpad(pad_Lk);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 39;
@@ -27102,6 +27226,7 @@ local (h1, h2, h3, uix_jneed, zzmi, i, j, k, m, n, np, pg, nl, sel, hk, hx, hy, 
                     );
                     j += 1;
                 );
+                its_Pad_Roles(pad_LkG, pad_LkG_Labs, pad_LkG_Colrs, pad_LkG_Siz, 2); // (2026-11-23 : the roles, links)
                 zz = control_jpad(pad_LkG, nl, -1, 0);
                 // the link under the mouse (geometry of the pad just drawn)
                 (ui_hover() && (ui_jpad_lst_wi > 0) && (ui_jpad_lst_he > 0)) ? (
@@ -27284,6 +27409,7 @@ local (h1, h3, uix_jneed, zzmi, i, c, b, o, zz, zzmcl, xx)
                 pad_Scr_Colrs[6] = (c === 0) ? Color_Limegreen : Col_Inactive;
                 strcpy(pad_Scr_Labs[7], "Action");
                 pad_Scr_Colrs[7] = Col_P1;
+                its_Pad_Roles(pad_Scr, pad_Scr_Labs, pad_Scr_Colrs, pad_Scr_Siz, 0); // (2026-11-23 : the roles)
                 zz = control_jpad(pad_Scr);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 37;
@@ -27612,6 +27738,7 @@ local (h1, h3, gh, pt, uix_jneed, zzmi, i, b, o, zz, zzmcl, xx, hk, ty, k)
                 sprintf(pad_Pg_Labs[6], "Modules %d", its_PgNbE + its_PgNbR + its_PgNbW + its_PgNbL);
                 strcpy(pad_Pg_Labs[7], "Action");
                 pad_Pg_Colrs[7] = Col_P1;
+                its_Pad_Roles(pad_Pg, pad_Pg_Labs, pad_Pg_Colrs, pad_Pg_Siz, 0); // (2026-11-23 : the roles)
                 zz = control_jpad(pad_Pg);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 36;
@@ -28145,6 +28272,7 @@ local (h1, h2, h3, uix_jneed, zzmi, jmc, i, k, b, ok, zz, zzmcl, xx, cgh, x0, w,
                 pad_Crv_Colrs[6] = (its_CrvUndoK === k) ? Col_P3 : Col_Inactive;
                 strcpy(pad_Crv_Labs[7], "Action");
                 pad_Crv_Colrs[7] = Col_P1;
+                its_Pad_Roles(pad_Crv, pad_Crv_Labs, pad_Crv_Colrs, pad_Crv_Siz, 0); // (2026-11-23 : the roles)
                 zz = control_jpad(pad_Crv);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 38;
@@ -28467,14 +28595,15 @@ local (h1, h2, uix_jneed, zzmi, jmc, i, k, r, xx, zi, zz, zzmcl, nLn, nRd, nWr, 
                 sprintf(pad_Glb_Labs[5],"Writers %d", nWr);
                 sprintf(pad_Glb_Labs[6],"Effects %d", nFx);
                 pad_Glb_Colrs[3] = pad_Glb_Colrs[4] = pad_Glb_Colrs[5] = pad_Glb_Colrs[6] = Color_Heliotrope;
-                strcpy(pad_Glb_Labs[7],"Action");
+                strcpy(pad_Glb_Labs[7],"Actions"); // (2026-11-23 : "Action" until then)
                 pad_Glb_Colrs[7] = Col_P1;
 
+                its_Pad_Roles(pad_Global, pad_Glb_Labs, pad_Glb_Colrs, pad_Glb_Siz, 1); // (2026-11-23 : the roles, states)
                 zz = control_jpad(pad_Global);
                 (zz > 0) ? (
                     ui_GFXdoNow |= 4; ui_GFXReason = 35;
                     zzmcl = pad_Global[ui_jpad_last]-1;
-                    ((zz & ui_jpad_ev_rmc) || ((zz & ui_jpad_ev_lmc) && (zzmcl === 7))) ? (  // right mouse clic (the cell "Action" : left clic too)
+                    ((zz & ui_jpad_ev_rmc) || ((zz & ui_jpad_ev_lmc) && (zzmcl === 7))) ? (  // right mouse clic (the cell "Actions" : left clic too)
                         (zzmcl === 2) ? (
                             ui_menu_tick(menu_Glb_Smpl, -1, 0);
                             ui_menu_tick(menu_Glb_Smpl, k+1, 1);
@@ -29041,6 +29170,7 @@ local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in
             s = p[block1Pane -1 + studDispPrf];
             str_setchar(s, 1, '!');
             (serialBlock[Pr7_StudLive + TabIdt]) ? str_setchar(p[blockTabLive], 1, '!');
+            tbs_MenuRefresh(p, TabIdt); // (2026-11-23) the count of the tabs, the tabs to exchange with
             str_setchar(p[blockStyle0 + (ui_jstyle != 0)], 1, '!'); // the current style, the current variation :
             str_setchar(p[blockVar0 + ((ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0))], 1, '!');
             str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
@@ -29115,6 +29245,9 @@ local(x, xx, xy, igb, u, v, w, m, myp, i, j, k, p, s, wst, kit, blockRent, pn_in
                     ui_screen_open("control.prompt");
                     ui_screen_arg(0, altTabsNames[TabIdt]);
                     ui_screen_arg(1, #tmp);
+                ) :
+                tbs_MenuClick(kit, TabIdt) ? (
+                    0; // (2026-11-23) Number of tabs, Exchange with tab (mSL_Tabs)
                 ) :
                 ui_jzoom_menu_click(kit) ? (
                     0; // a display size (see ui-lib-JJ-GUI)
@@ -29386,6 +29519,7 @@ local (p, i, xx, kit)
     i = 0; while (i < blockMenuITC) ( str_setchar(p[i], 1, ui_jmenu_chSP); i += 1; );
     str_setchar(p[block1Pane -1 + studDispPrf], 1, '!');
     str_setchar(p[blockTabLive], 1, '!');
+    tbs_MenuRefresh(p, TabIdt); // (2026-11-23) the count of the tabs, the tabs to exchange with
     str_setchar(p[blockStyle0 + (ui_jstyle != 0)], 1, '!'); // the current style, the current variation :
     str_setchar(p[blockVar0 + ((ui_jvariant >= 0) ? min(3, ui_jvariant) : (ui_jstyle != 0))], 1, '!');
     str_setchar(p[blockThemeDefault + uix_jtheme], 1, '!'); // current theme
@@ -29403,6 +29537,9 @@ local (p, i, xx, kit)
             ui_screen_open("control.prompt");
             ui_screen_arg(0, altTabsNames[TabIdt]);
             ui_screen_arg(1, #tmp);
+        ) :
+        tbs_MenuClick(kit, TabIdt) ? (
+            0; // (2026-11-23) Number of tabs, Exchange with tab (mSL_Tabs)
         ) :
         ui_jzoom_menu_click(kit) ? (
             0; // a display size (see ui-lib-JJ-GUI)
@@ -29442,7 +29579,7 @@ local (p, ww, t, BankLink)
     do_GenericTabStart();
     //colMouseWasIn = -1;
     BankLink = 1;
-    TabIdt = max(0, min(7, 0|tbNum));
+    TabIdt = max(0, min(dcbTabsCount - 1, 0|tbNum)); // (2026-11-23 : dcbTabsCount, until then 7)
     studDispPrf = studDispPCnt = max(1, min(4, 0|(serialBlock[Pr7_StudConf+TabIdt])));
 
     (serialBlock[Pr7_StudLive + TabIdt]) ? (
@@ -29545,69 +29682,10 @@ local (p, ww, t, BankLink)
 
 
         //SCREENS
-
-        ui_screen() === uix_jG_menuscr[0] ? (
-            /*
-            show_local_Infos();
-
-            gui_show_syslog ? show_SysLog(0, SysLogBox);
-            gui_show_memory ? (
-                (gfx_w/ui_jscale() > gfx_colM_width) ? (
-                    ui_split_leftratio(0.5);
-                    show_Memory(memoryBox1);
-                    ui_pop();
-                );
-                show_Memory(memoryBox2);
-            );
-            */
-            genericTabSet(0);
-        ) :
-
-        ui_screen() === uix_jG_menuscr[1] ? (
-            /*
-            SysLogBox[4] = 80;
-            show_SysLog(0, SysLogBox);
-            (gfx_w/ui_jscale() > gfx_colM_width) ? (
-                ui_split_leftratio(0.5);
-                show_Memory(memoryBox1);
-                ui_pop();
-            );
-            show_Memory(memoryBox2);
-            */
-            genericTabSet(1);
-        ) :
-
-        ui_screen() === uix_jG_menuscr[2] ? (
-            /*
-            memoryBox1[17] = memoryBox2[17] = 96;
-            (gfx_w/ui_jscale() > gfx_colM_width) ? (
-                ui_split_leftratio(0.5);
-                show_Memory(memoryBox1);
-                ui_pop();
-            );
-            show_Memory(memoryBox2);
-            */
-            genericTabSet(2);
-        ) :
-
-        ui_screen() === uix_jG_menuscr[3] ? (
-            genericTabSet(3);
-        ) :
-
-        ui_screen() === uix_jG_menuscr[4] ? (
-            genericTabSet(4);
-        ) :
-
-        ui_screen() === uix_jG_menuscr[5] ? (
-            genericTabSet(5);
-        ) :
-
-        ui_screen() === uix_jG_menuscr[6] ? (
-            genericTabSet(6);
-        ) :
-
-        ui_screen() === uix_jG_menuscr[7] ? (
-            genericTabSet(7);
+        // (2026-11-23) the tab shown : one of the dcbTabsCount tabs (mSL_Tabs ; until then 8 cases, uix_jG_menuscr[0 ... 7])
+        tbs_Frame();
+        ((g__tbn = tbs_Find(ui_screen())) >= 0) ? (
+            genericTabSet(g__tbn);
         ) :
 
         //SCREEN--DEFAULT
