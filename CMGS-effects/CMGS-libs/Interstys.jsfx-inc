@@ -2274,6 +2274,12 @@ fm_HasIn = 1;
 fm_Init();
 its_FmIn = make_array(CH_NB); its_FmOut = make_array(CH_NB); // (the samples of the track given to them, @sample)
 mm_usr_prot[mm_usr_prot_ptr] = fm_ptr; mm_usr_prot_ptr += 1; // (their work areas : kept by the garbage collector)
+// (2026-11-24) The curves : the library shared with Diffusion-3, mSL_Curves (the curves in static memory, their tables, the
+// editors "Curves A" ... "H" : crv_Editor ; the exports : crv_Export) ; Interstys keeps its analysis of the blocks Curve of
+// its settings (its_Tb_Curve : its passes), on these curves ; see "Curves" below for the names of Interstys kept
+<? crv_part = 1; include("CMGS-libs/mSL_Curves.jsfx-inc"); ?>
+<? crv_part = 2; include("CMGS-libs/mSL_Curves.jsfx-inc"); ?>
+#crv_xAp = "its"; #crv_xApp = "Interstys"; #crv_xHd = " Interstys"; // (the exports : Data/name-its-curve-date.mSL)
 
 
 // Créations des tables d'objets et de cellules
@@ -2393,7 +2399,7 @@ function its_Rdr_OutWidth(r)
 function its_Crv_Xfer(u, k, uni) local(ty, t, x, j, p)
 (
     its_CrvTbE[k] ? (
-        ty = its_CrvTbC[k * its_Crv_BlkSize + its_Crv_Type]; // (the type of the table)
+        ty = crv_tbc[k * CRV_BS + crv_fT]; // (the type of the table ; 2026-11-24 : mSL_Curves)
         t = its_CrvTab + k * its_CrvTbSz + its_CrvTbG;
         ((ty === its_CrvQWave) || (ty === its_CrvHWave)) ? (
             x = u * ((ty === its_CrvQWave) ? 0.25 : 0.5);
@@ -5466,13 +5472,7 @@ menu_PgL_N[3] = "Show its patch";
 menu_PgL = make_jmenu(
     ui_jmenu_typ_opt | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "patch-line", 4, menu_PgL_N);
-// Pad of the module "Curves" (see show_Curves_Pad) : one line
-pad_Crv_Siz = 8;
-pad_Crv = make_jpad(
-    ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors | ui_jpad_mk_values,
-    1, pad_Crv_Siz, pad_Crv_Siz);
-pad_Crv_Labs = pad_Crv + pad_Crv[ui_jpad_labs];
-pad_Crv_Colrs = pad_Crv + pad_Crv[ui_jpad_clrs];
+// (the pad of the modules "Curves" : that of mSL_Curves since 2026-11-24, pad_Crv)
 // the curves 1 ... 64, in 2 sub-menus of 32 (the ">" headers are not counted in the results)
 menu_Crv_Grp = 32;
 menu_Crv_Ids_N = make_array(64 + 2);
@@ -5480,30 +5480,6 @@ menu_Crv_Ids_N = make_array(64 + 2);
 menu_Crv_Ids = make_jmenu(
     ui_jmenu_typ_sel | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
             "curves", 64 + 2, menu_Crv_Ids_N);
-// (the new curves : in the order of its_CrvTyO)
-menu_Crv_Action_N = make_array(12);
-menu_Crv_Action_N[0] = "New envelope";
-menu_Crv_Action_N[1] = "New half envelope (H-Envelope)";
-menu_Crv_Action_N[2] = "New waveform";
-menu_Crv_Action_N[3] = "New quarter waveform (Q-Waveform)";
-menu_Crv_Action_N[4] = "New half waveform (H-Waveform)";
-menu_Crv_Action_N[5] = "Dump in the log";
-menu_Crv_Action_N[6] = "Export to a file";
-menu_Crv_Action_N[7] = "Export all the curves";
-menu_Crv_Action_N[8] = "Sustain : the selected point";
-menu_Crv_Action_N[9] = "Sustain : none";
-menu_Crv_Action_N[10] = "---";
-menu_Crv_Action_N[11] = "Delete";
-menu_Crv_Action = make_jmenu(
-    ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
-            "curves-actions", 12, menu_Crv_Action_N);
-its_CrvUiK = 0; // the curve shown in the editor being drawn (0 ... its_CrvMx-1) ; its state : see its_Crv_EdGet
-its_CrvGraphH = 160; // height of the graphic area (the waveform of a line : its_LinWaveH)
-// the mouse in the graphic area (its_Crv_Edit) : 0 nothing, 1 a point is moved, 2 the curvature of a segment ; the state at the clic
-its_CrvDrag = its_CrvMoved = its_CrvMPrev = 0; its_CrvDragI = -1;
-its_CrvM0x = its_CrvM0y = its_CrvP0x = its_CrvP0y = its_CrvC0 = 0;
-its_CrvGrid = 0; // the grid (x and y) : 0 none, otherwise its count of divisions (cell 5)
-its_CrvGridN = make_array(5); its_CrvGridN[0] = 0; its_CrvGridN[1] = 4; its_CrvGridN[2] = 8; its_CrvGridN[3] = 16; its_CrvGridN[4] = 32;
 // the modules that write or read a cell of the module "Connections" (right clic on the cell) : its items are set by its_Pch_Use
 menu_Pch_Mods = make_jmenu(
     ui_jmenu_typ_action | ui_jmenu_opt_rndrect | ui_jmenu_opt_rclick | ui_jmenu_opt_notitle,
@@ -13646,12 +13622,9 @@ function its_Tb_Clear() local(k, all, p)
                 its_AlgSym[k] = its_AlgBlk[k] = its_AlgLen[k] = 0;
                 k += 1;
             );
-            k = 0; loop(its_CrvMx,
-                (its_CrvBlk[k] > BASE_MEMORY) ? mSL_Dyn_Free(its_CrvBlk[k]);
-                its_CrvBlk[k] = 0; strcpy(its_CrvNm[k], "");
-                k += 1;
-            );
-            its_CrvSelK = its_CrvUndoK = its_CrvPreK = -1; its_CrvDrag = 0;
+            memset(crv_blk, 0, CRV_MX * CRV_BS); // (2026-11-24 : mSL_Curves)
+            k = 0; loop(its_CrvMx, strcpy(its_CrvNm[k], ""); k += 1;);
+            crv_selK = crv_undoK = crv_preK = -1; crv_mDrag = 0;
             k = 0; loop(its_CrvEdN, p = its_CrvEd + k * its_CrvEdSz; p[11] = -1; p[3] = 0; k += 1;);
             k = 0; loop(NB_GSL, (its_Ctl_Get(k) !== 0) ? its_Ctl_Set(k, 0); k += 1;);
             its_Lk_LedsOff(); its_Lk_FreeAll(); // (and the links : MIDI ; their LEDs lit switched off)
@@ -13942,232 +13915,49 @@ local (k, n)
 
 //—— Curves : envelopes and waveforms (the module "Curves")
 /*
-    its_CrvMx curves, in dynamic blocks (KW_crvb) : its_CrvBlk[k] (0 : no curve), its_CrvNm[k] their name (a text, "" : none ; case sensitive) ;
-    a block : the type (its_CrvEnv ... its_CrvHWave, below), the flags (1 : periodic), the count of points, then the
-    points (x, y, c) : x from 0 to 1 (not decreasing), c the curvature of the segment that starts at the point
-    the types : the editor shows the part kept (V, x in [0, 1]) ; the complete form F (u in [0, 1]) is deduced by symmetry
-    when it is needed (not built yet) :
-        0 Env   : an envelope, y in [0, 1] ; F = V
-        1 Wave  : a waveform, y in [-1, 1] ; F = V
-        2 HEnv  : a half envelope, the rise (y in [0, 1]) ; the fall is its mirror, (x, y) -> (2 - x, y), then x / 2 :
-                  F(u) = V(2 u) for u <= 0.5, V(2 - 2 u) after
-        3 QWave : a quarter of a waveform (y in [-1, 1], the first point at (0, 0)) ; the mirror (as HEnv) gives the half
-                  waveform H(u) = V(2 u) for u <= 0.5, V(2 - 2 u) after, then the complete form as HWave
-        4 HWave : a half waveform (y in [-1, 1], the first and the last y : 0) ; translated by (-1, 0) into [-1, 0], plus its
-                  symmetric about (0, 0), (x, y) -> (-x, -y), it gives the waveform in [-1, 1], then (x + 1) / 2 :
-                  F(u) = V(2 u) for u <= 0.5, -V(2 - 2 u) after
-    the periodic flag : Env and Wave only (the forms deduced are complete)
-    the sustain point of an envelope (its_Crv_Sus : its index, -1 : none ; a waveform has none) divides it in two parts :
-    the "rise" (from x = 0 to the point) and the "fall" (from the point to x = 1) ; applied to a sound with a fade-in, a
-    plateau and a fade-out, the rise is stretched over the fade-in, the y of the sustain point is the level of the plateau,
-    and the fall is stretched over the fade-out (the grains of a reader, see exec_grains)
+    (2026-11-24) The curves are those of the shared library mSL_Curves (included above : the curves in static memory, their
+    tables, the editors "Curves A" ... "H", crv_Editor, the exports) : see its header for the types (Env, Wave, HEnv, QWave,
+    HWave : the part edited and the complete form), the periodic flag, the sustain point. Interstys keeps its names :
+    its_Crv_B(k) the curve k as a block of Interstys (that of mSL_Curves after its word crv_fU : the type, the flags, the
+    count of points, the point selected, the sustain point, then the points x y c ; 0 : no curve ; saved in the records
+    'crvc' as before), its_CrvTab ... the tables (CRV_TN samples of the complete form, CRV_TG guards on each side : a cycle
+    for the cubic interpolation, its_Crv_Cyc, its_Crv_Xfer ; the plateau of the envelopes : the Grains), its_CrvNm the
+    names, its_CrvEd the editors (CRV_ES words each : 0 the curve shown, 1 the grid ...). Interstys keeps the analysis of
+    its blocks Curve (its_Crv_Keys, its_Tb_Curve : the simulation of pass 2, the curves set in pass 3), Check, Free, Dump.
+    Before 2026-11-24 : dynamic blocks (KW_crvb), tables and editors of its own.
 */
-KW_crvb = 'crvb';
-its_CrvMx = 64; // count of curves
-its_CrvPMx = 128; // points of a curve
+KW_crvb = 'crvb'; // (the first presets : their records 'crvb')
+its_CrvMx = CRV_MX; its_CrvPMx = CRV_PMX; its_CrvNmMx = CRV_NMLEN;
 its_Crv_Type = 0; its_Crv_Flags = 1; its_Crv_N = 2; its_Crv_Sel = 3; its_Crv_Sus = 4; its_Crv_Pts = 5;
-its_Crv_BlkSize = its_Crv_Pts + 3 * its_CrvPMx;
-its_CrvEnv = 0; its_CrvWave = 1; its_CrvHEnv = 2; its_CrvQWave = 3; its_CrvHWave = 4; its_CrvTyCnt = 5;
-its_CrvFl_Periodic = 1;
-its_CrvBlk = make_array(its_CrvMx);
-mm_usr_prot[mm_usr_prot_ptr] = its_CrvBlk; mm_usr_prot_ptr += 1; // (the garbage collector keeps them)
-// the names (texts, "" : none ; case sensitive ; in a table : a word, or a text between double quotes) ; in the simulation
-// of pass 2 : its_CrvSimN
-its_CrvNmMx = 31; // characters of a name at most
-its_CrvNm = make_array(its_CrvMx); its_CrvSimN = make_array(its_CrvMx);
-<? i = 0; loop(64, printf("its_CrvNm[%d] = #its_CrvNm%d; its_CrvSimN[%d] = #its_CrvSN%d; ", i, i, i, i); ((i % 4) == 3) ? printf("\n"); i += 1;); ?>
-its_CrvRenK = -1; // the curve renamed by the prompt of the module (see its_Crv_Rename)
+its_Crv_BlkSize = its_Crv_Pts + 3 * its_CrvPMx; // (CRV_BS - 1)
+its_CrvEnv = CRV_ENV; its_CrvWave = CRV_WAVE; its_CrvHEnv = CRV_HENV; its_CrvQWave = CRV_QWAVE; its_CrvHWave = CRV_HWAVE;
+its_CrvTyCnt = CRV_NTY;
+its_CrvFl_Periodic = CRV_PER;
+its_CrvNm = crv_nm; its_CrvTyN = crv_tyN; its_CrvTyL = crv_tyL; its_CrvTyO = crv_tyO;
+its_CrvTab = crv_tab; its_CrvTbN = CRV_TN; its_CrvTbG = CRV_TG; its_CrvTbSz = CRV_TS;
+its_CrvTbE = crv_tbE; its_CrvTbXs = crv_tbXs; its_CrvTbS = crv_tbS;
+its_CrvEd = crv_ed; its_CrvEdSz = CRV_ES; its_CrvEdN = CRV_NE;
 its_FxEdN = -1; // the effect whose value is edited by the prompt (-1 : none, see its_FxEd_Open)
-// the types : their names in a table, in the pad ; the order of the cell "type" of the pad (envelopes, then waveforms)
-its_CrvTyN = make_array(its_CrvTyCnt); its_CrvTy = make_array(its_CrvTyCnt); its_CrvTyL = make_array(its_CrvTyCnt);
-its_CrvTyN[0] = "Env"; its_CrvTyN[1] = "Wave"; its_CrvTyN[2] = "HEnv"; its_CrvTyN[3] = "QWave"; its_CrvTyN[4] = "HWave";
-its_CrvTyL[0] = "Envelope"; its_CrvTyL[1] = "Waveform"; its_CrvTyL[2] = "H-Envelope"; its_CrvTyL[3] = "Q-Waveform";
-its_CrvTyL[4] = "H-Waveform";
+// the names in the simulation of pass 2 (its_CrvSimN : texts ; its_CrvSimU : the curve exists)
+its_CrvSimN = make_array(its_CrvMx);
+<? i = 0; loop(64, printf("its_CrvSimN[%d] = #its_CrvSN%d; ", i, i); ((i % 8) == 7) ? printf("\n"); i += 1;); ?>
+// the type in the settings : its word
+its_CrvTy = make_array(its_CrvTyCnt);
 i__ii = 0; loop(its_CrvTyCnt, its_CrvTy[i__ii] = its_TK(its_CrvTyN[i__ii]); i__ii += 1;);
-its_CrvTyO = make_array(its_CrvTyCnt);
-its_CrvTyO[0] = its_CrvEnv; its_CrvTyO[1] = its_CrvHEnv; its_CrvTyO[2] = its_CrvWave; its_CrvTyO[3] = its_CrvQWave;
-its_CrvTyO[4] = its_CrvHWave;
-// the analysis of a block Curve : its keys (type, periodic, name, points, sustain), its points, the simulation of pass 2
-its_CrvKS = make_array(5); its_CrvK = make_array(5);
+// the analysis of a block Curve : its keys (type, periodic, name, points, sustain : given its_CrvKS, their values its_CrvKv ;
+// until 2026-11-24 its_CrvK, also the name of the constant of the shape of the segments : its values went to mem[1000]),
+// its points, the simulation of pass 2
+its_CrvKS = make_array(5); its_CrvKv = make_array(5);
 its_CrvTP = make_array(3 * its_CrvPMx); its_CrvTN = 0;
 its_CrvSimU = make_array(its_CrvMx);
-// one level of Undo : the curve before the last change (its_CrvUndoK : its number, -1 none ; its_CrvUndoE : 0 if there was no curve)
-its_CrvUndoB = make_array(its_Crv_BlkSize); its_CrvUndoK = -1; its_CrvUndoE = 0; // (its name : #its_CrvUndoN)
-its_CrvPreB = make_array(its_Crv_BlkSize); its_CrvPreK = -1; its_CrvPreE = 0; // the curve when a gesture starts (#its_CrvPreN)
-its_CrvTmpB = make_array(its_Crv_BlkSize);
-/*
-    the editors "Curves A ... H" (its_CrvEdN modules) : the state of each one in its_CrvEd (its_CrvEdSz words : 0 the curve
-    shown, 1 the grid, 2 ... 10 the mouse, 11 the curve of the selection), its selected points in its_CrvEdSel ;
-    show_Curves_Pad puts the state of the editor drawn in the globals its_CrvUiK ... its_CrvSelF (its_Crv_EdGet), then
-    keeps it (its_Crv_EdPut) ; by default, the editor e shows the curve e + 1
-*/
-its_CrvEdN = 8; its_CrvEdSz = 12;
-its_CrvEd = make_array(its_CrvEdN * its_CrvEdSz);
-its_CrvEdSel = make_array(its_CrvEdN * its_CrvPMx);
-i__ii = 0; loop(its_CrvEdN,
-    i__p = its_CrvEd + i__ii * its_CrvEdSz; i__p[0] = i__ii; i__p[4] = i__p[11] = -1;
-    i__ii += 1;
-);
-its_CrvSelF = its_CrvEdSel; its_CrvSelK = -1; // the selected points (1) of the curve its_CrvSelK (the editor drawn)
-its_CrvOrig = make_array(3 * its_CrvPMx); // the points when a move starts (its_Crv_Move)
-/*
-    the sampled tables of the curves (the shape "Curve" of an LFO reads them, see exec_fx) : for each curve, its_CrvTbN
-    samples of its complete form F(u), u = j / its_CrvTbN (see the types above), framed by its_CrvTbG guard samples on each
-    side, the samples of the other end (a cycle : the cubic interpolation reads t[-1] ... t[its_CrvTbN + 1]) ;
-    its_CrvTab + k * its_CrvTbSz + its_CrvTbG : the sample 0 of the curve k ; a curve that does not exist : zeros ;
-    built by @gfx when the curve changes (its_Crv_TabsUpdate : the curve compared with its copy in its_CrvTbC)
-*/
-its_CrvTbN = 4096; its_CrvTbG = 2; its_CrvTbSz = its_CrvTbN + 2 * its_CrvTbG;
-its_CrvTab = make_array(its_CrvMx * its_CrvTbSz);
-its_CrvTbC = make_array(its_CrvMx * its_Crv_BlkSize); // the curve when its table was built (type, count, points)
-its_CrvTbE = make_array(its_CrvMx); // 1 : the table comes from a curve (0 : zeros)
-// the plateau of an envelope in its table (the mode Grains of the readers, see its_Crv_Build) : its x, -1 if the curve is
-// not an envelope (a waveform, no curve), and its level
-its_CrvTbXs = make_array(its_CrvMx); its_CrvTbS = make_array(its_CrvMx);
-its_CrvTbMx = 4; its_CrvTbK = 0; // tables built per frame at most ; the first curve looked at (its_Crv_TabsUpdate)
-
-/*
-    the shape of a segment, t in [0, 1] : t / (t + a (1 - t)), a = its_CrvK^-c (c > 0 : fast start) ; monotonic, in [0, 1] ;
-    an arc of hyperbola, symmetric about its middle (the line x + y = 1) ; c and -c give mirror shapes : f(-c, t) = 1 - f(c, 1 - t) ;
-    the slopes at the ends are 1 / a and a (finite)
-*/
-its_CrvK = 1000; // (c = 1 : the slope at the start is 1000)
-function its_Crv_Shape(t, c)
-(
-    (c === 0) ? t : t / (t + (its_CrvK ^ (-c)) * (1 - t));
-);
-
-// the value of the curve "b" at x in [0, 1]
-function its_Crv_Val(b, x) local(n, p, i, x0, x1)
-(
-    n = b[its_Crv_N]; p = b + its_Crv_Pts;
-    x = max(0, min(1, x));
-    i = 0; while ((i < n - 2) && (p[3 * (i + 1)] <= x)) ( i += 1; );
-    p += 3 * i; x0 = p[0]; x1 = p[3];
-    (x1 <= x0) ? p[4] : p[1] + (p[4] - p[1]) * its_Crv_Shape((x - x0) / (x1 - x0), p[2]);
-);
-
-// the lowest y of the type "ty" : 0 for the envelopes (Env, HEnv), -1 for the waveforms
-function its_Crv_Lo(ty) ( ((ty === its_CrvEnv) || (ty === its_CrvHEnv)) ? 0 : -1; );
-
-/*
-    the default points of a new curve of type "ty" : Env, HEnv, QWave from (0, 0) to (1, 1) ; Wave at 0 ; HWave (0, 0),
-    (0.5, 1), (1, 0)
-*/
-function its_Crv_Default(b, ty)
-(
-    memset(b, 0, its_Crv_BlkSize);
-    b[its_Crv_Type] = ty; b[its_Crv_N] = 2; b[its_Crv_Sel] = -1; b[its_Crv_Sus] = -1;
-    b[its_Crv_Pts + 3] = 1; b[its_Crv_Pts + 4] = (ty === its_CrvWave) ? 0 : 1;
-    (ty === its_CrvHWave) ? (
-        b[its_Crv_N] = 3;
-        b[its_Crv_Pts + 3] = 0.5; b[its_Crv_Pts + 6] = 1; b[its_Crv_Pts + 7] = 0;
-    );
-);
-
-/*
-    the points kept in the bounds of the type, the last y of a periodic curve is the first one (Env, Wave ; the other types
-    are not periodic) ; QWave : the first y is 0 ; HWave : the first and the last y are 0 ; the sustain : a point of an Env
-*/
-function its_Crv_Clamp(b) local(lo, ty, p)
-(
-    ty = b[its_Crv_Type] = max(0, min(its_CrvTyCnt - 1, 0|b[its_Crv_Type]));
-    lo = its_Crv_Lo(ty);
-    p = b + its_Crv_Pts; loop(b[its_Crv_N], p[1] = max(lo, min(1, p[1])); p += 3;);
-    ((ty !== its_CrvEnv) && (ty !== its_CrvWave)) ? (b[its_Crv_Flags] = b[its_Crv_Flags] & (-1 ~ its_CrvFl_Periodic));
-    (b[its_Crv_Flags] & its_CrvFl_Periodic) ? (b[its_Crv_Pts + 3 * (b[its_Crv_N] - 1) + 1] = b[its_Crv_Pts + 1]);
-    ((ty === its_CrvQWave) || (ty === its_CrvHWave)) ? (b[its_Crv_Pts + 1] = 0);
-    (ty === its_CrvHWave) ? (b[its_Crv_Pts + 3 * (b[its_Crv_N] - 1) + 1] = 0);
-    ((ty !== its_CrvEnv) || (b[its_Crv_Sus] < 0) || (b[its_Crv_Sus] >= b[its_Crv_N])) ? (b[its_Crv_Sus] = -1) : (b[its_Crv_Sus] = floor(b[its_Crv_Sus]));
-);
-
-// the values V(j / m) of the curve "b" in t[0 ... m] (as its_Crv_Val, the segments followed in order)
-function its_Crv_Fill(b, t, m) local(n, p, q, i, j, x, x0, x1)
-(
-    n = b[its_Crv_N]; p = b + its_Crv_Pts; i = 0; j = 0;
-    loop(m + 1,
-        x = j / m;
-        while ((i < n - 2) && (p[3 * (i + 1)] <= x)) ( i += 1; );
-        q = p + 3 * i; x0 = q[0]; x1 = q[3];
-        t[j] = (x1 <= x0) ? q[4] : q[1] + (q[4] - q[1]) * its_Crv_Shape((x - x0) / (x1 - x0), q[2]);
-        j += 1;
-    );
-);
-
-/*
-    the table of the curve "k" (see its_CrvTab) : the complete form F (the types HEnv, QWave, HWave : by symmetry), then
-    the guards (a cycle) ; zeros if the curve does not exist ; the curve is copied in its_CrvTbC
-*/
-function its_Crv_Build(k) local(b, t, n, ty, j, i, p)
-(
-    b = its_CrvBlk[k]; t = its_CrvTab + k * its_CrvTbSz + its_CrvTbG; n = its_CrvTbN;
-    (b > BASE_MEMORY) ? (
-        ty = b[its_Crv_Type];
-        (ty === its_CrvHEnv) ? (
-            // F(u) = V(2 u) for u <= 0.5, F(1 - u) = F(u)
-            its_Crv_Fill(b, t, n / 2);
-            j = 1; loop(n / 2 - 1, t[n - j] = t[j]; j += 1;);
-        ) :
-        (ty === its_CrvHWave) ? (
-            // F(u) = V(2 u) for u <= 0.5, F(1 - u) = -F(u)
-            its_Crv_Fill(b, t, n / 2);
-            j = 1; loop(n / 2 - 1, t[n - j] = -t[j]; j += 1;);
-        ) :
-        (ty === its_CrvQWave) ? (
-            // the half waveform : H(u) = V(2 u) for u <= 0.5, H(1 - u) = H(u) ; then as HWave
-            its_Crv_Fill(b, t, n / 4);
-            j = 0; loop(n / 4, t[n / 2 - j] = t[j]; j += 1;);
-            j = 1; loop(n / 2 - 1, t[n - j] = -t[j]; j += 1;);
-        ) : (
-            // Env, Wave : F = V
-            its_Crv_Fill(b, t, n);
-        );
-        t[-2] = t[n - 2]; t[-1] = t[n - 1]; t[n] = t[0]; t[n + 1] = t[1];
-        memcpy(its_CrvTbC + k * its_Crv_BlkSize, b, its_Crv_Pts + 3 * b[its_Crv_N]);
-        its_CrvTbE[k] = 1;
-        // the plateau (the grains of a reader) : an envelope, its sustain point, else its highest point ; a half envelope,
-        // its top (u = 0.5) ; a waveform : none
-        p = b + its_Crv_Pts;
-        (ty === its_CrvEnv) ? (
-            i = b[its_Crv_Sus];
-            (i < 0) ? ( i = 0; j = 1; loop(b[its_Crv_N] - 1, (p[3 * j + 1] > p[3 * i + 1]) ? (i = j); j += 1;); );
-            its_CrvTbXs[k] = p[3 * i]; its_CrvTbS[k] = p[3 * i + 1];
-        ) :
-        (ty === its_CrvHEnv) ? (
-            its_CrvTbXs[k] = 0.5; its_CrvTbS[k] = t[n / 2];
-        ) : (
-            its_CrvTbXs[k] = -1; its_CrvTbS[k] = 1;
-        );
-    ) : (
-        memset(t - its_CrvTbG, 0, its_CrvTbSz);
-        its_CrvTbE[k] = 0;
-        its_CrvTbXs[k] = -1; its_CrvTbS[k] = 1;
-    );
-);
-
-// the table of the curve "k" is not the one of the curve (its type, its points), or the curve no longer exists
-function its_Crv_TbDiff(k) local(b, c, n, i, d)
-(
-    b = its_CrvBlk[k]; c = its_CrvTbC + k * its_Crv_BlkSize;
-    (b <= BASE_MEMORY) ? (d = its_CrvTbE[k]) :
-    !its_CrvTbE[k] ? (d = 1) : (
-        n = b[its_Crv_N];
-        d = (b[its_Crv_Type] !== c[its_Crv_Type]) || (n !== c[its_Crv_N]) || (b[its_Crv_Sus] !== c[its_Crv_Sus]); // (Sus : Grains)
-        i = its_Crv_Pts; loop(d ? 0 : 3 * n, (b[i] !== c[i]) ? (d = 1); i += 1;);
-    );
-    d;
-);
-
-// @gfx, each frame : the tables of the curves that changed (its_CrvTbMx at most ; the next frame starts after the last one built)
-function its_Crv_TabsUpdate() local(k, m, i)
-(
-    m = 0; i = 0;
-    while ((i < its_CrvMx) && (m < its_CrvTbMx)) (
-        k = (its_CrvTbK + i) % its_CrvMx;
-        its_Crv_TbDiff(k) ? ( its_Crv_Build(k); m += 1; (m === its_CrvTbMx) ? (its_CrvTbK = (k + 1) % its_CrvMx); );
-        i += 1;
-    );
-);
+// The curve k as a block of Interstys (mSL_Curves : after its word crv_fU), 0 if it does not exist ; the value of the curve b
+// (a block of Interstys) at x ; the lowest y of the type ty ; a new curve b of the type ty (it exists) ; its points in the
+// bounds of its type (see mSL_Curves)
+function its_Crv_B(k) ( crv_Ex(k) ? crv_B(k) + 1 : 0; );
+function its_Crv_Val(b, x) ( crv_Val(b - 1, x); );
+function its_Crv_Lo(ty) ( crv_Lo(ty); );
+function its_Crv_Default(b, ty) ( crv_Default(b - 1, ty); );
+function its_Crv_Clamp(b) ( crv_Clamp(b - 1); );
 
 // the curve named "txt" (or -1) ; "sim" : in the simulation of pass 2
 function its_Crv_Find(txt, sim) local(i, k, nm)
@@ -14197,7 +13987,7 @@ function its_Crv_NmOk(txt) local(i, l, c, ok)
     ok;
 );
 
-function its_Crv_Exists(k) ( (its_Tb_mode === 2) ? its_CrvSimU[k] : (its_CrvBlk[k] > BASE_MEMORY); );
+function its_Crv_Exists(k) ( (its_Tb_mode === 2) ? its_CrvSimU[k] : crv_Ex(k); );
 
 /*
     the curve designated by the word "w" : a number 1 ... its_CrvMx, or a name (a word, or a string) ; "create" : a new name gets the first free
@@ -14232,7 +14022,7 @@ function its_Crv_Id(w, create) local(k, i)
 // pass 2 starts with the curves as they are
 function its_Crv_SimInit() local(i)
 (
-    i = 0; loop(its_CrvMx, its_CrvSimU[i] = (its_CrvBlk[i] > BASE_MEMORY); strcpy(its_CrvSimN[i], its_CrvNm[i]); i += 1;);
+    i = 0; loop(its_CrvMx, its_CrvSimU[i] = crv_Ex(i); strcpy(its_CrvSimN[i], its_CrvNm[i]); i += 1;);
 );
 
 // the keys of a block Curve (k : the curve, -2 : a name not yet given a curve)
@@ -14242,8 +14032,8 @@ function its_Crv_Keys(k) local(w, v, i, n, lo, ty, pr, ok)
     while ((its_Tb_error === 0) && !its_Tb_IsHead(w = its_Tb_Peek())) (
         its_Tb_Next();
         its_Tb_chg = 0;
-        (w === mSL_symbol("type")) ? ( its_CrvK[0] = its_Tb_Enum("type", its_CrvTy, its_CrvTyCnt); its_CrvKS[0] = 1; ) :
-        (w === its_TK_periodic) ? ( its_CrvK[1] = its_Tb_Enum("periodic", its_TbFSt, 2); its_CrvKS[1] = 1; ) :
+        (w === mSL_symbol("type")) ? ( its_CrvKv[0] = its_Tb_Enum("type", its_CrvTy, its_CrvTyCnt); its_CrvKS[0] = 1; ) :
+        (w === its_TK_periodic) ? ( its_CrvKv[1] = its_Tb_Enum("periodic", its_TbFSt, 2); its_CrvKS[1] = 1; ) :
         (w === its_TK_name) ? (
             // (a word not reserved, or a string : the text in #its_CrvKN)
             v = its_Tb_Next();
@@ -14278,24 +14068,24 @@ function its_Crv_Keys(k) local(w, v, i, n, lo, ty, pr, ok)
             ((its_Tb_error === 0) && !ok) ? its_Tb_Err(2794, "Curve : points : x must go from 0 to 1, without decreasing");
         ) :
         (w === its_TK_sustain) ? (
-            (its_Tb_Peek() === its_TbFSt[0]) ? ( its_Tb_Next(); its_CrvK[4] = 0; ) : ( its_CrvK[4] = its_Tb_Int("sustain", 0, its_CrvPMx); );
+            (its_Tb_Peek() === its_TbFSt[0]) ? ( its_Tb_Next(); its_CrvKv[4] = 0; ) : ( its_CrvKv[4] = its_Tb_Int("sustain", 0, its_CrvPMx); );
             its_CrvKS[4] = 1;
         ) : (
             its_Tb_KeyErr(w, "Curve");
         );
     );
     // the type given, or the one of the curve, or Env
-    ty = its_CrvKS[0] ? its_CrvK[0] : ((k >= 0) && (its_CrvBlk[k] > BASE_MEMORY)) ? its_CrvBlk[k][its_Crv_Type] : its_CrvEnv;
+    ty = its_CrvKS[0] ? its_CrvKv[0] : crv_Ex(k) ? crv_blk[k * CRV_BS + crv_fT] : its_CrvEnv;
     // the sustain : a point of an envelope (the points given, or the ones of the curve, or the 2 of a new curve ; without
     // points in the block, the count is known in pass 3 only : the table may change the points before ; the same for the type)
-    ((its_Tb_error === 0) && its_CrvKS[4] && (its_CrvK[4] > 0)) ? (
+    ((its_Tb_error === 0) && its_CrvKS[4] && (its_CrvKv[4] > 0)) ? (
         n = its_CrvKS[3] ? its_CrvTN : (its_Tb_mode < 3) ? its_CrvPMx :
-            ((k >= 0) && (its_CrvBlk[k] > BASE_MEMORY)) ? its_CrvBlk[k][its_Crv_N] : 2;
+            crv_Ex(k) ? crv_blk[k * CRV_BS + crv_fN] : 2;
         ((its_CrvKS[0] || (its_Tb_mode === 3)) && (ty !== its_CrvEnv)) ? (
             its_Tb_Err(2799, "Curve : sustain : only an envelope (Env) has a sustain point");
         ) :
-        (its_CrvK[4] > n) ? (
-            sprintf(#its_TbW, "Curve : sustain : %d is not a point (1 ... %d)", its_CrvK[4], n);
+        (its_CrvKv[4] > n) ? (
+            sprintf(#its_TbW, "Curve : sustain : %d is not a point (1 ... %d)", its_CrvKv[4], n);
             its_Tb_Err(2799, #its_TbW);
         );
     );
@@ -14313,7 +14103,7 @@ function its_Crv_Keys(k) local(w, v, i, n, lo, ty, pr, ok)
 );
 
 // Curve id keys... : pass 3 creates the curve if needed, then sets it
-function its_Tb_Curve() local(k, b, w)
+function its_Tb_Curve() local(k, b, w, i, p)
 (
     w = its_Tb_Next();
     k = its_Crv_Id(w, 1);
@@ -14323,19 +14113,13 @@ function its_Tb_Curve() local(k, b, w)
         its_CrvKS[2] ? strcpy(its_CrvSimN[k], #its_CrvKN);
     );
     ((its_Tb_error === 0) && (its_Tb_mode === 3) && (k >= 0)) ? (
-        ((b = its_CrvBlk[k]) <= BASE_MEMORY) ? (
-            ((b = mSL_Dyn_Alloc(its_Crv_BlkSize, KW_crvb, 0)) <= BASE_MEMORY) ? (
-                sprintf(#its_TbW, "Curve %d : not enough memory", k + 1);
-                its_Tb_Err(2797, #its_TbW);
-                b = 0;
-            ) : (
-                its_Crv_Default(b, its_CrvKS[0] ? its_CrvK[0] : its_CrvEnv);
-                its_CrvBlk[k] = b;
-            );
-        );
-        (b > BASE_MEMORY) ? (
-            its_CrvKS[0] ? (b[its_Crv_Type] = its_CrvK[0]);
-            its_CrvKS[1] ? (b[its_Crv_Flags] = (b[its_Crv_Flags] & (-1 ~ its_CrvFl_Periodic)) | (its_CrvK[1] ? its_CrvFl_Periodic : 0));
+        // (2026-11-24 : the curves of mSL_Curves, in static memory ; the selection in the editors cleared)
+        b = crv_B(k) + 1;
+        !crv_Ex(k) ? its_Crv_Default(b, its_CrvKS[0] ? its_CrvKv[0] : its_CrvEnv);
+        i = 0; loop(CRV_NE, p = crv_ed + i * CRV_ES; (p[0] === k) ? memset(crv_edSel + i * CRV_PMX, 0, CRV_PMX); i += 1;);
+        (b > 0) ? (
+            its_CrvKS[0] ? (b[its_Crv_Type] = its_CrvKv[0]);
+            its_CrvKS[1] ? (b[its_Crv_Flags] = (b[its_Crv_Flags] & (-1 ~ its_CrvFl_Periodic)) | (its_CrvKv[1] ? its_CrvFl_Periodic : 0));
             its_CrvKS[2] ? strcpy(its_CrvNm[k], #its_CrvKN);
             its_CrvKS[3] ? (
                 b[its_Crv_N] = its_CrvTN;
@@ -14343,7 +14127,7 @@ function its_Tb_Curve() local(k, b, w)
                 b[its_Crv_Pts + 3 * its_CrvTN - 1] = 0; // (the last point starts no segment)
                 b[its_Crv_Sel] = -1; b[its_Crv_Sus] = -1;
             );
-            its_CrvKS[4] ? (b[its_Crv_Sus] = its_CrvK[4] - 1);
+            its_CrvKS[4] ? (b[its_Crv_Sus] = its_CrvKv[4] - 1);
             its_Crv_Clamp(b);
         );
     );
@@ -14365,7 +14149,7 @@ function its_Crv_TbName(str, k) local(nm, l, i, c, ok)
     (its_Xp_On === 1) ? (its_XpCrU[k] = 1); // (a patch : the curves it uses ; without a name, one for the patch)
     nm = its_CrvNm[k]; l = strlen(nm);
     (l === 0) ? (
-        ((its_Xp_On === 1) && (its_CrvBlk[k] > BASE_MEMORY)) ? sprintf(str, "\"%s-%d\"", #its_XpCB, k + 1) : sprintf(str, "%d", k + 1);
+        ((its_Xp_On === 1) && crv_Ex(k)) ? sprintf(str, "\"%s-%d\"", #its_XpCB, k + 1) : sprintf(str, "%d", k + 1);
     ) : (
         ok = (l <= 8); i = 0;
         while (ok && (i < l)) (
@@ -14381,7 +14165,7 @@ function its_Crv_TbName(str, k) local(nm, l, i, c, ok)
 // Dump Curve id : "Curve id type T [periodic On] [sustain n] points x y c ..."
 function its_Crv_Dump(k) local(b, p)
 (
-    b = its_CrvBlk[k];
+    b = its_Crv_B(k);
     sprintf(#its_TbW, "Curve %s type %s", its_Crv_TbName(#its_TbV, k), its_CrvTyN[b[its_Crv_Type]]);
     (b[its_Crv_Flags] & its_CrvFl_Periodic) ? strcat(#its_TbW, " periodic On");
     (b[its_Crv_Sus] >= 0) ? strcat(#its_TbW, sprintf(#its_TbV1, " sustain %d", b[its_Crv_Sus] + 1));
@@ -14391,98 +14175,7 @@ function its_Crv_Dump(k) local(b, p)
     its_Tb_Out(#its_TbW);
 );
 
-/*
-    Export : the curve "k" (all the curves if k < 0) in a file of the folder of the project, written by CMGS-auxiliary.eel
-    (command 30, as the export of the log) : Curve-name-date.mSL, or Curves-date.mSL ; it is an mSL script (table) :
-    dropped on Interstys, it creates the curves again (the same names ; a curve without a name : the same number)
-*/
-function its_Crv_EFn(dst, i, str) local(l, j)
-(
-    l = strlen(str); j = 0;
-    loop(l, gmem[dst + i] = str_getchar(str, j, 'cu'); i += 1; j += 1;);
-    i;
-);
-function its_Crv_ELine(j)
-(
-    j = mSL_g6packStr(infoBStarts, #its_CrvEL, j, infoBSize, 1);
-    (j >= infoBSize - 8) ? (its_CrvEOv = 1);
-    j;
-);
-function its_Crv_Export(k) local(i, j, n, b, p, q, c, cnt, ss, dst)
-(
-    (gmem[versionGMScript] == 0) ? (
-        mSL_log(SysLogBox, "Curves : export : no auxiliary script (CMGS-auxiliary.eel)");
-    ) : (
-        // the name of the file : one character per word (see sysout)
-        ss = nowIs(); // dd/mm/yyyy hhhmm'ss" (see edTimeL)
-        strcpy(#its_CrvEN, (k >= 0) ? "Curve-" : "Curves-");
-        (k >= 0) ? (
-            // (the name : not a letter, a digit, - or _ -> '_')
-            its_Crv_Name(#its_TbV, k);
-            i = 0; loop(strlen(#its_TbV),
-                c = str_getchar(#its_TbV, i, 'cu');
-                !(((c >= 'A') && (c <= 'Z')) || ((c >= 'a') && (c <= 'z')) || ((c >= '0') && (c <= '9')) || (c === '-') || (c === '_')) ?
-                    str_setchar(#its_TbV, i, '_', 'cu');
-                i += 1;
-            );
-            strcat(#its_CrvEN, #its_TbV); strcat(#its_CrvEN, "-");
-        );
-        sprintf(#its_CrvED, "%s-%s-%s-%s", strcpy_substr(#its_TbV1, ss, 6, 4), strcpy_substr(#its_TbV2, ss, 3, 2),
-            strcpy_substr(#its_TbV3, ss, 0, 2), strcpy_substr(#its_TbV4, ss, 11, 8));
-        // (the time of nowIs : 18h40'12) : not a digit -> '-'
-        i = 0; loop(strlen(#its_CrvED),
-            ((str_getchar(#its_CrvED, i, 'cu') < '0') || (str_getchar(#its_CrvED, i, 'cu') > '9')) ? str_setchar(#its_CrvED, i, '-', 'cu');
-            i += 1;
-        );
-        strcat(#its_CrvEN, #its_CrvED); strcat(#its_CrvEN, ".mSL");
-        dst = xplStr2;
-        i = its_Crv_EFn(dst, 0, #its_CrvEN);
-        gmem[dst + i] = 0;
-        // the text : the script
-        its_CrvEOv = 0; j = 0; cnt = 0;
-        sprintf(#its_CrvEL, "// Interstys : %s, exported the %s ; dropped on Interstys, this script creates %s again",
-            (k >= 0) ? "a curve" : "the curves", ss, (k >= 0) ? "it" : "them");
-        j = its_Crv_ELine(j);
-        strcpy(#its_CrvEL, "var r = settings(data( Interstys"); j = its_Crv_ELine(j);
-        i = (k >= 0) ? k : 0;
-        loop((k >= 0) ? 1 : its_CrvMx,
-            ((b = its_CrvBlk[i]) > BASE_MEMORY) ? (
-                (b[its_Crv_Sus] >= 0) ? sprintf(#its_TbV1, "  sustain %d", b[its_Crv_Sus] + 1) : strcpy(#its_TbV1, "");
-                sprintf(#its_CrvEL, "    Curve %s  type %s%s%s  points", its_Crv_TbName(#its_TbV, i),
-                    its_CrvTyN[b[its_Crv_Type]], (b[its_Crv_Flags] & its_CrvFl_Periodic) ? "  periodic On" : "",
-                    #its_TbV1);
-                j = its_Crv_ELine(j);
-                n = b[its_Crv_N]; p = b + its_Crv_Pts;
-                while (n > 0) (
-                    // 6 points per line
-                    strcpy(#its_CrvEL, "       ");
-                    q = 0; loop(min(6, n), strcat(#its_CrvEL, sprintf(#its_TbV1, "  %.6g %.6g %.6g", p[0], p[1], p[2])); p += 3; q += 1;);
-                    n -= q;
-                    j = its_Crv_ELine(j);
-                );
-                cnt += 1;
-            );
-            i += 1;
-        );
-        strcpy(#its_CrvEL, "));"); j = its_Crv_ELine(j);
-        sprintf(#its_CrvEL, "print(sprintf(0, \"Interstys : %d curve%s read (settings : %%d)\", r));", cnt, (cnt > 1) ? "s" : "");
-        j = its_Crv_ELine(j);
-        its_CrvEOv ? (
-            mSL_log(SysLogBox, "Error 2798 : Curves : export : the text is too long (infoBSize), nothing is written");
-        ) :
-        (cnt === 0) ? (
-            mSL_log(SysLogBox, "Curves : export : no curve");
-        ) : (
-            gmem[scptPar2] = xplStr2;
-            gmem[scptPar3] = infoBStarts;
-            // the command first, the dates last : the script (another thread) starts on the dates
-            gmem[cmndKode] = 30;
-            gmem[dateRqst] = gmem[dateCfrm] = time_precise() + timeD;
-            sprintf(#its_CrvEL, "Curves : %d curve%s exported in %s (folder of the project)", cnt, (cnt > 1) ? "s" : "", #its_CrvEN);
-            mSL_log(SysLogBox, #its_CrvEL);
-        );
-    );
-);
+// (2026-11-24 : the export of the curves, a file of settings : crv_Export of mSL_Curves, the module Curves)
 
 // Check Curve id keys... : "Check Curve id OK", or an error 2759 for each difference
 function its_Crv_Check() local(k, b, ok, i, n)
@@ -14491,20 +14184,20 @@ function its_Crv_Check() local(k, b, ok, i, n)
     its_Crv_Keys(k);
     ((its_Tb_error === 0) && (its_Tb_mode === 3) && (k >= 0)) ? (
         ok = 1;
-        ((b = its_CrvBlk[k]) <= BASE_MEMORY) ? (
+        ((b = its_Crv_B(k)) === 0) ? (
             ok = 0;
             sprintf(#its_TbMsg, "ERR: 2759    Interstys settings : Check Curve %d : no curve", k + 1);
             mSL_log(SysLogBox, #its_TbMsg);
         ) : (
-            (its_CrvKS[0] && (b[its_Crv_Type] !== its_CrvK[0])) ? (
+            (its_CrvKS[0] && (b[its_Crv_Type] !== its_CrvKv[0])) ? (
                 ok = 0;
                 sprintf(#its_TbMsg, "ERR: 2759    Interstys settings : Check Curve %d : type %s (expected %s)", k + 1,
-                    its_CrvTyN[b[its_Crv_Type]], its_CrvTyN[its_CrvK[0]]);
+                    its_CrvTyN[b[its_Crv_Type]], its_CrvTyN[its_CrvKv[0]]);
                 mSL_log(SysLogBox, #its_TbMsg);
             );
-            (its_CrvKS[1] && (((b[its_Crv_Flags] & its_CrvFl_Periodic) !== 0) !== (its_CrvK[1] !== 0))) ? (
+            (its_CrvKS[1] && (((b[its_Crv_Flags] & its_CrvFl_Periodic) !== 0) !== (its_CrvKv[1] !== 0))) ? (
                 ok = 0;
-                sprintf(#its_TbMsg, "ERR: 2759    Interstys settings : Check Curve %d : periodic (expected %s)", k + 1, its_TbFStN[its_CrvK[1]]);
+                sprintf(#its_TbMsg, "ERR: 2759    Interstys settings : Check Curve %d : periodic (expected %s)", k + 1, its_TbFStN[its_CrvKv[1]]);
                 mSL_log(SysLogBox, #its_TbMsg);
             );
             (its_CrvKS[2] && (strcmp(its_CrvNm[k], #its_CrvKN) !== 0)) ? (
@@ -14513,10 +14206,10 @@ function its_Crv_Check() local(k, b, ok, i, n)
                     its_CrvNm[k], #its_CrvKN);
                 mSL_log(SysLogBox, #its_TbMsg);
             );
-            (its_CrvKS[4] && ((b[its_Crv_Sus] + 1) !== its_CrvK[4])) ? (
+            (its_CrvKS[4] && ((b[its_Crv_Sus] + 1) !== its_CrvKv[4])) ? (
                 ok = 0;
                 sprintf(#its_TbMsg, "ERR: 2759    Interstys settings : Check Curve %d : sustain %d (expected %d)", k + 1,
-                    b[its_Crv_Sus] + 1, its_CrvK[4]);
+                    b[its_Crv_Sus] + 1, its_CrvKv[4]);
                 mSL_log(SysLogBox, #its_TbMsg);
             );
             its_CrvKS[3] ? (
@@ -14545,8 +14238,7 @@ function its_Crv_Free() local(k)
     ((its_Tb_error === 0) && (k >= 0)) ? (
         (its_Tb_mode === 2) ? ( its_CrvSimU[k] = 0; strcpy(its_CrvSimN[k], ""); ) :
         (its_Tb_mode === 3) ? (
-            (its_CrvBlk[k] > BASE_MEMORY) ? mSL_Dyn_Free(its_CrvBlk[k]);
-            its_CrvBlk[k] = 0; strcpy(its_CrvNm[k], "");
+            memset(crv_B(k), 0, CRV_BS); strcpy(its_CrvNm[k], ""); // (2026-11-24 : mSL_Curves)
         );
     );
 );
@@ -16125,7 +15817,7 @@ function its_Lk_Shape(L, x) local(n, k, b, ty, lo)
 (
     ((n = L[its_LkW_Steps]) >= 2) ? (x = min(n - 1, floor(x * n)) / (n - 1));
     ((k = L[its_LkW_Curve] - 1) >= 0) ? (
-        ((b = its_CrvBlk[k]) > BASE_MEMORY) ? (
+        ((b = its_Crv_B(k)) > 0) ? (
             ty = b[its_Crv_Type];
             lo = ((ty === its_CrvEnv) || (ty === its_CrvHEnv)) ? 0 : -1;
             x = max(0, min(1, (its_Crv_Val(b, x) - lo) / (1 - lo)));
@@ -18358,7 +18050,7 @@ function its_Xp_DumpCtl(i)
 function its_Xp_Curve(k) local(b, n, p, q)
 (
     (its_Xp_Sink === 2) ? (
-        b = its_CrvBlk[k];
+        b = its_Crv_B(k);
         (its_Xp_On === 2) ? (
             sprintf(#its_XpT, "Curve %d", k + 1);
             (strlen(its_CrvNm[k]) > 0) ? strcat(#its_XpT, sprintf(#its_TbV1, "  name %s", its_Crv_TbName(#its_TbV, k)));
@@ -18463,7 +18155,7 @@ function its_Xp_PatchBody(ty, k) local(i, f)
     );
     its_Xp_Ind = 4;
     i = 0; loop(NB_GSL, its_XpCtU[i] ? its_Xp_DumpCtl(i); i += 1;);
-    i = 0; loop(its_CrvMx, (its_XpCrU[i] && (its_CrvBlk[i] > BASE_MEMORY)) ? its_Xp_Curve(i); i += 1;);
+    i = 0; loop(its_CrvMx, (its_XpCrU[i] && crv_Ex(i)) ? its_Xp_Curve(i); i += 1;);
     sprintf(#its_XpT, "Algorithm %s", #its_XpAN); its_Xp_E(4, #its_XpT);
     i = 0; loop(its_XpPtN, (its_XpPtK[i] === 0) ? its_Xp_E(8, sprintf(#its_XpT, "input in%d", its_XpPtI[i])); i += 1;);
     i = 0; loop(its_XpPtN, (its_XpPtK[i] === 1) ? its_Xp_E(8, sprintf(#its_XpT, "output out%d", its_XpPtI[i])); i += 1;);
@@ -18568,7 +18260,7 @@ function its_Xp_SessBody() local(i, k, b, t, m)
     its_Xp_Ind = 4;
     its_Tb_DumpGlobal();
     i = 0; loop(NB_GSL, (its_Ctl_Get(i) !== 0) ? its_Xp_DumpCtl(i); i += 1;);
-    i = 0; loop(its_CrvMx, (its_CrvBlk[i] > BASE_MEMORY) ? its_Xp_Curve(i); i += 1;);
+    i = 0; loop(its_CrvMx, crv_Ex(i) ? its_Xp_Curve(i); i += 1;);
     its_XpTpN = 0;
     i = 0; loop(its_AlgMx, ((its_AlgSym[i] !== 0) && (its_AlgBlk[i] > BASE_MEMORY)) ? its_Xp_Tpl(its_AlgSym[i], its_AlgBlk[i], its_AlgLen[i]); i += 1;);
     its_Xp_SMods(its_TK_Line, 0);
@@ -18787,7 +18479,7 @@ function its_Tb_Dump() local(w, ty, k, b)
             k = 0; loop(WR_CNT, (Writers_set[k] !== 0) ? its_Tb_DumpMod(its_TK_Writer, k); k += 1;);
             k = 0; loop(RD_CNT, (Readers_set[k] !== 0) ? its_Tb_DumpMod(its_TK_Reader, k); k += 1;);
             k = 0; loop(FX_CNT, (Effects_set[k] !== 0) ? its_Tb_DumpFx(k); k += 1;);
-            k = 0; loop(its_CrvMx, (its_CrvBlk[k] > BASE_MEMORY) ? its_Crv_Dump(k); k += 1;);
+            k = 0; loop(its_CrvMx, crv_Ex(k) ? its_Crv_Dump(k); k += 1;);
             k = 0; loop(its_LkN, (its_LkTab[k * its_LkSz] !== 0) ? its_Tb_Out(its_Lk_Text(#its_LkT, k)); k += 1;);
         );
     ) :
@@ -18864,7 +18556,7 @@ local (b0, st, sz, nv, set, p, d, i, m, c, fs, fe, used, ua, bp, bc)
     (t === 'R') ? ( b0 = blockReaderA; st = ReadersStructA; sz = ReadersBlockSize; set = Readers_set; ) :
     (t === 'W') ? ( b0 = blockWriterA; st = WriterStructA; sz = WriterBlockSize; set = Writers_set; ) :
     (t === 'L') ? ( b0 = blockLineA; st = LinesStructA; sz = LinesBlockSize; set = Lines_Set; ) :
-    (t === 'C') ? ( b0 = blockCurvesA; st = its_CrvEd; sz = its_CrvEdSz; set = its_CrvBlk; nv = its_CrvEdN; ) :
+    (t === 'C') ? ( b0 = blockCurvesA; st = its_CrvEd; sz = its_CrvEdSz; set = 0; nv = its_CrvEdN; ) : // (a curve : crv_Ex)
     (t === 'E') ? ( b0 = blockEffectA; st = EffectsStructA; sz = LinesBlockSize; nv = its_EfxViews; set = Effects_set; ) :
     ( b0 = n; nv = 1; ); // a module
     np = max(1, min(dcbPannelsMax, np)); // the panes displayed
@@ -18887,7 +18579,8 @@ local (b0, st, sz, nv, set, p, d, i, m, c, fs, fe, used, ua, bp, bc)
                 used |= 2 ^ m;
                 (st === 0) ? (fs = m) : // (a module in the tab)
                 (p < np) ? (
-                    (st[m * sz] === n) ? (fs = m) : ((fe < 0) && (set[max(0, 0|st[m * sz])] <= BASE_MEMORY)) ? (fe = m);
+                    (st[m * sz] === n) ? (fs = m) :
+                    ((fe < 0) && ((t === 'C') ? !crv_Ex(0|st[m * sz]) : (set[max(0, 0|st[m * sz])] <= BASE_MEMORY))) ? (fe = m);
                 );
             );
             i += 1;
@@ -19212,7 +18905,7 @@ function its_Tb_ShowAll() local(i, j, k, b, ty, t2, x, f)
                 ty = b[3 * j + 1]; x = b[3 * j + 2];
                 t2 = (ty === its_TK_Effect) ? 'E' : (ty === its_TK_Reader) ? 'R' : (ty === its_TK_Writer) ? 'W' :
                     (ty === its_TK_Line) ? 'L' : (ty === its_TK_Curve) ? 'C' : 0;
-                (((t2 === 'C') && (its_CrvBlk[x] > BASE_MEMORY)) || ((t2 !== 0) && (t2 !== 'C') && (its_Xp_Blk(ty, x) !== 0))) ? (
+                (((t2 === 'C') && crv_Ex(x)) || ((t2 !== 0) && (t2 !== 'C') && (its_Xp_Blk(ty, x) !== 0))) ? (
                     !its_Mod_Show(t2, x) ? (f += 1);
                 );
                 j += 1;
@@ -19377,12 +19070,9 @@ loadMode ? (
     );
     z__si = 1; loop(its_InsMx, (its_InsSym[z__si] !== 0) ? its_Al_InsDrop(z__si); z__si += 1;);
     // the curves ('crvb' blocks) : those of the preset replace the current ones (the module Curves forgets its selection, its Undo)
-    z__si = 0; loop(its_CrvMx,
-        (its_CrvBlk[z__si] > BASE_MEMORY) ? mSL_Dyn_Free(its_CrvBlk[z__si]);
-        its_CrvBlk[z__si] = 0; strcpy(its_CrvNm[z__si], "");
-        z__si += 1;
-    );
-    its_CrvSelK = its_CrvUndoK = its_CrvPreK = -1; its_CrvDrag = 0;
+    memset(crv_blk, 0, CRV_MX * CRV_BS); // (2026-11-24 : mSL_Curves)
+    z__si = 0; loop(its_CrvMx, strcpy(its_CrvNm[z__si], ""); z__si += 1;);
+    crv_selK = crv_undoK = crv_preK = -1; crv_mDrag = 0;
     z__si = 0; loop(its_CrvEdN, z__sp = its_CrvEd + z__si * its_CrvEdSz; z__sp[11] = -1; z__sp[3] = 0; z__si += 1;);
     // the links (MIDI, a 'link' block) : those of the preset replace the current ones (no value pending)
     its_Lk_FreeAll();
@@ -19503,16 +19193,16 @@ loadMode ? (
             // 0 none, else a symbol (the first presets)
             z__si = savtmp[1];
             ((z__si >= 0) && (z__si < its_CrvMx) && (savtmp[3] >= 2) && (savtmp[3] <= its_CrvPMx)) ? (
-                z__sbl = (its_CrvBlk[z__si] > BASE_MEMORY) ? its_CrvBlk[z__si] : mSL_Dyn_Alloc(its_Crv_BlkSize, KW_crvb, 0);
-                (z__sbl > BASE_MEMORY) ? (
-                    memset(z__sbl, 0, its_Crv_BlkSize);
+                // (2026-11-24 : a curve of mSL_Curves, its block after its word crv_fU)
+                memset(crv_B(z__si), 0, CRV_BS);
+                z__sbl = crv_B(z__si) + 1; z__sbl[-1] = 1;
+                (z__sbl > 0) ? (
                     z__sp = (savtmp[0] === 'crvb') ? 4 : its_Crv_Pts;
                     ldtotal += load_mem(0, z__sbl, z__sp);
                     ldtotal += load_mem(0, z__sbl + its_Crv_Pts, 3 * savtmp[3]);
                     (savtmp[0] === 'crvb') ? (z__sbl[its_Crv_Sus] = -1);
                     z__sbl[its_Crv_N] = savtmp[3]; z__sbl[its_Crv_Sel] = -1;
                     its_Crv_Clamp(z__sbl);
-                    its_CrvBlk[z__si] = z__sbl;
                     (savtmp[2] === -1) ? file_string(0, its_CrvNm[z__si]) :
                     (savtmp[2] !== 0) ? mSL_edit_value(its_CrvNm[z__si], savtmp[2]) : strcpy(its_CrvNm[z__si], "");
                 ) : (
@@ -19526,7 +19216,7 @@ loadMode ? (
             // an editor Curves (savtmp[3] : 0 ... its_CrvEdN-1 ; the first presets : 0) : the curve shown, the grid
             z__sp = its_CrvEd + max(0, min(its_CrvEdN - 1, 0|savtmp[3])) * its_CrvEdSz;
             z__sp[0] = max(0, min(its_CrvMx - 1, 0|savtmp[1]));
-            z__si = 0; loop(5, (its_CrvGridN[z__si] === savtmp[2]) ? (z__sp[1] = savtmp[2]); z__si += 1;);
+            z__si = 0; loop(5, (crv_gridN[z__si] === savtmp[2]) ? (z__sp[1] = savtmp[2]); z__si += 1;);
         ) :
         (savtmp[0] === 'xprt') ? (
             // the module "Scripts" : the module designated, the name of the exported files
@@ -19698,7 +19388,7 @@ loadMode ? (
     );
     // Save the curves (the points used only)
     z__si = 0; loop(its_CrvMx,
-        ((z__sbl = its_CrvBlk[z__si]) > BASE_MEMORY) ? (
+        ((z__sbl = its_Crv_B(z__si)) > 0) ? (
             savtmp[0] = 'crvc'; savtmp[1] = z__si; savtmp[2] = (strlen(its_CrvNm[z__si]) > 0) ? -1 : 0; savtmp[3] = z__sbl[its_Crv_N];
             svtotal += save_mem(0, savtmp, TMPSIZ);
             svtotal += save_mem(0, z__sbl, its_Crv_Pts + 3 * z__sbl[its_Crv_N]);
@@ -20443,7 +20133,8 @@ its_Patch_Update();
 its_Fx_Order(); // the execution order of the effects (used by its_Run_Schedule)
 its_Run_TrashRun(); // the deleted modules that @sample can no longer see
 its_Run_Schedule(); // the list of the modules executed by @sample
-its_Crv_TabsUpdate(); // the tables of the curves (the shape "Curve" of the LFO)
+crv_Frame(); // the tables of the curves (the shape "Curve" of the LFO ; 2026-11-24 : mSL_Curves)
+crv_XpPoll(); // (the exports of the curves written, or not)
 
 // A pad asked for too many cells (damaged pad ?) : see the guard in control_jpad (mSL_ui_Pads)
 ((ui_jpad_bad_cnt != ui_jpad_bad_seen) && (time() != ui_jpad_bad_t)) ? (
@@ -21375,7 +21066,7 @@ local (m, f, da, a, s, c, i, xx)
     i = 0; loop(3, its_Menu_Item(m, 6 + i, s === i, 0, 0); i += 1;);
     i = 0; loop(its_CrvMx,
         (strlen(its_CrvNm[i]) > 0) ? sprintf(#its_MnT, "%d  %s", i + 1, its_CrvNm[i]) : sprintf(#its_MnT, "Curve %d", i + 1);
-        its_Menu_Item(m, its_MLw_Crv(i), (s === its_ModS_Crv) && (c === i), its_CrvBlk[i] <= BASE_MEMORY, #its_MnT);
+        its_Menu_Item(m, its_MLw_Crv(i), (s === its_ModS_Crv) && (c === i), !crv_Ex(i), #its_MnT);
         i += 1;
     );
     its_Menu_Item(m, 76, f & its_ModF_Uni, 0, 0);
@@ -21739,7 +21430,7 @@ function its_Gr_CrvClick(r, ev, sh) local(k, i, xx)
     sh ? (
         r[its_Rdr_GrCurve] = 0;
     ) : (
-        i = k + 1; while ((i < its_CrvMx) && (its_CrvBlk[i] <= BASE_MEMORY)) ( i += 1; );
+        i = k + 1; while ((i < its_CrvMx) && !crv_Ex(i)) ( i += 1; );
         r[its_Rdr_GrCurve] = (i < its_CrvMx) ? i + 1 : 0;
     );
 );
@@ -21835,7 +21526,7 @@ function its_Rd_Roles(rcbl, rok, md, RDBL) local(i, k, f, d, st)
         // mode Grains : the curve of the envelope (dim : not an envelope)
         (md === its_RdrMode_Grains) ? (
             k = rcbl[its_Rdr_GrCurve] - 1;
-            ui_jpad_mark(pad_Reader, 30, 0, (k >= 0) && !((its_CrvBlk[k] > BASE_MEMORY) && (its_CrvTbXs[k] >= 0)));
+            ui_jpad_mark(pad_Reader, 30, 0, (k >= 0) && !(crv_Ex(k) && (its_CrvTbXs[k] >= 0)));
         );
     );
 );
@@ -22021,7 +21712,7 @@ local (x, h1, h2, h3, h4, h5, uix_jneed, uix_jmini, rdr, rcbl, rok, lnb, lcbl, d
                         (w < 10) ? sprintf(pad_Rdr_Labs[36], "Density %.2f/s", w) : sprintf(pad_Rdr_Labs[36], "Density %.1f/s", w);
                         sprintf(pad_Rdr_Labs[37], "Onset rnd %.2f", rcbl[its_Rdr_GrRand]);
                         i = 24; loop(16, ((f = its_RdSt_Field(rcbl, i)) > 0) ? (pad_Rdr_Colrs[i] = (rcbl[f] !== its_RdSt_def) ? Col_P2 : Col_P1); i += 1;);
-                        pad_Rdr_Colrs[30] = (k < 0) ? Col_P1 : ((its_CrvBlk[k] > BASE_MEMORY) && (its_CrvTbXs[k] >= 0)) ? Color_Goldenrod : Col_Inactive;
+                        pad_Rdr_Colrs[30] = (k < 0) ? Col_P1 : (crv_Ex(k) && (its_CrvTbXs[k] >= 0)) ? Color_Goldenrod : Col_Inactive;
                         pad_Rdr_Colrs[31] = Col_InfoA;
                         pad_Rdr_Colrs[38] = pad_Rdr_Colrs[39] = Col_Inactive;
                     );
@@ -23257,7 +22948,7 @@ function FX_Crv_Fill(pc, c) local(k)
 (
     k = max(0, min(its_CrvMx - 1, 0|pc[0]));
     (strlen(its_CrvNm[k]) > 0) ? strcpy(pad_Efx_Labs[c], its_CrvNm[k]) : sprintf(pad_Efx_Labs[c], "Curve %d", k + 1);
-    pad_Efx_Colrs[c] = (its_CrvBlk[k] > BASE_MEMORY) ? Color_Goldenrod : Col_Inactive; // (no curve : silence)
+    pad_Efx_Colrs[c] = crv_Ex(k) ? Color_Goldenrod : Col_Inactive; // (no curve : silence)
 );
 
 // a clic on the cell of a curve : left clic, the next curve that exists ; right clic, the menu of the curves
@@ -23274,7 +22965,7 @@ function FX_Crv_Click(pc, ev) local(k, r, xx)
     ) :
     (ev & ui_jpad_ev_lmc) ? (
         // the next curve that exists (none : the next one)
-        r = 1; while ((r < its_CrvMx) && (its_CrvBlk[(k + r) % its_CrvMx] <= BASE_MEMORY)) ( r += 1; );
+        r = 1; while ((r < its_CrvMx) && !crv_Ex((k + r) % its_CrvMx)) ( r += 1; );
         pc[0] = (k + ((r < its_CrvMx) ? r : 1)) % its_CrvMx;
     );
 );
@@ -26032,8 +25723,7 @@ function its_Sum_Cnt(t) ( (t === 'R') ? RD_CNT : (t === 'W') ? WR_CNT : (t === '
 function its_Sum_Blk(t, i) local(b)
 (
     (t === 'C') ? (
-        b = its_CrvBlk[i];
-        (b > BASE_MEMORY) ? b : 0;
+        its_Crv_B(i);
     ) : (
         b = (t === 'R') ? Readers_set[i] : (t === 'W') ? Writers_set[i] : (t === 'L') ? Lines_Set[i] : Effects_set[i];
         ((b > BASE_MEMORY) && (b[-2] === ((t === 'R') ? KW_read : (t === 'W') ? KW_writ : (t === 'L') ? KW_lcbl : KW_effx))) ? b : 0;
@@ -27839,569 +27529,11 @@ local (h1, h3, gh, pt, uix_jneed, zzmi, i, b, o, zz, zzmcl, xx, hk, ty, k)
 );
 
 /*
-    the curve "b" in the current rect (retina coordinates) : the guides, the segments, the points (the first and the last :
-    another color ; the selected one, b[its_Crv_Sel] : Goldenrod ; the sustain point : an orange frame and a vertical line) ;
-    also the y of a point "px", "py" (see its_Crv_Py)
+    The modules "Curves A ... H" (the editor e) : the editors of mSL_Curves (crv_Editor, 2026-11-24 ; before : the same
+    editor in Interstys, its_Crv_Edit, its_Crv_Draw ..., from which those of mSL_Curves come) ; the envelopes and the
+    waveforms, see "Curve" in settings(data(...)) ; keys : d the curve in the log, h the sustain point, z Undo, Cmd + A
 */
-its_CrvPad = 6; // margin of the graphic area (pixels), so that the points at the edges are seen
-// the pixel (retina) of x in [0, 1], of y in [lo, 1]
-function its_Crv_Px(x0, w, x) ( x0 + its_CrvPad + x * (w - 1 - 2 * its_CrvPad); );
-function its_Crv_Py(y0, h, lo, y) ( y0 + its_CrvPad + (1 - y) / (1 - lo) * (h - 1 - 2 * its_CrvPad); );
-
-// the state of the curve "k" when a gesture starts (its_Crv_Pre), kept for the Undo once the curve changes (its_Crv_Commit)
-function its_Crv_Pre(k) local(b)
-(
-    b = its_CrvBlk[k];
-    its_CrvPreK = k; its_CrvPreE = (b > BASE_MEMORY); strcpy(#its_CrvPreN, its_CrvNm[k]);
-    its_CrvPreE ? memcpy(its_CrvPreB, b, its_Crv_BlkSize);
-);
-function its_Crv_Commit()
-(
-    (its_CrvPreK >= 0) ? (
-        its_CrvUndoK = its_CrvPreK; its_CrvUndoE = its_CrvPreE; strcpy(#its_CrvUndoN, #its_CrvPreN);
-        its_CrvPreE ? memcpy(its_CrvUndoB, its_CrvPreB, its_Crv_BlkSize);
-        its_CrvPreK = -1;
-    );
-);
-// Undo : the curve "k" and the one kept are exchanged (a second Undo restores the change)
-function its_Crv_Undo(k) local(b, e)
-(
-    (its_CrvUndoK === k) ? (
-        b = its_CrvBlk[k]; e = (b > BASE_MEMORY); strcpy(#its_CrvTmpN, its_CrvNm[k]);
-        e ? memcpy(its_CrvTmpB, b, its_Crv_BlkSize);
-        its_CrvUndoE ? (
-            (!e) ? ( ((b = mSL_Dyn_Alloc(its_Crv_BlkSize, KW_crvb, 0)) > BASE_MEMORY) ? (its_CrvBlk[k] = b) : (b = 0); );
-            (b > BASE_MEMORY) ? memcpy(b, its_CrvUndoB, its_Crv_BlkSize);
-        ) : (
-            e ? ( mSL_Dyn_Free(b); its_CrvBlk[k] = 0; );
-        );
-        strcpy(its_CrvNm[k], #its_CrvUndoN);
-        e ? memcpy(its_CrvUndoB, its_CrvTmpB, its_Crv_BlkSize);
-        its_CrvUndoE = e; strcpy(#its_CrvUndoN, #its_CrvTmpN);
-    );
-);
-
-// a value on the grid (its_CrvGrid divisions of [lo, 1]), or as is
-function its_Crv_Snap(v, lo)
-(
-    (its_CrvGrid > 0) ? lo + floor((v - lo) / (1 - lo) * its_CrvGrid + 0.5) / its_CrvGrid * (1 - lo) : v;
-);
-
-// the selection of points (its_CrvSelF, of the curve its_CrvSelK) : cleared, counted ; the point "i" deleted
-function its_Crv_SelClear() ( memset(its_CrvSelF, 0, its_CrvPMx); );
-function its_Crv_SelCount(n) local(i, c) ( c = 0; i = 0; loop(n, c += its_CrvSelF[i]; i += 1;); c; );
-function its_Crv_SelDel(i, n) ( memcpy(its_CrvSelF + i, its_CrvSelF + i + 1, n - i - 1); its_CrvSelF[n - 1] = 0; );
-
-/*
-    the selected points move by (dx, dy) from their places when the gesture started (its_CrvOrig), as far as the frame and
-    the points not selected allow (the first and the last point : y only) ; "r" : the point taken by the mouse
-*/
-function its_Crv_Move(b, r, x, y, lo) local(n, p, o, i, j, dx, dy, dmin, dmax, emin, emax, mv)
-(
-    n = b[its_Crv_N]; p = b + its_Crv_Pts; o = its_CrvOrig;
-    dx = x - o[3 * r]; dy = y - o[3 * r + 1];
-    dmin = emin = -(10^30); dmax = emax = 10^30; // (-10^30 is (-10)^30 > 0 in EEL2)
-    i = 0; loop(n,
-        its_CrvSelF[i] ? (
-            // y : in the frame
-            emin = max(emin, lo - o[3 * i + 1]); emax = min(emax, 1 - o[3 * i + 1]);
-            // x : between the nearest points that do not move in x (not selected, or the first, the last)
-            ((i > 0) && (i < n - 1)) ? (
-                j = i - 1; while ((j > 0) && its_CrvSelF[j]) ( j -= 1; );
-                dmin = max(dmin, o[3 * j] - o[3 * i]);
-                j = i + 1; while ((j < n - 1) && its_CrvSelF[j]) ( j += 1; );
-                dmax = min(dmax, o[3 * j] - o[3 * i]);
-            );
-        );
-        i += 1;
-    );
-    dx = max(dmin, min(dmax, dx)); dy = max(emin, min(emax, dy));
-    i = 0; loop(n,
-        its_CrvSelF[i] ? (
-            ((i > 0) && (i < n - 1)) ? (p[3 * i] = o[3 * i] + dx);
-            p[3 * i + 1] = o[3 * i + 1] + dy;
-        );
-        i += 1;
-    );
-    // periodic : the first and the last y stay equal
-    (b[its_Crv_Flags] & its_CrvFl_Periodic) ? (
-        (its_CrvSelF[0] && !its_CrvSelF[n - 1]) ? (p[3 * (n - 1) + 1] = p[1]) :
-        (its_CrvSelF[n - 1] && !its_CrvSelF[0]) ? (p[1] = p[3 * (n - 1) + 1]);
-    );
-);
-
-/*
-    the mouse in the graphic area of the curve "b" (number "k"), in the current rect (retina coordinates) :
-    left clic on a point : it is the selection (a point already in a selection of several : the selection is kept), moved
-    while the button is down ; shift + left clic on a point : the points from the first selected (b[its_Crv_Sel]) to it are
-    added to the selection ; cmd + left clic : the point is added to the selection, or removed ; the selected points move
-    together (x between the points not selected ; the first and the last : y only) ; shift and cmd + clic never create a
-    point : they take the nearest point within 16 pixels, or do nothing ;
-    left clic near the curve, between two points : drag up or down for the curvature of the segment (a clic without moving : 0) ;
-    left clic elsewhere : a new point, the selection (moved while the button is down) ; right clic on a point : deletes it,
-    or all the selection if it is selected (not the first and the last point ; the sustain point deleted : no sustain) ;
-    shift while moving : fine moves (1/10, no grid) ; the grid (cell 5)
-*/
-function its_Crv_Edit(b, k)
-local (x0, y0, w, h, lo, rp, mx, my, cap, ins, press, rpress, n, p, i, j, hs, hit, xv, yv, ya, f, dxm, dym, x, y, sg)
-(
-    x0 = ui_left_retina(); y0 = ui_top_retina(); w = ui_width_retina(); h = ui_height_retina();
-    // the distances of the mouse in screen points (screen pixels / rp) : the same at all display sizes
-    rp = gfx_ext_retina ? gfx_ext_retina : 1;
-    lo = its_Crv_Lo(b[its_Crv_Type]);
-    cap = mouse_cap; mx = mouse_x; my = mouse_y;
-    ins = ui_hover();
-    press = (cap & 1) && !(its_CrvMPrev & 1) && ins;
-    rpress = (cap & 2) && !(its_CrvMPrev & 2) && ins;
-    its_CrvMPrev = cap;
-    n = b[its_Crv_N]; p = b + its_Crv_Pts;
-    // the point under the mouse (the nearest one), the x and y of the mouse
-    hs = 8 * rp; hit = -1; f = 10^30;
-    i = 0; loop(n,
-        x = abs(mx - its_Crv_Px(x0, w, p[3 * i])); y = abs(my - its_Crv_Py(y0, h, lo, p[3 * i + 1]));
-        ((x <= hs) && (y <= hs) && (x + y < f)) ? ( hit = i; f = x + y; );
-        i += 1;
-    );
-    // shift or cmd + clic : the nearest point, a little further (these clics select : no new point, no curvature)
-    (press && (hit < 0) && (cap & (shfCap | cmdCap))) ? (
-        hs = 16 * rp; f = 10^30;
-        i = 0; loop(n,
-            x = abs(mx - its_Crv_Px(x0, w, p[3 * i])); y = abs(my - its_Crv_Py(y0, h, lo, p[3 * i + 1]));
-            ((x <= hs) && (y <= hs) && (x + y < f)) ? ( hit = i; f = x + y; );
-            i += 1;
-        );
-        (hit < 0) ? (press = 0);
-    );
-    xv = max(0, min(1, (mx - x0 - its_CrvPad) / max(1, w - 1 - 2 * its_CrvPad)));
-    yv = max(lo, min(1, 1 - (my - y0 - its_CrvPad) / max(1, h - 1 - 2 * its_CrvPad) * (1 - lo)));
-    press ? (
-        its_Crv_Pre(k);
-        its_CrvM0x = mx; its_CrvM0y = my; its_CrvMoved = 0;
-        ((hit >= 0) && (cap & shfCap) && (b[its_Crv_Sel] >= 0) && (b[its_Crv_Sel] < n) && its_CrvSelF[b[its_Crv_Sel]]) ? (
-            // shift : the points from the first selected to this one
-            i = min(hit, b[its_Crv_Sel]); loop(abs(hit - b[its_Crv_Sel]) + 1, its_CrvSelF[i] = 1; i += 1;);
-        ) :
-        ((hit >= 0) && (cap & (cmdCap | shfCap))) ? (
-            // cmd (or shift without a selected point) : this point added to the selection, or removed
-            its_CrvSelF[hit] = !its_CrvSelF[hit];
-            its_CrvSelF[hit] ? (b[its_Crv_Sel] = hit) : (b[its_Crv_Sel] === hit) ? (b[its_Crv_Sel] = -1);
-        ) :
-        (hit >= 0) ? (
-            // this point (or the selection that holds it) is moved
-            !(its_CrvSelF[hit] && (its_Crv_SelCount(n) > 1)) ? ( its_Crv_SelClear(); its_CrvSelF[hit] = 1; b[its_Crv_Sel] = hit; );
-            its_CrvDrag = 1; its_CrvDragI = hit;
-            its_CrvP0x = p[3 * hit]; its_CrvP0y = p[3 * hit + 1];
-            memcpy(its_CrvOrig, p, 3 * n);
-        ) : (
-            // the segment under the mouse : i ... i + 1
-            i = 0; while ((i < n - 2) && (p[3 * (i + 1)] <= xv)) ( i += 1; );
-            ya = its_Crv_Py(y0, h, lo, its_Crv_Val(b, xv));
-            ((abs(my - ya) <= 6 * rp) && (p[3 * (i + 1)] > p[3 * i])) ? (
-                its_CrvDrag = 2; its_CrvDragI = i; its_CrvC0 = p[3 * i + 2];
-            ) :
-            (n < its_CrvPMx) ? (
-                // a new point after the point i (its x : between them), the selection
-                its_Crv_Commit();
-                memcpy(p + 3 * (i + 2), p + 3 * (i + 1), 3 * (n - i - 1));
-                x = max(p[3 * i], min(p[3 * (i + 2)], its_Crv_Snap(xv, 0)));
-                p[3 * (i + 1)] = x; p[3 * (i + 1) + 1] = max(lo, min(1, its_Crv_Snap(yv, lo))); p[3 * (i + 1) + 2] = 0;
-                n += 1; b[its_Crv_N] = n;
-                (b[its_Crv_Sus] > i) ? (b[its_Crv_Sus] += 1);
-                its_Crv_SelClear(); its_CrvSelF[i + 1] = 1; b[its_Crv_Sel] = i + 1;
-                its_CrvDrag = 1; its_CrvDragI = i + 1;
-                its_CrvP0x = p[3 * (i + 1)]; its_CrvP0y = p[3 * (i + 1) + 1];
-                memcpy(its_CrvOrig, p, 3 * n);
-            ) : (
-                sprintf(#its_CrvMsg, "Curve %d : %d points at most", k + 1, its_CrvPMx);
-                mSL_log(SysLogBox, #its_CrvMsg);
-            );
-        );
-        ui_GFXdoNow |= 4; ui_GFXReason = 38;
-    );
-    (rpress && (hit >= 0)) ? (
-        // delete the point (a selected point : all the selection), not the first and the last
-        its_Crv_Pre(k);
-        !its_CrvSelF[hit] ? ( its_Crv_SelClear(); its_CrvSelF[hit] = 1; );
-        j = 0;
-        i = n - 2; while (i > 0) (
-            its_CrvSelF[i] ? (
-                (j === 0) ? its_Crv_Commit(); j += 1;
-                memcpy(p + 3 * i, p + 3 * (i + 1), 3 * (n - i - 1));
-                its_Crv_SelDel(i, n);
-                (b[its_Crv_Sus] === i) ? (b[its_Crv_Sus] = -1) : (b[its_Crv_Sus] > i) ? (b[its_Crv_Sus] -= 1);
-                n -= 1;
-            );
-            i -= 1;
-        );
-        b[its_Crv_N] = n;
-        its_Crv_SelClear(); b[its_Crv_Sel] = -1;
-        ui_GFXdoNow |= 4; ui_GFXReason = 38;
-    );
-    // the button held : the selected points or the curvature follow the mouse (shift : 1/10)
-    ((cap & 1) && its_CrvDrag) ? (
-        f = (cap & shfCap) ? 0.1 : 1;
-        dxm = (mx - its_CrvM0x) * f; dym = (my - its_CrvM0y) * f;
-        ((abs(mx - its_CrvM0x) + abs(my - its_CrvM0y) > 2) && !its_CrvMoved) ? ( its_CrvMoved = 1; its_Crv_Commit(); );
-        its_CrvMoved ? (
-            i = its_CrvDragI;
-            (its_CrvDrag === 1) ? (
-                x = its_CrvP0x + dxm / max(1, w - 1 - 2 * its_CrvPad);
-                y = its_CrvP0y - dym / max(1, h - 1 - 2 * its_CrvPad) * (1 - lo);
-                (f === 1) ? ( x = its_Crv_Snap(x, 0); y = its_Crv_Snap(y, lo); );
-                its_Crv_Move(b, i, x, y, lo);
-                its_Crv_Clamp(b); // (QWave, HWave : the y fixed at 0)
-            ) : (
-                // drag up : the segment bulges up (rising : c > 0 ; falling : c < 0)
-                sg = (p[3 * (i + 1) + 1] >= p[3 * i + 1]) ? 1 : -1;
-                p[3 * i + 2] = max(-1, min(1, its_CrvC0 - sg * dym / max(1, h / 2)));
-            );
-            ui_GFXdoNow |= 4; ui_GFXReason = 38;
-        );
-    );
-    // the button released : a clic on a segment, without moving : its curvature is 0
-    (!(cap & 1) && its_CrvDrag) ? (
-        ((its_CrvDrag === 2) && !its_CrvMoved && (p[3 * its_CrvDragI + 2] !== 0)) ? ( its_Crv_Commit(); p[3 * its_CrvDragI + 2] = 0; );
-        its_CrvDrag = 0; its_CrvPreK = -1;
-        ui_GFXdoNow |= 4; ui_GFXReason = 38;
-    );
-);
-function its_Crv_Draw(b)
-local (x0, y0, w, h, rsc, lo, i, n, p, xa, ya, xb, yb, d, k)
-(
-    x0 = ui_left_retina(); y0 = ui_top_retina(); w = ui_width_retina(); h = ui_height_retina();
-    rsc = max(1, floor(uix_drawconfig_current[9])); // retina scaling
-    lo = its_Crv_Lo(b[its_Crv_Type]);
-    ui_pcolor(0x808080, 0.15);
-    gfx_rect(x0, y0, w, h);
-    // the guides : y = 0, 1 (and -1), the middle
-    ui_pcolor(0x808080, 0.6);
-    gfx_line(x0, its_Crv_Py(y0, h, lo, 0), x0 + w - 1, its_Crv_Py(y0, h, lo, 0));
-    ui_pcolor(0x808080, 0.3);
-    gfx_line(x0, its_Crv_Py(y0, h, lo, 1), x0 + w - 1, its_Crv_Py(y0, h, lo, 1));
-    gfx_line(x0, its_Crv_Py(y0, h, lo, lo), x0 + w - 1, its_Crv_Py(y0, h, lo, lo));
-    (lo === 0) ? gfx_line(x0, its_Crv_Py(y0, h, lo, 0.5), x0 + w - 1, its_Crv_Py(y0, h, lo, 0.5));
-    // the sustain point : a vertical line between the rise and the fall
-    (b[its_Crv_Sus] >= 0) ? (
-        ui_pcolor(Color_Dark_Orange, 0.55);
-        xa = floor(its_Crv_Px(x0, w, b[its_Crv_Pts + 3 * b[its_Crv_Sus]]));
-        gfx_line(xa, y0, xa, y0 + h - 1);
-        (rsc > 1) ? gfx_line(xa + 1, y0, xa + 1, y0 + h - 1);
-    );
-    (its_CrvGrid > 0) ? (
-        ui_pcolor(0x808080, 0.18);
-        i = 1; loop(its_CrvGrid - 1,
-            d = i / its_CrvGrid;
-            gfx_line(its_Crv_Px(x0, w, d), y0, its_Crv_Px(x0, w, d), y0 + h - 1);
-            gfx_line(x0, its_Crv_Py(y0, h, lo, lo + d * (1 - lo)), x0 + w - 1, its_Crv_Py(y0, h, lo, lo + d * (1 - lo)));
-            i += 1;
-        );
-    );
-    // the curve : each segment from its first point to the next one (exactly : the vertical jumps are complete), one value per pixel
-    ui_pcolor(uix_theme_accent(), 0.95);
-    p = b + its_Crv_Pts;
-    loop(b[its_Crv_N] - 1,
-        xa = its_Crv_Px(x0, w, p[0]); ya = its_Crv_Py(y0, h, lo, p[1]);
-        n = max(1, ceil(its_Crv_Px(x0, w, p[3]) - xa)); // pixels of the segment
-        i = 1; loop(n,
-            d = i / n;
-            xb = xa + (its_Crv_Px(x0, w, p[3]) - its_Crv_Px(x0, w, p[0])) / n;
-            yb = its_Crv_Py(y0, h, lo, p[1] + (p[4] - p[1]) * its_Crv_Shape(d, p[2]));
-            gfx_line(xa, ya, xb, yb, 1);
-            (rsc > 1) ? gfx_line(xa, ya + 1, xb, yb + 1, 1);
-            xa = xb; ya = yb;
-            i += 1;
-        );
-        p += 3;
-    );
-    // the points
-    k = 3 * rsc;
-    p = b + its_Crv_Pts; i = 0;
-    loop(b[its_Crv_N],
-        xa = its_Crv_Px(x0, w, p[0]); ya = its_Crv_Py(y0, h, lo, p[1]);
-        its_CrvSelF[i] ? ui_pcolor(Color_Goldenrod, 1) :
-        ((i === 0) || (i === b[its_Crv_N] - 1)) ? ui_pcolor(Color_Light_Steel_Blue, 1) : ui_pcolor(Color_Limegreen, 1);
-        gfx_rect(xa - k, ya - k, 2 * k + 1, 2 * k + 1);
-        // the sustain point : also a frame
-        (i === b[its_Crv_Sus]) ? (
-            ui_pcolor(Color_Dark_Orange, 1);
-            gfx_rect(xa - 2 * k, ya - 2 * k, 4 * k + 1, 4 * k + 1, 0);
-            (rsc > 1) ? gfx_rect(xa - 2 * k + 1, ya - 2 * k + 1, 4 * k - 1, 4 * k - 1, 0);
-        );
-        p += 3; i += 1;
-    );
-);
-
-/*
-    the name "txt" given to the curve "k" (the prompt of the module) : the spaces at the ends removed ; "" : no name ; with Undo
-*/
-function its_Crv_Rename(k, txt) local(i, l)
-(
-    l = strlen(txt); i = 0;
-    while ((i < l) && (str_getchar(txt, i, 'cu') === ' ')) ( i += 1; );
-    while ((l > i) && (str_getchar(txt, l - 1, 'cu') === ' ')) ( l -= 1; );
-    strcpy_substr(#its_CrvRenX, txt, i, l - i);
-    (its_CrvBlk[k] <= BASE_MEMORY) ? 0 :
-    (strcmp(#its_CrvRenX, its_CrvNm[k]) === 0) ? 0 :
-    ((strlen(#its_CrvRenX) > 0) && !its_Crv_NmOk(#its_CrvRenX)) ? (
-        sprintf(#its_CrvMsg, "Curve %d : a name has 1 ... %d characters, without \"", k + 1, its_CrvNmMx);
-        mSL_log(SysLogBox, #its_CrvMsg);
-    ) :
-    (((i = its_Crv_Find(#its_CrvRenX, 0)) >= 0) && (i !== k)) ? (
-        sprintf(#its_CrvMsg, "Curve %d : the name \"%s\" is the one of the curve %d", k + 1, #its_CrvRenX, i + 1);
-        mSL_log(SysLogBox, #its_CrvMsg);
-    ) : (
-        its_Crv_Pre(k); its_Crv_Commit();
-        strcpy(its_CrvNm[k], #its_CrvRenX);
-    );
-);
-
-/*
-    the sustain point of the envelope "b" (number "k") : "i" (a point), -1 (none), -2 (the selected point ; already the sustain :
-    none) ; with Undo
-*/
-function its_Crv_SetSus(b, k, i)
-(
-    (i === -2) ? (
-        i = b[its_Crv_Sel];
-        ((i >= 0) && (i < b[its_Crv_N]) && its_CrvSelF[i]) ? ( (i === b[its_Crv_Sus]) ? (i = -1); ) : (i = -2);
-    );
-    (b[its_Crv_Type] !== its_CrvEnv) ? (
-        sprintf(#its_CrvMsg, "Curve %d : only an envelope (not a half one) has a sustain point", k + 1);
-        mSL_log(SysLogBox, #its_CrvMsg);
-    ) :
-    (i === -2) ? (
-        sprintf(#its_CrvMsg, "Curve %d : sustain : select a point first", k + 1);
-        mSL_log(SysLogBox, #its_CrvMsg);
-    ) :
-    (i !== b[its_Crv_Sus]) ? (
-        its_Crv_Pre(k); its_Crv_Commit();
-        b[its_Crv_Sus] = i;
-    );
-);
-
-// the state of the editor "e" (see its_CrvEd) in the globals of the editor drawn ; kept again by its_Crv_EdPut
-function its_Crv_EdGet(e) local(p)
-(
-    p = its_CrvEd + e * its_CrvEdSz;
-    its_CrvUiK = p[0]; its_CrvGrid = p[1]; its_CrvMPrev = p[2]; its_CrvDrag = p[3]; its_CrvDragI = p[4];
-    its_CrvM0x = p[5]; its_CrvM0y = p[6]; its_CrvMoved = p[7]; its_CrvC0 = p[8]; its_CrvP0x = p[9]; its_CrvP0y = p[10];
-    its_CrvSelK = p[11]; its_CrvSelF = its_CrvEdSel + e * its_CrvPMx;
-);
-function its_Crv_EdPut(e) local(p)
-(
-    p = its_CrvEd + e * its_CrvEdSz;
-    p[0] = its_CrvUiK; p[1] = its_CrvGrid; p[2] = its_CrvMPrev; p[3] = its_CrvDrag; p[4] = its_CrvDragI;
-    p[5] = its_CrvM0x; p[6] = its_CrvM0y; p[7] = its_CrvMoved; p[8] = its_CrvC0; p[9] = its_CrvP0x; p[10] = its_CrvP0y;
-    p[11] = its_CrvSelK;
-);
-
-/*
-    The modules "Curves A ... H" (editor "e" : its state in its_CrvEd) : the envelopes (y in [0, 1]) and the waveforms
-    (y in [-1, 1]), see "Curve" in settings(data(...)) ; several editors may show the same curve (the point b[its_Crv_Sel] is shared) ;
-    the half envelopes, the quarters and the halves of waveforms : the part edited only (see its_CrvHEnv ...)
-    Cmd + A : all the points are selected (see its_Crv_Edit for the mouse) ; key 'd' : the curve in the log (Dump Curve) ;
-    key 's' : the selected point becomes the sustain point of the envelope (again : no sustain)
-    line 1 : 0 the curve (left clic : next one, shift : previous one ; right clic : menu), 1 its name (left clic : a prompt,
-    see its_Crv_Rename), 2 its type (left clic :
-    the next one in its_CrvTyO, shift : the previous one), 3 its count of points, 4 periodic (left clic ; Env and Wave only),
-    5 the grid (left clic : Off, 4, 8, 16, 32 ; shift : the other way), 6 Undo (left clic ; again : Redo), 7 actions (right
-    or left clic : New envelope, H-envelope, waveform, Q-waveform, H-waveform, Dump, Export the curve, Export all the curves
-    (see its_Crv_Export), Sustain : the selected point, Sustain : none, Delete)
-    the graphic area (its_CrvGraphH, see its_Crv_Edit), then a line of text : x and y under the mouse, or the selected point
-*/
-function show_Curves_Pad(blockId, e)
-local (h1, h2, h3, uix_jneed, zzmi, jmc, i, k, b, ok, zz, zzmcl, xx, cgh, x0, w, mx, v)
-(
-    its_Crv_EdGet(e); // (the state of this editor, kept at the end)
-    // the prompt of the name closed (OK or Cancel) : the new name, if it changed
-    ((its_CrvRenK >= 0) && !(ui_screen() == "control.prompt")) ? ( its_Crv_Rename(its_CrvRenK, #its_CrvRen); its_CrvRenK = -1; );
-    k = its_CrvUiK = max(0, min(its_CrvMx - 1, its_CrvUiK));
-    b = its_CrvBlk[k];
-    ok = (b > BASE_MEMORY) && (b[-2] === KW_crvb);
-    (its_CrvSelK !== k) ? ( its_Crv_SelClear(); its_CrvSelK = k; ok ? (b[its_Crv_Sel] = -1); );
-    h1 = uix_jpadHeight(1);
-    h2 = ok ? its_CrvGraphH : 0;
-    h3 = ok ? uix_jBoxHeight(1) : 0;
-    uix_jneed = h1+h2+h3+ui_jd_ctgr;
-    (ui_height() >= uix_jneed) ? (
-        ui_split_top(uix_jneed);
-        ui_set_rect(ui_left(), ui_top(),max(ui_MinSize1Pane,min(ui_BestSize1Pane, ui_width())), ui_height());
-            zzmi = ui_hover();
-            jmc = ui_jmouse_cap;
-            keepBlockInfos(blockId);
-            (zzmi) ? (
-                ui_push();
-                    // stack is now 2 levels deep
-                    ui_color(Col_Frame);
-                    ui_border(); // draws in purple
-                ui_pop();
-            );
-            // 'd' : the curve in the log, in the syntax of table (Dump Curve)
-            (zzmi && ok && GM_key_take('d')) ? its_Crv_Dump(k);
-            // 'h' (hold) : the selected point is the sustain point (again : none) ; not 's', the system command (stop the tests)
-            (zzmi && ok && GM_key_take('h')) ? its_Crv_SetSus(b, k, -2);
-            // Cmd + A : all the points are selected
-            (zzmi && ok && (GM_key_mods() & 4) && (GM_key_take('a') || GM_key_take(1))) ? (
-                i = 0; loop(b[its_Crv_N], its_CrvSelF[i] = 1; i += 1;);
-                b[its_Crv_Sel] = 0;
-            );
-            control_group(blockDispNames[blockDispInverts[blockId]]);
-            ui_pad(0,ui_cg_pad_top,0,ui_cg_pad_bottom);
-
-            // line 1
-            ui_split_top(h1);
-                ui_pad(1,2,2,2);
-                mSL_setStrArray(pad_Crv_Labs, pad_Crv_Siz);
-                i = 0; loop(pad_Crv_Siz, pad_Crv_Colrs[i] = ok ? Col_InfoA : Col_Inactive; strcpy(pad_Crv_Labs[i], ""); i += 1;);
-                sprintf(pad_Crv_Labs[0], "Curve %d", k + 1);
-                ok ? (
-                    (strlen(its_CrvNm[k]) > 0) ? strcpy(pad_Crv_Labs[1], its_CrvNm[k]) : strcpy(pad_Crv_Labs[1], "(no name)");
-                    strcpy(pad_Crv_Labs[2], its_CrvTyL[b[its_Crv_Type]]);
-                    sprintf(pad_Crv_Labs[3], "%d points", b[its_Crv_N]);
-                    strcpy(pad_Crv_Labs[4], (b[its_Crv_Flags] & its_CrvFl_Periodic) ? "Periodic" : "Not periodic");
-                    pad_Crv_Colrs[1] = Color_Goldenrod;
-                    pad_Crv_Colrs[2] = pad_Crv_Colrs[4] = Col_P3;
-                    ((b[its_Crv_Type] !== its_CrvEnv) && (b[its_Crv_Type] !== its_CrvWave)) ? (pad_Crv_Colrs[4] = Col_Inactive);
-                    pad_Crv_Colrs[3] = Color_Heliotrope;
-                    (its_CrvGrid > 0) ? sprintf(pad_Crv_Labs[5], "Grid %d", its_CrvGrid) : strcpy(pad_Crv_Labs[5], "No grid");
-                    pad_Crv_Colrs[5] = (its_CrvGrid > 0) ? Col_P3 : Col_P1;
-                ) : (
-                    strcpy(pad_Crv_Labs[1], "No curve");
-                );
-                strcpy(pad_Crv_Labs[6], "Undo");
-                pad_Crv_Colrs[6] = (its_CrvUndoK === k) ? Col_P3 : Col_Inactive;
-                strcpy(pad_Crv_Labs[7], "Action");
-                pad_Crv_Colrs[7] = Col_P1;
-                its_Pad_Roles(pad_Crv, pad_Crv_Labs, pad_Crv_Colrs, pad_Crv_Siz, 0); // (2026-11-23 : the roles)
-                zz = control_jpad(pad_Crv);
-                (zz > 0) ? (
-                    ui_GFXdoNow |= 4; ui_GFXReason = 38;
-                    zzmcl = pad_Crv[ui_jpad_last]-1;
-                    (zzmcl === 0) ? (
-                        (zz & ui_jpad_ev_lmc) ? (
-                            // the next curve (shift : the previous one)
-                            its_CrvUiK = (jmc & shfCap) ? (k + its_CrvMx - 1) % its_CrvMx : (k + 1) % its_CrvMx;
-                        ) :
-                        (zz & ui_jpad_ev_rmc) ? (
-                            ui_menu_tick(menu_Crv_Ids, -1, 0);
-                            ui_menu_tick(menu_Crv_Ids, k + 1, 1);
-                            // also tick the header of the sub-menu that holds the current curve (reset below by the tick -1)
-                            str_setchar(menu_Crv_Ids[ui_jmenu_items + (0|(k / menu_Crv_Grp)) * (menu_Crv_Grp + 1)], 1, '!');
-                            xx = control_jmenu(menu_Crv_Ids);
-                            (xx != 0) ? (its_CrvUiK = xx - 1);
-                            ui_menu_tick(menu_Crv_Ids, -1, 0);
-                        );
-                    ) :
-                    ((zz & ui_jpad_ev_lmc) && ok && (zzmcl === 1)) ? (
-                        // the name : edited by the prompt in #its_CrvRen, taken when the prompt is closed (its_Crv_Rename)
-                        strcpy(#its_CrvRen, its_CrvNm[k]); its_CrvRenK = k;
-                        sprintf(#its_CrvRenT, "Name of the curve %d (empty : no name)...", k + 1);
-                        ui_screen_open("control.prompt");
-                        ui_screen_arg(0, #its_CrvRen);
-                        ui_screen_arg(1, #its_CrvRenT);
-                    ) :
-                    ((zz & ui_jpad_ev_lmc) && ok && (zzmcl === 2)) ? (
-                        // the next type (shift : the previous one), in the order of its_CrvTyO
-                        its_Crv_Pre(k); its_Crv_Commit();
-                        i = 0; while ((i < its_CrvTyCnt - 1) && (its_CrvTyO[i] !== b[its_Crv_Type])) ( i += 1; );
-                        b[its_Crv_Type] = its_CrvTyO[(i + ((jmc & shfCap) ? its_CrvTyCnt - 1 : 1)) % its_CrvTyCnt];
-                        its_Crv_Clamp(b);
-                    ) :
-                    ((zz & ui_jpad_ev_lmc) && ok && (zzmcl === 4) && ((b[its_Crv_Type] === its_CrvEnv) || (b[its_Crv_Type] === its_CrvWave))) ? (
-                        its_Crv_Pre(k); its_Crv_Commit();
-                        b[its_Crv_Flags] = b[its_Crv_Flags] ~ its_CrvFl_Periodic;
-                        its_Crv_Clamp(b);
-                    ) :
-                    ((zz & ui_jpad_ev_lmc) && (zzmcl === 5)) ? (
-                        i = 0; while ((i < 4) && (its_CrvGridN[i] !== its_CrvGrid)) ( i += 1; );
-                        its_CrvGrid = its_CrvGridN[(i + ((jmc & shfCap) ? 4 : 1)) % 5];
-                    ) :
-                    ((zz & ui_jpad_ev_lmc) && (zzmcl === 6)) ? (
-                        its_Crv_Undo(k);
-                        its_Crv_SelClear();
-                    ) :
-                    ((zz & (ui_jpad_ev_rmc | ui_jpad_ev_lmc)) && (zzmcl === 7)) ? ( // the cell "Action" : right or left clic
-                        xx = its_Menu_Clic(menu_Crv_Action, zz);
-                        (((xx >= 1) && (xx <= 5)) || ((xx === 12) && ok)) ? ( its_Crv_Pre(k); its_Crv_Commit(); ); // (Undo)
-                        ((xx >= 1) && (xx <= 5)) ? (
-                            // a new curve (the one shown, replaced)
-                            (!ok) ? (
-                                ((b = mSL_Dyn_Alloc(its_Crv_BlkSize, KW_crvb, 0)) > BASE_MEMORY) ? (its_CrvBlk[k] = b) : (
-                                    sprintf(#its_CrvMsg, "Error 2797 : Curve %d : not enough memory", k + 1);
-                                    mSL_log(SysLogBox, #its_CrvMsg);
-                                );
-                            );
-                            (its_CrvBlk[k] > BASE_MEMORY) ? its_Crv_Default(its_CrvBlk[k], its_CrvTyO[xx - 1]);
-                            its_Crv_SelClear();
-                        ) :
-                        ((xx === 6) && ok) ? (
-                            its_Crv_Dump(k);
-                        ) :
-                        ((xx === 7) && ok) ? (
-                            its_Crv_Export(k);
-                        ) :
-                        (xx === 8) ? (
-                            its_Crv_Export(-1);
-                        ) :
-                        ((xx === 9) && ok) ? (
-                            // (the selected point, even if it is already the sustain)
-                            i = b[its_Crv_Sel];
-                            its_Crv_SetSus(b, k, ((i >= 0) && (i < b[its_Crv_N]) && its_CrvSelF[i]) ? i : -2);
-                        ) :
-                        ((xx === 10) && ok) ? (
-                            its_Crv_SetSus(b, k, -1);
-                        ) :
-                        ((xx === 12) && ok) ? (
-                            mSL_Dyn_Free(b);
-                            its_CrvBlk[k] = 0; strcpy(its_CrvNm[k], "");
-                        );
-                    );
-                );
-            ui_pop();
-
-            // the graphic area, then x and y under the mouse
-            b = its_CrvBlk[k];
-            ((b > BASE_MEMORY) && (h2 > 0)) ? (
-                ui_split_top(h2);
-                    ui_pad(1,2,2,2);
-                    its_Crv_Edit(b, k);
-                    its_Crv_Draw(b);
-                    cgh = ui_hover();
-                    x0 = ui_left_retina(); w = ui_width_retina();
-                ui_pop();
-                ui_split_top(h3);
-                    ui_pad(4,2,4,2);
-                    ui_pcolor(ui_jcolor_text);
-                    ui_align(0, 0.5);
-                    (((i = its_Crv_SelCount(b[its_Crv_N])) > 1) && (its_CrvDrag || !cgh)) ? (
-                        ui_text(sprintf(#its_CrvTxt, "%d points selected", i));
-                    ) :
-                    (((i = b[its_Crv_Sel]) >= 0) && (i < b[its_Crv_N]) && its_CrvSelF[i] && (its_CrvDrag || !cgh)) ? (
-                        v = b + its_Crv_Pts + 3 * i;
-                        ui_text(sprintf(#its_CrvTxt, "Point %d :  x %.4f   y %.4f   c %.3f%s", i + 1, v[0], v[1], v[2],
-                            (i === b[its_Crv_Sus]) ? "   (sustain)" : ""));
-                    ) :
-                    cgh ? (
-                        mx = max(0, min(1, (mouse_x - x0 - its_CrvPad) / max(1, w - 1 - 2 * its_CrvPad)));
-                        v = its_Crv_Val(b, mx);
-                        ui_text(sprintf(#its_CrvTxt, "x %.4f   y %.4f", mx, v));
-                    ) :
-                    ((i = b[its_Crv_Sus]) >= 0) ? (
-                        v = b + its_Crv_Pts + 3 * i;
-                        ui_text(sprintf(#its_CrvTxt, "y in [0, 1]   sustain : point %d (x %.4f, y %.4f)", i + 1, v[0], v[1]));
-                    ) : (
-                        i = b[its_Crv_Type];
-                        ui_text(sprintf(#its_CrvTxt, "%s", (i === its_CrvEnv) ? "y in [0, 1]" : (i === its_CrvWave) ? "y in [-1, 1]" :
-                            (i === its_CrvHEnv) ? "the rise, y in [0, 1] (the fall : its mirror)" :
-                            (i === its_CrvQWave) ? "a quarter of the waveform, y in [-1, 1] (the first y : 0)" :
-                            "the first half of the waveform, y in [-1, 1] (the second : its symmetric about the middle)"));
-                    );
-                ui_pop();
-            );
-        ui_pop();
-    );
-    its_Crv_EdPut(e);
-);
+function show_Curves_Pad(blockId, e) ( crv_Editor(blockId, e); );
 
 /*
     The module "Main Infos" : the state of Interstys, in 1 to 3 columns (as the width allows) ; the counts are computed

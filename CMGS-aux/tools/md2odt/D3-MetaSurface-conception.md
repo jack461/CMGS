@@ -339,3 +339,18 @@ L'étape 4, premier volet (écrit le 24 novembre 2026) : les réglages et les ex
   éditeurs (`Edit X`). Les configurations ne sont pas dans le fichier : celles du projet de mêmes numéros (une
   configuration absente est signalée dans le journal). Erreurs 1656, 2450, 2451.
 - Les tests Ex-3007 (les courbes) et Ex-3008 (les MetaSurfaces).
+
+L'étape 4, deuxième volet (écrit le 24 novembre 2026) : Interstys passe sur mSL_Curves.
+
+- Les courbes d'Interstys sont celles de mSL_Curves (mémoire statique, plus de blocs dynamiques) ; ses modules « Curves A »
+  … « H » sont les éditeurs de la bibliothèque (crv_Editor : en plus, la touche z pour Undo, Duplicate, le menu du type au
+  clic droit, la hauteur du graphe qui suit le panneau, les exports en réglages : `nom-its-curve-date.mSL`).
+- Les tables de mSL_Curves prennent le format d'Interstys : 4 096 échantillons, deux gardes de chaque côté (un cycle pour
+  l'interpolation cubique), le palier des enveloppes (les Grains) ; Diffusion-3 en profite (1 024 échantillons avant).
+  Le dernier échantillon est maintenant F(1) (Interstys y mettait F(0)) : une courbe non périodique lue en cycle (LFO)
+  saute à la fin de son cycle au lieu de rejoindre son début sur 1/4 096 de la période.
+- Le bloc d'une courbe de mSL_Curves est celui d'Interstys précédé d'un mot (la courbe existe) : Interstys garde ses
+  noms (its_Crv_B(k) = crv_B(k) + 1, its_CrvTab … en alias), ses enregistrements 'crvc' (les projets se relisent), son
+  analyse des blocs Curve (ses passes, ses erreurs 2792 … 2799), Check, Free, Dump.
+- Corrigé au passage : `its_CrvK` était à la fois le tableau des clés d'un bloc Curve et la constante 1 000 de la forme
+  des segments ; l'analyse écrivait dans `mem[1000]` … `mem[1004]`.

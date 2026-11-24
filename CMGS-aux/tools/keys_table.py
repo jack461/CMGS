@@ -52,7 +52,7 @@ SHARED = {
     'mSL_System_Keys.jsfx-inc': ['FilePlayer', 'ScriptMaster', 'Diffusion-3', 'Interstys'],
     'ui-lib-JJ-GUI.jsfx-inc': PLUGINS,                    # GM_Tab_Keys (Tab, Shift + Tab), GM_Size_Keys (Cmd + - + 0)
     'mSL_Console.jsfx-inc': PLUGINS,                      # the module mSL Console (2026-11-19)
-    'mSL_Curves.jsfx-inc': ['Diffusion-3'],               # the modules Curves A ... D (2026-11-24)
+    'mSL_Curves.jsfx-inc': ['Diffusion-3', 'Interstys'],  # the modules Curves (2026-11-24 ; Interstys : the same day)
 }
 
 # Levels, in the order they see the key during a frame : each level only gets the keys the previous ones left
@@ -91,7 +91,6 @@ HANDLERS = {
     ('Interstys.jsfx-inc', 'its_Wave_Keys'): ('module', 'forme d\'onde (Line, Reader, Writer)'),
     ('Interstys.jsfx-inc', 'its_FxGraph_Keys'): ('module', 'Effect : hauteur du graphique (VU meter, Limiter)'),
     ('Interstys.jsfx-inc', 'show_Effect_Pad'): ('module', 'Effect'),
-    ('Interstys.jsfx-inc', 'show_Curves_Pad'): ('module', 'Curves'),
     ('mSL_Console.jsfx-inc', 'show_Console'): ('module', 'mSL Console (la ligne de saisie n\'a pas le clavier)'),
     ('mSL_Console.jsfx-inc', 'mcon_Key'): ('editor', 'mSL Console : la ligne de saisie, quand elle a le clavier (toutes les touches lui vont)'),
     ('GamePlayer.jsfx-inc', 'do_Generic_Commands'): ('tab', 'commandes d\'onglet'),
@@ -122,7 +121,7 @@ HANDLERS = {
     ('Diffusion-3-Edit.jsfx-inc', 'show_Edit_Pad'): ('module', 'Edit A ... D (éditeurs de points)'),
     ('Diffusion-3-ConfEditor.jsfx-inc', 'show_ConfEditor_Pad'): ('module', 'Conf Editor (éditeur de configurations)'),
     ('Diffusion-3-MetaSurface.jsfx-inc', 'show_MetaSurface_Pad'): ('module', 'MetaSurface A ... D'),
-    ('mSL_Curves.jsfx-inc', 'crv_Editor'): ('module', 'Curves A ... D (éditeurs de courbes)'),
+    ('mSL_Curves.jsfx-inc', 'crv_Editor'): ('module', 'Curves (éditeurs de courbes : A ... D, Interstys A ... H)'),
     ('mSL_Dbg_Memory.jsfx-inc', 'show_Memory'): ('module', 'mémoire (débogueur)'),
     ('mSL_Panes.jsfx-inc', 'genericItemsPos'): ('pane', 'largeur des colonnes'),
     ('mSL_ui_Pads.jsfx-inc', 'show_jled'): ('module', 'LED interactive'),

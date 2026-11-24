@@ -3,10 +3,12 @@
 
     ====================================== The curves ======================================
 
-    The curves of the applications (envelopes and waveforms), shared : from the module "Curves" of Interstys (its_Crv_* ;
-    Interstys keeps its own code until it moves to this library). Diffusion-3 : the modules "Curves A" ... "D" (the
-    editors, crv_Editor), saved with the project (crv_Serialize, record 'crv1'), the tables (crv_Frame, @gfx) read by
-    crv_F (@gfx or @block) : the MetaSurfaces, the dynamics of the spatial projectors.
+    The curves of the applications (envelopes and waveforms), shared : from the module "Curves" of Interstys (its_Crv_*).
+    Diffusion-3 : the modules "Curves A" ... "D" (the editors, crv_Editor), saved with the project (crv_Serialize, record
+    'crv1'), the tables (crv_Frame, @gfx) read by crv_F (@gfx or @block) : the MetaSurfaces, the dynamics of the spatial
+    projectors. Interstys (2026-11-24) : the modules "Curves A" ... "H" (crv_Editor), its tables read by its sound (its
+    names kept as aliases : its_CrvTab ... ; its_Crv_B(k) = crv_B(k) + 1, the block of Interstys : its records 'crvc' are
+    unchanged), its own analysis of the blocks Curve of its settings (its passes) and its own records.
 
     CRV_MX curves, in static memory (crv_B(k) : its block ; read by @block through its table, without allocation) ; a block :
     [crv_fU] 1 the curve exists, [crv_fT] its type, [crv_fF] its flags (1 : periodic), [crv_fN] its count of points,
@@ -22,9 +24,11 @@
         4 HWave : a half waveform (y in [-1, 1], the first and the last y : 0) : F(u) = V(2 u) for u <= 0.5, -V(2 - 2 u) after
     The periodic flag : Env and Wave only. The sustain point of an envelope (crv_fSus : its index, -1 : none) divides it in
     the rise and the fall.
-    The tables : for each curve, CRV_TN + 1 samples of its complete form F(j / CRV_TN) (and a guard), built by @gfx when the
-    curve changes (crv_Frame : the curve compared with its copy crv_tbc) ; crv_F(k, u) : F(u), linear between the samples
-    (a curve that does not exist : 0 ; crv_tbE[k] 0).
+    The tables : for each curve, CRV_TN + 1 samples of its complete form F(j / CRV_TN) and CRV_TG guards on each side (a
+    cycle : t[-2], t[-1] are t[CRV_TN - 2], t[CRV_TN - 1], t[CRV_TN + 1] is t[1] ; the cubic interpolation of Interstys),
+    built by @gfx when the curve changes (crv_Frame : the curve compared with its copy crv_tbc) ; the plateau of an
+    envelope (crv_tbXs, crv_tbS : the Grains of Interstys) ; crv_F(k, u) : F(u), linear between the samples (a curve that
+    does not exist : 0 ; crv_tbE[k] 0). (2026-11-24 : 4096 samples and the guards of Interstys ; 1024 before.)
     The editors (crv_Editor, the module of the host : its blockId, the editor e = 0 ... CRV_NE - 1) : the state of each one in
     crv_ed (CRV_ES words : 0 the curve shown, 1 the grid, 2 ... 10 the mouse, 11 the curve of the selection), its selected
     points in crv_edSel ; crv_Editor puts the state of the editor drawn in the globals crv_uiK ... crv_selF (crv_EdGet), then
@@ -93,11 +97,16 @@ crv_grid = 0;                             // the grid (x and y) : 0 none, else i
 crv_gridN = make_array(5); crv_gridN[0] = 0; crv_gridN[1] = 4; crv_gridN[2] = 8; crv_gridN[3] = 16; crv_gridN[4] = 32;
 CRV_PAD = 6;                              // the margin of the graph (pixels) : the points at the edges are seen
 crv_renK = -1;                            // the curve renamed by the prompt (#crv_ren)
-// the tables (see above)
-CRV_TN = 1024; CRV_TS = CRV_TN + 2;
+// the tables (see above ; 2026-11-24 : those of Interstys, CRV_TN 4096 samples, CRV_TG guards on each side : the sample 0 of
+// the curve k at crv_tab + k * CRV_TS + CRV_TG ; t[-2] t[-1] : t[CRV_TN - 2] t[CRV_TN - 1], t[CRV_TN + 1] : t[1], a cycle for
+// the cubic interpolation of Interstys)
+CRV_TN = 4096; CRV_TG = 2; CRV_TS = CRV_TN + 2 * CRV_TG;
 crv_tab = make_array(CRV_MX * CRV_TS);
 crv_tbc = make_array(CRV_MX * CRV_BS);    // the curve when its table was built
 crv_tbE = make_array(CRV_MX);             // 1 : the table comes from a curve (0 : zeros)
+// (2026-11-24, from Interstys) the plateau of an envelope in its table (the mode Grains of the readers of Interstys) : its x
+// (-1 : not an envelope, or no curve) and its level
+crv_tbXs = make_array(CRV_MX); crv_tbS = make_array(CRV_MX);
 CRV_TBMX = 4;                             // the tables built per run of @gfx at most
 crv_tbK = 0;                              // the first curve looked at
 crv_sv = make_array(2 * CRV_NE + 4);      // (crv_Serialize)
@@ -178,10 +187,10 @@ function crv_Fill(b, t, m) local(n, p, q, i, j, x, x0, x1)
 );
 
 // The table of the curve k : its complete form F(j / CRV_TN), j = 0 ... CRV_TN (the types HEnv, QWave, HWave by symmetry),
-// a guard ; zeros if the curve does not exist ; the curve copied into crv_tbc
-function crv_Build(k) local(b, t, n, ty, j)
+// the guards (a cycle) ; zeros if the curve does not exist ; the curve copied into crv_tbc ; the plateau (crv_tbXs, crv_tbS)
+function crv_Build(k) local(b, t, n, ty, j, i, p)
 (
-    b = crv_B(k); t = crv_tab + k * CRV_TS; n = CRV_TN;
+    b = crv_B(k); t = crv_tab + k * CRV_TS + CRV_TG; n = CRV_TN;
     (b[crv_fU] > 0) ? (
         ty = b[crv_fT];
         (ty === CRV_HENV) ? (
@@ -199,13 +208,27 @@ function crv_Build(k) local(b, t, n, ty, j)
         ) : (
             crv_Fill(b, t, n);
         );
-        t[n + 1] = t[n];
+        t[-2] = t[n - 2]; t[-1] = t[n - 1]; t[n + 1] = t[1];
         memcpy(crv_tbc + k * CRV_BS, b, crv_fP + 3 * b[crv_fN]);
         crv_tbE[k] = 1;
+        // the plateau (the grains of a reader of Interstys) : an envelope, its sustain point, else its highest point ; a half
+        // envelope, its top (u = 0.5) ; a waveform : none
+        p = b + crv_fP;
+        (ty === CRV_ENV) ? (
+            i = b[crv_fSus];
+            (i < 0) ? ( i = 0; j = 1; loop(b[crv_fN] - 1, (p[3 * j + 1] > p[3 * i + 1]) ? (i = j); j += 1;); );
+            crv_tbXs[k] = p[3 * i]; crv_tbS[k] = p[3 * i + 1];
+        ) :
+        (ty === CRV_HENV) ? (
+            crv_tbXs[k] = 0.5; crv_tbS[k] = t[n / 2];
+        ) : (
+            crv_tbXs[k] = -1; crv_tbS[k] = 1;
+        );
     ) : (
-        memset(t, 0, CRV_TS);
+        memset(t - CRV_TG, 0, CRV_TS);
         memset(crv_tbc + k * CRV_BS, 0, crv_fP);
         crv_tbE[k] = 0;
+        crv_tbXs[k] = -1; crv_tbS[k] = 1;
     );
 );
 // the table of the curve k is no more that of the curve (its existence, its type, its points)
@@ -215,7 +238,7 @@ function crv_TbDiff(k) local(b, c, n, i, d)
     (b[crv_fU] <= 0) ? (d = crv_tbE[k]) :
     !crv_tbE[k] ? (d = 1) : (
         n = b[crv_fN];
-        d = (b[crv_fT] !== c[crv_fT]) || (n !== c[crv_fN]);
+        d = (b[crv_fT] !== c[crv_fT]) || (n !== c[crv_fN]) || (b[crv_fSus] !== c[crv_fSus]); // (the sustain : the plateau)
         i = crv_fP; loop(d ? 0 : 3 * n, (b[i] !== c[i]) ? (d = 1); i += 1;);
     );
     d;
@@ -235,7 +258,7 @@ function crv_Frame() local(k, m, i)
 function crv_F(k, u) local(t, x, i)
 (
     ((k >= 0) && (k < CRV_MX)) ? (
-        t = crv_tab + (k|0) * CRV_TS;
+        t = crv_tab + (k|0) * CRV_TS + CRV_TG;
         x = max(0, min(1, u)) * CRV_TN; i = min(CRV_TN - 1, floor(x));
         t[i] + (x - i) * (t[i + 1] - t[i]);
     ) : 0;
@@ -1027,7 +1050,8 @@ i__k = 0; loop(CRV_PSIZ, pad_Crv_Colrs[i__k] = Col_P1; pad_Crv_Labs[i__k] = ""; 
     the file written, or not. The place of each module (crv_mr, crv_mf : the frame drawn) : a file dropped on it, its first
     block Curve goes into the curve it shows (crv_DropTarget, crv_tbDrop).
 */
-#crv_xAp = "d3"; #crv_xApp = "Diffusion 3"; // (the host : its short name in the files, its name in the texts)
+// (the host : its short name in the files, its name in the texts, the first words of its settings : Interstys sets them)
+#crv_xAp = "d3"; #crv_xApp = "Diffusion 3"; #crv_xHd = "";
 crv_mr = make_array(4 * CRV_NE); crv_mf = make_array(CRV_NE);
 i__k = 0; loop(CRV_NE, crv_mf[i__k] = -10; i__k += 1;);
 function crv_XpCurve(k) local(b, n, p, q)
@@ -1081,7 +1105,7 @@ function crv_Export(k) local(c, i, cnt)
         xpt_Line("  c la courbure du segment qui part du point, de -1 a 1).");
         xpt_Line(sprintf(#crv_xt, "*%c", '/'));
         xpt_Line("");
-        xpt_Line("var r = settings(data(");
+        xpt_Line(sprintf(#crv_xt, "var r = settings(data(%s", #crv_xHd));
         i = 0; loop(CRV_MX, (((k < 0) || (i === k)) && crv_Ex(i)) ? crv_XpCurve(i); i += 1;);
         xpt_Line("));");
         sprintf(#crv_xt, "print(sprintf(0, \"%s : settings %%d (0 : OK)\", r));", #crv_xn);
