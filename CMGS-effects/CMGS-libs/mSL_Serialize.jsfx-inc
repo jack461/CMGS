@@ -142,14 +142,16 @@ local (pd, pt, sl, rcr, sz)
 
 
 /*
-    (2026-11-24) The heights of the modules chosen by the user (uix_jmhH : ui_jheight, ui_jmh_lines in ui-lib-JJ-GUI) : a
-    record ['mhg1', n, 0, 0], then n pairs (the module, its height). ui_jmh_save writes it ; ui_jmh_load(n) reads its pairs
-    (its header read by the host : Interstys, the loop of its blocks) ; ui_jmh_serialize : the whole record (the last one of
-    the host : the older projects end before it, all the heights automatic).
+    (2026-11-24) The layout of the modules chosen by the user : their heights (uix_jmhH : ui_jheight, ui_jmh_lines in
+    ui-lib-JJ-GUI), and the layout of the System Log (SysLogBox : its columns [5], its spacing [6] ; the menu Log Layout). A
+    record ['mhg1', n, 0, 0], then n pairs (a key, a value) : the key of a height, its module (1 ... UIX_JMHN - 1) ; then
+    UIX_JMHN the columns of the log, UIX_JMHN + 1 its spacing (a key unknown : ignored). ui_jmh_save writes it ;
+    ui_jmh_load(n) reads its pairs (its header read by the host : Interstys, the loop of its blocks) ; ui_jmh_serialize : the
+    whole record (the last one of the host : the older projects end before it, all the heights automatic).
 */
 function ui_jmh_save() local(i, n)
 (
-    n = 0; i = 1; loop(UIX_JMHN - 1, (uix_jmhH[i] > 0) ? (n += 1); i += 1;);
+    n = 2; i = 1; loop(UIX_JMHN - 1, (uix_jmhH[i] > 0) ? (n += 1); i += 1;);
     ser_hdr[0] = 'mhg1'; ser_hdr[1] = n; ser_hdr[2] = ser_hdr[3] = 0;
     save_mem(0, ser_hdr, 4);
     i = 1;
@@ -157,16 +159,20 @@ function ui_jmh_save() local(i, n)
         (uix_jmhH[i] > 0) ? ( ser_hdr[0] = i; ser_hdr[1] = uix_jmhH[i]; save_mem(0, ser_hdr, 2); );
         i += 1;
     );
+    ser_hdr[0] = UIX_JMHN; ser_hdr[1] = SysLogBox[5]; save_mem(0, ser_hdr, 2);
+    ser_hdr[0] = UIX_JMHN + 1; ser_hdr[1] = SysLogBox[6]; save_mem(0, ser_hdr, 2);
     n;
 );
 function ui_jmh_load(n) local(k)
 (
     memset(uix_jmhH, 0, UIX_JMHN);
-    loop(max(0, min(UIX_JMHN, n|0)),
+    loop(max(0, min(UIX_JMHN + 8, n|0)),
         memset(ser_hdr, 0, 2);
         load_mem(0, ser_hdr, 2);
         k = ser_hdr[0]|0;
-        ((k > 0) && (k < UIX_JMHN)) ? (uix_jmhH[k] = max(0, min(20000, ser_hdr[1])));
+        ((k > 0) && (k < UIX_JMHN)) ? (uix_jmhH[k] = max(0, min(20000, ser_hdr[1]))) :
+        ((k === UIX_JMHN) && (SysLogBox > 0)) ? (SysLogBox[5] = max(1, min(8, ser_hdr[1]|0))) :
+        ((k === UIX_JMHN + 1) && (SysLogBox > 0)) ? (SysLogBox[6] = max(0, min(20, ser_hdr[1]|0)));
     );
 );
 function ui_jmh_serialize()
