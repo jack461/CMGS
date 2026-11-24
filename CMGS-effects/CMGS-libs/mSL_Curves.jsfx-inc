@@ -36,18 +36,29 @@
     The pad (one line) : 0 the curve (left : the next one, Shift : the previous one ; right : the menu), 1 its name (a
     prompt), 2 its type (left : the next one, Shift : the previous one ; right : the menu), 3 its count of points, 4 periodic
     (Env, Wave), 5 the grid (Off, 4, 8, 16, 32), 6 Undo (again : Redo), 7 Actions (new curves, duplicate, dump, sustain,
-    delete).
+    delete ; 2026-11-24 : export this curve, all the curves, as mSL settings).
     (2026-11-24, the user) The marks of the editors on the paths of the host (the MetaSurfaces of Diffusion-3) : the editor
     used last (the mouse over its graph, a clic in the module) and shown in the last frame drawn (crv_MarkE) gives its curve,
     its selected points, the x under the mouse in its graph (crv_hovX) ; crv_Us : the places in the complete form of a point
     of the part edited. The other way (2026-11-24, the user) : the playheads of the host (crv_PhSet : the brush of each
     MetaSurface on its path, the part of its length) are drawn in the graph of that editor (crv_DrawPh) : a vertical line
     at the x of the part edited (crv_XOf), a dot on the curve, a letter ; one that is not set again for 0.5 s : gone.
-    Included in @init (static memory), after the UI libraries (ui-lib, mSL_ui_Pads, mSL_Colors, ui-lib-JJ-GUI,
-    mSL_ui_LibJJ) and mSL_Panes part 1 (keepBlockInfos), mSL_Serialize (save_mem, load_mem, ser_hdr).
+    (2026-11-24, step 3 of the curves in Diffusion-3) The curves as dynamics (sp_Ease of the spatial projectors and of the
+    MetaSurfaces : the code CRV_DYN + k, crv_P : the place 0 ... 1 ; the menus, crv_MenuAdd ; the next one, crv_DynNext ;
+    its name, crv_DynName) ; the playheads may belong to a curve (the modulators of the MetaSurfaces : their phase).
+    (2026-11-24, step 4) The settings of the curves (crv_TbCurve : a block "Curve id keys..." of the mSL "settings", read by
+    the host ; crv_TbCommit : the curves staged, set when the whole analysis is without error) ; the exports (crv_XpCurve :
+    the lines of a curve ; crv_Export : a file, see mSL_Export).
+    Included twice in @init (static memory ; crv_part) : part 1 (the data, the curves, their tables, the settings) before
+    the analysis of the settings of the host (Diffusion-3-Set-Table), after mSL_Utilities, mSL_Strings ; part 2 (the
+    editors, the exports, the record of the project) after the UI libraries (ui-lib, mSL_ui_Pads, mSL_Colors,
+    ui-lib-JJ-GUI, mSL_ui_LibJJ), mSL_Panes part 1 (keepBlockInfos), mSL_Serialize (save_mem, load_mem, ser_hdr) and
+    mSL_Export (xpt_*).
 */
 
-CRV_MX = 64;                // the curves : 1 ... 64 (index 0 ... 63)
+<? crv_part != 1 ? _suppress = 1; ?>
+
+CRV_MX = 64;               // the curves : 1 ... 64 (index 0 ... 63)
 CRV_PMX = 128;              // the points of a curve
 CRV_NMLEN = 31;             // the characters of a name
 crv_fU = 0; crv_fT = 1; crv_fF = 2; crv_fN = 3; crv_fSel = 4; crv_fSus = 5; crv_fP = 6;
@@ -97,8 +108,10 @@ i__k = 0; loop(CRV_NE, crv_seenF[i__k] = -10; crv_hovX[i__k] = -1; i__k += 1;);
 crv_lastE = -1; crv_up = make_array(4);
 // (2026-11-24) the playheads of the host (crv_PhSet) : the place u in the complete form, the time it was set, the color
 // (24 bits), the letter
-CRV_PHN = 8;
+// (the curve read, -1 : all of them ; a text after the letter)
+CRV_PHN = 16;
 crv_phU = make_array(CRV_PHN); crv_phT = make_array(CRV_PHN); crv_phC = make_array(CRV_PHN); crv_phL = make_array(CRV_PHN);
+crv_phK = make_array(CRV_PHN); crv_phX = make_array(CRV_PHN);
 i__k = 0; loop(CRV_PHN, crv_phT[i__k] = -10; i__k += 1;);
 
 // The block of the curve k ; it exists
@@ -246,10 +259,14 @@ function crv_XOf(ty, u) local(q, g)
     u;
 );
 // (2026-11-24) The playhead i (0 ... CRV_PHN - 1) of the host at the place u (0 ... 1) of the complete form, its color c
-// (24 bits), its letter l (a character) ; to be set again at each run of @gfx (else gone after 0.5 s)
-function crv_PhSet(i, u, c, l)
+// (24 bits), its letter l (a character) and the text x after it, the curve k it reads (-1 : all of them) ; to be set again
+// at each run of @gfx (else gone after 0.5 s)
+function crv_PhSet(i, u, c, l, x, k)
 (
-    ((i >= 0) && (i < CRV_PHN)) ? ( crv_phU[i] = max(0, min(1, u)); crv_phC[i] = c; crv_phL[i] = l; crv_phT[i] = time_precise(); );
+    ((i >= 0) && (i < CRV_PHN)) ? (
+        crv_phU[i] = max(0, min(1, u)); crv_phC[i] = c; crv_phL[i] = l; crv_phX[i] = x; crv_phK[i] = k;
+        crv_phT[i] = time_precise();
+    );
 );
 
 // (2026-11-24) The editor whose marks the host shows : the one used last if it drew its graph in the last frame drawn (or in
@@ -262,6 +279,19 @@ function crv_MarkE() local(e, r)
         while ((r < 0) && (e < CRV_NE)) ( (crv_seenF[e] >= gfx_executed - 1) ? (r = e); e += 1; );
     );
     r;
+);
+
+// (2026-11-24, step 3) The curve k as a place (0 ... 1) at u : the dynamics of the motions (sp_Ease, the code CRV_DYN + k) ;
+// the envelopes (Env, HEnv) as they are, the waveforms from [-1, 1] to [0, 1] ; no curve : u (linear) ; @gfx or @block (the
+// type : that of its table, crv_tbc)
+CRV_DYN = 100;
+function crv_P(k, u) local(ty)
+(
+    k = k|0;
+    ((k >= 0) && (k < CRV_MX) && crv_tbE[k]) ? (
+        ty = crv_tbc[k * CRV_BS + crv_fT];
+        ((ty === CRV_ENV) || (ty === CRV_HENV)) ? max(0, min(1, crv_F(k, u))) : max(0, min(1, (crv_F(k, u) + 1) / 2));
+    ) : max(0, min(1, u));
 );
 
 // The name of the curve k (or its number) into str ; returns str
@@ -313,6 +343,268 @@ function crv_Undo(k) local(b, e)
         crv_undoE = e; strcpy(#crv_undoN, #crv_tmpN);
     );
 );
+
+/*
+    (2026-11-24, step 4) The blocks Curve of the mSL "settings" (the same keys as in Interstys) :
+
+        Curve id  name "text"  type Env|Wave|HEnv|QWave|HWave  periodic On|Off  sustain n|Off  points x y c  x y c ...
+
+    id : a number 1 ... CRV_MX, or a name (a word, or a "text" : the curve of that name ; none : the first curve that does
+    not exist, which takes that name) ; a file dropped on a module Curves (crv_tbDrop, set by the host) : its first block
+    goes into the curve this module shows (an id that is a name : its new name). The keys absent leave the curve as it is (a
+    new curve : that of its type, crv_Default) ; points : x from 0 to 1 without decreasing, y in [0, 1] (Env, HEnv) or
+    [-1, 1], c (the curvature of the segment that starts at the point) in [-1, 1] ; given, they remove the sustain (unless
+    it is given too) ; sustain : a point of an envelope (Env), Off : none. The block ends at the first word that is not one
+    of its keys (the host reads it). The commas and semicolons are ignored. The words : crv_tbT[0 ... crv_tbN - 1], read
+    from crv_tbP (the host sets them, then takes crv_tbP back) ; the first error (1650 ... 1655, in crv_tbError) stops the
+    reading, written in the log after #crv_tbHost (the name of the analysis of the host). The keys read are staged (crv_tsB,
+    crv_tsM, crv_tsNm : several blocks of a curve add up) ; crv_TbCommit sets them at the end of an analysis without error,
+    crv_TbReset forgets them (at the start of an analysis).
+*/
+crv_tbT = crv_tbN = crv_tbP = crv_tbError = 0;
+crv_tbEnd = -(10^30);
+crv_tbDrop = -1; crv_mslTgt = -1; // (the curve of the module Curves where a file was dropped ; set by the host)
+#crv_tbHost = "settings";
+crv_kCurve = mSL_symbol("Curve"); crv_kName = mSL_symbol("name"); crv_kType = mSL_symbol("type");
+crv_kPer = mSL_symbol("periodic"); crv_kSus = mSL_symbol("sustain"); crv_kPts = mSL_symbol("points");
+crv_kOn = mSL_symbol("On"); crv_kOff = mSL_symbol("Off");
+crv_kTy = make_array(CRV_NTY);
+i__k = 0; loop(CRV_NTY, crv_kTy[i__k] = mSL_symbol(crv_tyN[i__k]); i__k += 1;);
+// the staging : crv_tsM[k] the keys given (1 type, 2 periodic, 4 name, 8 points, 16 sustain ; 32 : staged), crv_tsB the
+// values (as a block of a curve), crv_tsNm[k] the name ; crv_tkB : the points of the block read
+crv_tsB = make_array(CRV_MX * CRV_BS); crv_tsM = make_array(CRV_MX); crv_tkB = make_array(3 * CRV_PMX);
+crv_tsNm = make_array(CRV_MX);
+<? i = 0; loop(64, printf("crv_tsNm[%d] = #crv_tsn%d; ", i, i); ((i % 8) == 7) ? printf("\n"); i += 1;); ?>
+
+function crv_TbReset() ( memset(crv_tsM, 0, CRV_MX); );
+
+// the first error stops the analysis
+function crv_TbErr(code, msg)
+(
+    (crv_tbError === 0) ? (
+        crv_tbError = code;
+        sprintf(#crv_tbm, "ERR: %04d    %s (word %d) : %s", code, #crv_tbHost, crv_tbP, msg);
+        mSL_log(SysLogBox, #crv_tbm);
+        mSL_ErrNote(code, msg);
+    );
+    code;
+);
+// the next word (the commas and semicolons skipped ; crv_tbEnd after the last one)
+function crv_TbPeek() local(w)
+(
+    w = crv_tbEnd;
+    while ((crv_tbP < crv_tbN) && (((w = crv_tbT[crv_tbP]) === mSL_cstComma) || (w === ';' + mSL_CharConst))) (
+        crv_tbP += 1; w = crv_tbEnd;
+    );
+    w;
+);
+function crv_TbNext() local(w) ( w = crv_TbPeek(); (crv_tbP < crv_tbN) ? (crv_tbP += 1); w; );
+// a number (a word "-" before it : its sign), or the sign of one
+function crv_TbIsNum(w) ( (w === mSL_cstMinus) || ((abs(w) < mSL_CharConst) && !mSL_isString(w)); );
+// a number in [vmin, vmax] ; 0 and the error code otherwise
+function crv_TbNum(key, vmin, vmax, code) local(w, s)
+(
+    s = 1;
+    ((w = crv_TbNext()) === mSL_cstMinus) ? ( s = -1; w = crv_TbNext(); );
+    ((abs(w) < mSL_CharConst) && !mSL_isString(w) && (w * s >= vmin) && (w * s <= vmax)) ? w * s : (
+        sprintf(#crv_tbw, "%s : %s is not a value in [%g, %g]", key, (w === crv_tbEnd) ? "the end" : mSL_edit_value(#crv_tbv, w), vmin, vmax);
+        crv_TbErr(code, #crv_tbw);
+        0;
+    );
+);
+// the text of a word (a "text", or a word) into dst : 1 ; 0 otherwise
+function crv_TbText(dst, w)
+(
+    mSL_isString(w) ? ( strcpy(dst, w); 1; ) :
+    ((w > mSL_Sym_Low) && (w < mSL_Sym_High)) ? ( mSL_edit_value(dst, w); 1; ) : 0;
+);
+// the curve named txt in the analysis (a name staged) or in the application ; -1 : none
+function crv_TbFind(txt) local(i, k)
+(
+    k = -1; i = 0;
+    while ((k < 0) && (i < CRV_MX)) (
+        (crv_tsM[i] & 4) ? ( (strcmp(crv_tsNm[i], txt) === 0) ? (k = i); ) :
+        ((strlen(crv_nm[i]) > 0) && (strcmp(crv_nm[i], txt) === 0)) ? (k = i);
+        i += 1;
+    );
+    k;
+);
+// the name txt staged for the curve k (valid, not that of another curve) ; 0 or the error
+function crv_TbName(k, txt) local(i)
+(
+    !crv_NmOk(txt) ? (
+        sprintf(#crv_tbw, "name : \"%s\" can't be a name (1 ... %d characters, without \")", txt, CRV_NMLEN);
+        crv_TbErr(1651, #crv_tbw);
+    ) :
+    (((i = crv_TbFind(txt)) >= 0) && (i !== k)) ? (
+        sprintf(#crv_tbw, "name : \"%s\" is the name of the curve %d", txt, i + 1);
+        crv_TbErr(1651, #crv_tbw);
+    ) : (
+        strcpy(crv_tsNm[k], txt); crv_tsM[k] |= 4 | 32;
+        0;
+    );
+);
+// the curve of the word w : a number 1 ... CRV_MX, or a name (create : a new name gets the first curve that neither exists
+// nor is staged) ; -1 and an error otherwise
+function crv_TbId(w, create) local(k, i)
+(
+    k = -1;
+    ((abs(w) < mSL_CharConst) && !mSL_isString(w) && (w === floor(w)) && (w >= 1) && (w <= CRV_MX)) ? (
+        k = w - 1;
+    ) :
+    (crv_TbText(#crv_tbx, w) && crv_NmOk(#crv_tbx)) ? (
+        k = crv_TbFind(#crv_tbx);
+        ((k < 0) && create) ? (
+            i = 0; while ((k < 0) && (i < CRV_MX)) ( (!crv_Ex(i) && !crv_tsM[i]) ? (k = i); i += 1; );
+            (k < 0) ? (
+                sprintf(#crv_tbw, "Curve \"%s\" : no free curve (%d)", #crv_tbx, CRV_MX);
+                crv_TbErr(1650, #crv_tbw);
+                k = -2;
+            ) : (
+                crv_TbName(k, #crv_tbx);
+            );
+        );
+    );
+    (k === -1) ? (
+        sprintf(#crv_tbw, "Curve %s : a number 1 ... %d, or the name of a curve, is expected", (w === crv_tbEnd) ? "(the end)" :
+            mSL_edit_value(#crv_tbv, w), CRV_MX);
+        crv_TbErr(1650, #crv_tbw);
+    );
+    max(-1, k);
+);
+
+// A block Curve (its word read) : its keys staged ; returns the curve, or -1
+function crv_TbCurve() local(w, k, f, ty, per, sus, n, i, ok, lo, s, np)
+(
+    w = crv_TbNext();
+    (crv_tbDrop >= 0) ? (
+        // a file dropped on a module Curves : its first block goes there (an id that is a name : the new name of the curve,
+        // unless another curve has it)
+        k = crv_tbDrop; crv_tbDrop = -1;
+        (!((abs(w) < mSL_CharConst) && !mSL_isString(w)) && crv_TbText(#crv_tbx, w) && (((i = crv_TbFind(#crv_tbx)) < 0) || (i === k))) ?
+            crv_TbName(k, #crv_tbx);
+    ) : (
+        k = crv_TbId(w, 1);
+    );
+    f = 0; ty = per = sus = n = 0;
+    while ((crv_tbError === 0) && (k >= 0) && (((w = crv_TbPeek()) === crv_kType) || (w === crv_kPer) || (w === crv_kName) ||
+        (w === crv_kSus) || (w === crv_kPts))) (
+        crv_TbNext();
+        (w === crv_kType) ? (
+            w = crv_TbNext();
+            ty = -1; i = 0; loop(CRV_NTY, (w === crv_kTy[i]) ? (ty = i); i += 1;);
+            (ty < 0) ? (
+                sprintf(#crv_tbw, "type : %s is not Env, Wave, HEnv, QWave or HWave", (w === crv_tbEnd) ? "(the end)" : mSL_edit_value(#crv_tbv, w));
+                crv_TbErr(1652, #crv_tbw);
+            ) : (f |= 1);
+        ) :
+        (w === crv_kPer) ? (
+            w = crv_TbNext();
+            per = (w === crv_kOn) ? 1 : (w === crv_kOff) ? 0 : (w === 1) ? 1 : (w === 0) ? 0 : -1;
+            (per < 0) ? (
+                sprintf(#crv_tbw, "periodic : %s is not On or Off", (w === crv_tbEnd) ? "(the end)" : mSL_edit_value(#crv_tbv, w));
+                crv_TbErr(1652, #crv_tbw);
+            ) : (f |= 2);
+        ) :
+        (w === crv_kName) ? (
+            w = crv_TbNext();
+            crv_TbText(#crv_tbx, w) ? crv_TbName(k, #crv_tbx) : (
+                sprintf(#crv_tbw, "name : %s is not a \"text\"", (w === crv_tbEnd) ? "(the end)" : mSL_edit_value(#crv_tbv, w));
+                crv_TbErr(1651, #crv_tbw);
+            );
+        ) :
+        (w === crv_kSus) ? (
+            (crv_TbPeek() === crv_kOff) ? ( crv_TbNext(); sus = 0; ) : ( sus = crv_TbNum("sustain", 1, CRV_PMX, 1655); );
+            f |= 16;
+        ) : (
+            // points x y c ... (as many numbers as follow)
+            np = 0;
+            while ((crv_tbError === 0) && crv_TbIsNum(crv_TbPeek())) (
+                (np < 3 * CRV_PMX) ? (
+                    crv_tkB[np] = ((np % 3) === 0) ? crv_TbNum("points (x)", 0, 1, 1653) : ((np % 3) === 1) ?
+                        crv_TbNum("points (y)", -1, 1, 1654) : crv_TbNum("points (c)", -1, 1, 1653);
+                ) : (
+                    crv_TbNum("points", -(10^9), 10^9, 1653);
+                );
+                np += 1;
+            );
+            ((crv_tbError === 0) && (((np % 3) !== 0) || (np < 6) || (np > 3 * CRV_PMX))) ? (
+                sprintf(#crv_tbw, "points : %d numbers, not 2 ... %d points (x y c)", np, CRV_PMX);
+                crv_TbErr(1653, #crv_tbw);
+            );
+            n = np / 3;
+            ok = (crv_tkB[0] === 0) && (crv_tkB[3 * (n - 1)] === 1);
+            i = 1; while (ok && (i < n)) ( (crv_tkB[3 * i] < crv_tkB[3 * (i - 1)]) ? (ok = 0); i += 1; );
+            ((crv_tbError === 0) && !ok) ? crv_TbErr(1653, "points : x must go from 0 to 1, without decreasing");
+            f |= 8;
+        );
+    );
+    (k >= 0) ? (
+        s = crv_tsB + k * CRV_BS;
+        // the type : given, or staged, or that of the curve, or Env ; the y of the points in its bounds ; the sustain : a
+        // point of an envelope
+        !(f & 1) ? (ty = (crv_tsM[k] & 1) ? s[crv_fT] : crv_Ex(k) ? crv_blk[k * CRV_BS + crv_fT] : CRV_ENV);
+        lo = crv_Lo(ty);
+        i = 0; while ((crv_tbError === 0) && (f & 8) && (i < n)) (
+            (crv_tkB[3 * i + 1] < lo) ? (
+                sprintf(#crv_tbw, "points : y = %g is not in [%d, 1] (%s)", crv_tkB[3 * i + 1], lo, crv_tyN[ty]);
+                crv_TbErr(1654, #crv_tbw);
+            );
+            i += 1;
+        );
+        ((crv_tbError === 0) && (f & 16) && (sus > 0)) ? (
+            np = (f & 8) ? n : (crv_tsM[k] & 8) ? s[crv_fN] : crv_Ex(k) ? crv_blk[k * CRV_BS + crv_fN] : 2;
+            (ty !== CRV_ENV) ? crv_TbErr(1655, "sustain : only an envelope (Env) has a sustain point") :
+            (sus > np) ? (
+                sprintf(#crv_tbw, "sustain : %d is not a point (1 ... %d)", sus, np);
+                crv_TbErr(1655, #crv_tbw);
+            );
+        );
+        // staged (the blocks of a curve add up)
+        (crv_tbError === 0) ? (
+            (f & 1) ? (s[crv_fT] = ty);
+            (f & 2) ? (s[crv_fF] = per ? CRV_PER : 0);
+            (f & 8) ? ( s[crv_fN] = n; memcpy(s + crv_fP, crv_tkB, 3 * n); s[crv_fSus] = -1; f |= 16; );
+            ((f & 16) && (sus > 0)) ? (s[crv_fSus] = sus - 1) : (!(f & 8) && (f & 16)) ? (s[crv_fSus] = -1);
+            crv_tsM[k] |= f | 32;
+        );
+    );
+    (crv_tbError === 0) ? k : -1;
+);
+
+// The curves staged set (each one : Undo, the last one ; its selection in the editors cleared ; a line in the log), the
+// staging emptied
+function crv_TbCommit() local(k, f, s, b, n, e, p)
+(
+    k = 0;
+    loop(CRV_MX,
+        ((f = crv_tsM[k]) & 32) ? (
+            s = crv_tsB + k * CRV_BS; b = crv_B(k);
+            crv_Pre(k); crv_Commit();
+            (b[crv_fU] <= 0) ? ( crv_Default(b, (f & 1) ? s[crv_fT] : CRV_ENV); strcpy(crv_nm[k], ""); ) : (f & 1) ? (b[crv_fT] = s[crv_fT]);
+            (f & 2) ? (b[crv_fF] = (b[crv_fF] & (-1 ~ CRV_PER)) | s[crv_fF]);
+            (f & 8) ? (
+                n = b[crv_fN] = s[crv_fN];
+                memcpy(b + crv_fP, s + crv_fP, 3 * n);
+                b[crv_fP + 3 * n - 1] = 0; // (the last point starts no segment)
+            );
+            (f & 16) ? (b[crv_fSus] = s[crv_fSus]);
+            (f & 4) ? strcpy(crv_nm[k], crv_tsNm[k]);
+            b[crv_fSel] = -1;
+            crv_Clamp(b);
+            e = 0; loop(CRV_NE, p = crv_ed + e * CRV_ES; (p[0] === k) ? memset(crv_edSel + e * CRV_PMX, 0, CRV_PMX); e += 1;);
+            (strlen(crv_nm[k]) > 0) ? sprintf(#crv_tbv, " \"%s\"", crv_nm[k]) : strcpy(#crv_tbv, "");
+            sprintf(#crv_tbm, "Curves : curve %d%s (%s, %d points) : read from settings", k + 1, #crv_tbv, crv_tyN[b[crv_fT]], b[crv_fN]);
+            mSL_log(SysLogBox, #crv_tbm);
+        );
+        k += 1;
+    );
+    crv_TbReset();
+    ui_GFXdoNow |= 4;
+);
+
+<? _suppress = 0; ?>
+<? crv_part != 2 ? _suppress = 1; ?>
 
 // A value on the grid (crv_grid divisions of [lo, 1]), or as it is
 function crv_Snap(v, lo) ( (crv_grid > 0) ? lo + floor((v - lo) / (1 - lo) * crv_grid + 0.5) / crv_grid * (1 - lo) : v; );
@@ -551,16 +843,17 @@ local (x0, y0, w, h, rsc, lo, i, n, p, xa, ya, xb, yb, d, k)
     );
 );
 
-// (2026-11-24, the user) The playheads of the host (crv_PhSet, set in the last 0.5 s) over the curve b in the current rect
-// (retina coordinates) : a vertical line, a dot on the curve, its letter at the top
-function crv_DrawPh(b) local(x0, y0, w, h, rsc, lo, i, x, px, py, t, tw, th)
+// (2026-11-24, the user) The playheads of the host (crv_PhSet, set in the last 0.5 s ; all the curves or this one) over the
+// curve b (number k) in the current rect (retina coordinates) : a vertical line, a dot on the curve, its letter at the top
+// (the playheads of a curve : a little lower)
+function crv_DrawPh(b, k) local(x0, y0, w, h, rsc, lo, i, x, px, py, t, tw, th)
 (
     x0 = ui_left_retina(); y0 = ui_top_retina(); w = ui_width_retina(); h = ui_height_retina();
     rsc = max(1, floor(uix_drawconfig_current[9]));
     lo = crv_Lo(b[crv_fT]); t = time_precise();
     i = 0;
     loop(CRV_PHN,
-        (t - crv_phT[i] < 0.5) ? (
+        ((t - crv_phT[i] < 0.5) && ((crv_phK[i] < 0) || (crv_phK[i] === k))) ? (
             x = crv_XOf(b[crv_fT], crv_phU[i]);
             px = floor(crv_Px(x0, w, x)); py = crv_Py(y0, h, lo, crv_Val(b, x));
             ui_pcolor(crv_phC[i], 0.85);
@@ -568,9 +861,9 @@ function crv_DrawPh(b) local(x0, y0, w, h, rsc, lo, i, x, px, py, t, tw, th)
             (rsc > 1) ? gfx_line(px + 1, y0, px + 1, y0 + h - 1);
             ui_pcolor(crv_phC[i], 1);
             gfx_circle(px, py, 4 * rsc, 1, 1);
-            sprintf(#crv_phS, "%c", crv_phL[i]);
+            sprintf(#crv_phS, "%c%s", crv_phL[i], crv_phX[i]);
             gfx_measurestr(#crv_phS, tw, th);
-            gfx_x = min(px + 3 * rsc, x0 + w - tw - 1); gfx_y = y0 + 2 * rsc;
+            gfx_x = min(px + 3 * rsc, x0 + w - tw - 1); gfx_y = y0 + 2 * rsc + ((crv_phK[i] < 0) ? 0 : th);
             gfx_drawstr(#crv_phS);
         );
         i += 1;
@@ -660,15 +953,15 @@ function crv_EdPut(e) local(p)
     p[11] = crv_selK;
 );
 
-// The menu of the curves (the title ttl : an item "#..."), the curve cur checked, by 32 in sub-menus : the curve chosen, or
-// -1 ; empty : the curves without points (a new curve there, or none) are greyed (with ok_empty : not)
-function crv_Menu(ttl, cur, ok_empty) local(i, g, m, b)
+// (2026-11-24) The items of the curves added to the menu str (ttl : the name of their sub-menus, by 32), the curve cur
+// checked ; empty : the curves without points (a new curve there, or none) are greyed (with ok_empty : not) ; returns their
+// count (CRV_MX : the item j is the curve j)
+function crv_MenuAdd(str, ttl, cur, ok_empty) local(i, g, b)
 (
-    strcpy(#crv_mnu, ttl);
     i = 0;
     loop(CRV_MX,
         g = (i % 32);
-        (g === 0) ? (sprintf(#crv_it, "|>Curves %d - %d", i + 1, i + 32); strcat(#crv_mnu, #crv_it););
+        (g === 0) ? (sprintf(#crv_it, "|>%s %d - %d", ttl, i + 1, i + 32); strcat(str, #crv_it););
         b = crv_B(i); // (EEL2 : no index on the result of a function)
         crv_Ex(i) ? (
             (strlen(crv_nm[i]) > 0) ? sprintf(#crv_t1, "%d  %s  (%s)", i + 1, crv_nm[i], crv_tyN[b[crv_fT]]) :
@@ -677,9 +970,43 @@ function crv_Menu(ttl, cur, ok_empty) local(i, g, m, b)
             sprintf(#crv_t1, "%d  -", i + 1);
         );
         sprintf(#crv_it, "|%s%s%s%s", (g === 31) ? "<" : "", (i === cur) ? "!" : "", (!ok_empty && !crv_Ex(i)) ? "#" : "", #crv_t1);
-        strcat(#crv_mnu, #crv_it);
+        strcat(str, #crv_it);
         i += 1;
     );
+    CRV_MX;
+);
+// (2026-11-24, step 3) The dynamics after c (d : 1 the next one, -1 the previous one) : the n0 curves of the host (0 ... n0
+// - 1 : the easings of Space), then the curves that exist (CRV_DYN + k), in a circle
+function crv_DynNext(c, d, n0) local(m, j, k, i, r)
+(
+    m = n0; k = 0; loop(CRV_MX, crv_Ex(k) ? (m += 1); k += 1;);
+    (c < CRV_DYN) ? (j = max(0, min(n0 - 1, c|0))) : (
+        j = n0; k = 0; loop(max(0, min(CRV_MX, (c|0) - CRV_DYN)), crv_Ex(k) ? (j += 1); k += 1;);
+    );
+    j = (j + d + 2 * m) % m;
+    (j < n0) ? j : (
+        i = j - n0; r = -1; k = 0;
+        while ((r < 0) && (k < CRV_MX)) ( crv_Ex(k) ? ((i === 0) ? (r = k) : (i -= 1)); k += 1; );
+        CRV_DYN + max(0, r);
+    );
+);
+// (2026-11-24, step 3) The name of the dynamics c into str when it is a curve ("curve 5", or its name) : 1 ; else 0 (an
+// easing of the host)
+function crv_DynName(str, c) local(k)
+(
+    (c >= CRV_DYN) ? (
+        k = max(0, min(CRV_MX - 1, (c|0) - CRV_DYN));
+        (strlen(crv_nm[k]) > 0) ? strcpy(str, crv_nm[k]) : sprintf(str, "curve %d", k + 1);
+        1;
+    ) : 0;
+);
+
+// The menu of the curves (the title ttl : an item "#..."), the curve cur checked, by 32 in sub-menus : the curve chosen, or
+// -1 ; empty : the curves without points (a new curve there, or none) are greyed (with ok_empty : not)
+function crv_Menu(ttl, cur, ok_empty) local(m)
+(
+    strcpy(#crv_mnu, ttl);
+    crv_MenuAdd(#crv_mnu, "Curves", cur, ok_empty);
     gfx_x = mouse_x; gfx_y = mouse_y;
     m = gfx_showmenu(#crv_mnu);
     uix_menu_end(m > 0);
@@ -692,6 +1019,105 @@ pad_Crv = make_jpad(ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors, 1, CRV
 pad_Crv_Labs = pad_Crv + pad_Crv[ui_jpad_labs];
 pad_Crv_Colrs = pad_Crv + pad_Crv[ui_jpad_clrs];
 i__k = 0; loop(CRV_PSIZ, pad_Crv_Colrs[i__k] = Col_P1; pad_Crv_Labs[i__k] = ""; i__k += 1;);
+
+/*
+    (2026-11-24, step 4) The exports : a curve as a block of the settings (crv_XpCurve : its lines in the text of mSL_Export ;
+    its id : its name, else its number) ; crv_Export(k) : the curve k (k < 0 : all the curves) in a file of the folder of the
+    project (Data/name-app-curve-date.mSL, app : #crv_xAp), written by CMGS-auxiliary.eel ; crv_XpPoll (each run of @gfx) :
+    the file written, or not. The place of each module (crv_mr, crv_mf : the frame drawn) : a file dropped on it, its first
+    block Curve goes into the curve it shows (crv_DropTarget, crv_tbDrop).
+*/
+#crv_xAp = "d3"; #crv_xApp = "Diffusion 3"; // (the host : its short name in the files, its name in the texts)
+crv_mr = make_array(4 * CRV_NE); crv_mf = make_array(CRV_NE);
+i__k = 0; loop(CRV_NE, crv_mf[i__k] = -10; i__k += 1;);
+function crv_XpCurve(k) local(b, n, p, q)
+(
+    b = crv_B(k);
+    (strlen(crv_nm[k]) > 0) ? sprintf(#crv_xt, "Curve \"%s\"", crv_nm[k]) : sprintf(#crv_xt, "Curve %d", k + 1);
+    strcat(#crv_xt, sprintf(#crv_xv, "  type %s", crv_tyN[b[crv_fT]]));
+    (b[crv_fF] & CRV_PER) ? strcat(#crv_xt, "  periodic On");
+    (b[crv_fSus] >= 0) ? strcat(#crv_xt, sprintf(#crv_xv, "  sustain %d", b[crv_fSus] + 1));
+    strcat(#crv_xt, "  points");
+    xpt_Block(#crv_xt, 4);
+    n = b[crv_fN]; p = b + crv_fP;
+    while (n > 0) (
+        strcpy(#crv_xt, "");
+        // (4 points per line, 6 digits : a line of the file)
+        q = 0; loop(min(4, n), strcat(#crv_xt, sprintf(#crv_xv, "%s%.6g %.6g %.6g", (q > 0) ? "   " : "", p[0], p[1], p[2])); p += 3; q += 1;);
+        n -= q;
+        xpt_Block(#crv_xt, 8);
+    );
+);
+function crv_XpErr(msg)
+(
+    sprintf(#crv_xm, "ERR: 1656    Curves : export : %s", msg);
+    mSL_log(SysLogBox, #crv_xm);
+    mSL_ErrNote(1656, msg);
+    1656;
+);
+function crv_Export(k) local(c, i, cnt)
+(
+    cnt = 0; i = 0; loop(CRV_MX, (((k < 0) || (i === k)) && crv_Ex(i)) ? (cnt += 1); i += 1;);
+    (cnt === 0) ? crv_XpErr("no curve") :
+    ((c = xpt_Ready()) !== 0) ? (
+        crv_XpErr((c === 1) ? "no auxiliary script (CMGS-auxiliary.eel) : nothing is written" :
+            (c === 2) ? "the auxiliary script CMGS-auxiliary.eel must be started again (an old version)" :
+            "the auxiliary script is busy : try again");
+    ) : (
+        (k >= 0) ? ( (strlen(crv_nm[k]) > 0) ? strcpy(#crv_xn, crv_nm[k]) : sprintf(#crv_xn, "Curve%d", k + 1); ) : strcpy(#crv_xn, "Curves");
+        xpt_Clean(#crv_xn);
+        xpt_FileName(#crv_xf, #crv_xn, #crv_xAp, (k >= 0) ? "curve" : "curves");
+        xpt_Date(#crv_xd, 1);
+        xpt_Begin();
+        (k >= 0) ? sprintf(#crv_xt, "print(\"%s : courbe %d de %s, exportee le %s.\");", #crv_xn, k + 1, #crv_xApp, #crv_xd) :
+            sprintf(#crv_xt, "print(\"Curves : %d courbe%s de %s, exportee%s le %s.\");", cnt, (cnt > 1) ? "s" : "", #crv_xApp,
+                (cnt > 1) ? "s" : "", #crv_xd);
+        xpt_Line(#crv_xt);
+        xpt_Line("");
+        xpt_Line(sprintf(#crv_xt, "%c*", '/'));
+        xpt_Line("  Deposee sur un module Curves, la premiere courbe va dans la courbe qu'il montre. Ailleurs : une courbe nommee");
+        xpt_Line("  remplace la courbe de meme nom, ou prend la premiere courbe libre ; sans nom : la courbe de meme numero.");
+        xpt_Line("  Chaque point : x y c (x de 0 a 1 ; y la valeur, de 0 a 1 pour les enveloppes, de -1 a 1 pour les formes d'onde ;");
+        xpt_Line("  c la courbure du segment qui part du point, de -1 a 1).");
+        xpt_Line(sprintf(#crv_xt, "*%c", '/'));
+        xpt_Line("");
+        xpt_Line("var r = settings(data(");
+        i = 0; loop(CRV_MX, (((k < 0) || (i === k)) && crv_Ex(i)) ? crv_XpCurve(i); i += 1;);
+        xpt_Line("));");
+        sprintf(#crv_xt, "print(sprintf(0, \"%s : settings %%d (0 : OK)\", r));", #crv_xn);
+        xpt_Line(#crv_xt);
+        xpt_Ov ? crv_XpErr("the text is too long : nothing is written") : (
+            xpt_Who = 'crv';
+            xpt_Send(#crv_xf);
+            sprintf(#crv_xm, "Curves : export of %d curve%s : %s", cnt, (cnt > 1) ? "s" : "", #crv_xf);
+            mSL_log(SysLogBox, #crv_xm);
+            0;
+        );
+    );
+);
+function crv_XpPoll() local(r)
+(
+    ((r = xpt_PollFor('crv')) !== 0) ? (
+        (r > 0) ? (
+            sprintf(#crv_xm, "Curves : export : %s written in the folder of the project", #crv_xf);
+            mSL_log(SysLogBox, #crv_xm);
+        ) : (
+            crv_XpErr(sprintf(#crv_xv, "the file %s can't be written", #crv_xf));
+        );
+    );
+);
+// the curve shown by the module Curves under the mouse (drawn in the last frame), or -1
+function crv_DropTarget() local(e, r, m, p)
+(
+    r = -1; e = 0;
+    loop(CRV_NE,
+        m = crv_mr + 4 * e;
+        ((r < 0) && (crv_mf[e] >= gfx_executed - 1) && (mouse_x >= m[0]) && (mouse_y >= m[1]) && (mouse_x < m[0] + m[2]) &&
+            (mouse_y < m[1] + m[3])) ? ( p = crv_ed + e * CRV_ES; r = p[0]; );
+        e += 1;
+    );
+    r;
+);
 
 // The cell c of the pad of the curve k clicked (rc : the right clic ; sh : Shift)
 function crv_Cell(k, c, rc, sh) local(b, ok, i, m, q)
@@ -741,8 +1167,9 @@ function crv_Cell(k, c, rc, sh) local(b, ok, i, m, q)
     ) :
     (c === 7) ? (
         // Actions (both clics)
-        sprintf(#crv_mnu, "#Curve %d|New envelope|New half envelope (H-Envelope)|New waveform|New quarter waveform (Q-Waveform)|New half waveform (H-Waveform)||%sDuplicate into the first free curve|%sDump in the log||%sSustain : the selected point|%sSustain : none||%sDelete",
-            k + 1, ok ? "" : "#", ok ? "" : "#", (ok && (b[crv_fT] === CRV_ENV)) ? "" : "#", (ok && (b[crv_fSus] >= 0)) ? "" : "#", ok ? "" : "#");
+        sprintf(#crv_mnu, "#Curve %d|New envelope|New half envelope (H-Envelope)|New waveform|New quarter waveform (Q-Waveform)|New half waveform (H-Waveform)||%sDuplicate into the first free curve|%sDump in the log||%sSustain : the selected point|%sSustain : none||%sDelete||%sExport : this curve (mSL settings)|Export : all the curves (mSL settings)",
+            k + 1, ok ? "" : "#", ok ? "" : "#", (ok && (b[crv_fT] === CRV_ENV)) ? "" : "#", (ok && (b[crv_fSus] >= 0)) ? "" : "#", ok ? "" : "#",
+            ok ? "" : "#");
         gfx_x = mouse_x; gfx_y = mouse_y;
         m = gfx_showmenu(#crv_mnu); uix_menu_end(m > 0);
         ((m >= 2) && (m <= 6)) ? (
@@ -777,7 +1204,10 @@ function crv_Cell(k, c, rc, sh) local(b, ok, i, m, q)
             crv_Pre(k); crv_Commit();
             memset(b, 0, CRV_BS); strcpy(crv_nm[k], "");
             crv_SelClear();
-        );
+        ) :
+        // (2026-11-24, step 4) the exports (mSL settings)
+        ((m === 12) && ok) ? crv_Export(k) :
+        (m === 13) ? crv_Export(-1);
     );
     ui_GFXdoNow |= 4;
 );
@@ -801,6 +1231,10 @@ local (h1, hg, h3, hneed, zzmi, i, k, b, ok, zz, c, x0, w, mx, v, cgh)
         ui_split_top(hneed);
             zzmi = ui_hover();
             keepBlockInfos(blockId);
+            // (2026-11-24, step 4) the place of the module : a file dropped on it (crv_DropTarget)
+            crv_mr[4 * e] = ui_left_retina(); crv_mr[4 * e + 1] = ui_top_retina();
+            crv_mr[4 * e + 2] = ui_width_retina(); crv_mr[4 * e + 3] = ui_height_retina();
+            crv_mf[e] = gfx_executed;
             (zzmi && (uix_click1 || uix_click2)) ? (crv_lastE = e); // (2026-11-24 : the marks of this editor, crv_MarkE)
             zzmi ? (
                 ui_push();
@@ -861,7 +1295,7 @@ local (h1, hg, h3, hneed, zzmi, i, k, b, ok, zz, c, x0, w, mx, v, cgh)
                     crv_Edit(b, k);
                     crv_Draw(b);
                     // (2026-11-24) the playheads of the host, in the editor of the marks (crv_MarkE ; none yet : all)
-                    (((i = crv_MarkE()) < 0) || (i === e)) ? crv_DrawPh(b);
+                    (((i = crv_MarkE()) < 0) || (i === e)) ? crv_DrawPh(b, k);
                     cgh = ui_hover();
                     x0 = ui_left_retina(); w = ui_width_retina();
                     // (2026-11-24) the marks of this editor (crv_MarkE) : its graph drawn, the x under the mouse (not while a
@@ -964,3 +1398,5 @@ function crv_Serialize() local(k, b, n, go, e, p)
         save_mem(0, crv_sv, 2 * CRV_NE);
     );
 );
+
+<? _suppress = 0; ?>

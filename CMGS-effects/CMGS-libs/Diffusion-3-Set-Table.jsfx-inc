@@ -8,6 +8,8 @@
     `>, 1) ; see the evaluator, mSL_stArgs) : the keywords of the configuration (clear, conf, set, prop, pload, actions,
     scene, group, hppos, source, trajectory, bgcolor ... end) and the blocks "Edit A" ... "Edit D" (ed_Tb_Edit), in any
     order. The configuration is applied as it is read ; the blocks Edit only if everything is read without error.
+    (2026-11-24) The blocks "Curve" (the curves of the modules Curves, mSL_Curves : crv_TbCurve) and "MetaSurface" (the
+    library of the MetaSurfaces : mst_Meta, below), as the blocks Edit : only if everything is read without error.
 */
 
 @init
@@ -56,7 +58,7 @@ function ed_Tb_Err(code, msg)
 (
     (ed_tberr === 0) ? (
         ed_tberr = code;
-        sprintf(#ed_tbm, "ERR: %04d    Diffusion settings (word %d) : %s", code, ed_tbptr, msg);
+        sprintf(#ed_tbm, "ERR: %04d    Diffusion-3 settings (word %d) : %s", code, ed_tbptr, msg); // (2026-11-24 : "Diffusion-3", as the others)
         mSL_log(SysLogBox, #ed_tbm);
         mSL_ErrNote(code, msg); // (2026-11-19, for "? n" in the mSL Console)
         d3_errLogged = 1;
@@ -80,17 +82,20 @@ function ed_Tb_Next() local(w)
     w;
 );
 
-// a number in [vmin, vmax] (a "-" word before it changes its sign) ; 0 and an error otherwise
-function ed_Tb_Num(key, vmin, vmax) local(w, s)
+// a number in [vmin, vmax] (a "-" word before it changes its sign) ; 0 and an error otherwise (code : 2490 for Edit)
+function ed_Tb_NumC(key, vmin, vmax, code) local(w, s)
 (
     s = 1;
     ((w = ed_Tb_Next()) === mSL_cstMinus) ? ( s = -1; w = ed_Tb_Next(); );
     ((abs(w) < mSL_CharConst) && !mSL_isString(w) && (w * s >= vmin) && (w * s <= vmax)) ? w * s : (
         sprintf(#ed_tbw, "%s : %s is not a value in [%g, %g]", key, (w === ed_tbEnd) ? "the end" : mSL_edit_value(#ed_tbv, w), vmin, vmax);
-        ed_Tb_Err(2490, #ed_tbw);
+        ed_Tb_Err(code, #ed_tbw);
         0;
     );
 );
+function ed_Tb_Num(key, vmin, vmax) ( ed_Tb_NumC(key, vmin, vmax, 2490); );
+// (2026-11-24) a number, or the sign of one, is the next word
+function ed_Tb_IsNum(w) ( (w === mSL_cstMinus) || ((abs(w) < mSL_CharConst) && !mSL_isString(w)); );
 
 // On | Off, or 1 | 0
 function ed_Tb_Bool(key) local(w)
@@ -108,7 +113,8 @@ function d3_IsKeyword(w)
     (w === kxw_vol) || (w === kxw_vadj) || (w === kxw_morpht) || (w === kxw_opmod) || (w === kxw_rdelay) ||
     (w === kxw_clear) || (w === kxw_pad) || (w === kxw_defaultconf) || (w === kxw_remove) || (w === kxw_prop) ||
     (w === kxw_pload) || (w === kxw_actions) || (w === kxw_hppos) || (w === kxw_source) || (w === kxw_trajectory) ||
-    (w === kxw_bgcolor) || (w === jg_kGUI); // (2026-11-21 : a part GUI, mSL_GUI)
+    (w === kxw_bgcolor) || (w === jg_kGUI) || // (2026-11-21 : a part GUI, mSL_GUI)
+    (w === crv_kCurve) || (w === mst_kMeta); // (2026-11-24 : the blocks Curve, mSL_Curves, and MetaSurface, below)
 );
 
 // A block Edit (its word read) : read in the work area of its editor (ed_tf2, ed_tpt2, ed_tnm2 ; the blocks of the same
@@ -199,6 +205,293 @@ function ed_Tb_Stage() local(e, f, g)
         e += 1;
     );
 );
+
+/*
+    (2026-11-24) The blocks MetaSurface of "settings" : an entry of the library of the MetaSurfaces (MS1 ... MS32, see
+    Diffusion-3-MetaSurface), as written by its export :
+
+        MetaSurface 3  name "Nuage"
+            zone 12 0.2 0.3 1  zone 15 0.7 0.25 1.5  zone 21 0.5 0.8
+            aspect 1.5  surface Rect  band 0.08  proj 1
+            spread 0.15  power 0  shape 0  stretch 1  offset 0  rotation 0.25  angle 0
+            volume 0  latency 80  rule Fixed  attack 2  release 4
+            brush Path  duration 20  mode Loop  speed Path  radius 0.6
+            A Circle  place 0 0 0 1  flip None
+            B T12  place 0.1 0 45 0.8  flip X
+            C Edit B ...  D None ...  path place 0 0 0 1  flip None
+            chain AB  mix 0.25  glide 10 Off  dyn Curve "Montee" In
+            modrot Off  cycle Path  depth 1  modspeed Curve 5  cycle 8  depth 0.5  modmix Off  cycle Path  depth 1
+
+    MetaSurface n (1 ... 32 ; a file dropped on a view MetaSurface A ... D : its first block goes into the entry this view
+    shows), then keys in any order : name "text" ; zone c x y [w] (the configuration c at x, y : 0 ... 1, x to the right, y
+    down ; its weight w, 0.1 ... 10, 1 by default ; the zones of the blocks of an entry follow one another, MS_MAXC at most ;
+    given, they replace all its configurations) ; the settings of the pad, numbers (mst_TbInit : aspect, band, proj ...) or
+    words (surface Rect|Disk, rule Fixed|Distance, brush Mouse|Path, mode Once|Loop|Back|Reverse, speed Path|Points, chain
+    AB|ABC|ABCD) ; A ... D the kind of the trajectory : None Circle Square Star Spiral Central, Edit A ... D, T1 ... T128
+    (or T 12) ; place x y turn scale, flip None|X|Y|XY (left - right, up - down) : the trajectory named before (A ... D), or
+    the whole path (path) ; glide t [On|Off] (the mode Glide) ; dyn Linear|Quad|Cubic|Quartic|Quintic|Exp|Circle|Sine|
+    Elastic|Bounce, or Curve id (a curve : its number, or its name, a curve of the application or of a block Curve before),
+    then [In|Out|InOut|OutIn] ; modrot, modspeed, modmix : Off or Curve id, then [cycle Path|seconds] [depth d]. The keys
+    absent leave the entry as it is. The block ends at the first word that is not one of its keys. The first error (2441,
+    2443 ... 2449) stops the analysis. Read in a work area (mst_tw, mst_twF, mst_twOn : the values, the keys given, the
+    entries of this analysis), staged without any error in the analysis (mst_ts, mst_tsF ; mst_tq[e] : to take ; several
+    analyses before the next frame add up), taken by ms_Frame (ms_TbTake, @gfx). Allocated by Diffusion-3-MetaSurface.
+*/
+mst_kMeta = mSL_symbol("MetaSurface");
+mst_drop = -1; ms_mslTgt = -1; // (the entry where a file was dropped ; set by the drop : that of the view under the mouse)
+mst_kZone = mSL_symbol("zone"); mst_kPath = mSL_symbol("path"); mst_kPlace = mSL_symbol("place"); mst_kFlip = mSL_symbol("flip");
+mst_kGlide = mSL_symbol("glide"); mst_kDyn = mSL_symbol("dyn"); mst_kCycle = mSL_symbol("cycle"); mst_kDepth = mSL_symbol("depth");
+mst_kModR = mSL_symbol("modrot"); mst_kModS = mSL_symbol("modspeed"); mst_kModM = mSL_symbol("modmix");
+mst_kPathW = mSL_symbol("Path"); mst_kT = mSL_symbol("T");
+mst_kKd = make_array(6);
+mst_kKd[0] = mSL_symbol("None"); mst_kKd[1] = mSL_symbol("Circle"); mst_kKd[2] = mSL_symbol("Square");
+mst_kKd[3] = mSL_symbol("Star"); mst_kKd[4] = mSL_symbol("Spiral"); mst_kKd[5] = mSL_symbol("Central");
+mst_kMd = make_array(4);
+mst_kMd[0] = mSL_symbol("In"); mst_kMd[1] = mSL_symbol("Out"); mst_kMd[2] = mSL_symbol("InOut"); mst_kMd[3] = mSL_symbol("OutIn");
+#mst_Ease = "Linear|Quad|Cubic|Quartic|Quintic|Exp|Circle|Sine|Elastic|Bounce"; // (the curves of s3d_EaseNames)
+// the keys of the settings : their word, the setting, the bounds, the list of words (0 : a number ; the value : its rank +
+// mst_Of) ; built at the first block (the settings ms_s... : defined later, by Diffusion-3-MetaSurface)
+MST_KMX = 24; mst_kc = 0; mst_ok = 0;
+mst_W = make_array(MST_KMX); mst_I = make_array(MST_KMX); mst_Lo = make_array(MST_KMX); mst_Hi = make_array(MST_KMX);
+mst_L = make_array(MST_KMX); mst_Ln = make_array(MST_KMX); mst_Of = make_array(MST_KMX);
+function mst_K(key, k, lo, hi, list, n, of)
+(
+    mst_W[mst_kc] = mSL_symbol(key); mst_I[mst_kc] = k; mst_Lo[mst_kc] = lo; mst_Hi[mst_kc] = hi;
+    mst_L[mst_kc] = list; mst_Ln[mst_kc] = n; mst_Of[mst_kc] = of;
+    mst_kc += 1;
+);
+function mst_TbInit()
+(
+    mst_kc = 0;
+    mst_K("aspect", ms_sAspect, 0.5, 4, 0, 0, 0);     mst_K("surface", ms_sSurf, 0, 0, "Rect|Disk", 2, 0);
+    mst_K("band", ms_sBand, 0, 0.5, 0, 0, 0);         mst_K("proj", ms_sProj, 1, projucnt, 0, 0, 0);
+    mst_K("spread", ms_sSpread, 0.01, 1, 0, 0, 0);    mst_K("power", ms_sPower, -1, 1, 0, 0, 0);
+    mst_K("shape", ms_sShape, 0, 2, 0, 0, 0);         mst_K("stretch", ms_sStretch, 0.1, 10, 0, 0, 0);
+    mst_K("offset", ms_sOffset, 0, 2, 0, 0, 0);       mst_K("rotation", ms_sRot, -4, 4, 0, 0, 0);
+    mst_K("angle", ms_sAngle, -360, 360, 0, 0, 0);    mst_K("volume", ms_sVol, -60, 12, 0, 0, 0);
+    mst_K("latency", ms_sLat, 5, 2000, 0, 0, 0);      mst_K("rule", ms_sLatMode, 0, 0, "Fixed|Distance", 2, 0);
+    mst_K("attack", ms_sAtt, 0.01, 60, 0, 0, 0);      mst_K("release", ms_sRel, 0.01, 60, 0, 0, 0);
+    mst_K("brush", ms_sPath, 0, 0, "Mouse|Path", 2, 0); mst_K("duration", ms_sDur, 0.5, 600, 0, 0, 0);
+    mst_K("mode", ms_sLoop, 0, 0, "Once|Loop|Back|Reverse", 4, 0); mst_K("speed", ms_sSpeedM, 0, 0, "Path|Points", 2, 0);
+    mst_K("radius", ms_sRad, 0.05, 1, 0, 0, 0);       mst_K("chain", ms_sTrN, 0, 0, "AB|ABC|ABCD", 3, 2);
+    mst_K("mix", ms_sMix, 0, 1, 0, 0, 0);
+    mst_ok = 1;
+);
+
+// a word of the list (n texts separated by |) : its rank ; -1 and an error otherwise
+function mst_Enum(key, list, n) local(w, i, k, l, st, p)
+(
+    w = ed_Tb_Next(); k = -1;
+    i = 0; st = 0; l = strlen(list);
+    while ((k < 0) && (i < n)) (
+        p = st; while ((p < l) && (str_getchar(list, p, 'cu') !== '|')) ( p += 1; );
+        strcpy_substr(#mst_it, list, st, p - st);
+        (mSL_symbol(#mst_it) === w) ? (k = i);
+        st = p + 1; i += 1;
+    );
+    (k < 0) ? (
+        sprintf(#ed_tbw, "%s : %s is not one of %s", key, (w === ed_tbEnd) ? "(the end)" : mSL_edit_value(#ed_tbv, w), list);
+        ed_Tb_Err(2444, #ed_tbw);
+    );
+    k;
+);
+// the setting k of the work area s given (f : its keys)
+function mst_Set(s, f, k, x) ( s[ms_eSet + k] = x; f[k] = 1; );
+// a curve : Curve n (1 ... CRV_MX) or Curve "name" (a curve of the application, or of a block Curve read before) ; its index,
+// or -1 and an error (the word Curve read)
+function mst_Curve(key) local(w, k)
+(
+    w = ed_Tb_Next(); k = -1;
+    ((abs(w) < mSL_CharConst) && !mSL_isString(w) && (w === floor(w)) && (w >= 1) && (w <= CRV_MX)) ? (k = w - 1) :
+    crv_TbText(#mst_tx, w) ? (k = crv_TbFind(#mst_tx));
+    (k < 0) ? (
+        sprintf(#ed_tbw, "%s : Curve %s : a number 1 ... %d, or the name of a curve (defined before), is expected", key,
+            (w === ed_tbEnd) ? "(the end)" : mSL_edit_value(#ed_tbv, w), CRV_MX);
+        ed_Tb_Err(2447, #ed_tbw);
+    );
+    k;
+);
+// the kind of a trajectory (see above) : SP_KED + e (Edit A ... D), SP_KLIB + i (the library) ; -1 and an error otherwise
+function mst_Kind(key) local(w, k, i)
+(
+    w = ed_Tb_Next(); k = -1;
+    i = 0; loop(6, (w === mst_kKd[i]) ? (k = i); i += 1;);
+    (k < 0) ? (
+        (w === ed_tkEdit) ? (
+            w = ed_Tb_Next();
+            k = (w === ed_tkA) ? SP_KED : (w === ed_tkB) ? SP_KED + 1 : (w === ed_tkC) ? SP_KED + 2 : (w === ed_tkD) ? SP_KED + 3 : -1;
+        ) :
+        (w === mst_kT) ? (
+            i = ed_Tb_NumC(key, 1, SP_NTRJ, 2448);
+            (ed_tberr === 0) ? (k = SP_KLIB + floor(i) - 1);
+        ) : (
+            // T1 ... T128 : one word
+            i = 1; while ((k < 0) && (i <= SP_NTRJ)) ( sprintf(#mst_tx, "T%d", i); (mSL_symbol(#mst_tx) === w) ? (k = SP_KLIB + i - 1); i += 1; );
+        );
+    );
+    ((k < 0) && (ed_tberr === 0)) ? (
+        sprintf(#ed_tbw, "%s : %s is not a trajectory (None, Circle, Square, Star, Spiral, Central, Edit A ... D, T1 ... T%d)", key,
+            (w === ed_tbEnd) ? "(the end)" : mSL_edit_value(#ed_tbv, w), SP_NTRJ);
+        ed_Tb_Err(2448, #ed_tbw);
+    );
+    k;
+);
+// a key of a block MetaSurface
+function mst_IsKey(w) local(i, r)
+(
+    r = (w === ed_tkName) || (w === mst_kZone) || (w === ed_tkA) || (w === ed_tkB) || (w === ed_tkC) || (w === ed_tkD) ||
+        (w === mst_kPath) || (w === mst_kPlace) || (w === mst_kFlip) || (w === mst_kGlide) || (w === mst_kDyn) ||
+        (w === mst_kModR) || (w === mst_kModS) || (w === mst_kModM);
+    i = 0; while (!r && (i < mst_kc)) ( (w === mst_W[i]) ? (r = 1); i += 1; );
+    r;
+);
+
+// A block MetaSurface (its word read) : read in the work area of its entry ; returns the entry, or -1
+function mst_Meta() local(w, e, s, f, i, j, k, t, x, n, p, c, bx)
+(
+    !mst_ok ? mst_TbInit();
+    w = ed_Tb_Next();
+    e = ((abs(w) < mSL_CharConst) && !mSL_isString(w) && (w === floor(w)) && (w >= 1) && (w <= MS_NLIB)) ? w - 1 : -1;
+    (e < 0) ? (
+        sprintf(#ed_tbw, "MetaSurface %s : a number 1 ... %d is expected", (w === ed_tbEnd) ? "(the end)" : mSL_edit_value(#ed_tbv, w), MS_NLIB);
+        ed_Tb_Err(2441, #ed_tbw);
+    ) : (
+        // a file dropped on a view MetaSurface : its first block goes into the entry it shows
+        (mst_drop >= 0) ? ( e = mst_drop; mst_drop = -1; );
+        s = mst_tw + e * MS_ES; f = mst_twF + e * MST_TF;
+        !mst_twOn[e] ? ( mst_twOn[e] = 1; memset(s, 0, MS_ES); memset(f, 0, MST_TF); );
+        t = -2; // (place, flip : -2 nothing named, -1 the path, 0 ... 3 the trajectory A ... D)
+        while ((ed_tberr === 0) && ((w = ed_Tb_Peek()) !== ed_tbEnd) && mst_IsKey(w)) (
+            ed_Tb_Next();
+            mSL_edit_value(#mst_kw, w); // (the key, for the messages)
+            k = -1; i = 0; while ((k < 0) && (i < mst_kc)) ( (w === mst_W[i]) ? (k = i); i += 1; );
+            (k >= 0) ? (
+                // a setting : a number, or a word of its list
+                mst_L[k] ? (
+                    ((x = mst_Enum(#mst_kw, mst_L[k], mst_Ln[k])) >= 0) ? mst_Set(s, f, mst_I[k], x + mst_Of[k]);
+                ) : (
+                    x = ed_Tb_NumC(#mst_kw, mst_Lo[k], mst_Hi[k], 2443);
+                    (ed_tberr === 0) ? mst_Set(s, f, mst_I[k], (mst_I[k] === ms_sProj) ? floor(x) : x);
+                );
+            ) :
+            (w === ed_tkName) ? (
+                w = ed_Tb_Next();
+                crv_TbText(#mst_tx, w) ? (
+                    // (as ms_SetName : the quotes become ', | becomes /)
+                    p = s + ms_eName; memset(p, 0, MS_NMLEN);
+                    n = min(MS_NMLEN - 1, strlen(#mst_tx)); i = 0;
+                    loop(n, c = str_getchar(#mst_tx, i, 'cu'); p[i] = (c === '"') ? 39 : (c === '|') ? '/' : (c < 32) ? 32 : c; i += 1;);
+                    f[MS_NS] = 1;
+                ) : (
+                    sprintf(#ed_tbw, "name : %s is not a \"text\"", (w === ed_tbEnd) ? "(the end)" : mSL_edit_value(#ed_tbv, w));
+                    ed_Tb_Err(2445, #ed_tbw);
+                );
+            ) :
+            (w === mst_kZone) ? (
+                n = s[ms_eN];
+                (n >= MS_MAXC) ? (
+                    sprintf(#ed_tbw, "zone : more than %d configurations", MS_MAXC);
+                    ed_Tb_Err(2446, #ed_tbw);
+                ) : (
+                    p = s + ms_eCf + 4 * n;
+                    p[0] = floor(ed_Tb_NumC("zone (configuration)", 1, conflsize - 1, 2443));
+                    p[1] = ed_Tb_NumC("zone x", 0, 1, 2443);
+                    p[2] = ed_Tb_NumC("zone y", 0, 1, 2443);
+                    p[3] = ed_Tb_IsNum(ed_Tb_Peek()) ? ed_Tb_NumC("zone (weight)", 0.1, 10, 2443) : 1;
+                    s[ms_eN] = n + 1; f[MS_NS + 1] = 1;
+                );
+            ) :
+            ((w === ed_tkA) || (w === ed_tkB) || (w === ed_tkC) || (w === ed_tkD)) ? (
+                t = (w === ed_tkA) ? 0 : (w === ed_tkB) ? 1 : (w === ed_tkC) ? 2 : 3;
+                ((x = mst_Kind(#mst_kw)) >= 0) ? mst_Set(s, f, ms_sTrK + t, x);
+            ) :
+            (w === mst_kPath) ? (
+                t = -1;
+            ) :
+            ((w === mst_kPlace) || (w === mst_kFlip)) ? (
+                (t < -1) ? (
+                    sprintf(#ed_tbw, "%s : A, B, C, D or path is expected before", #mst_kw);
+                    ed_Tb_Err(2449, #ed_tbw);
+                ) :
+                (w === mst_kPlace) ? (
+                    i = (t < 0) ? ms_sTx : ms_sPl + 4 * t;
+                    mst_Set(s, f, i, ed_Tb_NumC("place (x)", -2, 2, 2443));
+                    mst_Set(s, f, i + 1, ed_Tb_NumC("place (y)", -2, 2, 2443));
+                    x = ed_Tb_NumC("place (turn)", -360, 360, 2443); x = floor(x + 0.5);
+                    mst_Set(s, f, i + 2, x - 360 * floor((x + 180) / 360)); // (-180 ... 180, as the pad)
+                    mst_Set(s, f, i + 3, ed_Tb_NumC("place (scale)", 0.1, 10, 2443));
+                ) : (
+                    // the bits of this flip in ms_sFlip (see ms_FlipBit), merged : f[ms_sFlip] the bits given
+                    x = mst_Enum("flip", "None|X|Y|XY", 4);
+                    (x >= 0) ? (
+                        bx = 2 ^ ((t < 0) ? 0 : 2 + 2 * t);
+                        s[ms_eSet + ms_sFlip] = (s[ms_eSet + ms_sFlip] & (-1 ~ (3 * bx))) | ((x & 1) ? bx : 0) | ((x & 2) ? 2 * bx : 0);
+                        f[ms_sFlip] |= 3 * bx;
+                    );
+                );
+            ) :
+            (w === mst_kGlide) ? (
+                mst_Set(s, f, ms_sGlide, ed_Tb_NumC("glide", 1, 300, 2443));
+                (ed_Tb_Peek() === ed_tkOn) ? ( ed_Tb_Next(); mst_Set(s, f, ms_sGMode, 1); ) :
+                (ed_Tb_Peek() === ed_tkOff) ? ( ed_Tb_Next(); mst_Set(s, f, ms_sGMode, 0); );
+            ) :
+            (w === mst_kDyn) ? (
+                (ed_Tb_Peek() === crv_kCurve) ? (
+                    ed_Tb_Next();
+                    ((k = mst_Curve("dyn")) >= 0) ? mst_Set(s, f, ms_sCurve, CRV_DYN + k);
+                ) : (
+                    ((x = mst_Enum("dyn", #mst_Ease, 10)) >= 0) ? mst_Set(s, f, ms_sCurve, x);
+                );
+                w = ed_Tb_Peek(); k = -1; i = 0; loop(4, (w === mst_kMd[i]) ? (k = i); i += 1;);
+                ((ed_tberr === 0) && (k >= 0)) ? ( ed_Tb_Next(); mst_Set(s, f, ms_sDMode, k); );
+            ) : (
+                // modrot, modspeed, modmix : Off or Curve id, then cycle, depth
+                j = (w === mst_kModR) ? 0 : (w === mst_kModS) ? 1 : 2;
+                i = ms_sMod + 3 * j;
+                (ed_Tb_Peek() === ed_tkOff) ? ( ed_Tb_Next(); mst_Set(s, f, i, 0); ) :
+                (ed_Tb_Peek() === crv_kCurve) ? ( ed_Tb_Next(); ((k = mst_Curve(#mst_kw)) >= 0) ? mst_Set(s, f, i, k + 1); );
+                while ((ed_tberr === 0) && (((w = ed_Tb_Peek()) === mst_kCycle) || (w === mst_kDepth))) (
+                    ed_Tb_Next();
+                    (w === mst_kCycle) ? (
+                        (ed_Tb_Peek() === mst_kPathW) ? ( ed_Tb_Next(); mst_Set(s, f, i + 1, 0); ) :
+                            mst_Set(s, f, i + 1, ed_Tb_NumC("cycle", 0.5, 300, 2443));
+                    ) : (
+                        mst_Set(s, f, i + 2, ed_Tb_NumC("depth", -4, 4, 2443));
+                    );
+                );
+            );
+        );
+    );
+    (ed_tberr === 0) ? e : -1;
+);
+
+// The blocks MetaSurface read without error (and the whole analysis too) : staged for ms_Frame (the keys given added)
+function mst_Stage() local(e, s, f, d, g, k)
+(
+    e = 0;
+    loop(MS_NLIB,
+        mst_twOn[e] ? (
+            s = mst_tw + e * MS_ES; f = mst_twF + e * MST_TF; d = mst_ts + e * MS_ES; g = mst_tsF + e * MST_TF;
+            !mst_tq[e] ? ( memset(d, 0, MS_ES); memset(g, 0, MST_TF); );
+            k = 0;
+            loop(MS_NS,
+                f[k] ? (
+                    (k === ms_sFlip) ? (
+                        d[ms_eSet + k] = (d[ms_eSet + k] & (-1 ~ f[k])) | (s[ms_eSet + k] & f[k]); g[k] |= f[k];
+                    ) : (
+                        d[ms_eSet + k] = s[ms_eSet + k]; g[k] = 1;
+                    );
+                );
+                k += 1;
+            );
+            f[MS_NS] ? ( memcpy(d + ms_eName, s + ms_eName, MS_NMLEN); g[MS_NS] = 1; );
+            f[MS_NS + 1] ? ( d[ms_eN] = s[ms_eN]; memcpy(d + ms_eCf, s + ms_eCf, 4 * MS_MAXC); g[MS_NS + 1] = 1; );
+            mst_tq[e] = 1;
+        );
+        e += 1;
+    );
+);
+
 
 
 /*
@@ -419,6 +712,13 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
     d3_errLogged = 0; // (an error already written in the log : a block Edit, hppos 2426)
     ed_tbdrop = ((ed_mslTgt >= 0) && (time_precise() - ed_mslT < 10)) ? ed_mslTgt : -1;
     ed_mslTgt = -1;
+    // (2026-11-24) the blocks Curve (mSL_Curves) and MetaSurface : nothing read yet ; a file dropped on a module Curves or
+    // MetaSurface : its first block goes into the curve or the entry it shows
+    crv_TbReset(); crv_tbError = 0; strcpy(#crv_tbHost, "Diffusion-3 settings");
+    crv_tbDrop = ((crv_mslTgt >= 0) && (time_precise() - ed_mslT < 10)) ? crv_mslTgt : -1;
+    mst_drop = ((ms_mslTgt >= 0) && (time_precise() - ed_mslT < 10)) ? ms_mslTgt : -1;
+    crv_mslTgt = ms_mslTgt = -1;
+    memset(mst_twOn, 0, MS_NLIB);
     xErr = 0;
 
     (itc > 0) ? (
@@ -468,6 +768,23 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
                         // next Edit or a keyword of the configuration (d3_IsKeyword)
                         ed_tbtbl = tbl; ed_tbn = itc; ed_tbptr = ptr;
                         ed_Tb_Edit();
+                        ptr = ed_tbptr;
+                        xErr = ed_tberr;
+                        un = 0;
+                    ) :
+                    (curcod === crv_kCurve) ? (
+                        // (2026-11-24) a block "Curve id ..." (mSL_Curves : crv_TbCurve, from the next word up to the
+                        // first word that is not one of its keys ; staged, set at the end without error)
+                        crv_tbT = tbl; crv_tbN = itc; crv_tbP = ptr;
+                        crv_TbCurve();
+                        ptr = crv_tbP;
+                        (crv_tbError !== 0) ? ( xErr = crv_tbError; d3_errLogged = 1; ); // (already in the log)
+                        un = 0;
+                    ) :
+                    (curcod === mst_kMeta) ? (
+                        // (2026-11-24) a block "MetaSurface n ..." (mst_Meta, as the blocks Edit)
+                        ed_tbtbl = tbl; ed_tbn = itc; ed_tbptr = ptr;
+                        mst_Meta();
                         ptr = ed_tbptr;
                         xErr = ed_tberr;
                         un = 0;
@@ -2140,8 +2457,15 @@ local (state, un, rstate, c, i, pcnf, pt, px, ip, sum, sz, cglvol, ptaddr, sign,
 
 
     );
-    // the blocks Edit read without error (and the configuration too) : staged for the editors
-    ((xErr === 0) && (ed_tberr === 0)) ? ed_Tb_Stage();
+    // the blocks Edit read without error (and the configuration too) : staged for the editors ; (2026-11-24) the curves set,
+    // the MetaSurfaces staged (ms_Frame) ; an error : nothing of them
+    ((xErr === 0) && (ed_tberr === 0) && (crv_tbError === 0)) ? (
+        ed_Tb_Stage();
+        crv_TbCommit();
+        mst_Stage();
+    ) : (
+        crv_TbReset();
+    );
     xErr; // 0, or the first error (an error of a block Edit too)
 );
 

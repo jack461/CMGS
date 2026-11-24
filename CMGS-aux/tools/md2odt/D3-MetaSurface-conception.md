@@ -296,3 +296,46 @@ le pinceau y ralentira), les points de la courbe (petits points verts), les poin
 numéro), le x sous la souris (un anneau) ; les types HEnv, QWave, HWave : chaque place de la forme complète. En retour,
 le graphe de ce module Curves montre le pinceau de chaque MetaSurface en mouvement sur son chemin : une ligne verticale
 magenta au x de sa place (la part de la longueur du chemin), un point sur la courbe, la lettre de la vue.
+
+L'étape 3 (écrite le 24 novembre 2026) :
+
+- **Dyn par une courbe** (MetaSurface et vues Space) : après les dix courbes d'accélération, les courbes du module Curves
+  (le code 100 + k ; menus « Curves 1 - 32 », « Curves 33 - 64 » ; le clic gauche passe aux courbes qui existent). La
+  courbe donne la place sur le chemin en fonction du temps de la durée : une enveloppe telle quelle, une forme d'onde
+  ramenée de [-1, 1] à [0, 1] ; les modes in, out, in-out, out-in s'y appliquent comme aux autres (in : la courbe telle
+  qu'elle est dessinée). Une courbe qui ne monte pas sans cesse fait revenir le pinceau en arrière.
+- **Trois modulateurs** (une 7e ligne du pad : pour chacun, sa courbe et son cycle, puis sa profondeur) : la rotation du
+  pinceau et la vitesse du mouvement multipliées par 1 + profondeur × F(phase) (une profondeur de -4 à 4 : au-dessous de 0,
+  le pinceau tourne ou va en sens inverse ; Once : pas avant le départ), le Mix augmenté de profondeur × F(phase) (borné
+  à [0, 1]). Le cycle : « Path », la phase est la place du pinceau sur le chemin (la part de sa longueur, comme les
+  repères et la ligne du pinceau dans Curves), ou une période de 0,5 à 300 s (une phase propre, arrêtée par la Pause,
+  remise à 0 par Restart et au départ du mouvement). Dans le graphe de leur courbe, en Play, la phase des modulateurs à
+  cycle en secondes (une ligne orange pour la rotation, bleue pour la vitesse, verte pour le mix). Les réglages 54 … 62
+  de la MetaSurface (courbe + 1, 0 : aucune ; cycle ; profondeur) ; une MetaSurface sauvée avant : modulateurs éteints,
+  la profondeur mise à 1 quand une courbe est choisie.
+
+L'étape 4, premier volet (écrit le 24 novembre 2026) : les réglages et les exports.
+
+- **Les blocs Curve** des réglages mSL (`settings(data( ... ))`), les clés d'Interstys : `Curve id name "texte" type
+  Env|Wave|HEnv|QWave|HWave periodic On|Off sustain n|Off points x y c ...`. L'id : un numéro de 1 à 64, ou un nom (la
+  courbe de ce nom ; sinon la première courbe libre, qui prend ce nom). Les clés absentes ne changent rien ; des points
+  donnés retirent le sustain (sauf s'il est donné aussi). Le code est partagé (mSL_Curves, partie 1 : incluse avant
+  l'analyse des réglages ; Interstys pourra s'en servir), ses erreurs 1650 … 1655.
+- **Les blocs MetaSurface** : `MetaSurface n` (1 … 32), puis des clés dans n'importe quel ordre : `name`, `zone c x y
+  [poids]` (les configurations placées : données, elles les remplacent toutes), les réglages du pad (aspect, surface
+  Rect|Disk, band, proj, spread, power, shape, stretch, offset, rotation, angle, volume, latency, rule Fixed|Distance,
+  attack, release, brush Mouse|Path, duration, mode Once|Loop|Back|Reverse, speed Path|Points, radius, chain AB|ABC|ABCD,
+  mix), `A` … `D` suivis de la trajectoire (None, Circle, Square, Star, Spiral, Central, Edit A … D, T1 … T128), `place x
+  y tour échelle` et `flip None|X|Y|XY` (pour la trajectoire nommée juste avant, ou pour le chemin entier après `path`),
+  `glide t [On|Off]`, `dyn` (Linear, Quad, Cubic, Quartic, Quintic, Exp, Circle, Sine, Elastic, Bounce, ou `Curve id`)
+  suivi de `In|Out|InOut|OutIn`, `modrot`, `modspeed`, `modmix` (`Off` ou `Curve id`, puis `cycle Path|secondes`,
+  `depth d`). Erreurs 2441, 2443 … 2449.
+- Comme les blocs Edit, les blocs Curve et MetaSurface ne changent rien si l'analyse trouve une erreur, même après eux. Un
+  fichier déposé sur un module Curves ou sur une vue MetaSurface : son premier bloc va dans la courbe ou dans la
+  MetaSurface qu'il montre.
+- **Les exports** (fichiers `.mSL` du dossier Data du projet, écrits par CMGS-auxiliary.eel) : une courbe ou toutes
+  (Actions du module Curves) ; une MetaSurface, ou toutes celles qui sont utilisées (Actions de la MetaSurface), précédées
+  de ce qu'elles utilisent : leurs courbes, leurs trajectoires de la bibliothèque (`trajectory n`), les chemins de leurs
+  éditeurs (`Edit X`). Les configurations ne sont pas dans le fichier : celles du projet de mêmes numéros (une
+  configuration absente est signalée dans le journal). Erreurs 1656, 2450, 2451.
+- Les tests Ex-3007 (les courbes) et Ex-3008 (les MetaSurfaces).

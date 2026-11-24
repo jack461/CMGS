@@ -164,6 +164,26 @@ function tr_Err(code, msg)
     code;
 );
 
+// (2026-11-24) The statement "trajectory n "name" closed : x y z, ... ;" of the trajectory i : its lines in the text of
+// mSL_Export (the export of the trajectory, and that of a MetaSurface that uses it)
+function tr_XpLines(i)
+local(n, k, q)
+(
+    n = sp_trN[i];
+    sp_NmGet(i, #tr_nm);
+    sprintf(#tr_xt, "    trajectory %d \"%s\" %s :", i + 1, ed_MslName(#tr_xx, #tr_nm), sp_trC[i] ? "closed" : "open");
+    xpt_Line(#tr_xt);
+    // (4 points per line)
+    k = 0; strcpy(#tr_xt, "       ");
+    loop(n,
+        q = sp_trP + i * SP_MAXTRJ * 3 + 3 * k;
+        sprintf(#tr_xa, " %s %s %s%s", ed_Fmt(#ed_f1, q[0]), ed_Fmt(#ed_f2, q[1]), ed_Fmt(#ed_f3, q[2]), (k < n - 1) ? ", " : " ;");
+        strcat(#tr_xt, #tr_xa);
+        (((k % 4) === 3) || (k === n - 1)) ? ( xpt_Line(#tr_xt); strcpy(#tr_xt, "       "); );
+        k += 1;
+    );
+);
+
 // Export the trajectory i : kd 0, a trajectory of GRM Spaces (.xml : Trajectory closed, P x y z end 0) ; kd 1, a
 // configuration for Diffusion 3 (.mSL : settings(data( trajectory n "name" closed : x y z, ... ; ))) ; the file :
 // Data/name-d3-Tn-YYYY-MM-DD-HH-MM-SS.xml|mSL, written by CMGS-auxiliary.eel (ed_Frame logs when it is written)
@@ -195,16 +215,7 @@ local(n, k, q, c)
             xpt_Line(sprintf(#tr_xt, "*%c", '/'));
             xpt_Line("");
             xpt_Line("settings(data(");
-            sprintf(#tr_xt, "    trajectory %d \"%s\" %s :", i + 1, ed_MslName(#tr_xx, #tr_nm), sp_trC[i] ? "closed" : "open");
-            xpt_Line(#tr_xt);
-            k = 0;
-            loop(n,
-                q = sp_trP + i * SP_MAXTRJ * 3 + 3 * k;
-                sprintf(#tr_xt, "        %s %s %s%s", ed_Fmt(#ed_f1, q[0]), ed_Fmt(#ed_f2, q[1]), ed_Fmt(#ed_f3, q[2]),
-                    (k < n - 1) ? "," : " ;");
-                xpt_Line(#tr_xt);
-                k += 1;
-            );
+            tr_XpLines(i);
             xpt_Line("));");
         ) : (
             // (the XML declaration built with %c : written literally, its marks would be taken by the preprocessor)

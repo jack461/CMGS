@@ -52,6 +52,11 @@
     line 5 : Duration, the mode, Speed, Radius, Simulate, Record, Restart, the counter ; line 6 : x, y, turn, scale,
     Placement, Place). The entries saved before ('msf1', 200 words) : migrated (ms_Migrate ; their path in A).
 
+    2026-11-24 (step 4 of the curves) : the settings (blocks "MetaSurface n keys ..." of the mSL settings : mst_Meta in
+    Diffusion-3-Set-Table, staged, taken by ms_Frame : ms_TbTake ; a file dropped on a view : its first block goes into the
+    entry it shows, ms_DropTarget) and the exports (Actions : this entry, or all those used, with the curves, the
+    trajectories of the library and the paths of the editors they use : ms_Export).
+
     The library (ms_lib + e * MS_ES, e = 0 ... MS_NLIB - 1, "MS1" ... "MS32") : [ms_eUsed] 1 when it has been used
     (a configuration, a name), [ms_eN] the count of its configurations, [ms_eSet + k] its settings (ms_s... ; those of
     the next steps already there, with their defaults : the format saved stays the same), [ms_eName + k] its name (the
@@ -110,15 +115,28 @@ ms_sTx = 22; ms_sTy = 23; ms_sTa = 24; ms_sTk = 25;
 ms_sTrK = 26; ms_sTrN = 30; ms_sMix = 31; ms_sGlide = 32; ms_sGMode = 33; ms_sRad = 34; ms_sCurve = 35; ms_sDMode = 36;
 ms_sPl = 37; // (37 ... 52)
 // (2026-11-24, the user) the flips of the trajectories (ms_sFlip, bits : 1 the whole path left - right, 2 up - down ; the
-// trajectory t : 2^(2 + 2 t) left - right, 2^(3 + 2 t) up - down ; see ms_FlipBit) ; 54 ... 63 : free
+// trajectory t : 2^(2 + 2 t) left - right, 2^(3 + 2 t) up - down ; see ms_FlipBit)
 ms_sFlip = 53;
+// (2026-11-24, step 3 of the curves) the modulators by a curve (ms_sMod + 3 j, j : 0 the rotation of the brush, 1 the speed
+// of the motion, 2 the mix) : the curve + 1 (0 : off), the cycle (0 : the place of the brush on the path ; else a period,
+// s), the depth (the rotation and the speed multiplied by 1 + depth x F ; the mix : + depth x F) ; 63 : free
+ms_sMod = 54; // (54 ... 62)
 ms_lib = make_array(MS_NLIB * MS_ES);
 ms_seq = make_array(MS_NLIB);
+// (2026-11-24, step 4 of the curves) the blocks MetaSurface of the settings (mst_Meta, Diffusion-3-Set-Table) : the work area
+// (the values as an entry ; the keys given : the settings, the name, the zones ; the entries read), the staging (taken by
+// ms_Frame, ms_TbTake)
+MST_TF = MS_NS + 2;
+mst_tw = make_array(MS_NLIB * MS_ES); mst_twF = make_array(MS_NLIB * MST_TF); mst_twOn = make_array(MS_NLIB);
+mst_ts = make_array(MS_NLIB * MS_ES); mst_tsF = make_array(MS_NLIB * MST_TF); mst_tq = make_array(MS_NLIB);
 // the views
 MS_VS = 16; ms_vE = 0; ms_vMode = 1; ms_vSel = 2;
 // (step 2) Edit : the brush shown (held, moved by its cross and its shape) ; the brush saved (ms_bx, ms_by, ms_att ; ms_vInit 1)
 ms_vBrush = 3; ms_vBx = 4; ms_vBy = 5; ms_vAtt = 6; ms_vInit = 7;
 ms_vw = make_array(MS_NV * MS_VS);
+// (2026-11-24) the place of each view (its module) and the frame where it was drawn : a file dropped on it (ms_DropTarget)
+ms_mr = make_array(4 * MS_NV); ms_mf = make_array(MS_NV);
+i__k = 0; loop(MS_NV, ms_mf[i__k] = -10; i__k += 1;);
 // (not saved) the offscreen images and the keys of their drawings (entry, seq, w, h, background, cell size, aspect, band)
 MS_IMG = 80;                // MS_IMG ... MS_IMG + 3
 i__k = 0; loop(MS_NV, ui_reserve_image(MS_IMG + i__k); i__k += 1;);
@@ -302,6 +320,8 @@ function ms_SetDefaults(e) local(b, s)
     s[ms_sTrK] = 1; s[ms_sTrK + 1] = 2; s[ms_sTrK + 2] = 3; s[ms_sTrK + 3] = 4;
     s[ms_sTrN] = 2; s[ms_sMix] = 0; s[ms_sGlide] = 10; s[ms_sGMode] = 0; s[ms_sRad] = 0.6; s[ms_sCurve] = 0; s[ms_sDMode] = 0;
     s[ms_sPl + 3] = s[ms_sPl + 7] = s[ms_sPl + 11] = s[ms_sPl + 15] = 1;
+    // (2026-11-24, step 3) the modulators : off, the cycle Path, the depth 1
+    s[ms_sMod + 2] = s[ms_sMod + 5] = s[ms_sMod + 8] = 1;
 );
 // The entry e emptied (no configuration, no name, the defaults)
 function ms_Clear(e) local(b)
@@ -762,10 +782,21 @@ function ms_Shares(v, e) local(n, a, sh, P, S, j, k, r, pw, phi, rho, lx, ly, X,
     (win > 0) ? (k = 0; loop(n, sh[k] /= win; k += 1;));
     ms_cov[v] = (all > 0) ? win / all : 0;
 );
-// The brush of the view v moved by the time (its rotation), its shares computed ; returns 1 if it turns
+// (2026-11-24, step 3) The modulator j (0 the rotation, 1 the speed, 2 the mix) of the view v (entry e) : its phase (the
+// cycle Path : the place of the brush on the path, the part of its length, ms_marc ; else its own phase, ms_mph, ms_ModStep),
+// its value depth x F(phase) (off, or no curve : 0)
+function ms_ModPh(v, e, j) ( (ms_S(e, ms_sMod + 3 * j + 1) > 0) ? ms_mph[3 * v + j] : ms_marc[v]; );
+function ms_ModV(v, e, j) local(k)
+(
+    k = ms_S(e, ms_sMod + 3 * j) - 1;
+    ((k >= 0) && crv_Ex(k)) ? ms_S(e, ms_sMod + 3 * j + 2) * crv_F(k, ms_ModPh(v, e, j)) : 0;
+);
+function ms_ModOn(e, j) local(k) ( k = ms_S(e, ms_sMod + 3 * j) - 1; (k >= 0) && crv_Ex(k); );
+// The brush of the view v moved by the time (its rotation ; 2026-11-24 : modulated), its shares computed ; returns 1 if it
+// turns
 function ms_Update(v, e) local(t, rot)
 (
-    t = time_precise(); rot = ms_S(e, ms_sRot);
+    t = time_precise(); rot = ms_S(e, ms_sRot) * (1 + ms_ModV(v, e, 0)); // (2026-11-24, step 3 : modulated)
     ((ms_lt[v] > 0) && (t > ms_lt[v]) && !ms_pz[v]) ? ms_ph[v] += rot * min(0.5, t - ms_lt[v]); // (paused : it stays)
     ms_ph[v] -= floor(ms_ph[v]);
     ms_lt[v] = t;
@@ -939,7 +970,8 @@ function ms_PlI(v, i) ( ((ms_plc[v] < 0) ? ms_sTx : ms_sPl + 4 * ms_plc[v]) + i;
 // it waits ; after its time : the mix)
 function ms_WCur(v, e, W) local(u, k, w0, t)
 (
-    sp_WMix(ms_S(e, ms_sTrN), ms_S(e, ms_sMix), W);
+    // (2026-11-24, step 3 : the mix modulated)
+    sp_WMix(ms_S(e, ms_sTrN), max(0, min(1, ms_S(e, ms_sMix) + ms_ModV(v, e, 2))), W);
     ms_glOn[v] ? (
         t = ms_pz[v] ? ms_pzt[v] : time_precise();
         u = (t - ms_glT0[v]) / max(0.001, ms_glDur[v]);
@@ -1071,7 +1103,7 @@ function ms_ArcOf(v, s, bp) local(o, n, f, i, t)
     );
 );
 // The motion started (from the start of the path ; Loop reverse : from its end) if it is not running
-function ms_MoveStart(v) ( !ms_mv[v] ? (ms_mv[v] = 1; ms_mx[v] = 0; ms_mlt[v] = time_precise(); ms_mlp[v] = -1;); );
+function ms_MoveStart(v) ( !ms_mv[v] ? (ms_mv[v] = 1; ms_mx[v] = 0; ms_mlt[v] = time_precise(); ms_mlp[v] = -1; memset(ms_mph + 3 * v, 0, 3);); );
 // (2026-11-23) The place s (0 ... 1, the part of the duration) on the path for the progress x (in durations) of the motion
 // lp (0 Once, 1 Loop, 2 Back and forth, 3 Loop reverse) ; its direction : ms_dir (1 forward, -1 backward)
 function ms_SOf(lp, x) local(y)
@@ -1593,6 +1625,9 @@ ms_rb = make_array(MS_NV * SP_MAXTRJ * 2);
 // (MS_CGK steps), the ticks of the points the resampling would place (MS_CTK parts)
 MS_CGK = 256; MS_CTK = 48;
 ms_cgd = make_array(MS_CGK + 1);
+// (2026-11-24, step 3) the modulators : the place of the brush on the path (the part of its length), the phases of the
+// modulators of each view (3 each : their cycles in seconds), the time of their last step
+ms_marc = make_array(MS_NV); ms_mph = make_array(3 * MS_NV); ms_mpt = make_array(MS_NV);
 MS_IMGE = 76;               // MS_IMGE ... MS_IMGE + 3 : the backdrops of Edit A ... D
 i__k = 0; loop(4, ui_reserve_image(MS_IMGE + i__k); i__k += 1;);
 ms_edT = make_array(4); // (2026-11-24 : the trajectory A ... D that is the editor)
@@ -1824,7 +1859,7 @@ function ms_Publish(v, e, p) local(k, n, L, amp, T, d, ch, sh, buf, i, a, lat)
 // sound and without simulation : stopped. 2026-11-23 (the user) : the progress ms_mx (in durations) grows with the time
 // (paused : it stays ; a new duration : only the speed changes) ; a new mode while it moves : the brush stays where it is
 // on the path, only its direction follows the new mode (Back and forth : the same direction)
-function ms_Motion(v, e, t) local(x, s, lp, d, w)
+function ms_Motion(v, e, t) local(x, s, lp, d, w, f)
 (
     (ms_mv[v] && (ms_st[v] === 0) && !ms_msim[v]) ? ms_mv[v] = 0;
     ms_mv[v] ? (
@@ -1834,12 +1869,16 @@ function ms_Motion(v, e, t) local(x, s, lp, d, w)
             ms_mx[v] = (lp === 0) ? s : (lp === 1) ? min(0.999999, s) : (lp === 3) ? min(0.999999, 1 - s) : ((d > 0) ? s : 2 - s);
         );
         ms_mlp[v] = lp;
-        ms_mx[v] += (ms_pz[v] ? 0 : max(0, t - ms_mlt[v])) / max(0.1, ms_S(e, ms_sDur));
+        // (2026-11-24, step 3) the speed modulated : x (1 + depth x F) ; below 0, the brush goes back (Once : not before the
+        // start)
+        f = 1 + ms_ModV(v, e, 1);
+        ms_mx[v] += (ms_pz[v] ? 0 : max(0, t - ms_mlt[v])) / max(0.1, ms_S(e, ms_sDur)) * f;
+        (lp === 0) ? (ms_mx[v] = max(0, ms_mx[v]));
         ms_mlt[v] = t;
         x = ms_mx[v];
         s = ms_SOf(lp, x);
         ((lp === 0) && (x >= 1)) ? (ms_mv[v] = 0; ms_msim[v] = 0; ((ms_st[v] === 1) || (ms_st[v] === 2)) ? ms_Stop(v, 1););
-        ms_mpr[v] = s; ms_mdr[v] = ms_dir;
+        ms_mpr[v] = s; ms_mdr[v] = (f < 0) ? -ms_dir : ms_dir;
         ms_PathLoad(v, e);
         // (2026-11-24) the dynamics, as the views Space : the place on the path from the time by the curve and its mode
         (ms_pn[v] > 0) ? (
@@ -1848,7 +1887,10 @@ function ms_Motion(v, e, t) local(x, s, lp, d, w)
             ms_bx[v] = ms_cu; ms_by[v] = ms_cv;
             // (2026-11-24, the user) the brush in the graph of the module Curves : the part of the length of the path
             // (a magenta line, the letter of the view)
-            (ms_pn[v] > 1) ? crv_PhSet(v, ms_ArcOf(v, w, ms_S(e, ms_sSpeedM)), 0xD040C0, 'A' + v);
+            (ms_pn[v] > 1) ? (
+                ms_marc[v] = ms_ArcOf(v, w, ms_S(e, ms_sSpeedM)); // (the phase of the modulators in the cycle Path)
+                crv_PhSet(4 * v, ms_marc[v], 0xD040C0, 'A' + v, "", -1);
+            );
         );
     );
 );
@@ -2067,10 +2109,267 @@ function ms_Sim(v, e) local(L, K, N, j, q, s, i, g, sh, kk, ee)
     );
     L > 0;
 );
+// (2026-11-24, step 3) The phases of the modulators of the view v (entry e) at the time t (the cycles in seconds ; paused :
+// they stay) ; in Play, their playheads in the graph of their curve (module Curves ; the cycle Path : that of the brush)
+function ms_ModStep(v, e, t) local(j, cy, dt, k, q, vw)
+(
+    dt = ((ms_mpt[v] > 0) && !ms_pz[v]) ? max(0, min(0.5, t - ms_mpt[v])) : 0;
+    ms_mpt[v] = t;
+    vw = ms_vw + v * MS_VS;
+    j = 0;
+    loop(3,
+        cy = ms_S(e, ms_sMod + 3 * j + 1); k = ms_S(e, ms_sMod + 3 * j) - 1; q = 3 * v + j;
+        (cy > 0) ? (
+            ms_mph[q] += dt / max(0.05, cy); ms_mph[q] -= floor(ms_mph[q]);
+            ((k >= 0) && vw[ms_vMode]) ? crv_PhSet(4 * v + 1 + j, ms_mph[q], (j === 0) ? 0xE08020 : (j === 1) ? 0x2090E0 : 0x30B040,
+                'A' + v, (j === 0) ? " rot" : (j === 1) ? " speed" : " mix", k);
+        );
+        j += 1;
+    );
+);
+// (2026-11-24, step 4 of the curves) The entry e staged by the settings (mst_Stage, Diffusion-3-Set-Table) : its settings,
+// its name, its configurations (the zones) ; a line in the log (and the configurations it places that are not defined)
+function ms_TbTake(e) local(b, s, g, k, n, i, c, v, vw)
+(
+    b = ms_E(e); s = mst_ts + e * MS_ES; g = mst_tsF + e * MST_TF;
+    k = 0;
+    loop(MS_NS,
+        g[k] ? (
+            (k === ms_sFlip) ? (b[ms_eSet + k] = (b[ms_eSet + k] & (-1 ~ g[k])) | (s[ms_eSet + k] & g[k])) :
+                (b[ms_eSet + k] = s[ms_eSet + k]);
+        );
+        k += 1;
+    );
+    g[ms_sAngle] ? (b[ms_eSet + ms_sAngle] = ms_Wrap360(b[ms_eSet + ms_sAngle]));
+    g[ms_sRot] ? (b[ms_eSet + ms_sRotMem] = 0);
+    g[MS_NS] ? memcpy(b + ms_eName, s + ms_eName, MS_NMLEN);
+    g[MS_NS + 1] ? (
+        n = b[ms_eN] = s[ms_eN];
+        memset(b + ms_eCf, 0, 4 * MS_MAXC); memcpy(b + ms_eCf, s + ms_eCf, 4 * n);
+    );
+    b[ms_eUsed] = 1;
+    ms_ClampAll(e);
+    n = b[ms_eN];
+    v = 0; loop(MS_NV, vw = ms_vw + v * MS_VS; ((vw[ms_vE] === e) && (vw[ms_vSel] >= n)) ? (vw[ms_vSel] = -1); v += 1;);
+    ms_seq[e] += 1;
+    ms_Label(e, #ms_xl);
+    sprintf(#ms_xm, "MetaSurface %s : read from settings (%d configuration%s)", #ms_xl, n, (n > 1) ? "s" : "");
+    mSL_log(SysLogBox, #ms_xm);
+    strcpy(#ms_xm, ""); c = 0; i = 0;
+    loop(n,
+        k = ms_Cv(e, i, 0);
+        (ms_CfBlk(k) <= 0) ? ( c += 1; (c <= 12) ? strcat(#ms_xm, sprintf(#ms_xv, " %d", k)); );
+        i += 1;
+    );
+    (c > 0) ? (
+        sprintf(#ms_xv, "MetaSurface MS%d : configuration%s not defined :%s%s", e + 1, (c > 1) ? "s" : "", #ms_xm, (c > 12) ? " ..." : "");
+        mSL_log(SysLogBox, #ms_xv);
+    );
+    ui_GFXdoNow |= 4;
+);
+
+// (2026-11-24) The entry shown by the view under the mouse (drawn in the last frame), or -1 : a file dropped there, its
+// first block MetaSurface goes into this entry (mst_drop)
+function ms_DropTarget() local(v, r, m)
+(
+    r = -1; v = 0;
+    loop(MS_NV,
+        m = ms_mr + 4 * v;
+        ((r < 0) && (ms_mf[v] >= gfx_executed - 1) && (mouse_x >= m[0]) && (mouse_y >= m[1]) && (mouse_x < m[0] + m[2]) &&
+            (mouse_y < m[1] + m[3])) ? (r = ms_VGet(v, ms_vE));
+        v += 1;
+    );
+    r;
+);
+
+/*
+    (2026-11-24) The exports (mSL settings, see mst_Meta in Diffusion-3-Set-Table) : ms_XpEntry(e) the block MetaSurface of
+    the entry e ; ms_Export(e) : the entry e (e < 0 : all the entries used) in a file of the folder of the project
+    (Data/name-d3-MS3-date.mSL, MetaSurfaces-d3-library-date.mSL), written by CMGS-auxiliary.eel, with before them what they
+    use : their curves (blocks Curve, crv_XpCurve), their trajectories of the library (trajectory n, tr_XpLines), the paths
+    of their editors (Edit X, ed_XpLines) ; ms_XpPoll (ms_Frame) : the file written, or not. The configurations are not in
+    the file (those of the project with the same numbers).
+*/
+ms_xuC = make_array(CRV_MX); ms_xuT = make_array(SP_NTRJ); ms_xuE = make_array(4); ms_xuM = make_array(MS_NLIB);
+// the kind k of a trajectory as a word of the settings (mst_Kind)
+function ms_XpKind(dst, k)
+(
+    (k < SP_KED) ? sx_Nth("None|Circle|Square|Star|Spiral|Central", max(0, k), dst) :
+    (k < SP_KLIB) ? sprintf(dst, "Edit %c", 'A' + k - SP_KED) : sprintf(dst, "T%d", k - SP_KLIB + 1);
+    dst;
+);
+// the curve k as a reference : Curve "name", or Curve n
+function ms_XpCrv(dst, k) ( (strlen(crv_nm[k]) > 0) ? sprintf(dst, "Curve \"%s\"", crv_nm[k]) : sprintf(dst, "Curve %d", k + 1); dst; );
+// the flips of a trajectory t (-1 : the path) : None, X, Y, XY
+function ms_XpFlip(s, t) local(x, y)
+(
+    x = (s[ms_sFlip] & ms_FlipBit(t, 0)) ? 1 : 0; y = (s[ms_sFlip] & ms_FlipBit(t, 1)) ? 2 : 0;
+    (x + y === 3) ? "XY" : (x + y === 2) ? "Y" : (x + y === 1) ? "X" : "None";
+);
+// an angle in (-180, 180]
+function ms_XpTurn(a) local(x) ( x = floor(a + 0.5); x - 360 * floor((x + 180) / 360); );
+function ms_XpEntry(e) local(s, i, n, p, t, k, j)
+(
+    s = ms_E(e) + ms_eSet;
+    sprintf(#ms_xt, "MetaSurface %d", e + 1);
+    (strlen(ms_Name(e, #ms_xe)) > 0) ? strcat(#ms_xt, sprintf(#ms_xv, "  name \"%s\"", ed_MslName(#ms_xw, #ms_xe)));
+    xpt_Block(#ms_xt, 4);
+    n = ms_N(e);
+    (n > 0) ? (
+        strcpy(#ms_xt, ""); i = 0;
+        loop(n,
+            p = ms_C(e, i);
+            strcat(#ms_xt, sprintf(#ms_xv, "%szone %d %s %s %s", (i > 0) ? "  " : "", p[0], ed_Fmt(#ed_f1, p[1]), ed_Fmt(#ed_f2, p[2]),
+                ed_Fmt(#ed_f3, p[3])));
+            i += 1;
+        );
+        xpt_Block(#ms_xt, 8);
+    );
+    sprintf(#ms_xt, "aspect %s  surface %s  band %s  proj %d", ed_Fmt(#ed_f1, s[ms_sAspect]), s[ms_sSurf] ? "Disk" : "Rect",
+        ed_Fmt(#ed_f2, s[ms_sBand]), s[ms_sProj]);
+    xpt_Block(#ms_xt, 8);
+    sprintf(#ms_xt, "spread %s  power %s  shape %s  stretch %s  offset %s  rotation %s  angle %s", ed_Fmt(#ed_f1, s[ms_sSpread]),
+        ed_Fmt(#ed_f2, s[ms_sPower]), ed_Fmt(#ed_f3, s[ms_sShape]), ed_Fmt(#ed_f4, s[ms_sStretch]), ed_Fmt(#ed_f5, s[ms_sOffset]),
+        ed_Fmt(#ed_f6, s[ms_sRot]), ed_Fmt(#ms_xw, s[ms_sAngle]));
+    xpt_Block(#ms_xt, 8);
+    sprintf(#ms_xt, "volume %s  latency %s  rule %s  attack %s  release %s", ed_Fmt(#ed_f1, s[ms_sVol]), ed_Fmt(#ed_f2, s[ms_sLat]),
+        s[ms_sLatMode] ? "Distance" : "Fixed", ed_Fmt(#ed_f3, s[ms_sAtt]), ed_Fmt(#ed_f4, s[ms_sRel]));
+    xpt_Block(#ms_xt, 8);
+    sprintf(#ms_xt, "brush %s  duration %s  mode %s  speed %s  radius %s", s[ms_sPath] ? "Path" : "Mouse", ed_Fmt(#ed_f1, s[ms_sDur]),
+        (s[ms_sLoop] === 0) ? "Once" : (s[ms_sLoop] === 2) ? "Back" : (s[ms_sLoop] === 3) ? "Reverse" : "Loop",
+        s[ms_sSpeedM] ? "Points" : "Path", ed_Fmt(#ed_f2, s[ms_sRad]));
+    xpt_Block(#ms_xt, 8);
+    t = 0;
+    loop(4,
+        i = ms_sPl + 4 * t;
+        sprintf(#ms_xt, "%c %s  place %s %s %d %s  flip %s", 'A' + t, ms_XpKind(#ms_xw, s[ms_sTrK + t]), ed_Fmt(#ed_f1, s[i]),
+            ed_Fmt(#ed_f2, s[i + 1]), ms_XpTurn(s[i + 2]), ed_Fmt(#ed_f3, (s[i + 3] > 0) ? s[i + 3] : 1), ms_XpFlip(s, t));
+        xpt_Block(#ms_xt, 8);
+        t += 1;
+    );
+    sprintf(#ms_xt, "path place %s %s %d %s  flip %s", ed_Fmt(#ed_f1, s[ms_sTx]), ed_Fmt(#ed_f2, s[ms_sTy]), ms_XpTurn(s[ms_sTa]),
+        ed_Fmt(#ed_f3, (s[ms_sTk] > 0) ? s[ms_sTk] : 1), ms_XpFlip(s, -1));
+    xpt_Block(#ms_xt, 8);
+    (s[ms_sCurve] >= CRV_DYN) ? ms_XpCrv(#ms_xw, s[ms_sCurve] - CRV_DYN) :
+        sx_Nth(#mst_Ease, max(0, min(9, s[ms_sCurve])), #ms_xw);
+    sprintf(#ms_xt, "chain %s  mix %s  glide %s %s  dyn %s %s", (s[ms_sTrN] === 3) ? "ABC" : (s[ms_sTrN] === 4) ? "ABCD" : "AB",
+        ed_Fmt(#ed_f1, s[ms_sMix]), ed_Fmt(#ed_f2, (s[ms_sGlide] > 0) ? s[ms_sGlide] : 10), s[ms_sGMode] ? "On" : "Off", #ms_xw,
+        (s[ms_sDMode] === 1) ? "Out" : (s[ms_sDMode] === 2) ? "InOut" : (s[ms_sDMode] === 3) ? "OutIn" : "In");
+    xpt_Block(#ms_xt, 8);
+    j = 0;
+    loop(3,
+        k = s[ms_sMod + 3 * j] - 1;
+        (k >= 0) ? ms_XpCrv(#ms_xw, k) : strcpy(#ms_xw, "Off");
+        (s[ms_sMod + 3 * j + 1] > 0) ? ed_Fmt(#ed_f1, s[ms_sMod + 3 * j + 1]) : strcpy(#ed_f1, "Path");
+        sprintf(#ms_xt, "%s %s  cycle %s  depth %s", (j === 0) ? "modrot" : (j === 1) ? "modspeed" : "modmix", #ms_xw, #ed_f1,
+            ed_Fmt(#ed_f2, s[ms_sMod + 3 * j + 2]));
+        xpt_Block(#ms_xt, 8);
+        j += 1;
+    );
+);
+function ms_XpErr(code, msg)
+(
+    sprintf(#ms_xm, "ERR: %04d    MetaSurface : export : %s", code, msg);
+    mSL_log(SysLogBox, #ms_xm);
+    mSL_ErrNote(code, msg);
+    code;
+);
+function ms_Export(e) local(c, i, j, k, t, cnt, s, p)
+(
+    cnt = 0; i = 0;
+    loop(MS_NLIB, ms_xuM[i] = (i === e) || ((e < 0) && ((ms_N(i) > 0) || (strlen(ms_Name(i, #ms_xe)) > 0))); cnt += ms_xuM[i]; i += 1;);
+    (cnt === 0) ? ms_XpErr(2450, "no MetaSurface used (a configuration or a name)") :
+    ((c = xpt_Ready()) !== 0) ? (
+        ms_XpErr(2450, (c === 1) ? "no auxiliary script (CMGS-auxiliary.eel) : nothing is written" :
+            (c === 2) ? "the auxiliary script CMGS-auxiliary.eel must be started again (an old version)" :
+            "the auxiliary script is busy : try again");
+    ) : (
+        // what they use : their curves, their trajectories of the library, the paths of their editors
+        memset(ms_xuC, 0, CRV_MX); memset(ms_xuT, 0, SP_NTRJ); memset(ms_xuE, 0, 4);
+        i = 0;
+        loop(MS_NLIB,
+            ms_xuM[i] ? (
+                s = ms_E(i) + ms_eSet;
+                k = s[ms_sCurve] - CRV_DYN; ((k >= 0) && crv_Ex(k)) ? (ms_xuC[k] = 1);
+                j = 0; loop(3, k = s[ms_sMod + 3 * j] - 1; ((k >= 0) && crv_Ex(k)) ? (ms_xuC[k] = 1); j += 1;);
+                t = 0;
+                loop(4,
+                    k = s[ms_sTrK + t];
+                    (k >= SP_KLIB) ? ( (sp_trN[k - SP_KLIB] > 0) ? (ms_xuT[k - SP_KLIB] = 1); ) :
+                    (k >= SP_KED) ? ( p = ed_St(k - SP_KED); (p[ed_sN] > 0) ? (ms_xuE[k - SP_KED] = 1); );
+                    t += 1;
+                );
+            );
+            i += 1;
+        );
+        // the names : of the file (its name, or MetaSurface), of the messages of the script (its name, or MS3)
+        (e >= 0) ? (
+            (strlen(ms_Name(e, #ms_xn)) === 0) ? strcpy(#ms_xn, "MetaSurface");
+            sprintf(#ms_xk, "MS%d", e + 1);
+            (strlen(ms_Name(e, #ms_xp)) > 0) ? ed_MslName(#ms_xp, #ms_xp) : strcpy(#ms_xp, #ms_xk);
+        ) : (
+            strcpy(#ms_xn, "MetaSurfaces"); strcpy(#ms_xk, "library"); strcpy(#ms_xp, #ms_xn);
+        );
+        xpt_Clean(#ms_xn);
+        xpt_FileName(#ms_xf, #ms_xn, "d3", #ms_xk);
+        xpt_Date(#ms_xd, 1);
+        xpt_Begin();
+        (e >= 0) ? sprintf(#ms_xt, "print(\"%s : MetaSurface MS%d de Diffusion 3, exportee le %s.\");", #ms_xp, e + 1, #ms_xd) :
+            sprintf(#ms_xt, "print(\"MetaSurfaces : %d MetaSurface%s de Diffusion 3, exportee%s le %s.\");", cnt, (cnt > 1) ? "s" : "",
+                (cnt > 1) ? "s" : "", #ms_xd);
+        xpt_Line(#ms_xt);
+        xpt_Line("");
+        xpt_Line(sprintf(#ms_xt, "%c*", '/'));
+        (e >= 0) ? (
+            xpt_Line("  Deposee sur une vue MetaSurface (A ... D), la MetaSurface remplace celle que la vue montre ; ailleurs dans");
+            xpt_Line("  Diffusion 3 : celle de meme numero (MS1 ... MS32).");
+        ) : (
+            xpt_Line("  Chaque MetaSurface remplace celle de meme numero (MS1 ... MS32) ; deposee sur une vue MetaSurface (A ... D), la");
+            xpt_Line("  premiere remplace celle que la vue montre.");
+        );
+        xpt_Line("  Avant les MetaSurfaces, ce qu'elles utilisent : les courbes (une courbe nommee remplace la courbe de meme nom, ou");
+        xpt_Line("  prend la premiere courbe libre ; sans nom : la courbe de meme numero), les trajectoires de la bibliotheque");
+        xpt_Line("  (trajectory n : elles remplacent celles de meme numero), les chemins des editeurs Edit A ... D (ils remplacent");
+        xpt_Line("  leur configuration ; touche z sur le module : Undo). Les configurations (zone c x y poids) ne sont pas dans ce");
+        xpt_Line("  fichier : celles du projet de memes numeros.");
+        xpt_Line(sprintf(#ms_xt, "*%c", '/'));
+        xpt_Line("");
+        xpt_Line("var r = settings(data(");
+        i = 0; loop(CRV_MX, ms_xuC[i] ? crv_XpCurve(i); i += 1;);
+        i = 0; loop(SP_NTRJ, ms_xuT[i] ? tr_XpLines(i); i += 1;);
+        i = 0; loop(4, ms_xuE[i] ? ed_XpLines(i); i += 1;);
+        i = 0; loop(MS_NLIB, ms_xuM[i] ? ms_XpEntry(i); i += 1;);
+        xpt_Line("));");
+        sprintf(#ms_xt, "print(sprintf(0, \"%s : settings %%d (0 : OK)\", r));", #ms_xp);
+        xpt_Line(#ms_xt);
+        xpt_Ov ? ms_XpErr(2450, "the text is too long : nothing is written") : (
+            xpt_Who = 'msf';
+            xpt_Send(#ms_xf);
+            sprintf(#ms_xm, "MetaSurface : export of %d MetaSurface%s : %s", cnt, (cnt > 1) ? "s" : "", #ms_xf);
+            mSL_log(SysLogBox, #ms_xm);
+            0;
+        );
+    );
+);
+function ms_XpPoll() local(r)
+(
+    ((r = xpt_PollFor('msf')) !== 0) ? (
+        (r > 0) ? (
+            sprintf(#ms_xm, "MetaSurface : export : %s written in the folder of the project", #ms_xf);
+            mSL_log(SysLogBox, #ms_xm);
+        ) : (
+            ms_XpErr(2451, sprintf(#ms_xv, "the file %s can't be written", #ms_xf));
+        );
+    );
+);
+
 // Each run of @gfx (even when the window is closed) : for each view, its projector released if it left Play or chose
-// another one ; its envelope ; its shares (its brush shown) ; its publication (it drives a projector)
+// another one ; its envelope ; its shares (its brush shown) ; its publication (it drives a projector) ; (2026-11-24, step 4)
+// the entries read by the settings, the exports written
 function ms_Frame() local(v, vw, e, p, t)
 (
+    e = 0; loop(MS_NLIB, mst_tq[e] ? ( mst_tq[e] = 0; ms_TbTake(e); ); e += 1;);
+    ms_XpPoll();
     t = time_precise();
     v = 0;
     loop(MS_NV,
@@ -2081,6 +2380,7 @@ function ms_Frame() local(v, vw, e, p, t)
         p = ms_ownp[v];
         ((p > 0) && (!vw[ms_vMode] || (ms_S(e, ms_sProj) !== p))) ? ms_Release(v);
         ms_Env(v, e, t);
+        ms_ModStep(v, e, t); // (2026-11-24, step 3)
         // (step 5) the brush on the path (the mode Path : while it sounds, or simulated) ; the recording
         (vw[ms_vMode] && ms_S(e, ms_sPath)) ? ms_Motion(v, e, t) : (ms_mv[v] = ms_msim[v] = 0);
         ms_rec[v] ? (vw[ms_vMode] ? ms_RecStep(v, e, t) : ms_RecEnd(v, e));
@@ -2334,9 +2634,10 @@ function ms_Prompted()
 );
 
 // The pad of the views (shared : its labels are set before each drawing) : line 1 the surface, line 2 the brush (step 2),
-// line 3 the sound (step 3), line 4 the trajectory (step 5), line 5 the placement of the path (2026-11-23)
-MS_PSIZ = 48; // (2026-11-24 : 6 lines)
-pad_MSV = make_jpad(ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors, 6, 8, MS_PSIZ);
+// line 3 the sound (step 3), line 4 the trajectory (step 5), line 5 the placement of the path (2026-11-23) ; (2026-11-24,
+// step 3 of the curves) line 7 the modulators
+MS_PSIZ = 56; // (2026-11-24 : 7 lines)
+pad_MSV = make_jpad(ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors, 7, 8, MS_PSIZ);
 pad_MSV_Labs = pad_MSV + pad_MSV[ui_jpad_labs];
 pad_MSV_Colrs = pad_MSV + pad_MSV[ui_jpad_clrs];
 i__k = 0; loop(MS_PSIZ, pad_MSV_Colrs[i__k] = Col_Inactive; pad_MSV_Labs[i__k] = ""; i__k += 1;);
@@ -2358,7 +2659,9 @@ function ms_DV(v, e, c) local(i)
     (c === 29) ? 100 * ms_S(e, ms_sMix) : (c === 30) ? max(1, min(300, ms_S(e, ms_sGlide))) :
     (c === 32) ? max(0.5, ms_S(e, ms_sDur)) : (c === 35) ? 100 * ms_S(e, ms_sRad) :
     ((c === 40) || (c === 41)) ? 100 * ms_S(e, ms_PlI(v, c - 40)) : (c === 42) ? ms_S(e, ms_PlI(v, 2)) :
-    (c === 43) ? ((ms_S(e, ms_PlI(v, 3)) > 0) ? max(0.1, min(10, ms_S(e, ms_PlI(v, 3)))) : 1) : 0;
+    (c === 43) ? ((ms_S(e, ms_PlI(v, 3)) > 0) ? max(0.1, min(10, ms_S(e, ms_PlI(v, 3)))) : 1) :
+    // (2026-11-24, step 3) the depths of the modulators (%)
+    ((c === 49) || (c === 51) || (c === 53)) ? 100 * ms_S(e, ms_sMod + 3 * ((c - 49) / 2) + 2) : 0;
 );
 function ms_DSet(v, e, c, x) local(i, k)
 (
@@ -2383,7 +2686,8 @@ function ms_DSet(v, e, c, x) local(i, k)
     (c === 35) ? ms_SSet(e, ms_sRad, max(5, min(100, floor(x + 0.5))) / 100) :
     ((c === 40) || (c === 41)) ? ms_SSet(e, ms_PlI(v, c - 40), max(-200, min(200, floor(x + 0.5))) / 100) :
     (c === 42) ? (k = floor(x + 0.5); ms_SSet(e, ms_PlI(v, 2), k - 360 * floor((k + 180) / 360));) : // (-180 ... 180, the drag goes on)
-    (c === 43) ? ms_SSet(e, ms_PlI(v, 3), max(0.1, min(10, x)));
+    (c === 43) ? ms_SSet(e, ms_PlI(v, 3), max(0.1, min(10, x))) :
+    ((c === 49) || (c === 51) || (c === 53)) ? ms_SSet(e, ms_sMod + 3 * ((c - 49) / 2) + 2, max(-400, min(400, floor(x + 0.5))) / 100);
     ui_GFXdoNow |= 4;
 );
 function ms_DRange(c)
@@ -2398,11 +2702,12 @@ function ms_DRange(c)
     (c === 29) ? (ms_lo = 0; ms_hi = 100;) : (c === 30) ? (ms_lo = 1; ms_hi = 300;) : (c === 32) ? (ms_lo = 0.5; ms_hi = 600;) :
     (c === 35) ? (ms_lo = 5; ms_hi = 100;) : ((c === 40) || (c === 41)) ? (ms_lo = -200; ms_hi = 200;) :
     (c === 43) ? (ms_lo = 0.1; ms_hi = 10;) :
+    ((c === 49) || (c === 51) || (c === 53)) ? (ms_lo = -400; ms_hi = 400;) :
     (ms_lo = ms_hi = 0;);
     ms_hi > ms_lo;
 );
 function ms_DDef(c) ( (c === 4) ? 8 : (c === 8) ? 15 : ((c === 6) || (c === 11) || (c === 43)) ? 1 : (c === 17) ? 80 : (c === 19) ? 2 :
-    (c === 20) ? 4 : (c === 30) ? 10 : (c === 32) ? 20 : (c === 35) ? 60 : 0; );
+    (c === 20) ? 4 : (c === 30) ? 10 : (c === 32) ? 20 : (c === 35) ? 60 : ((c === 49) || (c === 51) || (c === 53)) ? 100 : 0; );
 // the cells dragged continuously, logarithmic (the others : integers)
 function ms_DLog(c) ( (c === 6) || (c === 11) || (c === 17) || (c === 19) || (c === 20) || (c === 30) || (c === 32) || (c === 43); );
 MS_MVW = 10;
@@ -2431,6 +2736,62 @@ ms_MVSet(40, "-50 %|-25 %|-10 %|0 %|10 %|25 %|50 %", 7, -50, -25, -10, 0, 10, 25
 ms_MVSet(41, "-50 %|-25 %|-10 %|0 %|10 %|25 %|50 %", 7, -50, -25, -10, 0, 10, 25, 50, 0, 0, 0);
 ms_MVSet(42, "-135|-90|-45|-15|0|15|45|90|135|180", 10, -135, -90, -45, -15, 0, 15, 45, 90, 135, 180);
 ms_MVSet(43, "0.25|0.5|0.75|0.9|1|1.1|1.25|1.5|2|4", 10, 0.25, 0.5, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 2, 4);
+ms_MVSet(49, "-2|-1|-0.5|-0.25|0|0.25|0.5|1|2|4", 10, -200, -100, -50, -25, 0, 25, 50, 100, 200, 400);
+ms_MVSet(51, "-2|-1|-0.5|-0.25|0|0.25|0.5|1|2|4", 10, -200, -100, -50, -25, 0, 25, 50, 100, 200, 400);
+ms_MVSet(53, "-1|-0.5|-0.25|-0.1|0|0.1|0.25|0.5|1", 9, -100, -50, -25, -10, 0, 10, 25, 50, 100, 0);
+// (2026-11-24, step 3) the cycles of the modulators (s ; 0 : Path)
+MS_NCY = 11;
+ms_cyV = make_array(MS_NCY);
+ms_cyV[0] = 0; ms_cyV[1] = 0.5; ms_cyV[2] = 1; ms_cyV[3] = 2; ms_cyV[4] = 4; ms_cyV[5] = 8; ms_cyV[6] = 15; ms_cyV[7] = 30;
+ms_cyV[8] = 60; ms_cyV[9] = 120; ms_cyV[10] = 300;
+// The label of the modulator j (0 Rot, 1 Speed, 2 Mix) of the entry e into str : its curve, its cycle
+function ms_ModLbl(str, e, j) local(k, cy)
+(
+    k = ms_S(e, ms_sMod + 3 * j) - 1; cy = ms_S(e, ms_sMod + 3 * j + 1);
+    (k < 0) ? sprintf(str, "%s ~ off", (j === 0) ? "Rot" : (j === 1) ? "Speed" : "Mix") : (
+        crv_Name(#ms_t2, k);
+        (strlen(crv_nm[k]) > 0) ? strcpy(#ms_t4, #ms_t2) : sprintf(#ms_t4, "C%s", #ms_t2);
+        (cy > 0) ? sprintf(str, "%s ~ %s / %.3g s", (j === 0) ? "Rot" : (j === 1) ? "Speed" : "Mix", #ms_t4, cy) :
+            sprintf(str, "%s ~ %s / path", (j === 0) ? "Rot" : (j === 1) ? "Speed" : "Mix", #ms_t4);
+        !crv_Ex(k) ? strcat(str, " (none)");
+    );
+    str;
+);
+// The cell of the curve of the modulator j of the entry e clicked : left, the next curve that exists, or off (Shift : the
+// previous one) ; right, the menu (off, the curves, the cycle)
+function ms_ModCell(e, j, rc, sh) local(q, k, m, i, cy)
+(
+    q = ms_sMod + 3 * j; k = ms_S(e, q) - 1; cy = ms_S(e, q + 1);
+    rc ? (
+        sprintf(#ms_mnu, "#%s modulated by a curve (MS%d)|%sOff", (j === 0) ? "The rotation of the brush" : (j === 1) ? "The speed of the motion" : "The mix",
+            e + 1, (k < 0) ? "!" : "");
+        crv_MenuAdd(#ms_mnu, "Curves", k, 0);
+        strcat(#ms_mnu, "||>Cycle");
+        i = 0;
+        loop(MS_NCY,
+            (i === 0) ? strcpy(#ms_t3, "Path (the place of the brush)") : sprintf(#ms_t3, "%.3g s", ms_cyV[i]);
+            sprintf(#ms_it, "|%s%s%s", (i === MS_NCY - 1) ? "<" : "", (abs(cy - ms_cyV[i]) < 0.001) ? "!" : "", #ms_t3);
+            strcat(#ms_mnu, #ms_it);
+            i += 1;
+        );
+        gfx_x = mouse_x; gfx_y = mouse_y;
+        m = gfx_showmenu(#ms_mnu); uix_menu_end(m > 0);
+        (m === 2) ? ms_SSet(e, q, 0) :
+        ((m >= 3) && (m < 3 + CRV_MX)) ? ms_SSet(e, q, m - 2) :
+        ((m >= 3 + CRV_MX) && (m < 3 + CRV_MX + MS_NCY)) ? ms_SSet(e, q + 1, ms_cyV[m - 3 - CRV_MX]);
+    ) : (
+        // the next curve that exists after k (Shift : before), then off
+        i = 0; m = -2;
+        while ((m === -2) && (i < CRV_MX + 1)) (
+            k = sh ? ((k < 0) ? CRV_MX - 1 : k - 1) : ((k >= CRV_MX - 1) ? -1 : k + 1);
+            ((k < 0) || crv_Ex(k)) ? (m = k);
+            i += 1;
+        );
+        ms_SSet(e, q, max(-1, m) + 1);
+    );
+    // (a curve chosen with a depth 0, an entry saved before : 1)
+    ((ms_S(e, q) > 0) && (ms_S(e, q + 2) === 0)) ? ms_SSet(e, q + 2, 1);
+);
 // the menu of the values of the cell c : the value chosen set
 function ms_ValMenu(v, e, c) local(m, k, x, q)
 (
@@ -2586,17 +2947,21 @@ function ms_PadCell(v, c, ev) local(vw, e, b, s, rc, sh, m, k, i, p)
     (c === 31) ? (
         // the dynamics of the motion (as the views Space : the curve, its mode) : left, the next curve (Shift : the previous
         // one) ; right, the menu
+        // (2026-11-24, step 3 : and the curves of the module Curves, CRV_DYN + k : the place on the path along the time)
         rc ? (
             strcpy(#ms_mnu, "#The dynamics of the motion");
             k = 0; loop(s3d_EaseCount, sx_Nth(s3d_EaseNames, k, #ms_t3); sprintf(#ms_it, "|%s%s", (k === ms_S(e, ms_sCurve)) ? "!" : "", #ms_t3); strcat(#ms_mnu, #ms_it); k += 1;);
+            strcat(#ms_mnu, "|");
+            crv_MenuAdd(#ms_mnu, "Curves", ms_S(e, ms_sCurve) - CRV_DYN, 0);
             strcat(#ms_mnu, "||>Mode");
             k = 0; loop(4, sx_Nth(s3d_EaseModes, k, #ms_t3); sprintf(#ms_it, "|%s%s%s", (k === 3) ? "<" : "", (k === ms_S(e, ms_sDMode)) ? "!" : "", #ms_t3); strcat(#ms_mnu, #ms_it); k += 1;);
             gfx_x = mouse_x; gfx_y = mouse_y;
             m = gfx_showmenu(#ms_mnu); uix_menu_end(m > 0);
             ((m >= 2) && (m < 2 + s3d_EaseCount)) ? ms_SSet(e, ms_sCurve, m - 2) :
-            ((m >= 2 + s3d_EaseCount) && (m < 6 + s3d_EaseCount)) ? ms_SSet(e, ms_sDMode, m - 2 - s3d_EaseCount);
+            ((m >= 2 + s3d_EaseCount) && (m < 2 + s3d_EaseCount + CRV_MX)) ? ms_SSet(e, ms_sCurve, CRV_DYN + m - 2 - s3d_EaseCount) :
+            ((m >= 2 + s3d_EaseCount + CRV_MX) && (m < 6 + s3d_EaseCount + CRV_MX)) ? ms_SSet(e, ms_sDMode, m - 2 - s3d_EaseCount - CRV_MX);
         ) : (
-            ms_SSet(e, ms_sCurve, (ms_S(e, ms_sCurve) + (sh ? s3d_EaseCount - 1 : 1)) % s3d_EaseCount);
+            ms_SSet(e, ms_sCurve, crv_DynNext(ms_S(e, ms_sCurve), sh ? -1 : 1, s3d_EaseCount));
         );
     ) :
     (c === 33) ? (
@@ -2623,7 +2988,15 @@ function ms_PadCell(v, c, ev) local(vw, e, b, s, rc, sh, m, k, i, p)
     ) :
     (c === 38) ? (
         // (2026-11-24) the motion from the start of the path (both clics ; Loop reverse : from its end)
-        ms_mx[v] = 0; ms_mlp[v] = -1;
+        ms_mx[v] = 0; ms_mlp[v] = -1; memset(ms_mph + 3 * v, 0, 3); // (2026-11-24 : the phases of the modulators too)
+    ) :
+    ((c === 48) || (c === 50) || (c === 52)) ? (
+        // (2026-11-24, step 3) the curve and the cycle of a modulator (Rot, Speed, Mix)
+        ms_ModCell(e, (c - 48) / 2, rc, sh);
+    ) :
+    ((c === 49) || (c === 51) || (c === 53)) ? (
+        // the depth of a modulator : left, a drag (Shift : 1) ; right, its menu
+        rc ? ms_ValMenu(v, e, c) : sh ? ms_DSet(v, e, c, 100);
     ) :
     (c === 44) ? (
         // (2026-11-23, the user) the placement of the whole path, or (2026-11-24) of the trajectory placed : a menu on both clics
@@ -2702,6 +3075,9 @@ function ms_PadCell(v, c, ev) local(vw, e, b, s, rc, sh, m, k, i, p)
         sprintf(#ms_it, "||%sRemove the configuration selected|%sRemove all the configurations|Clear (configurations, name, settings)",
             ((i >= 0) && (i < b[ms_eN])) ? "" : "#", (b[ms_eN] > 0) ? "" : "#");
         strcat(#ms_mnu, #ms_it);
+        // (2026-11-24, step 4) the exports (mSL settings)
+        sprintf(#ms_it, "||Export : MS%d (mSL settings, with its curves and its trajectories)|Export : all the MetaSurfaces used (mSL settings)", e + 1);
+        strcat(#ms_mnu, #ms_it);
         gfx_x = mouse_x; gfx_y = mouse_y;
         m = gfx_showmenu(#ms_mnu);
         prv_MenuEnd(m > 0);
@@ -2712,7 +3088,9 @@ function ms_PadCell(v, c, ev) local(vw, e, b, s, rc, sh, m, k, i, p)
         ) :
         (m === 3 + MS_NLIB) ? (ms_Del(e, i); vw[ms_vSel] = -1;) :
         (m === 4 + MS_NLIB) ? (memset(ms_C(e, 0), 0, 4 * MS_MAXC); b[ms_eN] = 0; ms_seq[e] += 1; vw[ms_vSel] = -1;) :
-        (m === 5 + MS_NLIB) ? (ms_Clear(e); vw[ms_vSel] = -1;);
+        (m === 5 + MS_NLIB) ? (ms_Clear(e); vw[ms_vSel] = -1;) :
+        (m === 6 + MS_NLIB) ? ms_Export(e) :
+        (m === 7 + MS_NLIB) ? ms_Export(-1);
     );
     ui_GFXdoNow |= 4;
 );
@@ -2722,7 +3100,8 @@ function ms_Drag(blockId, v, c) local(e, i, d)
     e = ms_VGet(v, ms_vE); i = ms_VGet(v, ms_vSel);
     (ui_jdrag_can_start() && ms_DRange(c) && ((c !== 6) || ((i >= 0) && (i < ms_N(e))))) ? (
         // (the weight, Stretch, Latency, Attack, Release : continuous, logarithmic ; the others : integers, see ms_DV)
-        ui_jdrag_start(blockId + 0.25, c, ms_DV(v, e, c), ms_lo, ms_hi, (c === 13) ? 600 : ((c === 14) || (c === 42)) ? 72000 : 300,
+        ui_jdrag_start(blockId + 0.25, c, ms_DV(v, e, c), ms_lo, ms_hi, ((c === 13) || (c === 49) || (c === 51) || (c === 53)) ? 600 :
+            ((c === 14) || (c === 42)) ? 72000 : 300,
             ms_DLog(c) ? 1 : 2); // (the angles : 1 degree per pixel)
     );
     d = ui_jdrag(blockId + 0.25);
@@ -2736,13 +3115,16 @@ function show_MetaSurface_Pad(blockId, v) local(h1, hv, hneed, zzmi, zz, c, dr, 
     ms_Prompted();
     vw = ms_vw + v * MS_VS; e = vw[ms_vE]; b = ms_E(e); s = b + ms_eSet; n = b[ms_eN];
     (vw[ms_vSel] >= n) ? vw[ms_vSel] = -1;
-    h1 = uix_jpadHeight(6);
+    h1 = uix_jpadHeight(7); // (2026-11-24 : 7 lines)
     hv = max(160, min(ui_width() * 0.62, ui_height() - h1 - ui_jd_ctgr - 8));
     hneed = h1 + hv + ui_jd_ctgr + 8;
     (ui_height() >= hneed) ? (
         ui_split_top(hneed);
             zzmi = ui_hover();
             keepBlockInfos(blockId);
+            ms_mr[4 * v] = ui_left_retina(); ms_mr[4 * v + 1] = ui_top_retina();
+            ms_mr[4 * v + 2] = ui_width_retina(); ms_mr[4 * v + 3] = ui_height_retina();
+            ms_mf[v] = gfx_executed;
             (zzmi) ? (
                 ui_push();
                     ui_color(Col_Frame);
@@ -2776,7 +3158,7 @@ function show_MetaSurface_Pad(blockId, v) local(h1, hv, hneed, zzmi, zz, c, dr, 
                 (s[ms_sShape] === 2) ? strcpy(pad_MSV_Labs[10], "Shape : cross") : sprintf(pad_MSV_Labs[10], "Shape %.2f", s[ms_sShape]);
                 sprintf(pad_MSV_Labs[11], "Stretch %.2f", s[ms_sStretch]);
                 sprintf(pad_MSV_Labs[12], "Offset %d %%", floor(100 * s[ms_sOffset] + 0.5));
-                (s[ms_sRot] !== 0) ? sprintf(pad_MSV_Labs[13], "Rotation %.2f t/s", s[ms_sRot]) :
+                (s[ms_sRot] !== 0) ? sprintf(pad_MSV_Labs[13], ms_ModOn(e, 0) ? "Rotation %.2f t/s ~" : "Rotation %.2f t/s", s[ms_sRot]) :
                 (s[ms_sRotMem] !== 0) ? sprintf(pad_MSV_Labs[13], "Rotation : off (%.2f)", s[ms_sRotMem]) :
                     strcpy(pad_MSV_Labs[13], "Rotation : off");
                 sprintf(pad_MSV_Labs[14], "Angle %d deg", floor(s[ms_sAngle] + 0.5));
@@ -2804,13 +3186,19 @@ function show_MetaSurface_Pad(blockId, v) local(h1, hv, hneed, zzmi, zz, c, dr, 
                 );
                 strcpy(#ms_t3, (s[ms_sTrN] === 3) ? "ABC" : (s[ms_sTrN] === 4) ? "ABCD" : "AB");
                 sprintf(pad_MSV_Labs[29], "Mix %d %% %s", floor(100 * s[ms_sMix] + 0.5), #ms_t3);
+                // (2026-11-24, step 3) modulated : the mix now
+                ms_ModOn(e, 2) ? (sprintf(#ms_t2, " ~%d", floor(100 * max(0, min(1, s[ms_sMix] + ms_ModV(v, e, 2))) + 0.5)); strcat(pad_MSV_Labs[29], #ms_t2););
                 ms_glOn[v] ? sprintf(pad_MSV_Labs[30], "Gliding %d %%", floor(100 * max(0, min(1, (time_precise() - ms_glT0[v]) / max(0.001, ms_glDur[v]))) + 0.5)) :
                     sprintf(pad_MSV_Labs[30], s[ms_sGMode] ? "Glide %.3g s" : "Glide %.3g s off", s[ms_sGlide]);
-                sx_Nth(s3d_EaseNames, max(0, min(s3d_EaseCount - 1, s[ms_sCurve])), #ms_t3);
+                // (2026-11-24, step 3 : a curve of the module Curves ; its mode shown when it is not "in")
+                !crv_DynName(#ms_t3, s[ms_sCurve]) ? sx_Nth(s3d_EaseNames, max(0, min(s3d_EaseCount - 1, s[ms_sCurve])), #ms_t3);
                 sx_Nth(s3d_EaseModes, max(0, min(3, s[ms_sDMode])), #ms_t2);
-                (s[ms_sCurve] === 0) ? strcpy(pad_MSV_Labs[31], "Dyn : linear") : sprintf(pad_MSV_Labs[31], "Dyn : %s %s", #ms_t3, #ms_t2);
+                (s[ms_sCurve] === 0) ? strcpy(pad_MSV_Labs[31], "Dyn : linear") :
+                ((s[ms_sCurve] >= CRV_DYN) && (s[ms_sDMode] === 0)) ? sprintf(pad_MSV_Labs[31], "Dyn : %s", #ms_t3) :
+                    sprintf(pad_MSV_Labs[31], "Dyn : %s %s", #ms_t3, #ms_t2);
                 // line 5 : the motion
                 (s[ms_sDur] >= 60) ? sprintf(pad_MSV_Labs[32], "Duration %.1f min", s[ms_sDur] / 60) : sprintf(pad_MSV_Labs[32], "Duration %.1f s", s[ms_sDur]);
+                ms_ModOn(e, 1) ? strcat(pad_MSV_Labs[32], " ~"); // (2026-11-24 : the speed modulated)
                 strcpy(pad_MSV_Labs[33], (s[ms_sLoop] === 0) ? "Once" : (s[ms_sLoop] === 1) ? "Loop" : (s[ms_sLoop] === 3) ? "Loop reverse" : "Back and forth");
                 strcpy(pad_MSV_Labs[34], s[ms_sSpeedM] ? "Speed : points" : "Speed : path");
                 sprintf(pad_MSV_Labs[35], "Radius %d %%", floor(100 * s[ms_sRad] + 0.5));
@@ -2840,6 +3228,16 @@ function show_MetaSurface_Pad(blockId, v) local(h1, hv, hneed, zzmi, zz, c, dr, 
                 (ms_plc[v] < 0) ? strcpy(pad_MSV_Labs[45], "Place : path") : sprintf(pad_MSV_Labs[45], "Placing %c", 'A' + ms_plc[v]);
                 i = 40; loop(6, pad_MSV_Colrs[i] = Col_P1; i += 1;);
                 (ms_plc[v] >= 0) ? (pad_MSV_Colrs[45] = Color_Goldenrod);
+                // line 7 (2026-11-24, step 3) : the modulators, their curve and cycle, their depth
+                i = 0;
+                loop(3,
+                    ms_ModLbl(pad_MSV_Labs[48 + 2 * i], e, i);
+                    sprintf(pad_MSV_Labs[49 + 2 * i], (s[ms_sMod + 3 * i + 2] > 0) ? "%s depth +%.2f" : "%s depth %.2f",
+                        (i === 0) ? "Rot" : (i === 1) ? "Speed" : "Mix", s[ms_sMod + 3 * i + 2]);
+                    pad_MSV_Colrs[48 + 2 * i] = Col_P1;
+                    pad_MSV_Colrs[49 + 2 * i] = ms_ModOn(e, i) ? Col_P1 : Col_Inactive;
+                    i += 1;
+                );
                 i = vw[ms_vSel]; // (the selection, again)
                 pad_MSV_Colrs[0] = pad_MSV_Colrs[1] = pad_MSV_Colrs[3] = pad_MSV_Colrs[4] = Col_P1;
                 pad_MSV_Colrs[2] = Col_InfoA;
@@ -2852,7 +3250,8 @@ function show_MetaSurface_Pad(blockId, v) local(h1, hv, hneed, zzmi, zz, c, dr, 
                 // (2026-11-24) line 4 : Brush, A ... D (Choice), Mix, Glide (Value), Dyn (Choice) ; line 5 : Duration (Value), the
                 // mode, Speed (Choice), Radius (Value), Simulate, Record (Choice), Restart (Action), the counter ; line 6 : x, y,
                 // turn, scale (Value), Placement (Action), Place (Choice)
-                ui_jpad_roles_set(pad_MSV, 0, "ncicvcvavvvvvvvcvvcvvcc.cccccvvcvccvccasvvvvac..");
+                // (2026-11-24) line 7 : the curve of each modulator (Choice), its depth (Value)
+                ui_jpad_roles_set(pad_MSV, 0, "ncicvcvavvvvvvvcvvcvvcc.cccccvvcvccvccasvvvvac..cvcvcv..");
                 d3_Pad_Modes(pad_MSV, pad_MSV_Labs, pad_MSV_Colrs, MS_PSIZ);
                 ui_jpad_mark(pad_MSV, 1, vw[ms_vMode], 0);
                 ui_jpad_mark(pad_MSV, 15, vw[ms_vMode] ? !ms_att[v] : vw[ms_vBrush], 0); // (Play : held lit ; Edit : shown lit)
@@ -2864,6 +3263,7 @@ function show_MetaSurface_Pad(blockId, v) local(h1, hv, hneed, zzmi, zz, c, dr, 
                 ui_jpad_mark(pad_MSV, 36, ms_msim[v], !vw[ms_vMode] || !s[ms_sPath]); // (simulated : lit)
                 ui_jpad_mark(pad_MSV, 37, ms_rec[v], !ms_rec[v] && (!vw[ms_vMode] || s[ms_sPath])); // (recording : lit)
                 ui_jpad_mark(pad_MSV, 39, ms_mv[v], !ms_mv[v]);
+                i = 0; loop(3, ui_jpad_mark(pad_MSV, 48 + 2 * i, ms_ModOn(e, i), 0); ui_jpad_mark(pad_MSV, 49 + 2 * i, 0, !ms_ModOn(e, i)); i += 1;);
                 i = 0; loop(4, (ms_plc[v] === i) ? (ui_jpad_role(pad_MSV, 25 + i, ui_jpad_rl_alert); ui_jpad_mark(pad_MSV, 25 + i, 0, 0);); i += 1;);
                 zz = control_jpad(pad_MSV);
                 c = ui_jpad_cell_at();
