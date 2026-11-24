@@ -32,6 +32,15 @@ tr_sel = 0;                 // the trajectory selected (0 ...)
 tr_pend = -1;               // the trajectory being renamed (tr_Prompt), -1 : none
 tr_buf = make_array(ED_MAXP * 3 + 6);   // a trajectory resampled for an editor (tr_ToEdit)
 strcpy(#tr_prm, ""); strcpy(#tr_nm, ""); strcpy(#tr_txt, ""); strcpy(#tr_t2, ""); strcpy(#tr_mnu, "");
+// (2026-11-24, the user : a recorded path smoothed, resampled) the transforms of a trajectory of the library (tr_Smooth,
+// tr_Resample ; the menu tr_TfMenu, tr_TfDo) : the work areas (the points, the lengths along the path, the density
+// integrated), one level of Undo (the trajectory tr_ukI before the last transform : its count, closed, its points), the
+// depth of the density of a curve (2^tr_rdep at its top, 2^-tr_rdep at its bottom ; 1 ... 4), the codes of the items of
+// the menu (tr_tfm, by their numbers)
+tr_wk = make_array(SP_MAXTRJ * 3); tr_ld = make_array(SP_MAXTRJ + 2); TR_GK = 1024; tr_gd = make_array(TR_GK + 1);
+tr_ukI = -1; tr_ukN = tr_ukC = 0; tr_ukP = make_array(SP_MAXTRJ * 3);
+tr_rdep = 2;
+tr_tfm = make_array(512);
 
 // The pad : 16 lines of 8 cells, one per trajectory
 pad_TRJ_NL = SP_NTRJ / 8;
@@ -226,6 +235,157 @@ local(n, k, q, c)
     );
 );
 
+// (2026-11-24) The trajectory i kept for the Undo of a transform ; the Undo (again : Redo)
+function tr_TfKeep(i) ( tr_ukI = i; tr_ukN = sp_trN[i]; tr_ukC = sp_trC[i]; memcpy(tr_ukP, sp_trP + i * SP_MAXTRJ * 3, 3 * tr_ukN); );
+function tr_TfUndo() local(i, n, c)
+(
+    i = tr_ukI;
+    (i >= 0) ? (
+        n = sp_trN[i]; c = sp_trC[i];
+        memcpy(tr_wk, sp_trP + i * SP_MAXTRJ * 3, 3 * n);
+        memcpy(sp_trP + i * SP_MAXTRJ * 3, tr_ukP, 3 * tr_ukN); sp_trN[i] = tr_ukN; sp_trC[i] = tr_ukC;
+        memcpy(tr_ukP, tr_wk, 3 * n); tr_ukN = n; tr_ukC = c;
+        sp_libSeq += 1;
+    );
+);
+// The trajectory i smoothed (Taubin : passes of a step towards the mean of the two neighbours, then a step back a little
+// larger : no shrinking ; open, its ends stay) ; with Undo
+function tr_Smooth(i, passes) local(n, cl, q, j, a, b, f, c, h)
+(
+    n = sp_trN[i]; cl = sp_trC[i]; q = sp_trP + i * SP_MAXTRJ * 3;
+    (n >= 3) ? (
+        tr_TfKeep(i);
+        loop(passes,
+            h = 0;
+            loop(2,
+                f = (h === 0) ? 0.5 : -0.53;
+                j = 0;
+                loop(n,
+                    (!cl && ((j === 0) || (j === n - 1))) ? (
+                        tr_wk[3 * j] = q[3 * j]; tr_wk[3 * j + 1] = q[3 * j + 1]; tr_wk[3 * j + 2] = q[3 * j + 2];
+                    ) : (
+                        a = (j + n - 1) % n; b = (j + 1) % n;
+                        c = 0; loop(3, tr_wk[3 * j + c] = q[3 * j + c] + f * ((q[3 * a + c] + q[3 * b + c]) / 2 - q[3 * j + c]); c += 1;);
+                    );
+                    j += 1;
+                );
+                memcpy(q, tr_wk, 3 * n);
+                h += 1;
+            );
+        );
+        sp_libSeq += 1;
+    );
+);
+// The trajectory i resampled into n2 points (closed : its last point is not the first one again), at equal parts of the
+// density integrated along its length : k < 0, the density 1 (equal distances between the points) ; else 2^(dep F(s)),
+// F the curve k (mSL_Curves, crv_F), s the part of the length (a curve high : the points closer, the brush slower when the
+// path is followed with the same time between its points ; low : farther, faster ; flat : equal distances) ; with Undo
+function tr_Resample(i, n2, k, dep) local(n, cl, q, m, j, L, t, u, s, g, lo, hi, f, a, b, c, d)
+(
+    n = sp_trN[i]; cl = sp_trC[i]; q = sp_trP + i * SP_MAXTRJ * 3;
+    n2 = max(2, min(SP_MAXTRJ, n2|0));
+    (n >= 2) ? (
+        memcpy(tr_wk, q, 3 * n);
+        // the lengths from the start (closed : the segment back to the first point)
+        m = n + (cl ? 1 : 0);
+        tr_ld[0] = 0;
+        j = 1;
+        loop(m - 1,
+            a = 3 * (j - 1); b = 3 * (j % n);
+            tr_ld[j] = tr_ld[j - 1] + sqrt(sqr(tr_wk[b] - tr_wk[a]) + sqr(tr_wk[b + 1] - tr_wk[a + 1]) + sqr(tr_wk[b + 2] - tr_wk[a + 2]));
+            j += 1;
+        );
+        L = tr_ld[m - 1];
+        (L > 0) ? (
+            tr_TfKeep(i);
+            // the density integrated (TR_GK steps)
+            tr_gd[0] = 0;
+            j = 1; loop(TR_GK, d = (k >= 0) ? 2 ^ (dep * crv_F(k, (j - 0.5) / TR_GK)) : 1; tr_gd[j] = tr_gd[j - 1] + d; j += 1;);
+            j = 0; lo = 0; hi = 0;
+            loop(n2,
+                // the part s of the length where the density integrated is the part j of its total
+                t = tr_gd[TR_GK] * j / (cl ? n2 : n2 - 1);
+                while ((lo < TR_GK - 1) && (tr_gd[lo + 1] < t)) (lo += 1;);
+                g = tr_gd[lo + 1] - tr_gd[lo]; f = (g > 0) ? max(0, min(1, (t - tr_gd[lo]) / g)) : 0;
+                s = max(0, min(1, (lo + f) / TR_GK));
+                // the point at the length u (the lengths increase : the search goes on from the segment before)
+                u = s * L;
+                while ((hi < m - 2) && (tr_ld[hi + 1] < u)) (hi += 1;);
+                a = 3 * hi; b = 3 * ((hi + 1) % n);
+                g = tr_ld[hi + 1] - tr_ld[hi]; f = (g > 0) ? max(0, min(1, (u - tr_ld[hi]) / g)) : 0;
+                c = 0; loop(3, q[3 * j + c] = tr_wk[a + c] + f * (tr_wk[b + c] - tr_wk[a + c]); c += 1;);
+                j += 1;
+            );
+            sp_trN[i] = n2;
+            sp_libSeq += 1;
+        );
+    );
+);
+// The items of the transforms of the trajectory i added to the menu str (nb : the items before ; tr_tfm : the code of each
+// item added, by its number : 1 ... 3 smooth, 10 ... 13 equal distances, 100 + k the density of the curve k, 200 + d the
+// depth, 300 Undo) ; returns the count of items added
+function tr_TfMenu(str, nb, i) local(c, k, n, b)
+(
+    c = 0; n = sp_trN[i];
+    (n >= 2) ? (
+        sprintf(#tr_t2, "|>Transform T%d (%d points)|Smooth : light|Smooth : medium|Smooth : strong", i + 1, n); strcat(str, #tr_t2);
+        k = 1; loop(3, tr_tfm[nb + c + 1] = k; c += 1; k += 1;);
+        sprintf(#tr_t2, "||Resample : equal distances (%d points)|Resample : equal distances, 128 points|Resample : equal distances, 256 points|Resample : equal distances, 512 points", n);
+        strcat(str, #tr_t2);
+        k = 10; loop(4, tr_tfm[nb + c + 1] = k; c += 1; k += 1;);
+        strcat(str, "||>Resample : the density of a curve (high : the points closer, slower ; low : faster)");
+        k = 0;
+        loop(CRV_MX,
+            b = crv_B(k);
+            crv_Ex(k) ? (
+                (strlen(crv_nm[k]) > 0) ? sprintf(#tr_nm, "%d  %s  (%s)", k + 1, crv_nm[k], crv_tyN[b[crv_fT]]) : sprintf(#tr_nm, "%d  (%s)", k + 1, crv_tyN[b[crv_fT]]);
+            ) : (
+                sprintf(#tr_nm, "#%d  -", k + 1);
+            );
+            sprintf(#tr_t2, "|%s%s", (k === CRV_MX - 1) ? "<" : "", #tr_nm); strcat(str, #tr_t2);
+            tr_tfm[nb + c + 1] = 100 + k; c += 1;
+            k += 1;
+        );
+        sprintf(#tr_t2, "|>Depth of the curve (the density at its top)|%sx 2|%sx 4|%sx 8|<%sx 16",
+            (tr_rdep === 1) ? "!" : "", (tr_rdep === 2) ? "!" : "", (tr_rdep === 3) ? "!" : "", (tr_rdep === 4) ? "!" : "");
+        strcat(str, #tr_t2);
+        k = 1; loop(4, tr_tfm[nb + c + 1] = 200 + k; c += 1; k += 1;);
+        sprintf(#tr_t2, "||<%sUndo the last transform", (tr_ukI === i) ? "" : "#"); strcat(str, #tr_t2);
+        tr_tfm[nb + c + 1] = 300; c += 1;
+    );
+    c;
+);
+// The transform of the code cd on the trajectory i (see tr_TfMenu) ; returns 1 when it was resampled (the time between its
+// points now says its speed)
+function tr_TfDo(i, cd) local(r, n)
+(
+    r = 0; n = sp_trN[i];
+    ((cd >= 1) && (cd <= 3)) ? (
+        tr_Smooth(i, (cd === 1) ? 3 : (cd === 2) ? 10 : 30);
+        sprintf(#tr_w, "Trajectories : T%d smoothed (%s)", i + 1, (cd === 1) ? "light" : (cd === 2) ? "medium" : "strong");
+    ) :
+    ((cd >= 10) && (cd <= 13)) ? (
+        tr_Resample(i, (cd === 10) ? n : (cd === 11) ? 128 : (cd === 12) ? 256 : 512, -1, 0); r = 1;
+        sprintf(#tr_w, "Trajectories : T%d resampled, %d points at equal distances", i + 1, sp_trN[i]);
+    ) :
+    ((cd >= 100) && (cd < 100 + CRV_MX)) ? (
+        tr_Resample(i, max(512, n), cd - 100, tr_rdep); r = 1;
+        sprintf(#tr_w, "Trajectories : T%d resampled, %d points, the density of the curve %d (x %d at its top)", i + 1, sp_trN[i], cd - 99, 2 ^ tr_rdep);
+    ) :
+    ((cd >= 201) && (cd <= 204)) ? (
+        tr_rdep = cd - 200;
+        sprintf(#tr_w, "Trajectories : the depth of the density of a curve : x %d", 2 ^ tr_rdep);
+    ) :
+    (cd === 300) ? (
+        tr_TfUndo();
+        sprintf(#tr_w, "Trajectories : T%d, the last transform undone (again : redone)", i + 1);
+    ) : (
+        strcpy(#tr_w, "");
+    );
+    (strlen(#tr_w) > 0) ? mSL_log(SysLogBox, #tr_w);
+    r;
+);
+
 // The menu of the trajectory i
 function tr_Menu(i)
 local(n, e, m, p, st)
@@ -261,6 +421,8 @@ local(n, e, m, p, st)
     sprintf(#tr_t2, "||%sExport : trajectory of GRM Spaces (.xml)|%sExport : configuration (.mSL, trajectory %d ...)",
         (n > 0) ? "" : "#", (n > 0) ? "" : "#", i + 1);
     strcat(#tr_mnu, #tr_t2);
+    // (2026-11-24) the transforms : smooth, resample (items 17 ...)
+    (n >= 2) ? (strcat(#tr_mnu, "|"); tr_TfMenu(#tr_mnu, 16, i););
     gfx_x = mouse_x; gfx_y = mouse_y;
     m = gfx_showmenu(#tr_mnu);
     prv_MenuEnd(m > 0);
@@ -279,7 +441,8 @@ local(n, e, m, p, st)
         mSL_log(SysLogBox, #tr_w);
     ) :
     (m === 15) ? tr_Export(i, 0) :
-    (m === 16) ? tr_Export(i, 1);
+    (m === 16) ? tr_Export(i, 1) :
+    ((m > 16) && (n >= 2)) ? tr_TfDo(i, tr_tfm[m]);
 );
 
 /*

@@ -62,26 +62,19 @@ Pour chaque plugin, les touches testées par le code `@gfx`, par niveau dans l'o
 
 ### Diffusion-3
 
-**Commandes masquées au-dessus de certains modules (le module, qui passe avant, utilise la même touche : c'est la règle, mais à éviter pour les commandes importantes)** (18)
+**Commandes masquées au-dessus de certains modules (le module, qui passe avant, utilise la même touche : c'est la règle, mais à éviter pour les commandes importantes)** (11)
 
-- `S` : commandes de Diffusion-3 (Diffusion-3.jsfx-inc:5856), pas au-dessus de : ?
 - `Shift+Down` : largeur des colonnes (mSL_Panes.jsfx-inc:918), pas au-dessus de : mémoire (débogueur)
 - `Shift+Left` : largeur des colonnes (mSL_Panes.jsfx-inc:887), pas au-dessus de : mémoire (débogueur)
 - `Shift+Right` : largeur des colonnes (mSL_Panes.jsfx-inc:859), pas au-dessus de : mémoire (débogueur)
-- `Shift+Tab` : onglet suivant / précédent (ui-lib-JJ-GUI.jsfx-inc:680), pas au-dessus de : ?
 - `Shift+Up` : largeur des colonnes (mSL_Panes.jsfx-inc:918), pas au-dessus de : mémoire (débogueur)
-- `Tab` : onglet suivant / précédent (ui-lib-JJ-GUI.jsfx-inc:681), pas au-dessus de : ?
-- `a` : écran Live : commandes (Diffusion-3.jsfx-inc:5780), pas au-dessus de : écran Live : boîte sous la souris
-- `c` : commandes système (mSL_System_Keys.jsfx-inc:28), pas au-dessus de : ?, mémoire (débogueur)
-- `g` : commandes système (mSL_System_Keys.jsfx-inc:24), pas au-dessus de : ?, mémoire (débogueur)
-- `k` : commandes système (mSL_System_Keys.jsfx-inc:25), pas au-dessus de : ?, log système, mémoire (débogueur)
-- `l` : commandes système (mSL_System_Keys.jsfx-inc:29), pas au-dessus de : ?, log système, mémoire (débogueur)
-- `m` : commandes système (mSL_System_Keys.jsfx-inc:26), pas au-dessus de : ?, Edit A ... D (éditeurs de points), log système, mémoire (débogueur)
-- `n` : commandes système (mSL_System_Keys.jsfx-inc:27), pas au-dessus de : ?
-- `o` : commandes système (mSL_System_Keys.jsfx-inc:36), pas au-dessus de : ?
-- `r` : commandes système (mSL_System_Keys.jsfx-inc:30), pas au-dessus de : ?
-- `s` : commandes système (mSL_System_Keys.jsfx-inc:37), pas au-dessus de : ?
-- `t` : commandes système (mSL_System_Keys.jsfx-inc:35), pas au-dessus de : ?, log système
+- `a` : écran Live : commandes (Diffusion-3.jsfx-inc:5794), pas au-dessus de : écran Live : boîte sous la souris
+- `c` : commandes système (mSL_System_Keys.jsfx-inc:28), pas au-dessus de : mémoire (débogueur)
+- `g` : commandes système (mSL_System_Keys.jsfx-inc:24), pas au-dessus de : mémoire (débogueur)
+- `k` : commandes système (mSL_System_Keys.jsfx-inc:25), pas au-dessus de : log système, mémoire (débogueur)
+- `l` : commandes système (mSL_System_Keys.jsfx-inc:29), pas au-dessus de : log système, mémoire (débogueur)
+- `m` : commandes système (mSL_System_Keys.jsfx-inc:26), pas au-dessus de : Edit A ... D (éditeurs de points), log système, mémoire (débogueur)
+- `t` : commandes système (mSL_System_Keys.jsfx-inc:35), pas au-dessus de : log système
 
 ### Interstys
 
@@ -582,7 +575,6 @@ Ordre : Cmd + - + = 0 (taille d'affichage) → module sous la souris (écran Liv
 | `0` |  | début de trame | taille d'affichage (GM_Size_Keys) | (ui_jzoom_set(ui_jzoomDef); 1) : 0; | ui-lib-JJ-GUI.jsfx-inc:130 |
 | `=` |  | début de trame | taille d'affichage (GM_Size_Keys) | ui_jzoom_set(ui_jzoomK + 1); 1 | ui-lib-JJ-GUI.jsfx-inc:129 |
 | `Ctrl+C..Ctrl+E` |  | module | ? (ce_OpsDo) | ce_Normalize(k - 3) | Diffusion-3-ConfEditor.jsfx-inc:1236 |
-| `Ctrl+A..0x84` |  | module | ? (ms_TrNext) | r = k; | Diffusion-3-MetaSurface.jsfx-inc:2106 |
 | `Backspace` |  | module | ? (uix_jp_make) | min(3, ui_jvariant) : (ui_jstyle != 0) | ui-lib-JJ-GUI.jsfx-inc:1277 |
 | `Backspace` |  | module | ? (uix_jp_measure) | (k = 10); d = uix_jp_dist(t[8 * k], uix_jp_bgc); (d < uix_jp_mBg) ? (uix_jp_mBg = d; uix_jp_mBgR = k;); k += 1… | ui-lib-JJ-GUI.jsfx-inc:1234 |
 | `Backspace` |  | module | Conf Editor (éditeur de configurations) (show_ConfEditor_Pad) | (ce_Wt(ce_row, ce_col) > 0) ? (ce_Keep(); ce_Set(ce_row, ce_col, 0);); ui_GFXdoNow \|= 4; | Diffusion-3-ConfEditor.jsfx-inc:2560 |
@@ -602,23 +594,29 @@ Ordre : Cmd + - + = 0 (taille d'affichage) → module sous la souris (écran Liv
 | `Down` |  | module | Conf Editor (éditeur de configurations) (show_ConfEditor_Pad) | ce_row = min(ce_N - 1, ce_row + 1); ce_Show(); ui_GFXdoNow \|= 4; | Diffusion-3-ConfEditor.jsfx-inc:2565 |
 | `Left` |  | module | Conf Editor (éditeur de configurations) (show_ConfEditor_Pad) | ce_col = max(0, ce_col - 1); ce_Show(); ui_GFXdoNow \|= 4; | Diffusion-3-ConfEditor.jsfx-inc:2562 |
 | `Right` |  | module | Conf Editor (éditeur de configurations) (show_ConfEditor_Pad) | ce_col = min(ce_P - 1, ce_col + 1); ce_Show(); ui_GFXdoNow \|= 4; | Diffusion-3-ConfEditor.jsfx-inc:2563 |
-| `Ctrl+A` | Cmd | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_SelOp(e, 0); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2551 |
-| `Ctrl+E` | Cmd | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_SelOp(e, 1); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2552 |
-| `Backspace` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_DelSelK(e); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2560 |
-| `<` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | st[ed_sMode] = (st[ed_sMode] + 1) % 3; ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2557 |
-| `>` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | st[ed_sGrid] = (st[ed_sGrid] + 1) % 6; ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2558 |
-| `a` | Cmd | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_SelOp(e, 0); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2551 |
-| `a` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_Level(e); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2554 |
-| `e` | Cmd | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_SelOp(e, 1); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2552 |
-| `m` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | st[ed_sMode] = 1; ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2555 |
-| `p` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | st[ed_sMode] = 2; ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2556 |
-| `v` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | !st[ed_sLock] ? ed_SetView(e, (max(-1, st[ed_sView]) + 1) % 4); ui_GFXdoNow \|= 4;  // (Lock 2D : no) | Diffusion-3-Edit.jsfx-inc:2553 |
-| `z` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_Undo(e); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2559 |
-| `Up` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_Sel1(e, 0); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2564 |
-| `Del` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_DelSelK(e); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2560 |
-| `Down` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_Sel1(e, n - 1); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2565 |
-| `Left` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_Sel1(e, (cur <= 0) ? n - 1 : cur - 1); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2562 |
-| `Right` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_Sel1(e, (cur + 1) % n); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2563 |
+| `Ctrl+A` | Cmd | module | Curves A ... D (éditeurs de courbes) (crv_Editor) | i = 0; loop(b[crv_fN], crv_selF[i] = 1; i += 1;); | mSL_Curves.jsfx-inc:815 |
+| `a` | Cmd | module | Curves A ... D (éditeurs de courbes) (crv_Editor) | i = 0; loop(b[crv_fN], crv_selF[i] = 1; i += 1;); | mSL_Curves.jsfx-inc:815 |
+| `d` |  | module | Curves A ... D (éditeurs de courbes) (crv_Editor) | crv_Dump(k) | mSL_Curves.jsfx-inc:812 |
+| `h` |  | module | Curves A ... D (éditeurs de courbes) (crv_Editor) | crv_SetSus(b, k, -2) | mSL_Curves.jsfx-inc:813 |
+| `z` |  | module | Curves A ... D (éditeurs de courbes) (crv_Editor) | crv_Undo(k); crv_SelClear(); ui_GFXdoNow \|= 4; | mSL_Curves.jsfx-inc:814 |
+| `Ctrl+A` | Cmd | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_SelOp(e, 0); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2553 |
+| `Ctrl+E` | Cmd | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_SelOp(e, 1); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2554 |
+| `Backspace` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_DelSelK(e); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2562 |
+| `<` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | st[ed_sMode] = (st[ed_sMode] + 1) % 3; ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2559 |
+| `>` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | st[ed_sGrid] = (st[ed_sGrid] + 1) % 6; ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2560 |
+| `a` | Cmd | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_SelOp(e, 0); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2553 |
+| `a` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_Level(e); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2556 |
+| `e` | Cmd | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_SelOp(e, 1); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2554 |
+| `m` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | st[ed_sMode] = 1; ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2557 |
+| `p` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | st[ed_sMode] = 2; ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2558 |
+| `v` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | !st[ed_sLock] ? ed_SetView(e, (max(-1, st[ed_sView]) + 1) % 4); ui_GFXdoNow \|= 4;  // (Lock 2D : no) | Diffusion-3-Edit.jsfx-inc:2555 |
+| `z` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_Undo(e); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2561 |
+| `Up` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_Sel1(e, 0); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2566 |
+| `Del` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_DelSelK(e); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2562 |
+| `Down` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_Sel1(e, n - 1); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2567 |
+| `Left` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_Sel1(e, (cur <= 0) ? n - 1 : cur - 1); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2564 |
+| `Right` |  | module | Edit A ... D (éditeurs de points) (show_Edit_Pad) | ed_Sel1(e, (cur + 1) % n); ui_GFXdoNow \|= 4; | Diffusion-3-Edit.jsfx-inc:2565 |
+| `e` |  | module | MetaSurface A ... D (show_MetaSurface_Pad) | ms_RecToggle(v, e) | Diffusion-3-MetaSurface.jsfx-inc:2752 |
 | `<` |  | module | Space A ... D (la vue) (show_Space_Pad) | s3d_mtarget = !s3d_mtarget; ui_GFXdoNow \|= 4; | Diffusion-3-Space3D.jsfx-inc:1565 |
 | `>` |  | module | Space A ... D (la vue) (show_Space_Pad) | s3d_PresSet((s3d_PresCur() + 1) % 6); ui_GFXdoNow \|= 4; | Diffusion-3-Space3D.jsfx-inc:1566 |
 | `a` |  | module | Space A ... D (la vue) (show_Space_Pad) | s3d_level(); ui_GFXdoNow \|= 4; | Diffusion-3-Space3D.jsfx-inc:1570 |
@@ -626,27 +624,27 @@ Ordre : Cmd + - + = 0 (taille d'affichage) → module sous la souris (écran Liv
 | `v` |  | module | Space A ... D (la vue) (show_Space_Pad) | sx_SetView((sx_view + 1) % 4); ui_GFXdoNow \|= 4; | Diffusion-3-Space3D.jsfx-inc:1569 |
 | `w` |  | module | Space A ... D (la vue) (show_Space_Pad) | s3d_opt = s3d_opt ~ s3d_oClamp; ui_GFXdoNow \|= 4; | Diffusion-3-Space3D.jsfx-inc:1568 |
 | `x` |  | module | Space A ... D (la vue) (show_Space_Pad) | s3d_opt = s3d_opt ~ s3d_oTraj; ui_GFXdoNow \|= 4; | Diffusion-3-Space3D.jsfx-inc:1567 |
-| `Enter` |  | module | log système (show_SysLog) | mSL_log(box, " ");  // Enter : a blank line (not Space : play / stop in REAPER) | Diffusion-3.jsfx-inc:6274 |
-| `1` |  | module | log système (show_SysLog) | box[5] = 1; | Diffusion-3.jsfx-inc:6286 |
-| `2` |  | module | log système (show_SysLog) | box[5] = 2; | Diffusion-3.jsfx-inc:6287 |
-| `3` |  | module | log système (show_SysLog) | box[5] = 3; | Diffusion-3.jsfx-inc:6288 |
-| `4` |  | module | log système (show_SysLog) | box[5] = 4; | Diffusion-3.jsfx-inc:6289 |
-| `5` |  | module | log système (show_SysLog) | box[5] = 5; | Diffusion-3.jsfx-inc:6290 |
-| `6` |  | module | log système (show_SysLog) | box[5] = 6; | Diffusion-3.jsfx-inc:6291 |
-| `7` |  | module | log système (show_SysLog) | box[5] = 7; | Diffusion-3.jsfx-inc:6292 |
-| `8` |  | module | log système (show_SysLog) | box[5] = 8; | Diffusion-3.jsfx-inc:6293 |
-| `P` |  | module | log système (show_SysLog) | sysout(box, 31);  // the log in the console of CMGS-auxiliary.eel, to copy it | Diffusion-3.jsfx-inc:6295 |
-| `j` |  | module | log système (show_SysLog) | box[7] = (box[7]+1) % box[2]; | Diffusion-3.jsfx-inc:6279 |
-| `k` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-1); | Diffusion-3.jsfx-inc:6278 |
-| `l` |  | module | log système (show_SysLog) | box[6] = max(0, box[6]-1); | Diffusion-3.jsfx-inc:6276 |
-| `m` |  | module | log système (show_SysLog) | box[6] = min(20, box[6]+1); | Diffusion-3.jsfx-inc:6275 |
-| `p` |  | module | log système (show_SysLog) | sysout(box);  // log in a text file (see mSL_show_Utilities) | Diffusion-3.jsfx-inc:6294 |
-| `t` |  | module | log système (show_SysLog) | nowTime(); mSL_log(SysLogBox, #nowis); | Diffusion-3.jsfx-inc:6280 |
-| `z` |  | module | log système (show_SysLog) | box[7] = 0; | Diffusion-3.jsfx-inc:6277 |
-| `Up` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-10); | Diffusion-3.jsfx-inc:6282 |
-| `Down` |  | module | log système (show_SysLog) | box[7] = (box[7]+10) % box[2]; | Diffusion-3.jsfx-inc:6283 |
-| `Left` | none | module | log système (show_SysLog) | box[7] = 0; | Diffusion-3.jsfx-inc:6284 |
-| `Right` | none | module | log système (show_SysLog) | box[7] = (box[7]+100) % box[2]; | Diffusion-3.jsfx-inc:6285 |
+| `Enter` |  | module | log système (show_SysLog) | mSL_log(box, " ");  // Enter : a blank line (not Space : play / stop in REAPER) | Diffusion-3.jsfx-inc:6288 |
+| `1` |  | module | log système (show_SysLog) | box[5] = 1; | Diffusion-3.jsfx-inc:6300 |
+| `2` |  | module | log système (show_SysLog) | box[5] = 2; | Diffusion-3.jsfx-inc:6301 |
+| `3` |  | module | log système (show_SysLog) | box[5] = 3; | Diffusion-3.jsfx-inc:6302 |
+| `4` |  | module | log système (show_SysLog) | box[5] = 4; | Diffusion-3.jsfx-inc:6303 |
+| `5` |  | module | log système (show_SysLog) | box[5] = 5; | Diffusion-3.jsfx-inc:6304 |
+| `6` |  | module | log système (show_SysLog) | box[5] = 6; | Diffusion-3.jsfx-inc:6305 |
+| `7` |  | module | log système (show_SysLog) | box[5] = 7; | Diffusion-3.jsfx-inc:6306 |
+| `8` |  | module | log système (show_SysLog) | box[5] = 8; | Diffusion-3.jsfx-inc:6307 |
+| `P` |  | module | log système (show_SysLog) | sysout(box, 31);  // the log in the console of CMGS-auxiliary.eel, to copy it | Diffusion-3.jsfx-inc:6309 |
+| `j` |  | module | log système (show_SysLog) | box[7] = (box[7]+1) % box[2]; | Diffusion-3.jsfx-inc:6293 |
+| `k` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-1); | Diffusion-3.jsfx-inc:6292 |
+| `l` |  | module | log système (show_SysLog) | box[6] = max(0, box[6]-1); | Diffusion-3.jsfx-inc:6290 |
+| `m` |  | module | log système (show_SysLog) | box[6] = min(20, box[6]+1); | Diffusion-3.jsfx-inc:6289 |
+| `p` |  | module | log système (show_SysLog) | sysout(box);  // log in a text file (see mSL_show_Utilities) | Diffusion-3.jsfx-inc:6308 |
+| `t` |  | module | log système (show_SysLog) | nowTime(); mSL_log(SysLogBox, #nowis); | Diffusion-3.jsfx-inc:6294 |
+| `z` |  | module | log système (show_SysLog) | box[7] = 0; | Diffusion-3.jsfx-inc:6291 |
+| `Up` |  | module | log système (show_SysLog) | box[7] = max(0, box[7]-10); | Diffusion-3.jsfx-inc:6296 |
+| `Down` |  | module | log système (show_SysLog) | box[7] = (box[7]+10) % box[2]; | Diffusion-3.jsfx-inc:6297 |
+| `Left` | none | module | log système (show_SysLog) | box[7] = 0; | Diffusion-3.jsfx-inc:6298 |
+| `Right` | none | module | log système (show_SysLog) | box[7] = (box[7]+100) % box[2]; | Diffusion-3.jsfx-inc:6299 |
 | `+` |  | module | mSL Console (la ligne de saisie n'a pas le clavier) (show_Console) | mcon_Hgt = min(1200, max(hmin, hneed) + 40); ui_GFXdoNow \|= 4; | mSL_Console.jsfx-inc:854 |
 | `-` |  | module | mSL Console (la ligne de saisie n'a pas le clavier) (show_Console) | mcon_Hgt = max(hmin, hneed - 40); ui_GFXdoNow \|= 4; | mSL_Console.jsfx-inc:855 |
 | `=` |  | module | mSL Console (la ligne de saisie n'a pas le clavier) (show_Console) | mcon_Hgt = min(1200, max(hmin, hneed) + 40); ui_GFXdoNow \|= 4; | mSL_Console.jsfx-inc:854 |
@@ -675,47 +673,47 @@ Ordre : Cmd + - + = 0 (taille d'affichage) → module sous la souris (écran Liv
 | `Right` | none | module | mémoire (débogueur) (show_Memory) | membox[7] = membox[7] + 1; | mSL_Dbg_Memory.jsfx-inc:228 |
 | `Right` | Shift | module | mémoire (débogueur) (show_Memory) | membox[7] = membox[7] + knb * 32; | mSL_Dbg_Memory.jsfx-inc:234 |
 | `Right` | none | module | mémoire (débogueur) (show_Memory) | membox[7] = membox[7] + 1; | mSL_Dbg_Memory.jsfx-inc:291 |
-| `$` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_opt = s3d_opt ~ s3d_oLevels; | Diffusion-3.jsfx-inc:6698 |
-| `%` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_opt = s3d_opt ~ s3d_oGains; | Diffusion-3.jsfx-inc:6701 |
-| `,` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_dist = min(12, s3d_dist * 1.02); | Diffusion-3.jsfx-inc:6685 |
-| `/` |  | module | écran Live : boîte sous la souris (mouse_hover) | sx_lbg = !sx_lbg; | Diffusion-3.jsfx-inc:6704 |
-| `:` |  | module | écran Live : boîte sous la souris (mouse_hover) | HP_Dr_updsize(mh_cur_box, max(10, floor(mh_cur_box[bx_sfact]  * 0.96))); | Diffusion-3.jsfx-inc:6677 |
-| `;` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_dist = max(1.8, s3d_dist * 0.98); | Diffusion-3.jsfx-inc:6682 |
-| `=` |  | module | écran Live : boîte sous la souris (mouse_hover) | HP_Dr_updsize(mh_cur_box, max(mh_cur_box[bx_sfact] + 1, ceil(mh_cur_box[bx_sfact]  * 1.04))); | Diffusion-3.jsfx-inc:6674 |
-| `>` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_PresSet((s3d_PresCur() + 1) % 6); | Diffusion-3.jsfx-inc:6695 |
-| `?` |  | module | écran Live : boîte sous la souris (mouse_hover) | sx_SetView((sx_view + 1) % 4); | Diffusion-3.jsfx-inc:6688 |
-| `a` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_basis(); s3d_LevelStart(5); | Diffusion-3.jsfx-inc:6691 |
-| `Up` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_el += 0.05; | Diffusion-3.jsfx-inc:6711 |
-| `Down` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_el -= 0.05; | Diffusion-3.jsfx-inc:6714 |
-| `Home` |  | module | écran Live : boîte sous la souris (mouse_hover) | sx_SetView(sx_view); | Diffusion-3.jsfx-inc:6707 |
-| `Left` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_az -= 0.05; | Diffusion-3.jsfx-inc:6717 |
-| `Right` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_az += 0.05; | Diffusion-3.jsfx-inc:6720 |
+| `$` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_opt = s3d_opt ~ s3d_oLevels; | Diffusion-3.jsfx-inc:6712 |
+| `%` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_opt = s3d_opt ~ s3d_oGains; | Diffusion-3.jsfx-inc:6715 |
+| `,` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_dist = min(12, s3d_dist * 1.02); | Diffusion-3.jsfx-inc:6699 |
+| `/` |  | module | écran Live : boîte sous la souris (mouse_hover) | sx_lbg = !sx_lbg; | Diffusion-3.jsfx-inc:6718 |
+| `:` |  | module | écran Live : boîte sous la souris (mouse_hover) | HP_Dr_updsize(mh_cur_box, max(10, floor(mh_cur_box[bx_sfact]  * 0.96))); | Diffusion-3.jsfx-inc:6691 |
+| `;` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_dist = max(1.8, s3d_dist * 0.98); | Diffusion-3.jsfx-inc:6696 |
+| `=` |  | module | écran Live : boîte sous la souris (mouse_hover) | HP_Dr_updsize(mh_cur_box, max(mh_cur_box[bx_sfact] + 1, ceil(mh_cur_box[bx_sfact]  * 1.04))); | Diffusion-3.jsfx-inc:6688 |
+| `>` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_PresSet((s3d_PresCur() + 1) % 6); | Diffusion-3.jsfx-inc:6709 |
+| `?` |  | module | écran Live : boîte sous la souris (mouse_hover) | sx_SetView((sx_view + 1) % 4); | Diffusion-3.jsfx-inc:6702 |
+| `a` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_basis(); s3d_LevelStart(5); | Diffusion-3.jsfx-inc:6705 |
+| `Up` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_el += 0.05; | Diffusion-3.jsfx-inc:6725 |
+| `Down` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_el -= 0.05; | Diffusion-3.jsfx-inc:6728 |
+| `Home` |  | module | écran Live : boîte sous la souris (mouse_hover) | sx_SetView(sx_view); | Diffusion-3.jsfx-inc:6721 |
+| `Left` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_az -= 0.05; | Diffusion-3.jsfx-inc:6731 |
+| `Right` |  | module | écran Live : boîte sous la souris (mouse_hover) | s3d_az += 0.05; | Diffusion-3.jsfx-inc:6734 |
 | `Up` | Shift | panneau | largeur des colonnes (genericItemsPos) | p = serialBlock + Pr7_StudRat + 4 * TabIdt; | mSL_Panes.jsfx-inc:918 |
 | `Down` | Shift | panneau | largeur des colonnes (genericItemsPos) | p = serialBlock + Pr7_StudRat + 4 * TabIdt; | mSL_Panes.jsfx-inc:918 |
 | `Left` | Shift | panneau | largeur des colonnes (genericItemsPos) | // try to increase colum size | mSL_Panes.jsfx-inc:887 |
 | `Right` | Shift | panneau | largeur des colonnes (genericItemsPos) | // try to increase colum size | mSL_Panes.jsfx-inc:859 |
-| `-` |  | onglet | écran Live : commandes (do_live_actions) | check_graph = 1 - check_graph; | Diffusion-3.jsfx-inc:5839 |
-| `.` |  | onglet | écran Live : commandes (do_live_actions) | mk_display_box(1, "*", 1, -1, 180); | Diffusion-3.jsfx-inc:5842 |
-| `C` |  | onglet | écran Live : commandes (do_live_actions) | coloriterate = coloriterate ? 0: 1; | Diffusion-3.jsfx-inc:5787 |
-| `a` |  | onglet | écran Live : commandes (do_live_actions) | wrefresh = 1; | Diffusion-3.jsfx-inc:5780 |
-| `b` |  | onglet | écran Live : commandes (do_live_actions) | perform_action(7, 0, actpars); | Diffusion-3.jsfx-inc:5818 |
-| `c` |  | onglet | écran Live : commandes (do_live_actions) | actpars[0] = -1; | Diffusion-3.jsfx-inc:5783 |
-| `g` |  | onglet | écran Live : commandes (do_live_actions) | actpars[0] = -1; | Diffusion-3.jsfx-inc:5772 |
-| `i` |  | onglet | écran Live : commandes (do_live_actions) | HP_Box_Show(-1); | Diffusion-3.jsfx-inc:5836 |
-| `j` |  | onglet | écran Live : commandes (do_live_actions) | HP_ViewN = (HP_ViewN + 1) % 4; | Diffusion-3.jsfx-inc:5831 |
-| `k` |  | onglet | écran Live : commandes (do_live_actions) | statkeyd = statkeyd ? 0 : 1; | Diffusion-3.jsfx-inc:5803 |
-| `l` |  | onglet | écran Live : commandes (do_live_actions) | // Clear non permanent boxes | Diffusion-3.jsfx-inc:5824 |
-| `m` |  | onglet | écran Live : commandes (do_live_actions) | show_mouse = 1 - show_mouse; | Diffusion-3.jsfx-inc:5796 |
-| `p` |  | onglet | écran Live : commandes (do_live_actions) | actpars[0] = -1; | Diffusion-3.jsfx-inc:5814 |
-| `r` |  | onglet | écran Live : commandes (do_live_actions) | actpars[0] = 1; | Diffusion-3.jsfx-inc:5799 |
-| `s` |  | onglet | écran Live : commandes (do_live_actions) | actpars[0] = -1; | Diffusion-3.jsfx-inc:5776 |
-| `t` |  | onglet | écran Live : commandes (do_live_actions) | actpars[0] = -1; | Diffusion-3.jsfx-inc:5806 |
-| `u` |  | onglet | écran Live : commandes (do_live_actions) | actpars[0] = -1;  // next tabulation (Tab, Shift + Tab : see do_Plugin_Keys) | Diffusion-3.jsfx-inc:5810 |
-| `v` |  | onglet | écran Live : commandes (do_live_actions) | show_used = 1 - show_used; | Diffusion-3.jsfx-inc:5793 |
-| `w` |  | onglet | écran Live : commandes (do_live_actions) | perform_action(8, 0, actpars); | Diffusion-3.jsfx-inc:5828 |
-| `x` |  | onglet | écran Live : commandes (do_live_actions) | wrefresh = 3; | Diffusion-3.jsfx-inc:5790 |
-| `z` |  | onglet | écran Live : commandes (do_live_actions) | perform_action(10, 0, actpars); | Diffusion-3.jsfx-inc:5821 |
-| `S` |  | plugin | commandes de Diffusion-3 (do_Plugin_Keys) | togglesliders(-1); | Diffusion-3.jsfx-inc:5856 |
+| `-` |  | onglet | écran Live : commandes (do_live_actions) | check_graph = 1 - check_graph; | Diffusion-3.jsfx-inc:5853 |
+| `.` |  | onglet | écran Live : commandes (do_live_actions) | mk_display_box(1, "*", 1, -1, 180); | Diffusion-3.jsfx-inc:5856 |
+| `C` |  | onglet | écran Live : commandes (do_live_actions) | coloriterate = coloriterate ? 0: 1; | Diffusion-3.jsfx-inc:5801 |
+| `a` |  | onglet | écran Live : commandes (do_live_actions) | wrefresh = 1; | Diffusion-3.jsfx-inc:5794 |
+| `b` |  | onglet | écran Live : commandes (do_live_actions) | perform_action(7, 0, actpars); | Diffusion-3.jsfx-inc:5832 |
+| `c` |  | onglet | écran Live : commandes (do_live_actions) | actpars[0] = -1; | Diffusion-3.jsfx-inc:5797 |
+| `g` |  | onglet | écran Live : commandes (do_live_actions) | actpars[0] = -1; | Diffusion-3.jsfx-inc:5786 |
+| `i` |  | onglet | écran Live : commandes (do_live_actions) | HP_Box_Show(-1); | Diffusion-3.jsfx-inc:5850 |
+| `j` |  | onglet | écran Live : commandes (do_live_actions) | HP_ViewN = (HP_ViewN + 1) % 4; | Diffusion-3.jsfx-inc:5845 |
+| `k` |  | onglet | écran Live : commandes (do_live_actions) | statkeyd = statkeyd ? 0 : 1; | Diffusion-3.jsfx-inc:5817 |
+| `l` |  | onglet | écran Live : commandes (do_live_actions) | // Clear non permanent boxes | Diffusion-3.jsfx-inc:5838 |
+| `m` |  | onglet | écran Live : commandes (do_live_actions) | show_mouse = 1 - show_mouse; | Diffusion-3.jsfx-inc:5810 |
+| `p` |  | onglet | écran Live : commandes (do_live_actions) | actpars[0] = -1; | Diffusion-3.jsfx-inc:5828 |
+| `r` |  | onglet | écran Live : commandes (do_live_actions) | actpars[0] = 1; | Diffusion-3.jsfx-inc:5813 |
+| `s` |  | onglet | écran Live : commandes (do_live_actions) | actpars[0] = -1; | Diffusion-3.jsfx-inc:5790 |
+| `t` |  | onglet | écran Live : commandes (do_live_actions) | actpars[0] = -1; | Diffusion-3.jsfx-inc:5820 |
+| `u` |  | onglet | écran Live : commandes (do_live_actions) | actpars[0] = -1;  // next tabulation (Tab, Shift + Tab : see do_Plugin_Keys) | Diffusion-3.jsfx-inc:5824 |
+| `v` |  | onglet | écran Live : commandes (do_live_actions) | show_used = 1 - show_used; | Diffusion-3.jsfx-inc:5807 |
+| `w` |  | onglet | écran Live : commandes (do_live_actions) | perform_action(8, 0, actpars); | Diffusion-3.jsfx-inc:5842 |
+| `x` |  | onglet | écran Live : commandes (do_live_actions) | wrefresh = 3; | Diffusion-3.jsfx-inc:5804 |
+| `z` |  | onglet | écran Live : commandes (do_live_actions) | perform_action(10, 0, actpars); | Diffusion-3.jsfx-inc:5835 |
+| `S` |  | plugin | commandes de Diffusion-3 (do_Plugin_Keys) | togglesliders(-1); | Diffusion-3.jsfx-inc:5870 |
 | `Tab` | Shift | plugin | onglet suivant / précédent (GM_Tab_Keys) | ui_jtab_step(uix_jG_menuscr, -1); 1 | ui-lib-JJ-GUI.jsfx-inc:680 |
 | `Tab` |  | plugin | onglet suivant / précédent (GM_Tab_Keys) | (ui_jtab_step(uix_jG_menuscr, 1); 1) : 0; | ui-lib-JJ-GUI.jsfx-inc:681 |
 | `c` |  | système | commandes système (do_System_Keys) | mSL_Dyn_RecycleF = mSL_Dyn_RecycleF ? 0 : 1; | mSL_System_Keys.jsfx-inc:28 |

@@ -1,0 +1,966 @@
+/*
+    mSL_Curves.jsfx-inc  (2026-11-24)
+
+    ====================================== The curves ======================================
+
+    The curves of the applications (envelopes and waveforms), shared : from the module "Curves" of Interstys (its_Crv_* ;
+    Interstys keeps its own code until it moves to this library). Diffusion-3 : the modules "Curves A" ... "D" (the
+    editors, crv_Editor), saved with the project (crv_Serialize, record 'crv1'), the tables (crv_Frame, @gfx) read by
+    crv_F (@gfx or @block) : the MetaSurfaces, the dynamics of the spatial projectors.
+
+    CRV_MX curves, in static memory (crv_B(k) : its block ; read by @block through its table, without allocation) ; a block :
+    [crv_fU] 1 the curve exists, [crv_fT] its type, [crv_fF] its flags (1 : periodic), [crv_fN] its count of points,
+    [crv_fSel] the point selected last (the editors), [crv_fSus] the sustain point (-1 : none), then the points (x, y, c) :
+    x from 0 to 1 (not decreasing), c the curvature of the segment that starts at the point. Its name : crv_nm[k] (a text,
+    "" : none ; case sensitive, 1 ... CRV_NMLEN characters, without double quote).
+    The types : the editor shows the part kept (V, x in [0, 1]) ; the complete form F (u in [0, 1]) is deduced by symmetry :
+        0 Env   : an envelope, y in [0, 1] ; F = V
+        1 Wave  : a waveform, y in [-1, 1] ; F = V
+        2 HEnv  : a half envelope, the rise (y in [0, 1]) ; the fall is its mirror : F(u) = V(2 u) for u <= 0.5, V(2 - 2 u) after
+        3 QWave : a quarter of a waveform (y in [-1, 1], the first point at (0, 0)) ; its mirror gives the half waveform H,
+                  then the complete form as HWave
+        4 HWave : a half waveform (y in [-1, 1], the first and the last y : 0) : F(u) = V(2 u) for u <= 0.5, -V(2 - 2 u) after
+    The periodic flag : Env and Wave only. The sustain point of an envelope (crv_fSus : its index, -1 : none) divides it in
+    the rise and the fall.
+    The tables : for each curve, CRV_TN + 1 samples of its complete form F(j / CRV_TN) (and a guard), built by @gfx when the
+    curve changes (crv_Frame : the curve compared with its copy crv_tbc) ; crv_F(k, u) : F(u), linear between the samples
+    (a curve that does not exist : 0 ; crv_tbE[k] 0).
+    The editors (crv_Editor, the module of the host : its blockId, the editor e = 0 ... CRV_NE - 1) : the state of each one in
+    crv_ed (CRV_ES words : 0 the curve shown, 1 the grid, 2 ... 10 the mouse, 11 the curve of the selection), its selected
+    points in crv_edSel ; crv_Editor puts the state of the editor drawn in the globals crv_uiK ... crv_selF (crv_EdGet), then
+    keeps it (crv_EdPut). The mouse in the graph (crv_Edit) : a clic on a point selects it (moved while the button is down ;
+    Shift + clic : the points from the first selected to it ; Cmd + clic : added or removed) ; a clic near the curve between
+    two points : a drag up or down bends the segment (a clic without moving : straight) ; a clic elsewhere : a new point ;
+    right clic on a point : deleted (a selected point : the selection) ; Shift while moving : fine. Keys over the module :
+    d the curve in the log, h the selected point becomes the sustain point (again : none), z Undo, Cmd + A all the points.
+    The pad (one line) : 0 the curve (left : the next one, Shift : the previous one ; right : the menu), 1 its name (a
+    prompt), 2 its type (left : the next one, Shift : the previous one ; right : the menu), 3 its count of points, 4 periodic
+    (Env, Wave), 5 the grid (Off, 4, 8, 16, 32), 6 Undo (again : Redo), 7 Actions (new curves, duplicate, dump, sustain,
+    delete).
+    (2026-11-24, the user) The marks of the editors on the paths of the host (the MetaSurfaces of Diffusion-3) : the editor
+    used last (the mouse over its graph, a clic in the module) and shown in the last frame drawn (crv_MarkE) gives its curve,
+    its selected points, the x under the mouse in its graph (crv_hovX) ; crv_Us : the places in the complete form of a point
+    of the part edited. The other way (2026-11-24, the user) : the playheads of the host (crv_PhSet : the brush of each
+    MetaSurface on its path, the part of its length) are drawn in the graph of that editor (crv_DrawPh) : a vertical line
+    at the x of the part edited (crv_XOf), a dot on the curve, a letter ; one that is not set again for 0.5 s : gone.
+    Included in @init (static memory), after the UI libraries (ui-lib, mSL_ui_Pads, mSL_Colors, ui-lib-JJ-GUI,
+    mSL_ui_LibJJ) and mSL_Panes part 1 (keepBlockInfos), mSL_Serialize (save_mem, load_mem, ser_hdr).
+*/
+
+CRV_MX = 64;                // the curves : 1 ... 64 (index 0 ... 63)
+CRV_PMX = 128;              // the points of a curve
+CRV_NMLEN = 31;             // the characters of a name
+crv_fU = 0; crv_fT = 1; crv_fF = 2; crv_fN = 3; crv_fSel = 4; crv_fSus = 5; crv_fP = 6;
+CRV_BS = crv_fP + 3 * CRV_PMX;
+CRV_ENV = 0; CRV_WAVE = 1; CRV_HENV = 2; CRV_QWAVE = 3; CRV_HWAVE = 4; CRV_NTY = 5;
+CRV_PER = 1;                // the flag periodic
+crv_blk = make_array(CRV_MX * CRV_BS);
+crv_nm = make_array(CRV_MX);
+<? i = 0; loop(64, printf("crv_nm[%d] = #crv_nm%d; ", i, i); ((i % 8) == 7) ? printf("\n"); i += 1;); ?>
+// the types : their short names (settings, log), their long names (the pad), the order of the cell of the type and of the
+// new curves (the envelopes, then the waveforms)
+crv_tyN = make_array(CRV_NTY); crv_tyL = make_array(CRV_NTY); crv_tyO = make_array(CRV_NTY);
+crv_tyN[0] = "Env"; crv_tyN[1] = "Wave"; crv_tyN[2] = "HEnv"; crv_tyN[3] = "QWave"; crv_tyN[4] = "HWave";
+crv_tyL[0] = "Envelope"; crv_tyL[1] = "Waveform"; crv_tyL[2] = "H-Envelope"; crv_tyL[3] = "Q-Waveform"; crv_tyL[4] = "H-Waveform";
+crv_tyO[0] = CRV_ENV; crv_tyO[1] = CRV_HENV; crv_tyO[2] = CRV_WAVE; crv_tyO[3] = CRV_QWAVE; crv_tyO[4] = CRV_HWAVE;
+// one level of Undo : the curve before the last change (crv_undoK : its number, -1 none ; crv_undoE : 0 if there was no
+// curve ; its name #crv_undoN) ; the curve when a gesture starts (crv_preK ..., #crv_preN)
+crv_undoB = make_array(CRV_BS); crv_undoK = -1; crv_undoE = 0;
+crv_preB = make_array(CRV_BS); crv_preK = -1; crv_preE = 0;
+crv_tmpB = make_array(CRV_BS);
+// the editors
+CRV_NE = 8; CRV_ES = 12;
+crv_ed = make_array(CRV_NE * CRV_ES);
+crv_edSel = make_array(CRV_NE * CRV_PMX);
+i__k = 0; loop(CRV_NE, i__p = crv_ed + i__k * CRV_ES; i__p[0] = i__k; i__p[4] = i__p[11] = -1; i__k += 1;);
+crv_selF = crv_edSel; crv_selK = -1;      // the selected points (1) of the curve crv_selK (the editor drawn)
+crv_orig = make_array(3 * CRV_PMX);       // the points when a move starts (crv_Move)
+crv_uiK = 0;                              // the curve shown by the editor drawn ; its state : see crv_EdGet
+crv_mDrag = crv_moved = 0; crv_dragI = -1; // the mouse : 0 nothing, 1 points moved, 2 the curvature of a segment
+crv_m0x = crv_m0y = crv_p0x = crv_p0y = crv_c0 = 0;
+crv_grid = 0;                             // the grid (x and y) : 0 none, else its count of divisions
+crv_gridN = make_array(5); crv_gridN[0] = 0; crv_gridN[1] = 4; crv_gridN[2] = 8; crv_gridN[3] = 16; crv_gridN[4] = 32;
+CRV_PAD = 6;                              // the margin of the graph (pixels) : the points at the edges are seen
+crv_renK = -1;                            // the curve renamed by the prompt (#crv_ren)
+// the tables (see above)
+CRV_TN = 1024; CRV_TS = CRV_TN + 2;
+crv_tab = make_array(CRV_MX * CRV_TS);
+crv_tbc = make_array(CRV_MX * CRV_BS);    // the curve when its table was built
+crv_tbE = make_array(CRV_MX);             // 1 : the table comes from a curve (0 : zeros)
+CRV_TBMX = 4;                             // the tables built per run of @gfx at most
+crv_tbK = 0;                              // the first curve looked at
+crv_sv = make_array(2 * CRV_NE + 4);      // (crv_Serialize)
+// (2026-11-24) the marks of the editors (see above) : the last frame (gfx_executed) where each editor drew its graph, the x
+// under the mouse in it (-1 : none), the editor used last (-1 : none) ; the places of a point (crv_Us)
+crv_seenF = make_array(CRV_NE); crv_hovX = make_array(CRV_NE);
+i__k = 0; loop(CRV_NE, crv_seenF[i__k] = -10; crv_hovX[i__k] = -1; i__k += 1;);
+crv_lastE = -1; crv_up = make_array(4);
+// (2026-11-24) the playheads of the host (crv_PhSet) : the place u in the complete form, the time it was set, the color
+// (24 bits), the letter
+CRV_PHN = 8;
+crv_phU = make_array(CRV_PHN); crv_phT = make_array(CRV_PHN); crv_phC = make_array(CRV_PHN); crv_phL = make_array(CRV_PHN);
+i__k = 0; loop(CRV_PHN, crv_phT[i__k] = -10; i__k += 1;);
+
+// The block of the curve k ; it exists
+function crv_B(k) ( crv_blk + max(0, min(CRV_MX - 1, k|0)) * CRV_BS; );
+function crv_Ex(k) local(b) ( b = crv_B(k); (k >= 0) && (k < CRV_MX) && (b[crv_fU] > 0); );
+
+// The shape of a segment, t in [0, 1] : t / (t + a (1 - t)), a = CRV_KS^-c (c > 0 : a fast start) ; monotonic ; c and -c
+// give mirror shapes
+CRV_KS = 1000;
+function crv_Shape(t, c) ( (c === 0) ? t : t / (t + (CRV_KS ^ (-c)) * (1 - t)); );
+
+// The value of the curve b at x in [0, 1] (the part edited, V)
+function crv_Val(b, x) local(n, p, i, x0, x1)
+(
+    n = b[crv_fN]; p = b + crv_fP;
+    x = max(0, min(1, x));
+    i = 0; while ((i < n - 2) && (p[3 * (i + 1)] <= x)) ( i += 1; );
+    p += 3 * i; x0 = p[0]; x1 = p[3];
+    (x1 <= x0) ? p[4] : p[1] + (p[4] - p[1]) * crv_Shape((x - x0) / (x1 - x0), p[2]);
+);
+
+// The lowest y of the type ty : 0 for the envelopes, -1 for the waveforms
+function crv_Lo(ty) ( ((ty === CRV_ENV) || (ty === CRV_HENV)) ? 0 : -1; );
+
+// The points of a new curve of type ty (it exists) : Env, HEnv, QWave from (0, 0) to (1, 1) ; Wave at 0 ; HWave (0, 0),
+// (0.5, 1), (1, 0)
+function crv_Default(b, ty)
+(
+    memset(b, 0, CRV_BS);
+    b[crv_fU] = 1; b[crv_fT] = ty; b[crv_fN] = 2; b[crv_fSel] = -1; b[crv_fSus] = -1;
+    b[crv_fP + 3] = 1; b[crv_fP + 4] = (ty === CRV_WAVE) ? 0 : 1;
+    (ty === CRV_HWAVE) ? (
+        b[crv_fN] = 3;
+        b[crv_fP + 3] = 0.5; b[crv_fP + 6] = 1; b[crv_fP + 7] = 0;
+    );
+);
+
+// The points kept in the bounds of the type ; periodic (Env, Wave) : the last y is the first one ; QWave : the first y 0 ;
+// HWave : the first and the last y 0 ; the sustain : a point of an Env
+function crv_Clamp(b) local(lo, ty, p)
+(
+    ty = b[crv_fT] = max(0, min(CRV_NTY - 1, 0|b[crv_fT]));
+    b[crv_fN] = max(2, min(CRV_PMX, 0|b[crv_fN]));
+    lo = crv_Lo(ty);
+    p = b + crv_fP; loop(b[crv_fN], p[0] = max(0, min(1, p[0])); p[1] = max(lo, min(1, p[1])); p[2] = max(-1, min(1, p[2])); p += 3;);
+    ((ty !== CRV_ENV) && (ty !== CRV_WAVE)) ? (b[crv_fF] = b[crv_fF] & (-1 ~ CRV_PER));
+    (b[crv_fF] & CRV_PER) ? (b[crv_fP + 3 * (b[crv_fN] - 1) + 1] = b[crv_fP + 1]);
+    ((ty === CRV_QWAVE) || (ty === CRV_HWAVE)) ? (b[crv_fP + 1] = 0);
+    (ty === CRV_HWAVE) ? (b[crv_fP + 3 * (b[crv_fN] - 1) + 1] = 0);
+    ((ty !== CRV_ENV) || (b[crv_fSus] < 0) || (b[crv_fSus] >= b[crv_fN])) ? (b[crv_fSus] = -1) : (b[crv_fSus] = floor(b[crv_fSus]));
+);
+
+// The values V(j / m) of the curve b in t[0 ... m] (the segments followed in order)
+function crv_Fill(b, t, m) local(n, p, q, i, j, x, x0, x1)
+(
+    n = b[crv_fN]; p = b + crv_fP; i = 0; j = 0;
+    loop(m + 1,
+        x = j / m;
+        while ((i < n - 2) && (p[3 * (i + 1)] <= x)) ( i += 1; );
+        q = p + 3 * i; x0 = q[0]; x1 = q[3];
+        t[j] = (x1 <= x0) ? q[4] : q[1] + (q[4] - q[1]) * crv_Shape((x - x0) / (x1 - x0), q[2]);
+        j += 1;
+    );
+);
+
+// The table of the curve k : its complete form F(j / CRV_TN), j = 0 ... CRV_TN (the types HEnv, QWave, HWave by symmetry),
+// a guard ; zeros if the curve does not exist ; the curve copied into crv_tbc
+function crv_Build(k) local(b, t, n, ty, j)
+(
+    b = crv_B(k); t = crv_tab + k * CRV_TS; n = CRV_TN;
+    (b[crv_fU] > 0) ? (
+        ty = b[crv_fT];
+        (ty === CRV_HENV) ? (
+            crv_Fill(b, t, n / 2);
+            j = n / 2 + 1; loop(n / 2, t[j] = t[n - j]; j += 1;);
+        ) :
+        (ty === CRV_HWAVE) ? (
+            crv_Fill(b, t, n / 2);
+            j = n / 2 + 1; loop(n / 2, t[j] = -t[n - j]; j += 1;);
+        ) :
+        (ty === CRV_QWAVE) ? (
+            crv_Fill(b, t, n / 4);
+            j = 0; loop(n / 4, t[n / 2 - j] = t[j]; j += 1;);
+            j = n / 2 + 1; loop(n / 2, t[j] = -t[n - j]; j += 1;);
+        ) : (
+            crv_Fill(b, t, n);
+        );
+        t[n + 1] = t[n];
+        memcpy(crv_tbc + k * CRV_BS, b, crv_fP + 3 * b[crv_fN]);
+        crv_tbE[k] = 1;
+    ) : (
+        memset(t, 0, CRV_TS);
+        memset(crv_tbc + k * CRV_BS, 0, crv_fP);
+        crv_tbE[k] = 0;
+    );
+);
+// the table of the curve k is no more that of the curve (its existence, its type, its points)
+function crv_TbDiff(k) local(b, c, n, i, d)
+(
+    b = crv_B(k); c = crv_tbc + k * CRV_BS;
+    (b[crv_fU] <= 0) ? (d = crv_tbE[k]) :
+    !crv_tbE[k] ? (d = 1) : (
+        n = b[crv_fN];
+        d = (b[crv_fT] !== c[crv_fT]) || (n !== c[crv_fN]);
+        i = crv_fP; loop(d ? 0 : 3 * n, (b[i] !== c[i]) ? (d = 1); i += 1;);
+    );
+    d;
+);
+// @gfx, each run (even when the window is closed) : the tables of the curves that changed (CRV_TBMX at most ; the next run
+// goes on after the last one built)
+function crv_Frame() local(k, m, i)
+(
+    m = 0; i = 0;
+    while ((i < CRV_MX) && (m < CRV_TBMX)) (
+        k = (crv_tbK + i) % CRV_MX;
+        crv_TbDiff(k) ? ( crv_Build(k); m += 1; (m === CRV_TBMX) ? (crv_tbK = (k + 1) % CRV_MX); );
+        i += 1;
+    );
+);
+// F(u) of the curve k (u in [0, 1] ; its table : linear between the samples ; no curve : 0), @gfx or @block
+function crv_F(k, u) local(t, x, i)
+(
+    ((k >= 0) && (k < CRV_MX)) ? (
+        t = crv_tab + (k|0) * CRV_TS;
+        x = max(0, min(1, u)) * CRV_TN; i = min(CRV_TN - 1, floor(x));
+        t[i] + (x - i) * (t[i + 1] - t[i]);
+    ) : 0;
+);
+
+// (2026-11-24) The places u in the complete form F of the point x of the part edited (V) of a curve of type ty, into crv_up ;
+// returns their count (Env, Wave : 1 ; HEnv, HWave : 2, the second one in the mirror ; QWave : 4)
+function crv_Us(ty, x)
+(
+    ((ty === CRV_HENV) || (ty === CRV_HWAVE)) ? ( crv_up[0] = x / 2; crv_up[1] = 1 - x / 2; 2; ) :
+    (ty === CRV_QWAVE) ? ( crv_up[0] = x / 4; crv_up[1] = 0.5 - x / 4; crv_up[2] = 0.5 + x / 4; crv_up[3] = 1 - x / 4; 4; ) :
+    ( crv_up[0] = x; 1; );
+);
+// (2026-11-24) The x in the part edited (V) of the place u of the complete form F of a curve of type ty (HEnv, HWave : the
+// second half goes back ; QWave : each quarter goes forth, back, forth, back)
+function crv_XOf(ty, u) local(q, g)
+(
+    u = max(0, min(1, u));
+    ((ty === CRV_HENV) || (ty === CRV_HWAVE)) ? ( (u <= 0.5) ? 2 * u : 2 - 2 * u; ) :
+    (ty === CRV_QWAVE) ? ( q = 4 * u; g = min(3, floor(q)); (g & 1) ? 1 - (q - g) : q - g; ) :
+    u;
+);
+// (2026-11-24) The playhead i (0 ... CRV_PHN - 1) of the host at the place u (0 ... 1) of the complete form, its color c
+// (24 bits), its letter l (a character) ; to be set again at each run of @gfx (else gone after 0.5 s)
+function crv_PhSet(i, u, c, l)
+(
+    ((i >= 0) && (i < CRV_PHN)) ? ( crv_phU[i] = max(0, min(1, u)); crv_phC[i] = c; crv_phL[i] = l; crv_phT[i] = time_precise(); );
+);
+
+// (2026-11-24) The editor whose marks the host shows : the one used last if it drew its graph in the last frame drawn (or in
+// this one), else the first one that did ; -1 : none
+function crv_MarkE() local(e, r)
+(
+    r = -1;
+    ((crv_lastE >= 0) && (crv_lastE < CRV_NE) && (crv_seenF[crv_lastE] >= gfx_executed - 1)) ? (r = crv_lastE) : (
+        e = 0;
+        while ((r < 0) && (e < CRV_NE)) ( (crv_seenF[e] >= gfx_executed - 1) ? (r = e); e += 1; );
+    );
+    r;
+);
+
+// The name of the curve k (or its number) into str ; returns str
+function crv_Name(str, k)
+(
+    (strlen(crv_nm[k]) > 0) ? strcpy(str, crv_nm[k]) : sprintf(str, "%d", k + 1);
+    str;
+);
+// the curve named txt, or -1
+function crv_Find(txt) local(i, k)
+(
+    k = -1; i = 0;
+    while ((k < 0) && (i < CRV_MX)) ( ((strlen(crv_nm[i]) > 0) && (strcmp(crv_nm[i], txt) === 0)) ? (k = i); i += 1; );
+    k;
+);
+// a valid name : 1 ... CRV_NMLEN characters, without double quote nor control character
+function crv_NmOk(txt) local(i, l, c, ok)
+(
+    l = strlen(txt);
+    ok = (l >= 1) && (l <= CRV_NMLEN);
+    i = 0; while (ok && (i < l)) ( c = str_getchar(txt, i, 'cu'); ((c === '"') || (c < 0x20)) ? (ok = 0); i += 1; );
+    ok;
+);
+
+// The state of the curve k when a gesture starts (crv_Pre), kept for the Undo once the curve changes (crv_Commit) ; Undo :
+// the curve k and the one kept are exchanged (a second Undo restores the change)
+function crv_Pre(k) local(b)
+(
+    b = crv_B(k);
+    crv_preK = k; crv_preE = (b[crv_fU] > 0); strcpy(#crv_preN, crv_nm[k]);
+    memcpy(crv_preB, b, CRV_BS);
+);
+function crv_Commit()
+(
+    (crv_preK >= 0) ? (
+        crv_undoK = crv_preK; crv_undoE = crv_preE; strcpy(#crv_undoN, #crv_preN);
+        memcpy(crv_undoB, crv_preB, CRV_BS);
+        crv_preK = -1;
+    );
+);
+function crv_Undo(k) local(b, e)
+(
+    (crv_undoK === k) ? (
+        b = crv_B(k); e = (b[crv_fU] > 0); strcpy(#crv_tmpN, crv_nm[k]);
+        memcpy(crv_tmpB, b, CRV_BS);
+        memcpy(b, crv_undoB, CRV_BS); b[crv_fU] = crv_undoE;
+        strcpy(crv_nm[k], #crv_undoN);
+        memcpy(crv_undoB, crv_tmpB, CRV_BS);
+        crv_undoE = e; strcpy(#crv_undoN, #crv_tmpN);
+    );
+);
+
+// A value on the grid (crv_grid divisions of [lo, 1]), or as it is
+function crv_Snap(v, lo) ( (crv_grid > 0) ? lo + floor((v - lo) / (1 - lo) * crv_grid + 0.5) / crv_grid * (1 - lo) : v; );
+
+// The selection of points (crv_selF, of the curve crv_selK) : cleared, counted ; the point i deleted
+function crv_SelClear() ( memset(crv_selF, 0, CRV_PMX); );
+function crv_SelCount(n) local(i, c) ( c = 0; i = 0; loop(n, c += crv_selF[i]; i += 1;); c; );
+function crv_SelDel(i, n) ( memcpy(crv_selF + i, crv_selF + i + 1, n - i - 1); crv_selF[n - 1] = 0; );
+
+// The pixel (retina) of x in [0, 1], of y in [lo, 1], in the graph x0, y0, w, h
+function crv_Px(x0, w, x) ( x0 + CRV_PAD + x * (w - 1 - 2 * CRV_PAD); );
+function crv_Py(y0, h, lo, y) ( y0 + CRV_PAD + (1 - y) / (1 - lo) * (h - 1 - 2 * CRV_PAD); );
+
+// The selected points moved by (dx, dy) from their places when the gesture started (crv_orig), as far as the frame and the
+// points not selected allow (the first and the last point : y only) ; r : the point taken by the mouse
+function crv_Move(b, r, x, y, lo) local(n, p, o, i, j, dx, dy, dmin, dmax, emin, emax)
+(
+    n = b[crv_fN]; p = b + crv_fP; o = crv_orig;
+    dx = x - o[3 * r]; dy = y - o[3 * r + 1];
+    dmin = emin = -(10^30); dmax = emax = 10^30;
+    i = 0; loop(n,
+        crv_selF[i] ? (
+            emin = max(emin, lo - o[3 * i + 1]); emax = min(emax, 1 - o[3 * i + 1]);
+            ((i > 0) && (i < n - 1)) ? (
+                j = i - 1; while ((j > 0) && crv_selF[j]) ( j -= 1; );
+                dmin = max(dmin, o[3 * j] - o[3 * i]);
+                j = i + 1; while ((j < n - 1) && crv_selF[j]) ( j += 1; );
+                dmax = min(dmax, o[3 * j] - o[3 * i]);
+            );
+        );
+        i += 1;
+    );
+    dx = max(dmin, min(dmax, dx)); dy = max(emin, min(emax, dy));
+    i = 0; loop(n,
+        crv_selF[i] ? (
+            ((i > 0) && (i < n - 1)) ? (p[3 * i] = o[3 * i] + dx);
+            p[3 * i + 1] = o[3 * i + 1] + dy;
+        );
+        i += 1;
+    );
+    // periodic : the first and the last y stay equal
+    (b[crv_fF] & CRV_PER) ? (
+        (crv_selF[0] && !crv_selF[n - 1]) ? (p[3 * (n - 1) + 1] = p[1]) :
+        (crv_selF[n - 1] && !crv_selF[0]) ? (p[1] = p[3 * (n - 1) + 1]);
+    );
+);
+
+// The mouse in the graph of the curve b (number k), the current rect (retina coordinates) : see the header (the presses of
+// ui-lib : uix_click1, uix_click2 ; the buttons held : uix_mcap, without the "ghost" ones)
+function crv_Edit(b, k)
+local (x0, y0, w, h, lo, rp, mx, my, ms, ins, press, rpress, n, p, i, j, hs, hit, xv, yv, ya, f, dxm, dym, x, y, sg)
+(
+    x0 = ui_left_retina(); y0 = ui_top_retina(); w = ui_width_retina(); h = ui_height_retina();
+    rp = gfx_ext_retina ? gfx_ext_retina : 1; // (the distances of the mouse in screen points)
+    lo = crv_Lo(b[crv_fT]);
+    ms = mouse_cap; mx = mouse_x; my = mouse_y;
+    ins = ui_hover();
+    press = uix_click1 && ins && !(uix_mcap & 2);
+    rpress = uix_click2 && ins && !(ms & 8); // (Shift + right clic : left to the host)
+    n = b[crv_fN]; p = b + crv_fP;
+    // the point under the mouse (the nearest one)
+    hs = 8 * rp; hit = -1; f = 10^30;
+    i = 0; loop(n,
+        x = abs(mx - crv_Px(x0, w, p[3 * i])); y = abs(my - crv_Py(y0, h, lo, p[3 * i + 1]));
+        ((x <= hs) && (y <= hs) && (x + y < f)) ? ( hit = i; f = x + y; );
+        i += 1;
+    );
+    // Shift or Cmd + clic : the nearest point, a little further (these clics select : no new point, no curvature)
+    (press && (hit < 0) && (ms & (8 | 0x24))) ? (
+        hs = 16 * rp; f = 10^30;
+        i = 0; loop(n,
+            x = abs(mx - crv_Px(x0, w, p[3 * i])); y = abs(my - crv_Py(y0, h, lo, p[3 * i + 1]));
+            ((x <= hs) && (y <= hs) && (x + y < f)) ? ( hit = i; f = x + y; );
+            i += 1;
+        );
+        (hit < 0) ? (press = 0);
+    );
+    xv = max(0, min(1, (mx - x0 - CRV_PAD) / max(1, w - 1 - 2 * CRV_PAD)));
+    yv = max(lo, min(1, 1 - (my - y0 - CRV_PAD) / max(1, h - 1 - 2 * CRV_PAD) * (1 - lo)));
+    press ? (
+        crv_Pre(k);
+        crv_m0x = mx; crv_m0y = my; crv_moved = 0;
+        ((hit >= 0) && (ms & 8) && (b[crv_fSel] >= 0) && (b[crv_fSel] < n) && crv_selF[b[crv_fSel]]) ? (
+            // Shift : the points from the first selected to this one
+            i = min(hit, b[crv_fSel]); loop(abs(hit - b[crv_fSel]) + 1, crv_selF[i] = 1; i += 1;);
+        ) :
+        ((hit >= 0) && (ms & (8 | 0x24))) ? (
+            // Cmd (or Shift without a selected point) : this point added to the selection, or removed
+            crv_selF[hit] = !crv_selF[hit];
+            crv_selF[hit] ? (b[crv_fSel] = hit) : (b[crv_fSel] === hit) ? (b[crv_fSel] = -1);
+        ) :
+        (hit >= 0) ? (
+            // this point (or the selection that holds it) is moved
+            !(crv_selF[hit] && (crv_SelCount(n) > 1)) ? ( crv_SelClear(); crv_selF[hit] = 1; b[crv_fSel] = hit; );
+            crv_mDrag = 1; crv_dragI = hit;
+            crv_p0x = p[3 * hit]; crv_p0y = p[3 * hit + 1];
+            memcpy(crv_orig, p, 3 * n);
+        ) : (
+            // the segment under the mouse : i ... i + 1
+            i = 0; while ((i < n - 2) && (p[3 * (i + 1)] <= xv)) ( i += 1; );
+            ya = crv_Py(y0, h, lo, crv_Val(b, xv));
+            ((abs(my - ya) <= 6 * rp) && (p[3 * (i + 1)] > p[3 * i])) ? (
+                crv_mDrag = 2; crv_dragI = i; crv_c0 = p[3 * i + 2];
+            ) :
+            (n < CRV_PMX) ? (
+                // a new point after the point i (its x : between them), the selection
+                crv_Commit();
+                memcpy(p + 3 * (i + 2), p + 3 * (i + 1), 3 * (n - i - 1));
+                x = max(p[3 * i], min(p[3 * (i + 2)], crv_Snap(xv, 0)));
+                p[3 * (i + 1)] = x; p[3 * (i + 1) + 1] = max(lo, min(1, crv_Snap(yv, lo))); p[3 * (i + 1) + 2] = 0;
+                n += 1; b[crv_fN] = n;
+                (b[crv_fSus] > i) ? (b[crv_fSus] += 1);
+                crv_SelClear(); crv_selF[i + 1] = 1; b[crv_fSel] = i + 1;
+                crv_mDrag = 1; crv_dragI = i + 1;
+                crv_p0x = p[3 * (i + 1)]; crv_p0y = p[3 * (i + 1) + 1];
+                memcpy(crv_orig, p, 3 * n);
+            ) : (
+                sprintf(#crv_msg, "Curve %d : %d points at most", k + 1, CRV_PMX);
+                mSL_log(SysLogBox, #crv_msg);
+            );
+        );
+        ui_GFXdoNow |= 4;
+    );
+    (rpress && (hit >= 0)) ? (
+        // delete the point (a selected point : all the selection), not the first and the last
+        crv_Pre(k);
+        !crv_selF[hit] ? ( crv_SelClear(); crv_selF[hit] = 1; );
+        j = 0;
+        i = n - 2; while (i > 0) (
+            crv_selF[i] ? (
+                (j === 0) ? crv_Commit(); j += 1;
+                memcpy(p + 3 * i, p + 3 * (i + 1), 3 * (n - i - 1));
+                crv_SelDel(i, n);
+                (b[crv_fSus] === i) ? (b[crv_fSus] = -1) : (b[crv_fSus] > i) ? (b[crv_fSus] -= 1);
+                n -= 1;
+            );
+            i -= 1;
+        );
+        b[crv_fN] = n;
+        crv_SelClear(); b[crv_fSel] = -1;
+        ui_GFXdoNow |= 4;
+    );
+    // the button held : the selected points or the curvature follow the mouse (Shift : 1/10)
+    ((uix_mcap & 1) && crv_mDrag) ? (
+        f = (ms & 8) ? 0.1 : 1;
+        dxm = (mx - crv_m0x) * f; dym = (my - crv_m0y) * f;
+        ((abs(mx - crv_m0x) + abs(my - crv_m0y) > 2) && !crv_moved) ? ( crv_moved = 1; crv_Commit(); );
+        crv_moved ? (
+            i = crv_dragI;
+            (crv_mDrag === 1) ? (
+                x = crv_p0x + dxm / max(1, w - 1 - 2 * CRV_PAD);
+                y = crv_p0y - dym / max(1, h - 1 - 2 * CRV_PAD) * (1 - lo);
+                (f === 1) ? ( x = crv_Snap(x, 0); y = crv_Snap(y, lo); );
+                crv_Move(b, i, x, y, lo);
+                crv_Clamp(b); // (QWave, HWave : the y fixed at 0)
+            ) : (
+                // drag up : the segment bulges up (rising : c > 0 ; falling : c < 0)
+                sg = (p[3 * (i + 1) + 1] >= p[3 * i + 1]) ? 1 : -1;
+                p[3 * i + 2] = max(-1, min(1, crv_c0 - sg * dym / max(1, h / 2)));
+            );
+            ui_GFXdoNow |= 4;
+        );
+    );
+    // the button released : a clic on a segment, without moving : straight
+    (!(uix_mcap & 1) && crv_mDrag) ? (
+        ((crv_mDrag === 2) && !crv_moved && (p[3 * crv_dragI + 2] !== 0)) ? ( crv_Commit(); p[3 * crv_dragI + 2] = 0; );
+        crv_mDrag = 0; crv_preK = -1;
+        ui_GFXdoNow |= 4;
+    );
+);
+
+// The curve b in the current rect (retina coordinates) : the guides, the grid, the segments, the points (the first and the
+// last : another color ; the selected ones : Goldenrod ; the sustain point : an orange frame and a vertical line)
+function crv_Draw(b)
+local (x0, y0, w, h, rsc, lo, i, n, p, xa, ya, xb, yb, d, k)
+(
+    x0 = ui_left_retina(); y0 = ui_top_retina(); w = ui_width_retina(); h = ui_height_retina();
+    rsc = max(1, floor(uix_drawconfig_current[9]));
+    lo = crv_Lo(b[crv_fT]);
+    ui_pcolor(0x808080, 0.15);
+    gfx_rect(x0, y0, w, h);
+    // the guides : y = 0, 1 (and -1), the middle
+    ui_pcolor(0x808080, 0.6);
+    gfx_line(x0, crv_Py(y0, h, lo, 0), x0 + w - 1, crv_Py(y0, h, lo, 0));
+    ui_pcolor(0x808080, 0.3);
+    gfx_line(x0, crv_Py(y0, h, lo, 1), x0 + w - 1, crv_Py(y0, h, lo, 1));
+    gfx_line(x0, crv_Py(y0, h, lo, lo), x0 + w - 1, crv_Py(y0, h, lo, lo));
+    (lo === 0) ? gfx_line(x0, crv_Py(y0, h, lo, 0.5), x0 + w - 1, crv_Py(y0, h, lo, 0.5));
+    // the sustain point : a vertical line between the rise and the fall
+    (b[crv_fSus] >= 0) ? (
+        ui_pcolor(Color_Dark_Orange, 0.55);
+        xa = floor(crv_Px(x0, w, b[crv_fP + 3 * b[crv_fSus]]));
+        gfx_line(xa, y0, xa, y0 + h - 1);
+        (rsc > 1) ? gfx_line(xa + 1, y0, xa + 1, y0 + h - 1);
+    );
+    (crv_grid > 0) ? (
+        ui_pcolor(0x808080, 0.18);
+        i = 1; loop(crv_grid - 1,
+            d = i / crv_grid;
+            gfx_line(crv_Px(x0, w, d), y0, crv_Px(x0, w, d), y0 + h - 1);
+            gfx_line(x0, crv_Py(y0, h, lo, lo + d * (1 - lo)), x0 + w - 1, crv_Py(y0, h, lo, lo + d * (1 - lo)));
+            i += 1;
+        );
+    );
+    // the curve : each segment from its first point to the next one, one value per pixel
+    ui_pcolor(uix_theme_accent(), 0.95);
+    p = b + crv_fP;
+    loop(b[crv_fN] - 1,
+        xa = crv_Px(x0, w, p[0]); ya = crv_Py(y0, h, lo, p[1]);
+        n = max(1, ceil(crv_Px(x0, w, p[3]) - xa));
+        i = 1; loop(n,
+            d = i / n;
+            xb = xa + (crv_Px(x0, w, p[3]) - crv_Px(x0, w, p[0])) / n;
+            yb = crv_Py(y0, h, lo, p[1] + (p[4] - p[1]) * crv_Shape(d, p[2]));
+            gfx_line(xa, ya, xb, yb, 1);
+            (rsc > 1) ? gfx_line(xa, ya + 1, xb, yb + 1, 1);
+            xa = xb; ya = yb;
+            i += 1;
+        );
+        p += 3;
+    );
+    // the points
+    k = 3 * rsc;
+    p = b + crv_fP; i = 0;
+    loop(b[crv_fN],
+        xa = crv_Px(x0, w, p[0]); ya = crv_Py(y0, h, lo, p[1]);
+        crv_selF[i] ? ui_pcolor(Color_Goldenrod, 1) :
+        ((i === 0) || (i === b[crv_fN] - 1)) ? ui_pcolor(Color_Light_Steel_Blue, 1) : ui_pcolor(Color_Limegreen, 1);
+        gfx_rect(xa - k, ya - k, 2 * k + 1, 2 * k + 1);
+        (i === b[crv_fSus]) ? (
+            ui_pcolor(Color_Dark_Orange, 1);
+            gfx_rect(xa - 2 * k, ya - 2 * k, 4 * k + 1, 4 * k + 1, 0);
+            (rsc > 1) ? gfx_rect(xa - 2 * k + 1, ya - 2 * k + 1, 4 * k - 1, 4 * k - 1, 0);
+        );
+        p += 3; i += 1;
+    );
+);
+
+// (2026-11-24, the user) The playheads of the host (crv_PhSet, set in the last 0.5 s) over the curve b in the current rect
+// (retina coordinates) : a vertical line, a dot on the curve, its letter at the top
+function crv_DrawPh(b) local(x0, y0, w, h, rsc, lo, i, x, px, py, t, tw, th)
+(
+    x0 = ui_left_retina(); y0 = ui_top_retina(); w = ui_width_retina(); h = ui_height_retina();
+    rsc = max(1, floor(uix_drawconfig_current[9]));
+    lo = crv_Lo(b[crv_fT]); t = time_precise();
+    i = 0;
+    loop(CRV_PHN,
+        (t - crv_phT[i] < 0.5) ? (
+            x = crv_XOf(b[crv_fT], crv_phU[i]);
+            px = floor(crv_Px(x0, w, x)); py = crv_Py(y0, h, lo, crv_Val(b, x));
+            ui_pcolor(crv_phC[i], 0.85);
+            gfx_line(px, y0, px, y0 + h - 1);
+            (rsc > 1) ? gfx_line(px + 1, y0, px + 1, y0 + h - 1);
+            ui_pcolor(crv_phC[i], 1);
+            gfx_circle(px, py, 4 * rsc, 1, 1);
+            sprintf(#crv_phS, "%c", crv_phL[i]);
+            gfx_measurestr(#crv_phS, tw, th);
+            gfx_x = min(px + 3 * rsc, x0 + w - tw - 1); gfx_y = y0 + 2 * rsc;
+            gfx_drawstr(#crv_phS);
+        );
+        i += 1;
+    );
+);
+
+// The name txt given to the curve k (the prompt of the module) : the spaces at the ends removed ; "" : no name ; with Undo
+function crv_Rename(k, txt) local(i, l)
+(
+    l = strlen(txt); i = 0;
+    while ((i < l) && (str_getchar(txt, i, 'cu') === ' ')) ( i += 1; );
+    while ((l > i) && (str_getchar(txt, l - 1, 'cu') === ' ')) ( l -= 1; );
+    strcpy_substr(#crv_renX, txt, i, l - i);
+    !crv_Ex(k) ? 0 :
+    (strcmp(#crv_renX, crv_nm[k]) === 0) ? 0 :
+    ((strlen(#crv_renX) > 0) && !crv_NmOk(#crv_renX)) ? (
+        sprintf(#crv_msg, "Curve %d : a name has 1 ... %d characters, without \"", k + 1, CRV_NMLEN);
+        mSL_log(SysLogBox, #crv_msg);
+    ) :
+    (((i = crv_Find(#crv_renX)) >= 0) && (i !== k)) ? (
+        sprintf(#crv_msg, "Curve %d : the name \"%s\" is the one of the curve %d", k + 1, #crv_renX, i + 1);
+        mSL_log(SysLogBox, #crv_msg);
+    ) : (
+        crv_Pre(k); crv_Commit();
+        strcpy(crv_nm[k], #crv_renX);
+    );
+);
+
+// The sustain point of the envelope b (number k) : i (a point), -1 (none), -2 (the selected point ; already the sustain :
+// none) ; with Undo
+function crv_SetSus(b, k, i)
+(
+    (i === -2) ? (
+        i = b[crv_fSel];
+        ((i >= 0) && (i < b[crv_fN]) && crv_selF[i]) ? ( (i === b[crv_fSus]) ? (i = -1); ) : (i = -2);
+    );
+    (b[crv_fT] !== CRV_ENV) ? (
+        sprintf(#crv_msg, "Curve %d : only an envelope (not a half one) has a sustain point", k + 1);
+        mSL_log(SysLogBox, #crv_msg);
+    ) :
+    (i === -2) ? (
+        sprintf(#crv_msg, "Curve %d : sustain : select a point first", k + 1);
+        mSL_log(SysLogBox, #crv_msg);
+    ) :
+    (i !== b[crv_fSus]) ? (
+        crv_Pre(k); crv_Commit();
+        b[crv_fSus] = i;
+    );
+);
+
+// The curve k in the log, as in the settings : "Curve id type T [periodic On] [sustain n] points x y c ..." (6 points per line)
+function crv_Dump(k) local(b, p, n, q)
+(
+    b = crv_B(k);
+    crv_Ex(k) ? (
+        (strlen(crv_nm[k]) > 0) ? sprintf(#crv_t1, "\"%s\"", crv_nm[k]) : sprintf(#crv_t1, "%d", k + 1);
+        sprintf(#crv_msg, "Curve %s  type %s", #crv_t1, crv_tyN[b[crv_fT]]);
+        (b[crv_fF] & CRV_PER) ? strcat(#crv_msg, "  periodic On");
+        (b[crv_fSus] >= 0) ? (sprintf(#crv_t1, "  sustain %d", b[crv_fSus] + 1); strcat(#crv_msg, #crv_t1););
+        strcat(#crv_msg, "  points");
+        mSL_log(SysLogBox, #crv_msg);
+        n = b[crv_fN]; p = b + crv_fP;
+        while (n > 0) (
+            strcpy(#crv_msg, "   ");
+            q = 0; loop(min(6, n), sprintf(#crv_t1, "  %.6g %.6g %.6g", p[0], p[1], p[2]); strcat(#crv_msg, #crv_t1); p += 3; q += 1;);
+            n -= q;
+            mSL_log(SysLogBox, #crv_msg);
+        );
+    ) : (
+        sprintf(#crv_msg, "Curve %d : no curve", k + 1); mSL_log(SysLogBox, #crv_msg);
+    );
+);
+
+// The state of the editor e in the globals of the editor drawn ; kept again by crv_EdPut
+function crv_EdGet(e) local(p)
+(
+    p = crv_ed + e * CRV_ES;
+    crv_uiK = p[0]; crv_grid = p[1]; crv_mDrag = p[3]; crv_dragI = p[4];
+    crv_m0x = p[5]; crv_m0y = p[6]; crv_moved = p[7]; crv_c0 = p[8]; crv_p0x = p[9]; crv_p0y = p[10];
+    crv_selK = p[11]; crv_selF = crv_edSel + e * CRV_PMX;
+);
+function crv_EdPut(e) local(p)
+(
+    p = crv_ed + e * CRV_ES;
+    p[0] = crv_uiK; p[1] = crv_grid; p[3] = crv_mDrag; p[4] = crv_dragI;
+    p[5] = crv_m0x; p[6] = crv_m0y; p[7] = crv_moved; p[8] = crv_c0; p[9] = crv_p0x; p[10] = crv_p0y;
+    p[11] = crv_selK;
+);
+
+// The menu of the curves (the title ttl : an item "#..."), the curve cur checked, by 32 in sub-menus : the curve chosen, or
+// -1 ; empty : the curves without points (a new curve there, or none) are greyed (with ok_empty : not)
+function crv_Menu(ttl, cur, ok_empty) local(i, g, m, b)
+(
+    strcpy(#crv_mnu, ttl);
+    i = 0;
+    loop(CRV_MX,
+        g = (i % 32);
+        (g === 0) ? (sprintf(#crv_it, "|>Curves %d - %d", i + 1, i + 32); strcat(#crv_mnu, #crv_it););
+        b = crv_B(i); // (EEL2 : no index on the result of a function)
+        crv_Ex(i) ? (
+            (strlen(crv_nm[i]) > 0) ? sprintf(#crv_t1, "%d  %s  (%s)", i + 1, crv_nm[i], crv_tyN[b[crv_fT]]) :
+                sprintf(#crv_t1, "%d  (%s)", i + 1, crv_tyN[b[crv_fT]]);
+        ) : (
+            sprintf(#crv_t1, "%d  -", i + 1);
+        );
+        sprintf(#crv_it, "|%s%s%s%s", (g === 31) ? "<" : "", (i === cur) ? "!" : "", (!ok_empty && !crv_Ex(i)) ? "#" : "", #crv_t1);
+        strcat(#crv_mnu, #crv_it);
+        i += 1;
+    );
+    gfx_x = mouse_x; gfx_y = mouse_y;
+    m = gfx_showmenu(#crv_mnu);
+    uix_menu_end(m > 0);
+    ((m >= 2) && (m < 2 + CRV_MX)) ? m - 2 : -1;
+);
+
+// The pad of the editors (shared : its labels are set before each drawing)
+CRV_PSIZ = 8;
+pad_Crv = make_jpad(ui_jpad_ty_act | ui_jpad_mk_labs | ui_jpad_mk_colors, 1, CRV_PSIZ, CRV_PSIZ);
+pad_Crv_Labs = pad_Crv + pad_Crv[ui_jpad_labs];
+pad_Crv_Colrs = pad_Crv + pad_Crv[ui_jpad_clrs];
+i__k = 0; loop(CRV_PSIZ, pad_Crv_Colrs[i__k] = Col_P1; pad_Crv_Labs[i__k] = ""; i__k += 1;);
+
+// The cell c of the pad of the curve k clicked (rc : the right clic ; sh : Shift)
+function crv_Cell(k, c, rc, sh) local(b, ok, i, m, q)
+(
+    b = crv_B(k); ok = crv_Ex(k);
+    (c === 0) ? (
+        // the curve shown : left, the next one (Shift : the previous one) ; right, the menu
+        rc ? (((m = crv_Menu("#The curve shown", k, 1)) >= 0) ? (crv_uiK = m)) : (crv_uiK = (k + (sh ? CRV_MX - 1 : 1)) % CRV_MX);
+    ) :
+    ((c === 1) && ok && !rc) ? (
+        // the name : edited by the prompt in #crv_ren, taken when the prompt is closed (crv_Rename)
+        strcpy(#crv_ren, crv_nm[k]); crv_renK = k;
+        sprintf(#crv_renT, "Name of the curve %d (empty : no name)...", k + 1);
+        ui_screen_open("control.prompt");
+        ui_screen_arg(0, #crv_ren);
+        ui_screen_arg(1, #crv_renT);
+    ) :
+    ((c === 2) && ok) ? (
+        // the type : left, the next one (Shift : the previous one), in the order of crv_tyO ; right, the menu
+        i = 0; while ((i < CRV_NTY - 1) && (crv_tyO[i] !== b[crv_fT])) ( i += 1; );
+        rc ? (
+            strcpy(#crv_mnu, "#The type of the curve");
+            m = 0; loop(CRV_NTY, sprintf(#crv_it, "|%s%s", (m === i) ? "!" : "", crv_tyL[crv_tyO[m]]); strcat(#crv_mnu, #crv_it); m += 1;);
+            gfx_x = mouse_x; gfx_y = mouse_y;
+            m = gfx_showmenu(#crv_mnu) - 2; uix_menu_end(m >= 0);
+        ) : (
+            m = (i + (sh ? CRV_NTY - 1 : 1)) % CRV_NTY;
+        );
+        ((m >= 0) && (m < CRV_NTY) && (crv_tyO[m] !== b[crv_fT])) ? (
+            crv_Pre(k); crv_Commit();
+            b[crv_fT] = crv_tyO[m];
+            crv_Clamp(b);
+        );
+    ) :
+    ((c === 4) && ok && !rc && ((b[crv_fT] === CRV_ENV) || (b[crv_fT] === CRV_WAVE))) ? (
+        crv_Pre(k); crv_Commit();
+        b[crv_fF] = b[crv_fF] ~ CRV_PER;
+        crv_Clamp(b);
+    ) :
+    ((c === 5) && !rc) ? (
+        i = 0; while ((i < 4) && (crv_gridN[i] !== crv_grid)) ( i += 1; );
+        crv_grid = crv_gridN[(i + (sh ? 4 : 1)) % 5];
+    ) :
+    ((c === 6) && !rc) ? (
+        crv_Undo(k);
+        crv_SelClear();
+    ) :
+    (c === 7) ? (
+        // Actions (both clics)
+        sprintf(#crv_mnu, "#Curve %d|New envelope|New half envelope (H-Envelope)|New waveform|New quarter waveform (Q-Waveform)|New half waveform (H-Waveform)||%sDuplicate into the first free curve|%sDump in the log||%sSustain : the selected point|%sSustain : none||%sDelete",
+            k + 1, ok ? "" : "#", ok ? "" : "#", (ok && (b[crv_fT] === CRV_ENV)) ? "" : "#", (ok && (b[crv_fSus] >= 0)) ? "" : "#", ok ? "" : "#");
+        gfx_x = mouse_x; gfx_y = mouse_y;
+        m = gfx_showmenu(#crv_mnu); uix_menu_end(m > 0);
+        ((m >= 2) && (m <= 6)) ? (
+            // a new curve (the one shown, replaced : Undo)
+            crv_Pre(k); crv_Commit();
+            crv_Default(b, crv_tyO[m - 2]);
+            crv_SelClear();
+        ) :
+        ((m === 7) && ok) ? (
+            i = 0; while ((i < CRV_MX) && crv_Ex(i)) ( i += 1; );
+            (i < CRV_MX) ? (
+                q = crv_B(i); memcpy(q, b, CRV_BS); strcpy(crv_nm[i], ""); q[crv_fSel] = -1;
+                crv_uiK = i;
+                sprintf(#crv_msg, "Curve %d : duplicated into the curve %d", k + 1, i + 1);
+            ) : (
+                sprintf(#crv_msg, "Curve %d : no free curve (%d)", k + 1, CRV_MX);
+            );
+            mSL_log(SysLogBox, #crv_msg);
+        ) :
+        ((m === 8) && ok) ? (
+            crv_Dump(k);
+        ) :
+        ((m === 9) && ok) ? (
+            // (the selected point, even if it is already the sustain)
+            i = b[crv_fSel];
+            crv_SetSus(b, k, ((i >= 0) && (i < b[crv_fN]) && crv_selF[i]) ? i : -2);
+        ) :
+        ((m === 10) && ok) ? (
+            crv_SetSus(b, k, -1);
+        ) :
+        ((m === 11) && ok) ? (
+            crv_Pre(k); crv_Commit();
+            memset(b, 0, CRV_BS); strcpy(crv_nm[k], "");
+            crv_SelClear();
+        );
+    );
+    ui_GFXdoNow |= 4;
+);
+
+// The module "Curves A" ... (the editor e ; blockId : the module) : the pad, the graph (its height follows the pane), a line of
+// text (x and y under the mouse, or the selected point)
+function crv_Editor(blockId, e)
+local (h1, hg, h3, hneed, zzmi, i, k, b, ok, zz, c, x0, w, mx, v, cgh)
+(
+    crv_EdGet(e);
+    // the prompt of the name closed (OK or Cancel) : the new name, if it changed
+    ((crv_renK >= 0) && !(ui_screen() == "control.prompt")) ? ( crv_Rename(crv_renK, #crv_ren); crv_renK = -1; );
+    k = crv_uiK = max(0, min(CRV_MX - 1, crv_uiK|0));
+    b = crv_B(k); ok = crv_Ex(k);
+    (crv_selK !== k) ? ( crv_SelClear(); crv_selK = k; ok ? (b[crv_fSel] = -1); );
+    h1 = uix_jpadHeight(1);
+    h3 = uix_jBoxHeight(1);
+    hg = max(100, min(ui_width() * 0.5, ui_height() - h1 - h3 - ui_jd_ctgr - 8));
+    hneed = h1 + (ok ? hg + h3 : 0) + ui_jd_ctgr + 8;
+    (ui_height() >= hneed) ? (
+        ui_split_top(hneed);
+            zzmi = ui_hover();
+            keepBlockInfos(blockId);
+            (zzmi && (uix_click1 || uix_click2)) ? (crv_lastE = e); // (2026-11-24 : the marks of this editor, crv_MarkE)
+            zzmi ? (
+                ui_push();
+                    ui_color(Col_Frame);
+                    ui_border();
+                ui_pop();
+                // keys : d the curve in the log ; h the selected point is the sustain point (again : none) ; z Undo ; Cmd + A
+                // all the points
+                (ok && GM_key_take('d')) ? crv_Dump(k) :
+                (ok && GM_key_take('h')) ? crv_SetSus(b, k, -2) :
+                GM_key_take('z') ? (crv_Undo(k); crv_SelClear(); ui_GFXdoNow |= 4;) :
+                (ok && (GM_key_mods() & 4) && (GM_key_take('a') || GM_key_take(1))) ? (
+                    i = 0; loop(b[crv_fN], crv_selF[i] = 1; i += 1;);
+                    b[crv_fSel] = 0; ui_GFXdoNow |= 4;
+                );
+            );
+            sprintf(#crv_ttl, "Curves %c", 'A' + e);
+            control_group(#crv_ttl);
+            ui_pad(0, ui_cg_pad_top, 0, ui_cg_pad_bottom);
+            // the pad
+            ui_split_top(h1);
+                ui_pad(1, 2, 2, 2);
+                mSL_setStrArray(pad_Crv_Labs, CRV_PSIZ);
+                sprintf(pad_Crv_Labs[0], "Curve %d", k + 1);
+                ok ? (
+                    (strlen(crv_nm[k]) > 0) ? strcpy(pad_Crv_Labs[1], crv_nm[k]) : strcpy(pad_Crv_Labs[1], "(no name)");
+                    strcpy(pad_Crv_Labs[2], crv_tyL[b[crv_fT]]);
+                    sprintf(pad_Crv_Labs[3], "%d points", b[crv_fN]);
+                    strcpy(pad_Crv_Labs[4], (b[crv_fF] & CRV_PER) ? "Periodic" : "Not periodic");
+                ) : (
+                    strcpy(pad_Crv_Labs[1], "No curve");
+                    strcpy(pad_Crv_Labs[2], "-"); strcpy(pad_Crv_Labs[3], "-"); strcpy(pad_Crv_Labs[4], "-");
+                );
+                (crv_grid > 0) ? sprintf(pad_Crv_Labs[5], "Grid %d", crv_grid) : strcpy(pad_Crv_Labs[5], "No grid");
+                strcpy(pad_Crv_Labs[6], "Undo");
+                strcpy(pad_Crv_Labs[7], "Actions");
+                // the roles (GUI rubric) : the curve (Navigation), its name (Action), its type (Choice), its points
+                // (Information), periodic, the grid (Choice), Undo, Actions (Action)
+                ui_jpad_roles_set(pad_Crv, 0, "naciccaa");
+                i = 0; loop(CRV_PSIZ, ui_jpad_mark(pad_Crv, i, 0, 0); ui_jpad_lock(pad_Crv, i, 0); i += 1;);
+                i = 1; loop(4, ui_jpad_mark(pad_Crv, i, 0, !ok); i += 1;);
+                ui_jpad_mark(pad_Crv, 4, ok && (b[crv_fF] & CRV_PER), !ok || ((b[crv_fT] !== CRV_ENV) && (b[crv_fT] !== CRV_WAVE)));
+                ui_jpad_mark(pad_Crv, 5, crv_grid > 0, 0);
+                ui_jpad_mark(pad_Crv, 6, 0, crv_undoK !== k);
+                zz = control_jpad(pad_Crv);
+                (zz > 0) ? (
+                    c = pad_Crv[ui_jpad_last] - 1;
+                    (zz & (ui_jpad_ev_lmc | ui_jpad_ev_rmc)) ? crv_Cell(k, c, zz & ui_jpad_ev_rmc, mouse_cap & 8);
+                    ui_GFXdoNow |= 4;
+                );
+            ui_pop();
+            // the graph, then x and y under the mouse
+            k = crv_uiK = max(0, min(CRV_MX - 1, crv_uiK|0)); b = crv_B(k); ok = crv_Ex(k);
+            (crv_selK !== k) ? ( crv_SelClear(); crv_selK = k; ok ? (b[crv_fSel] = -1); );
+            ok ? (
+                ui_split_top(hg);
+                    ui_pad(1, 2, 2, 2);
+                    crv_Edit(b, k);
+                    crv_Draw(b);
+                    // (2026-11-24) the playheads of the host, in the editor of the marks (crv_MarkE ; none yet : all)
+                    (((i = crv_MarkE()) < 0) || (i === e)) ? crv_DrawPh(b);
+                    cgh = ui_hover();
+                    x0 = ui_left_retina(); w = ui_width_retina();
+                    // (2026-11-24) the marks of this editor (crv_MarkE) : its graph drawn, the x under the mouse (not while a
+                    // point or a segment is dragged)
+                    crv_seenF[e] = gfx_executed;
+                    crv_hovX[e] = (cgh && !crv_mDrag) ? max(0, min(1, (mouse_x - x0 - CRV_PAD) / max(1, w - 1 - 2 * CRV_PAD))) : -1;
+                    cgh ? (crv_lastE = e);
+                ui_pop();
+                ui_split_top(h3);
+                    ui_pad(4, 2, 4, 2);
+                    ui_pcolor(ui_jcolor_text);
+                    ui_align(0, 0.5);
+                    (((i = crv_SelCount(b[crv_fN])) > 1) && (crv_mDrag || !cgh)) ? (
+                        ui_text(sprintf(#crv_txt, "%d points selected", i));
+                    ) :
+                    (((i = b[crv_fSel]) >= 0) && (i < b[crv_fN]) && crv_selF[i] && (crv_mDrag || !cgh)) ? (
+                        v = b + crv_fP + 3 * i;
+                        ui_text(sprintf(#crv_txt, "Point %d :  x %.4f   y %.4f   c %.3f%s", i + 1, v[0], v[1], v[2],
+                            (i === b[crv_fSus]) ? "   (sustain)" : ""));
+                    ) :
+                    cgh ? (
+                        mx = max(0, min(1, (mouse_x - x0 - CRV_PAD) / max(1, w - 1 - 2 * CRV_PAD)));
+                        ui_text(sprintf(#crv_txt, "x %.4f   y %.4f", mx, crv_Val(b, mx)));
+                    ) :
+                    ((i = b[crv_fSus]) >= 0) ? (
+                        v = b + crv_fP + 3 * i;
+                        ui_text(sprintf(#crv_txt, "y in [0, 1]   sustain : point %d (x %.4f, y %.4f)", i + 1, v[0], v[1]));
+                    ) : (
+                        i = b[crv_fT];
+                        ui_text((i === CRV_ENV) ? "y in [0, 1]" : (i === CRV_WAVE) ? "y in [-1, 1]" :
+                            (i === CRV_HENV) ? "the rise, y in [0, 1] (the fall : its mirror)" :
+                            (i === CRV_QWAVE) ? "a quarter of the waveform, y in [-1, 1] (the first y : 0)" :
+                            "the first half of the waveform, y in [-1, 1] (the second : its symmetric about the middle)");
+                    );
+                ui_pop();
+            );
+        ui_pop();
+    );
+    crv_EdPut(e);
+);
+
+// Saved with the project : the curves that exist (record 'crv1' : CRV_MX, CRV_BS, CRV_NE ; then for each curve [its index, its
+// count of points, 1 if it has a name, 0], its header and its points, its name ; [-1 ...] at the end ; then the curve shown
+// and the grid of each editor)
+function crv_Serialize() local(k, b, n, go, e, p)
+(
+    (file_avail(0) >= 0) ? (
+        // ===LOAD===
+        (file_avail(0) > 0) ? (
+            memset(ser_hdr, 0, 4);
+            load_mem(0, ser_hdr, 4);
+            ((ser_hdr[0] === 'crv1') && (ser_hdr[1] === CRV_MX) && (ser_hdr[2] === CRV_BS) && (ser_hdr[3] === CRV_NE)) ? (
+                memset(crv_blk, 0, CRV_MX * CRV_BS);
+                k = 0; loop(CRV_MX, strcpy(crv_nm[k], ""); k += 1;);
+                go = 1;
+                while (go && (file_avail(0) > 0)) (
+                    memset(crv_sv, 0, 4);
+                    load_mem(0, crv_sv, 4);
+                    k = crv_sv[0]; n = crv_sv[1];
+                    ((k >= 0) && (k < CRV_MX) && (n >= 2) && (n <= CRV_PMX)) ? (
+                        b = crv_B(k);
+                        load_mem(0, b, crv_fP + 3 * n);
+                        b[crv_fU] = 1; b[crv_fN] = n; b[crv_fSel] = -1;
+                        crv_Clamp(b);
+                        crv_sv[2] ? file_string(0, crv_nm[k]);
+                    ) : (
+                        go = 0;
+                    );
+                );
+                memset(crv_sv, 0, 2 * CRV_NE);
+                load_mem(0, crv_sv, 2 * CRV_NE);
+                e = 0;
+                loop(CRV_NE,
+                    p = crv_ed + e * CRV_ES;
+                    p[0] = max(0, min(CRV_MX - 1, crv_sv[2 * e]|0)); p[1] = max(0, min(32, crv_sv[2 * e + 1]|0));
+                    e += 1;
+                );
+                crv_undoK = crv_preK = -1;
+                mSL_log(SysLogBox, "Curves : loaded");
+            );
+        );
+    ) : (
+        // ===SAVE===
+        ser_hdr[0] = 'crv1'; ser_hdr[1] = CRV_MX; ser_hdr[2] = CRV_BS; ser_hdr[3] = CRV_NE;
+        save_mem(0, ser_hdr, 4);
+        k = 0;
+        loop(CRV_MX,
+            b = crv_B(k);
+            (b[crv_fU] > 0) ? (
+                crv_sv[0] = k; crv_sv[1] = b[crv_fN]; crv_sv[2] = (strlen(crv_nm[k]) > 0); crv_sv[3] = 0;
+                save_mem(0, crv_sv, 4);
+                save_mem(0, b, crv_fP + 3 * b[crv_fN]);
+                crv_sv[2] ? file_string(0, crv_nm[k]);
+            );
+            k += 1;
+        );
+        crv_sv[0] = -1; crv_sv[1] = crv_sv[2] = crv_sv[3] = 0;
+        save_mem(0, crv_sv, 4);
+        e = 0; loop(CRV_NE, p = crv_ed + e * CRV_ES; crv_sv[2 * e] = p[0]; crv_sv[2 * e + 1] = p[1]; e += 1;);
+        save_mem(0, crv_sv, 2 * CRV_NE);
+    );
+);

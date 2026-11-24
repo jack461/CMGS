@@ -258,3 +258,41 @@ module Global.
    placement de la trajectoire sur la surface (5e ligne du pad), un chemin bien visible ; dans Edit A … D, la taille des
    points (menu de la vue, « Size of the points », comme « Size of … » des vues Space).
 6. Export et import, faders de l'APCmini, chapitre du manuel de Diffusion-3, tests mSL (Ex-30xx).
+
+## Extension : les trajectoires A … D et les courbes (24 novembre 2026)
+
+Décidé avec l'utilisateur :
+
+- **Le système de Space dans la MetaSurface** : quatre trajectoires A, B, C, D (les formes de Space 3D avec leur rayon,
+  les chemins des éditeurs Edit A … D, la bibliothèque T1 … T128), un placement par trajectoire (x, y, rotation, taille),
+  Mix le long de la chaîne (A B, A B C, A B C D), Glide, Dyn (les courbes d'accélération de Space et les courbes de
+  l'utilisateur) ; le placement actuel devient celui du chemin entier. Le mélange réutilise celui des projecteurs
+  spatiaux (sp_Native, sp_MkBlend), dans le plan x, y. Les MetaSurfaces sauvées sont reprises (leur chemin dans A).
+- **Le module Curves dans Diffusion-3** : une bibliothèque partagée, mSL_Curves (préfixe crv_), tirée du module Curves
+  d'Interstys : 64 courbes en mémoire statique (lisibles par @block sans allocation), leurs types (Env, Wave, HEnv, QWave,
+  HWave), périodique, sustain, la forme des segments, les noms, Undo ; les éditeurs « Curves A … D » ; des tables de
+  1 025 échantillons de la forme complète, construites par @gfx quand une courbe change (crv_F) ; la sauvegarde avec le
+  projet (enregistrement 'crv1'). Interstys garde son code ; il passera à la bibliothèque plus tard.
+- **Moduler par des courbes** : Dyn par une courbe (la place sur le chemin en fonction du temps, la durée respectée) ;
+  trois modulateurs Rotation, Speed, Mix (une courbe, un cycle « Path » ou une période en secondes, une profondeur :
+  les vitesses multipliées par la courbe, Mix + profondeur × courbe). Dyn accepte aussi les courbes dans les vues Space.
+
+Les étapes : 1. le module Curves (écrit le 24 novembre 2026, testé) ; 2. les trajectoires A … D de la MetaSurface (écrite le
+24 novembre 2026 : le pad passe à 6 lignes — ligne 4 Brush, A, B, C, D, Mix, Glide, Dyn ; ligne 5 Duration, le mode, Speed,
+Radius, Simulate, Record, Restart, le compteur ; ligne 6 x, y, turn, scale, Placement, Place ; Alt + clic sur A … D : son
+placement, la trajectoire dessinée seule en or avec son pivot ; Cmd + clic : un glide vers elle ; un enregistrement va dans A) ; 3. les
+modulations par les courbes (et Dyn de Space) ; 4. l'export et l'import, Interstys sur mSL_Curves, le manuel, les tests.
+
+Compléments (24 novembre 2026, demandes de l'utilisateur) : la touche e lance et arrête Record ; le tracé de
+l'enregistrement en cours ; les flips (gauche - droite, haut - bas) du chemin entier et de chaque trajectoire A … D ;
+Remove (une trajectoire de la bibliothèque) ; les transformations d'une trajectoire de la bibliothèque (menus de A … D et
+module Trajectories, avec Undo) : lissage (Taubin, sans rétrécissement ; léger, moyen, fort), rééchantillonnage à
+distances égales, ou selon la densité d'une courbe de Curves (2^(profondeur × F(s)), s la part de la longueur : une
+courbe haute rapproche les points, le pinceau ralentit quand le chemin est parcouru à temps égal entre ses points ;
+plate : distances égales). Un rééchantillonnage depuis la MetaSurface passe Speed sur « points ». Les repères de la
+courbe éditée sur le chemin (le module Curves utilisé en dernier, visible ; tant qu'un de ses points est sélectionné ou que
+la souris est sur son graphe) : des tirets en travers du chemin là où le rééchantillonnage placerait les points (rapprochés :
+le pinceau y ralentira), les points de la courbe (petits points verts), les points sélectionnés (plus gros, or, avec leur
+numéro), le x sous la souris (un anneau) ; les types HEnv, QWave, HWave : chaque place de la forme complète. En retour,
+le graphe de ce module Curves montre le pinceau de chaque MetaSurface en mouvement sur son chemin : une ligne verticale
+magenta au x de sa place (la part de la longueur du chemin), un point sur la courbe, la lettre de la vue.

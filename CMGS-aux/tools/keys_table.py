@@ -37,6 +37,7 @@ SKIP = ('mSL_Comp_lib', 'Diffusion-3-XML', 'mSL_Utilities', 'ZZZ', 'unused', 'Th
 NOT_KEYS = {('GamePlayer.jsfx-inc', f) for f in ('getClipName', 'rebuildAllaliases', 'installClipSet',
             'SetClipsList', 'updClSel', 'clDirResolve')} | {('FilePlayer.jsfx-inc', 'checkRCB')} | \
            {('Interstys.jsfx-inc', 'its_Rd_SegMenu')} | \
+           {('Diffusion-3-MetaSurface.jsfx-inc', 'ms_Migrate')} | \
            {('mSL_ui_LibJJ.jsfx-inc', f) for f in ('GM_key_frame', 'GM_key_end', 'GM_key_peek', 'GM_key_take',
                                                    'GM_key_take_in', 'GM_key_mods')}
 READERS = set()
@@ -51,6 +52,7 @@ SHARED = {
     'mSL_System_Keys.jsfx-inc': ['FilePlayer', 'ScriptMaster', 'Diffusion-3', 'Interstys'],
     'ui-lib-JJ-GUI.jsfx-inc': PLUGINS,                    # GM_Tab_Keys (Tab, Shift + Tab), GM_Size_Keys (Cmd + - + 0)
     'mSL_Console.jsfx-inc': PLUGINS,                      # the module mSL Console (2026-11-19)
+    'mSL_Curves.jsfx-inc': ['Diffusion-3'],               # the modules Curves A ... D (2026-11-24)
 }
 
 # Levels, in the order they see the key during a frame : each level only gets the keys the previous ones left
@@ -119,6 +121,8 @@ HANDLERS = {
     ('Diffusion-3-Space3D.jsfx-inc', 'show_Space_Pad'): ('module', 'Space A ... D (la vue)'),
     ('Diffusion-3-Edit.jsfx-inc', 'show_Edit_Pad'): ('module', 'Edit A ... D (éditeurs de points)'),
     ('Diffusion-3-ConfEditor.jsfx-inc', 'show_ConfEditor_Pad'): ('module', 'Conf Editor (éditeur de configurations)'),
+    ('Diffusion-3-MetaSurface.jsfx-inc', 'show_MetaSurface_Pad'): ('module', 'MetaSurface A ... D'),
+    ('mSL_Curves.jsfx-inc', 'crv_Editor'): ('module', 'Curves A ... D (éditeurs de courbes)'),
     ('mSL_Dbg_Memory.jsfx-inc', 'show_Memory'): ('module', 'mémoire (débogueur)'),
     ('mSL_Panes.jsfx-inc', 'genericItemsPos'): ('pane', 'largeur des colonnes'),
     ('mSL_ui_Pads.jsfx-inc', 'show_jled'): ('module', 'LED interactive'),
