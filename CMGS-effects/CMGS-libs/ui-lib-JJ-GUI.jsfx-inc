@@ -212,6 +212,10 @@ local (ii, std)
         uix_jG_menuscr[ii+=1] = -1;
         uix_jtheme_ctlsiz = make_array(16); // up to 16 themes
         uix_cz = make_array(UIX_CZS * UIX_CZMAX); // (2026-11-21) the cursor zones (see ui_cursor_zone, mSL_ui_LibJJ)
+        // (2026-11-24) the heights of the modules chosen by the user (see ui_jheight, ui_jmh_lines)
+        uix_jmhH = make_array(UIX_JMHN); uix_jmhR = make_array(UIX_JMHN);
+        uix_jmhLo = make_array(UIX_JMHN); uix_jmhHi = make_array(UIX_JMHN);
+        memset(uix_jmhH, 0, UIX_JMHN); memset(uix_jmhR, -10, UIX_JMHN);
         // (2026-11-21) the tabs bar and its button "Back", drawn as pads (the look of the pads, rubric GUI) ; no border :
         // each tab keeps the width of its zone of clics (uix_jsiz_menu_bar_item_width)
         uix_jtabs_pad = make_jpad(ui_jpad_ty_sel | ui_jpad_mk_labs | ui_jpad_mk_colors, 1, 32, 32);
@@ -693,6 +697,12 @@ function ui_split_leftratio(ratio,mini) (
 // the border between two panes dragged (ui_jborders) : its index (-1 : none), its tab, the count of the panes ; the last
 // clic on a border (a double clic : the two panes equal)
 uix_jbdK = -1; uix_jbdTab = 0; uix_jbdN = 0; uix_jbdLK = -1; uix_jbdLT = 0;
+// (2026-11-24) the heights of the modules chosen by the user, by module number (0 ... UIX_JMHN - 1 ; see ui_jheight) : the
+// height (0 : automatic), the frame (gfx_executed) where the module asked it, its bounds ; the line dragged (ui_jmh_lines) :
+// its module (0 : none), its pane, the mouse and the height at its start ; the last clic on a line (a double clic) ; the
+// pane (screen pixels)
+UIX_JMHN = 512; uix_jmhH = uix_jmhR = uix_jmhLo = uix_jmhHi = 0;
+uix_jmhK = 0; uix_jmhP = -1; uix_jmhY0 = uix_jmhH0 = 0; uix_jmhLK = 0; uix_jmhLT = 0; uix_jmhPL = uix_jmhPW = uix_jmhPB = 0;
 
 /*
     (2026-11-21) The borders between the n panes of a tab (p : their widths, relative ; tab : its number ; the rect : the
@@ -757,6 +767,116 @@ local(L, T, W, H, S, c, k, i, xb, hz, a, b, pm, x, r)
     );
 );
 
+
+/*
+    (2026-11-24) The height of a module, chosen by the user (the 5 applications : the panes of mSL_Panes, of Interstys and of
+    the GamePlayer). The module m (its number, as for keepBlockInfos) asks its whole height : ui_jheight(m, hdef, hmin, hmax)
+    (hdef : its automatic height ; hmin : its least ; hmax : the room left in the pane, ui_height()) ; the height of the
+    user (uix_jmhH[m] ; 0 : none) or hdef, in [hmin, hmax]. The module is then, for this frame, a module whose height may
+    change (uix_jmhR[m] = gfx_executed ; uix_jmhLo, uix_jmhHi : its bounds) : the line under it can be dragged (ui_jmh_lines).
+    The heights : in the units of ui-lib (they follow the display size) ; saved with the project (ui_jmh_serialize,
+    mSL_Serialize). (A double clic on the line : uix_jmhH[m] -1, the automatic height.)
+*/
+function ui_jheight(m, hdef, hmin, hmax)
+local(h)
+(
+    ((m > 0) && (m < UIX_JMHN) && (uix_jmhH > 0)) ? (
+        (uix_jmhH[m] < 0) ? (uix_jmhH[m] = 0);
+        hmax = max(hmin, hmax);
+        uix_jmhR[m] = gfx_executed; uix_jmhLo[m] = hmin; uix_jmhHi[m] = hmax;
+        h = (uix_jmhH[m] > 0) ? uix_jmhH[m] : hdef;
+        max(hmin, min(hmax, h));
+    ) : hdef;
+);
+
+/*
+    (2026-11-24) A module whose variable part keeps its height itself (a waveform, a graph : hp[0], 0 for its default vdef ;
+    also changed by the keys + and - of the module, saved with the module) : its whole height is hf + that part. The line
+    under it dragged sets hp[0] (in [vmin, vmax], the module in the room left in the pane, ui_height()) ; a double clic :
+    hp[0] = 0 (the default). Returns the height of the part (to call before the module takes its place, as ui_jheight).
+*/
+function ui_jheightv(m, hf, hp, vdef, vmin, vmax)
+local(v)
+(
+    v = (hp[0] > 0) ? hp[0] : vdef;
+    ((m > 0) && (m < UIX_JMHN) && (uix_jmhH > 0)) ? (
+        (uix_jmhH[m] > 0) ? (
+            v = hp[0] = max(vmin, min(vmax, uix_jmhH[m] - hf)); uix_jmhH[m] = 0;
+        ) :
+        (uix_jmhH[m] < 0) ? (
+            hp[0] = 0; v = vdef; uix_jmhH[m] = 0;
+        );
+        uix_jmhR[m] = gfx_executed; uix_jmhLo[m] = hf + vmin;
+        uix_jmhHi[m] = max(hf + vmin, min(hf + vmax, ui_height()));
+    );
+    v;
+);
+
+/*
+    (2026-11-24) The lines under the modules of a pane whose height may change (ui_jheight, in the frame drawn before) : the
+    rect, the pane ; desc, its modules (nm words : their numbers, then their places, top * 10000 + height, in screen pixels,
+    see keepBlockInfos) ; pn, the pane (a number of the host). Under the mouse (3 pixels on each side of a line ; a module
+    down to the bottom of the pane : from 3 to 12 pixels above its bottom, the zone of the window being resized by the
+    system is at its bottom), arrows up - down ; a left drag moves the line (the height of the module above it, in its bounds ; the next modules follow) ; a
+    double clic : its automatic height. The clic on a line is not seen by the modules (uix_click_block). Called before the
+    modules of the pane (ph 0 : the clics, the drag), then after them (ph 1 : the cursor zones, over those of the modules)
+*/
+function ui_jmh_lines(desc, nm, pn, ph)
+local(i, k, u, y, h, r, hz, f, zm, zd, b)
+(
+    r = ui_retina(); hz = 3 * r;
+    (ph === 0) ? (
+        uix_jmhPL = ui_left_retina(); uix_jmhPW = ui_width_retina(); uix_jmhPB = ui_top_retina() + ui_height_retina();
+        // a drag going on (this pane) : the line follows the mouse
+        ((uix_jmhK > 0) && (uix_jmhP === pn)) ? (
+            (uix_mcap & 1) ? (
+                k = uix_jmhK;
+                uix_jmhH[k] = max(uix_jmhLo[k], min(uix_jmhHi[k], (uix_jmhH0 + mouse_y - uix_jmhY0) / r));
+                ui_cursor_drag(7);
+                ui_GFXdoNow |= 4;
+            ) : (
+                uix_jmhK = 0;
+            );
+        );
+        // a clic on a line : a drag ; a double clic : the automatic height
+        (uix_click1 && (uix_jmhK <= 0) && (mouse_x >= uix_jmhPL) && (mouse_x < uix_jmhPL + uix_jmhPW)) ? (
+            f = 0; i = 0;
+            loop(nm - 1,
+                k = desc[i];
+                (!f && (k > 0) && (k < UIX_JMHN) && (uix_jmhR[k] >= gfx_executed - 1)) ? (
+                    u = desc[i + nm]; h = u % 10000; y = floor(u / 10000) + h;
+                    // (the zone of the line : its middle, its half height)
+                    b = (y > uix_jmhPB - 2 * hz); zm = b ? y - 2.5 * hz : y; zd = b ? 1.5 * hz : hz;
+                    ((u > 0) && (abs(mouse_y - zm) <= zd)) ? (
+                        f = 1;
+                        ((uix_jmhLK === k) && (time_precise() - uix_jmhLT < 0.4)) ? (
+                            uix_jmhH[k] = -1; uix_jmhLK = 0; // (ui_jheight, ui_jheightv : the automatic height)
+                        ) : (
+                            uix_jmhK = k; uix_jmhP = pn; uix_jmhY0 = mouse_y; uix_jmhH0 = h;
+                            uix_jmhLK = k; uix_jmhLT = time_precise();
+                            ui_cursor_drag(7);
+                        );
+                        uix_click_block(); // (the modules under it do not see this clic)
+                        ui_GFXdoNow |= 4;
+                    );
+                );
+                i += 1;
+            );
+        );
+    ) : (
+        // the cursor zones of the lines (the modules drawn in this frame)
+        i = 0;
+        loop(nm - 1,
+            k = desc[i];
+            ((k > 0) && (k < UIX_JMHN) && (uix_jmhR[k] === gfx_executed)) ? (
+                u = desc[i + nm]; y = floor(u / 10000) + (u % 10000);
+                b = (y > uix_jmhPB - 2 * hz); zm = b ? y - 2.5 * hz : y; zd = b ? 1.5 * hz : hz;
+                (u > 0) ? ui_cursor_zone(uix_jmhPL, zm - zd, uix_jmhPW, 2 * zd, 7, -1);
+            );
+            i += 1;
+        );
+    );
+);
 
 function ui_split_rightratio(ratio,mini) (
     ui_split_right(max(mini,ratio*uix_drawconfig_current[18]));

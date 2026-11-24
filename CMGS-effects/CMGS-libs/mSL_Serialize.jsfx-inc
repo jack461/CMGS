@@ -16,6 +16,8 @@
     load_mem(file, area, size)            in @serialize (load) : reads them back ; both return the count of doubles
     ser_hdr                               4 words, for the headers of the saved blocks (mark, sizes...)
     savwrk, WRKSIZ, BFFSIZ                the work area (2 * WRKSIZ words), also usable outside @serialize
+    ui_jmh_serialize(), ui_jmh_save(), ui_jmh_load(n)
+                                          (2026-11-24) the heights of the modules chosen by the user (see at the end)
 */
 
 function ser_Init()
@@ -138,3 +140,47 @@ local (pd, pt, sl, rcr, sz)
     sl >> 1;
 );
 
+
+/*
+    (2026-11-24) The heights of the modules chosen by the user (uix_jmhH : ui_jheight, ui_jmh_lines in ui-lib-JJ-GUI) : a
+    record ['mhg1', n, 0, 0], then n pairs (the module, its height). ui_jmh_save writes it ; ui_jmh_load(n) reads its pairs
+    (its header read by the host : Interstys, the loop of its blocks) ; ui_jmh_serialize : the whole record (the last one of
+    the host : the older projects end before it, all the heights automatic).
+*/
+function ui_jmh_save() local(i, n)
+(
+    n = 0; i = 1; loop(UIX_JMHN - 1, (uix_jmhH[i] > 0) ? (n += 1); i += 1;);
+    ser_hdr[0] = 'mhg1'; ser_hdr[1] = n; ser_hdr[2] = ser_hdr[3] = 0;
+    save_mem(0, ser_hdr, 4);
+    i = 1;
+    loop(UIX_JMHN - 1,
+        (uix_jmhH[i] > 0) ? ( ser_hdr[0] = i; ser_hdr[1] = uix_jmhH[i]; save_mem(0, ser_hdr, 2); );
+        i += 1;
+    );
+    n;
+);
+function ui_jmh_load(n) local(k)
+(
+    memset(uix_jmhH, 0, UIX_JMHN);
+    loop(max(0, min(UIX_JMHN, n|0)),
+        memset(ser_hdr, 0, 2);
+        load_mem(0, ser_hdr, 2);
+        k = ser_hdr[0]|0;
+        ((k > 0) && (k < UIX_JMHN)) ? (uix_jmhH[k] = max(0, min(20000, ser_hdr[1])));
+    );
+);
+function ui_jmh_serialize()
+(
+    (file_avail(0) >= 0) ? (
+        // ===LOAD=== (an older project : the automatic heights)
+        memset(uix_jmhH, 0, UIX_JMHN);
+        (file_avail(0) > 0) ? (
+            memset(ser_hdr, 0, 4);
+            load_mem(0, ser_hdr, 4);
+            (ser_hdr[0] === 'mhg1') ? ui_jmh_load(ser_hdr[1]);
+        );
+    ) : (
+        // ===SAVE===
+        ui_jmh_save();
+    );
+);
