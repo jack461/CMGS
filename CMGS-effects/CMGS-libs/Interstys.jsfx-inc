@@ -13950,6 +13950,10 @@ i__ii = 0; loop(its_CrvTyCnt, its_CrvTy[i__ii] = its_TK(its_CrvTyN[i__ii]); i__i
 its_CrvKS = make_array(5); its_CrvKv = make_array(5);
 its_CrvTP = make_array(3 * its_CrvPMx); its_CrvTN = 0;
 its_CrvSimU = make_array(its_CrvMx);
+// (2026-11-24) a file dropped on a module Curves (crv_mslTgt : the curve it shows, crv_DropTarget ; its_CrvDropT : the time) :
+// the first block Curve of the settings read in the 10 s goes into that curve (its_CrvDrop for the analysis, its_CrvDropP for
+// each pass)
+its_CrvDrop = its_CrvDropP = -1; its_CrvDropT = 0;
 // The curve k as a block of Interstys (mSL_Curves : after its word crv_fU), 0 if it does not exist ; the value of the curve b
 // (a block of Interstys) at x ; the lowest y of the type ty ; a new curve b of the type ty (it exists) ; its points in the
 // bounds of its type (see mSL_Curves)
@@ -14106,7 +14110,17 @@ function its_Crv_Keys(k) local(w, v, i, n, lo, ty, pr, ok)
 function its_Tb_Curve() local(k, b, w, i, p)
 (
     w = its_Tb_Next();
-    k = its_Crv_Id(w, 1);
+    (its_CrvDropP >= 0) ? (
+        // (2026-11-24) a file dropped on a module Curves : its first block goes into the curve that module shows (an id that
+        // is a name : the new name of the curve, unless another curve has it)
+        k = its_CrvDropP; its_CrvDropP = -1;
+        ((its_Tb_mode >= 2) && !((abs(w) < mSL_CharConst) && !mSL_isString(w)) && its_Crv_WTxt(#its_CrvW, w) &&
+            its_Crv_NmOk(#its_CrvW) && (((i = its_Crv_Find(#its_CrvW, its_Tb_mode === 2)) < 0) || (i === k))) ? (
+            (its_Tb_mode === 2) ? strcpy(its_CrvSimN[k], #its_CrvW) : strcpy(its_CrvNm[k], #its_CrvW);
+        );
+    ) : (
+        k = its_Crv_Id(w, 1);
+    );
     its_Crv_Keys(k);
     ((its_Tb_error === 0) && (its_Tb_mode === 2) && (k >= 0)) ? (
         its_CrvSimU[k] = 1;
@@ -14129,6 +14143,11 @@ function its_Tb_Curve() local(k, b, w, i, p)
             );
             its_CrvKS[4] ? (b[its_Crv_Sus] = its_CrvKv[4] - 1);
             its_Crv_Clamp(b);
+            // (2026-11-24) the curve read, in the log (as in Diffusion-3, crv_TbCommit)
+            (strlen(its_CrvNm[k]) > 0) ? sprintf(#its_CrvLg, " \"%s\"", its_CrvNm[k]) : strcpy(#its_CrvLg, "");
+            sprintf(#its_CrvLm, "Curves : curve %d%s (%s, %d points) : read from settings", k + 1, #its_CrvLg,
+                its_CrvTyN[b[its_Crv_Type]], b[its_Crv_N]);
+            mSL_log(SysLogBox, #its_CrvLm);
         );
     );
 );
@@ -18933,6 +18952,9 @@ function Set_Table_App(tbl) local(m, w, xb)
     its_Tb_error = its_Tb_res = its_TbNCnt = 0;
     its_Tb_scope = its_Tb_sscope = its_Tb_setm = 0; its_Tb_cpend = its_Tb_spend = -1;
     its_Tb_hasTab = 0; // (pass 0 : a block Tab, see its_XpShow)
+    // (2026-11-24) a file dropped on a module Curves in the last 10 s : its first block Curve goes there
+    its_CrvDrop = ((crv_mslTgt >= 0) && (time_precise() - its_CrvDropT < 10)) ? crv_mslTgt : -1;
+    crv_mslTgt = -1;
     memset(its_TbResv, 0, LN_CNT + WR_CNT + RD_CNT + FX_CNT);
     // the templates taken, the instances expanded (its_Al_Expand : its size, then the words)
     its_Al_buf = xb = 0;
@@ -18955,6 +18977,7 @@ function Set_Table_App(tbl) local(m, w, xb)
         its_Tb_scope = its_Tb_sscope = its_Tb_setm = 0;
         its_Tb_SimInit();
         its_Crv_SimInit();
+        its_CrvDropP = its_CrvDrop;
         (its_Tb_Peek() === its_TK_Interstys) ? its_Tb_Next();
         while ((its_Tb_error === 0) && ((w = its_Tb_Next()) !== its_TK_End) && (w !== its_TK_EofMark)) (
             its_Al_Flush(); // (an instance ended by the previous block)
@@ -19778,6 +19801,8 @@ while (g__efi) (
 
     (match ("*.mSL", g__efs)) ? (
         //sprintf(#s, "*  Compile: %s  (%d)  *", efs, strlen(#efs)); mSL_log(SysLogBox, #s);
+        // (2026-11-24) dropped on a module "Curves" : the first block Curve of its settings goes into the curve it shows
+        crv_mslTgt = crv_DropTarget(); its_CrvDropT = time_precise();
         mcon_DropCheck(g__efs); // (dropped on the mSL Console : it becomes its context, see mSL_Console)
         doMslCompile(g__efs); // add to compile list
     ) :
