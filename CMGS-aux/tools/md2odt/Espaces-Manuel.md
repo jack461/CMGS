@@ -1,5 +1,5 @@
 ---
-title: "Diffusion 3"
+title: "Espaces"
 subtitle: "Diffusion de sources multicanales sur des installations multicanales — Manuel de l'utilisateur"
 author: "Jean-Jacques Girardot"
 date: "Novembre 2026 — version 3.8.2 — document de travail"
@@ -9,9 +9,9 @@ toc-title: "Table des matières"
 
 # Présentation
 
-## À quoi sert Diffusion 3
+## À quoi sert Espaces
 
-Diffusion 3 est un plug-in de la suite CMGS (*Concrete Music Gran Studio*), destiné à la **diffusion**, ou
+Espaces est un plug-in de la suite CMGS (*Concrete Music Gran Studio*), destiné à la **diffusion**, ou
 spatialisation, de sources multicanales sur une installation multicanale (un acousmonium). Il est programmé en JSFX,
 et n'est donc utilisable que dans REAPER.
 
@@ -34,21 +34,21 @@ d'accompagnement) sur l'ensemble des haut-parleurs.
 | Paquets d'actions | 16 | de 8 actions chacun |
 | Fichiers de configuration | 9 | Diffusion-1.mSL à Diffusion-9.mSL |
 
-Le nombre de projecteurs est fixé au début du fichier Diffusion-3.jsfx (`PRJ_CNT = 16`) ; les structures internes en
+Le nombre de projecteurs est fixé au début du fichier Espaces.jsfx (`PRJ_CNT = 16`) ; les structures internes en
 prévoient jusqu'à 24.
 
 ## Installation
 
-Diffusion 3 fonctionne avec REAPER 7.25 ou plus récent. Le fichier Diffusion-3.jsfx et le dossier GM-Libs/ doivent se
+Espaces fonctionne avec REAPER 7.25 ou plus récent. Le fichier Espaces.jsfx et le dossier GM-Libs/ doivent se
 trouver dans le dossier Effects/ de REAPER (dans la distribution CMGS, sous Effects/CMGS/GameMaster/). Le plug-in
-apparaît dans la liste des effets sous le nom *Diffusion3 - 128 Channels - v4.0 - 2026*.
+apparaît dans la liste des effets sous le nom *Espaces - 128 Channels - v4.0 - 2026*.
 
 Le nombre de canaux utilisés en entrée et en sortie est, par défaut, celui de la piste sur laquelle le plug-in est
 installé (jusqu'à 128).
 
 Le plug-in lit au lancement un fichier de configuration, Diffusion-1.mSL, qui décrit les diffusions (voir « Les
 fichiers de configuration »). Les dossiers où il le cherche dépendent de la variable `user_directory`, au début du
-fichier Diffusion-3.jsfx, à adapter une fois pour toutes (voir « Où placer les fichiers »).
+fichier Espaces.jsfx, à adapter une fois pour toutes (voir « Où placer les fichiers »).
 
 ## Sauvegarde
 
@@ -120,7 +120,7 @@ effectives.
 
 ## Onglets, panneaux et modules
 
-La fenêtre de Diffusion 3 est organisée comme celles des autres plug-ins CMGS : des **onglets** (Tab1, Tab2…, dont la
+La fenêtre d'Espaces est organisée comme celles des autres plug-ins CMGS : des **onglets** (Tab1, Tab2…, dont la
 liste est en haut de la fenêtre), chacun de 1 à 4 **panneaux** (colonnes), et dans chaque panneau une pile de
 **modules**. Par défaut, le premier onglet montre les modules Main Status, System Log, Memory 1 et Memory 2, et le
 second l'écran Live.
@@ -153,7 +153,7 @@ Une valeur se tape aussi au clavier : un clic sur le libellé d'un fader (module
 
 ## Les curseurs natifs
 
-Diffusion 3 déclare des curseurs JSFX, que REAPER montre dans le panneau de l'effet (la touche S les montre ou les
+Espaces déclare des curseurs JSFX, que REAPER montre dans le panneau de l'effet (la touche S les montre ou les
 cache) et qui peuvent être automatisés ou appris par un contrôleur MIDI. Les modules ne font que les manipuler : changer
 un réglage dans un pad revient à déplacer le curseur correspondant.
 
@@ -250,7 +250,7 @@ du menu des modules.
 Le module **Space 3D** est une vue en trois dimensions des haut-parleurs et de sources. C'est un outil d'étude et de
 visualisation : il ne modifie pas le son.
 
-Par défaut, les haut-parleurs sont ceux de la configuration de Diffusion 3 (leurs positions sont données par `hppos`
+Par défaut, les haut-parleurs sont ceux de la configuration d'Espaces (leurs positions sont données par `hppos`
 dans le fichier de configuration) ; les gains montrés sont ceux de la diffusion du projecteur courant, et les niveaux
 ceux des sorties. On peut aussi y charger des configurations de GRM Spaces : déposer sur la fenêtre un fichier .lay (une
 configuration) ou .ala (une bibliothèque), ou une trajectoire exportée en .xml.
@@ -393,7 +393,7 @@ Le fichier ci-dessous a été conçu pour diffuser une stéréo sur une installa
 
 ```
 D3_config(data(
-// Configuration for "Diffusion 3"
+// Configuration for "Espaces"
 vol -8
 vadj 4
 morpht 5
@@ -519,8 +519,8 @@ lancement ; le menu de la cellule File du module Global, ou le curseur Action (F
 tout moment. Un fichier de configuration peut aussi être déposé sur la fenêtre du plug-in, comme tout script mSL.
 
 REAPER ne donne pas à un plug-in JSFX le dossier de l'utilisateur. Le plug-in cherche donc les fichiers, dans cet ordre :
-sous leur nom seul, puis dans cinq dossiers définis au début de Diffusion-3.jsfx-inc à partir de la variable
-`user_directory` de Diffusion-3.jsfx :
+sous leur nom seul, puis dans cinq dossiers définis au début d'Espaces.jsfx-inc à partir de la variable
+`user_directory` d'Espaces.jsfx :
 
 ```
 user_directory = "/Users/jjg4"
@@ -599,7 +599,7 @@ projecteurs, se font progressivement, en un temps réglé par la Volume Responsi
 
 ## Présentation
 
-Bien que l'interface de Diffusion 3 donne accès à toutes ses fonctions, une utilisation en concert demande une surface
+Bien que l'interface d'Espaces donne accès à toutes ses fonctions, une utilisation en concert demande une surface
 de contrôle MIDI. L'expérience montre que plus une surface est complexe et évoluée (et donc chère), moins il est facile
 de l'adapter à un usage que son concepteur n'a pas prévu. L'APCmini d'AKAI, par sa simplicité et son faible coût, s'y
 prête bien. Son module est inclus dans le plug-in (AKAI-APCmini.jsfx-inc) ; il peut être laissé sans conséquence si
@@ -680,7 +680,7 @@ allumé, et clignote quand un second appui a choisi sa variante.
 
 Pour utiliser la surface de contrôle, il faut s'assurer qu'elle est connue du système (sous macOS, dans « Configuration
 audio et MIDI »), et qu'elle est utilisable par REAPER (Preferences, Audio, MIDI Inputs et MIDI Outputs). Il suffit
-ensuite de mettre la piste qui porte Diffusion 3 en entrée MIDI sur cette surface, et d'ajouter dans son routage la même
+ensuite de mettre la piste qui porte Espaces en entrée MIDI sur cette surface, et d'ajouter dans son routage la même
 surface en sortie MIDI (*MIDI Hardware Output*), afin que le plug-in puisse en éclairer les touches.
 
 [Copie d'écran à refaire : le routage de la piste du plug-in, avec la sortie MIDI vers l'APCmini.]
@@ -693,14 +693,14 @@ surface pour la passer en mode MK2. Les couleurs affichées sont alors différen
 
 # Les scripts mSL
 
-Diffusion 3 contient l'interpréteur mSL (*micro Script Language*) de CMGS. Un fichier .mSL déposé n'importe où dans la
+Espaces contient l'interpréteur mSL (*micro Script Language*) de CMGS. Un fichier .mSL déposé n'importe où dans la
 fenêtre est compilé et exécuté : c'est ainsi que sont lus les fichiers de configuration, qui appellent `D3_config`. Un
 script peut aussi échanger des messages avec les autres plug-ins CMGS (le Game Master, Interstys…), ou être appelé par
 une action (opération 12). Le langage est décrit dans le manuel du Game Master.
 
 # Le clavier
 
-Diffusion 3 suit le schéma de clavier commun à CMGS : une touche est d'abord proposée au module sous la souris, puis au
+Espaces suit le schéma de clavier commun à CMGS : une touche est d'abord proposée au module sous la souris, puis au
 panneau, à l'onglet (l'écran Live), aux commandes du plug-in, enfin aux commandes système. La liste complète est dans
 Documents/CMGS-Keys.md.
 

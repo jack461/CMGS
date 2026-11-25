@@ -29,7 +29,7 @@ disposition de panneaux et de modules. Le nombre d'onglets dépend du plug-in (d
 « Tab1 », « Tab2 », etc.
 
 On renomme l'onglet courant par le menu des modules (*Tabs Management ▷ Rename tab…*, voir plus bas). Dans FilePlayer,
-ScriptMaster et Diffusion-3, un clic droit dans la barre d'onglets propose aussi *Rename tab…* ; dans le Game Master et
+ScriptMaster et Espaces, un clic droit dans la barre d'onglets propose aussi *Rename tab…* ; dans le Game Master et
 Interstys, il ouvre le choix du thème. Dans le Game Master, la droite de la barre d'onglets affiche en outre un ruban
 coloré, qui reflète l'activité des lecteurs.
 
@@ -86,7 +86,7 @@ l'a quittée.
 ## L'affichage « Live »
 
 L'option *Tabs Management ▷ Live display* remplace les panneaux de l'onglet courant par l'écran « Live » du plug-in,
-destiné au concert : dans Diffusion-3, par exemple, un grand écran de boîtes d'affichage pilotées par l'APCmini (voir
+destiné au concert : dans Espaces, par exemple, un grand écran de boîtes d'affichage pilotées par l'APCmini (voir
 son manuel). Dans un onglet « Live », le menu des modules ne s'ouvre que par **Shift + clic droit** ; on y décoche
 *Live display* pour revenir aux panneaux.
 
@@ -98,7 +98,7 @@ Un **pad** est une grille de **cellules** colorées, en lignes et en colonnes. U
 information, porter une valeur réglable, déclencher une action, ou ouvrir un menu ; sa couleur indique souvent un
 état (actif, en erreur, sélectionné…).
 
-Les plug-ins récents (Diffusion-3, Interstys) suivent les conventions suivantes, que tous les plug-ins rejoignent
+Les plug-ins récents (Espaces, Interstys) suivent les conventions suivantes, que tous les plug-ins rejoignent
 progressivement :
 
 | Geste | Effet |
@@ -199,11 +199,11 @@ Par convention, les **minuscules** commandent des actions, les **majuscules** de
 | Cmd + `+` ou `=`, Cmd + `-`, Cmd + `0` | taille d'affichage : agrandir, réduire, 100 % | tous |
 | Shift + ◀, Shift + ▶ | déplacer la limite du panneau | tous |
 | `L`, `M` | afficher le journal, la mémoire | FilePlayer, ScriptMaster |
-| `S` | afficher ou masquer les sliders de REAPER | Diffusion-3, Interstys |
+| `S` | afficher ou masquer les sliders de REAPER | Espaces, Interstys |
 | `U` | afficher ou masquer l'interface | Interstys |
 
 Les **commandes système** servent surtout à la mise au point ; elles sont les mêmes dans FilePlayer, ScriptMaster,
-Diffusion-3 et Interstys (le Game Master utilise ces touches pour ses commandes de concert) :
+Espaces et Interstys (le Game Master utilise ces touches pour ses commandes de concert) :
 
 | Touche | Effet |
 |---|---|
@@ -219,7 +219,7 @@ Diffusion-3 et Interstys (le Game Master utilise ces touches pour ses commandes 
 
 Plusieurs modules se retrouvent, sous le même nom et avec le même fonctionnement, dans plusieurs plug-ins :
 
-| Module | Game Master | FilePlayer | ScriptMaster | Diffusion-3 | Interstys |
+| Module | Game Master | FilePlayer | ScriptMaster | Espaces | Interstys |
 |---|---|---|---|---|---|
 | *Main Infos* / *Main Status* | oui | oui | oui | oui | oui |
 | *System Log* | oui | oui | oui | oui | oui |
@@ -312,7 +312,7 @@ On peut faire glisser des fichiers depuis le Finder (ou l'Explorateur) dans la f
 | fichier `.RPP` | Game Master | le Game Master apprend où se trouve le projet (à faire après tout déplacement du projet) |
 | `Clips.txt` | Game Master | la liste des clips du dossier `WAVES` (voir le manuel du Game Master) |
 | sons (`.wav`, `.aif`, `.flac`, `.mp3`…) | Game Master, Interstys | associés à des numéros de clips (module *Clips Selection*) ou chargés dans une ligne d'Interstys |
-| configurations et trajectoires de *GRM Spaces* (`.ala`, `.lay`, `.xml`) | Diffusion-3 | pour la vue 3D et les modules *Edit* |
+| configurations et trajectoires de *GRM Spaces* (`.ala`, `.lay`, `.xml`) | Espaces | pour la vue 3D et les modules *Edit* |
 
 Chaque plug-in précise dans son manuel où déposer ses fichiers, quand l'endroit compte.
 
@@ -338,6 +338,6 @@ doit donc être lancé. Ainsi :
 - la touche `p` d'un journal l'enregistre dans un fichier texte du dossier du projet, la touche `P` le copie dans la
   console de REAPER ;
 - Interstys exporte ses patchs et ses sessions sous forme de scripts mSL, que l'on peut relire ou modifier ;
-- Diffusion-3 exporte les points de ses modules *Edit* sous forme de tables mSL.
+- Espaces exporte les points de ses modules *Edit* sous forme de tables mSL.
 
 Ces exports sont décrits dans les manuels des plug-ins concernés.

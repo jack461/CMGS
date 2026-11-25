@@ -14,7 +14,7 @@ REAPER, version **7.25 or later**.
 | Application | Plugins | Role |
 |---|---|---|
 | **Game Master** | `GamePlayer`, with `FilePlayer`, `ScriptMaster`, `MIDI_In`, `MIDIduino` | Sampler and electroacoustic music generator: clip players, generator, scheduler, live control. `FilePlayer` is a sample reader driven by the Game Master, `ScriptMaster` an editor, debugger and runner of scripts, `MIDI_In` and `MIDIduino` bring MIDI and sensors into the Game Master. |
-| **Diffusion-3** | `Diffusion-3` | Spatialization of up to 128 inputs and outputs: projectors, scenes, morphing, 3D trajectories, configurations of the loudspeakers, control by an AKAI APCmini. |
+| **Espaces** | `Espaces` | Spatialization of up to 128 inputs and outputs: projectors, scenes, morphing, 3D trajectories, configurations of the loudspeakers, control by an AKAI APCmini. Named Diffusion-3 until November 2026 (`Diffusion-3` stays, for the old projects). |
 | **Interstys** | `Interstys` | Modular fractional delay: lines, readers (Stretch, Grains…), writers, effects (filters, saturation, feedback matrix, flanger, phaser, shimmer, noise, random…), curves, MIDI links. |
 
 These applications share **mSL**, a small scripting language: scripts drive them, exchange messages, and describe
@@ -27,7 +27,7 @@ their configurations, patches and presets. Ready-to-use scripts are in [`CMGS-sc
 - `Multichannel_VU_meter` (and its variant `Multichannel_VU_meter_U`): a VU meter for up to 128 channels.
 - Small utilities: `ChannelReducer16/24/48`, `CheapChannelReducer`, `ChannelsMuter`, `ChannelsSwitcher`,
   `mid-side`, `channels-folder`, `Synchronizer`.
-- Examples: `AKAI-Ex-01`, `AKAI-Ex-02` (AKAI APCmini), `Space3D-Demo` (the 3D view of Diffusion-3).
+- Examples: `AKAI-Ex-01`, `AKAI-Ex-02` (AKAI APCmini), `Space3D-Demo` (the 3D view of Espaces).
 
 ## Installation
 
@@ -85,7 +85,7 @@ sources).
 | `GameMaster-Manuel.pdf` | The Game Master (what is specific to it; the rest is in the general manual) |
 | `GameMaster-Doc-1.7.8.pdf` | The former complete manual of the Game Master (version 1.7.8, 2024) |
 | `GM-Commandes.pdf` | Commands of the Game Master |
-| `Diffusion-3-Manuel.pdf` | Diffusion-3 |
+| `Espaces-Manuel.pdf` | Espaces |
 | `Interstys-Manuel.pdf` | Interstys |
 | `MCBM-Manuel.pdf`, `SmoothMultiLimiter-Manuel.pdf`, `Multichannel_VU_meter-Manuel.pdf` | Auxiliary plugins |
 | `CMGS-Keys.md` | The keyboard keys of all the plugins |
@@ -96,7 +96,7 @@ sources).
 | Path | Contents |
 |---|---|
 | `CMGS-effects/` | The plugins (`.jsfx`) and `README.txt`, a marker the Game Master looks for. `CMGS-libs/` holds the shared libraries and the code of the large plugins (`.jsfx-inc`). |
-| `CMGS-data/` | What the plugins read at run time: `themes/` (the bitmap themes), `Diffusions/` (configurations read by Diffusion-3). |
+| `CMGS-data/` | What the plugins read at run time: `themes/` (the bitmap themes), `Diffusions/` (configurations read by Espaces). |
 | `CMGS-auxiliary.eel` | The auxiliary ReaScript (generated, see above). |
 | `CMGS-scripts/` | mSL scripts: algorithms and presets for Interstys, examples, test series. |
 | `CMGS-docs/` | The manuals. |
@@ -123,7 +123,7 @@ REAPER, version **7.25 ou ultérieure**.
 | Application | Plugins | Rôle |
 |---|---|---|
 | **Game Master** | `GamePlayer`, avec `FilePlayer`, `ScriptMaster`, `MIDI_In`, `MIDIduino` | Échantillonneur et générateur de musique électroacoustique : lecteurs de clips, générateur, ordonnanceur, contrôle en direct. `FilePlayer` est un lecteur d'échantillons piloté par le Game Master, `ScriptMaster` un éditeur, débogueur et exécuteur de scripts, `MIDI_In` et `MIDIduino` font entrer le MIDI et les capteurs dans le Game Master. |
-| **Diffusion-3** | `Diffusion-3` | Spatialisation jusqu'à 128 entrées et sorties : projecteurs, scènes, morphing, trajectoires 3D, configurations des haut-parleurs, contrôle par un AKAI APCmini. |
+| **Espaces** | `Espaces` | Spatialisation jusqu'à 128 entrées et sorties : projecteurs, scènes, morphing, trajectoires 3D, configurations des haut-parleurs, contrôle par un AKAI APCmini. Nommé Diffusion-3 jusqu'en novembre 2026 (`Diffusion-3` reste, pour les anciens projets). |
 | **Interstys** | `Interstys` | Délai fractionnaire modulaire : lignes, lecteurs (Stretch, Grains…), écrivains, effets (filtres, saturation, matrice de réinjection, flanger, phaser, shimmer, bruit, aléatoire…), courbes, liens MIDI. |
 
 Ces applications partagent **mSL**, un petit langage de script : les scripts les pilotent, échangent des messages, et
@@ -138,7 +138,7 @@ décrivent leurs configurations, leurs patchs et leurs presets. Des scripts prê
 - `Multichannel_VU_meter` (et sa variante `Multichannel_VU_meter_U`) : un VU-mètre jusqu'à 128 canaux.
 - Petits utilitaires : `ChannelReducer16/24/48`, `CheapChannelReducer`, `ChannelsMuter`, `ChannelsSwitcher`,
   `mid-side`, `channels-folder`, `Synchronizer`.
-- Exemples : `AKAI-Ex-01`, `AKAI-Ex-02` (AKAI APCmini), `Space3D-Demo` (la vue 3D de Diffusion-3).
+- Exemples : `AKAI-Ex-01`, `AKAI-Ex-02` (AKAI APCmini), `Space3D-Demo` (la vue 3D d'Espaces).
 
 ## Installation
 
@@ -200,7 +200,7 @@ sources LibreOffice).
 | `GameMaster-Manuel.pdf` | Le Game Master (ce qui lui est propre ; le reste est dans le manuel général) |
 | `GameMaster-Doc-1.7.8.pdf` | L'ancien manuel complet du Game Master (version 1.7.8, 2024) |
 | `GM-Commandes.pdf` | Les commandes du Game Master |
-| `Diffusion-3-Manuel.pdf` | Diffusion-3 |
+| `Espaces-Manuel.pdf` | Espaces |
 | `Interstys-Manuel.pdf` | Interstys |
 | `MCBM-Manuel.pdf`, `SmoothMultiLimiter-Manuel.pdf`, `Multichannel_VU_meter-Manuel.pdf` | Plugins auxiliaires |
 | `CMGS-Keys.md` | Les touches du clavier de tous les plugins |
@@ -211,7 +211,7 @@ sources LibreOffice).
 | Chemin | Contenu |
 |---|---|
 | `CMGS-effects/` | Les plugins (`.jsfx`) et `README.txt`, un repère que cherche le Game Master. `CMGS-libs/` contient les bibliothèques partagées et le code des gros plugins (`.jsfx-inc`). |
-| `CMGS-data/` | Ce que les plugins lisent à l'exécution : `themes/` (les thèmes bitmap), `Diffusions/` (configurations lues par Diffusion-3). |
+| `CMGS-data/` | Ce que les plugins lisent à l'exécution : `themes/` (les thèmes bitmap), `Diffusions/` (configurations lues par Espaces). |
 | `CMGS-auxiliary.eel` | Le ReaScript auxiliaire (généré, voir plus haut). |
 | `CMGS-scripts/` | Scripts mSL : algorithmes et presets pour Interstys, exemples, séries de tests. |
 | `CMGS-docs/` | Les manuels. |

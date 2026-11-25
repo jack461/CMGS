@@ -6,7 +6,7 @@ lang: fr-FR
 # Premiers pas
 
 **mSL** (*micro Script Language*) est le langage de script de CMGS. Il est intégré à chacun des plug-ins : il sert à
-décrire des configurations (le Profile du Game Master, les configurations de Diffusion-3, les patchs d'Interstys), à
+décrire des configurations (le Profile du Game Master, les configurations d'Espaces, les patchs d'Interstys), à
 écrire des algorithmes de jeu, à automatiser des réglages, et à mettre au point les plug-ins eux-mêmes. Ce chapitre
 en présente les éléments essentiels, à travers de petits exemples ; le chapitre suivant décrit le langage plus
 complètement. Les fonctions propres à chaque plug-in sont décrites dans son manuel.
@@ -392,7 +392,7 @@ n'y a pas de récupération automatique des chaînes : une chaîne obtenue par `
 mSL n'a pas de fonctions graphiques.
 
 **Paramètres.** Les paramètres des plug-ins (ceux que l'on règle avec des sliders) portent des numéros de 0 à 1023,
-avec une plage par application : 0 à 255 pour le Game Master, 256 à 511 pour Interstys, 512 à 639 pour Diffusion-3,
+avec une plage par application : 0 à 255 pour le Game Master, 256 à 511 pour Interstys, 512 à 639 pour Espaces,
 640 à 703 pour ScriptMaster, 704 à 767 pour MIDI_In et MIDIduino. `` get(`pval, n) `` lit la valeur du paramètre `n`,
 quelle que soit l'application ; `` set(`pval, n, v) `` le modifie, s'il appartient au plug-in où s'exécute le script
 (sinon, une erreur), et rend la valeur précédente.
@@ -473,7 +473,7 @@ le Game Master pilote ainsi ses lecteurs, et un script peut lire les paramètres
 
 Le dossier `CMGS-scripts/Tests` contient des scripts de test, `Ex-NNNN.mSL`, qui vérifient le langage et les plug-ins.
 Leurs numéros indiquent leur domaine : `Ex-0NNN` le langage (ils doivent réussir dans tous les plug-ins), `Ex-1NNN`
-Interstys, `Ex-2NNN` le Game Master, `Ex-3NNN` Diffusion-3.
+Interstys, `Ex-2NNN` le Game Master, `Ex-3NNN` Espaces.
 
 Chaque script annonce ce qu'il doit écrire dans le journal, par des commentaires :
 

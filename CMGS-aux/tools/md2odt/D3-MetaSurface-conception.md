@@ -3,7 +3,7 @@ title: "CMGS — fragment MetaSurface"
 lang: fr-FR
 ---
 
-# La MetaSurface de Diffusion-3 (projet)
+# La MetaSurface d'Espaces (projet)
 
 *Conception du 23 novembre 2026, d'après la maquette de J.-J. Girardot (`JJG-MetaSurface.png`) et sa description ; les
 choix ont été validés le même jour. L'étape 1 est en cours.*
@@ -191,13 +191,13 @@ Le seul ajout est une source de niveaux simulée pour la vue.
 - **Vues** : 4 modules, « MetaSurface A » … « D ». Chacune montre une entrée de la bibliothèque, pilote un projecteur et
   garde son état de jeu (actif, position, angle, enveloppe). Plusieurs MetaSurfaces peuvent jouer à la fois, sur des
   projecteurs différents.
-- **Export** : en réglages mSL, par mSL_Export (`Data/<nom>-d3-metasurface-<date>.mSL`), par exemple :
+- **Export** : en réglages mSL, par mSL_Export (`Data/<nom>-esp-metasurface-<date>.mSL`), par exemple :
 
       settings(data( MetaSurface 3 "Nuage" conf 12 0.2 0.3 1, conf 15 0.7 0.25 1.5, conf 21 0.5 0.8 1 ;
                      brush spread 0.15 power 0 shape 0 stretch 1 offset 0 rotation 0.25 ;
                      time latency 80 attack 2 release 4 ; band 0.1 ));
 
-  L'import passe par les réglages de Diffusion-3 (Set_Table). Les erreurs prendront une nouvelle plage de codes à 4
+  L'import passe par les réglages d'Espaces (Set_Table). Les erreurs prendront une nouvelle plage de codes à 4
   chiffres.
 - **Le projecteur** : pendant qu'une MetaSurface le pilote, il est dans un nouveau mode « Meta » : le hasard et le Hyper
   Slider ne le touchent plus. MetaSurface inactive, il est silencieux. Le mode apparaît dans sa cellule et dans le module
@@ -224,7 +224,7 @@ module Global.
   - la souris, le pinceau, les parts ;
   - l'enveloppe (fade-in, fade-out) et la trajectoire ;
   - la publication pour @block des parts, de l'amplitude et de la durée d'interpolation, en double tampon avec numéro de
-    séquence, comme `sp_` dans Diffusion-3-Spatial.
+    séquence, comme `sp_` dans Espaces-Spatial.
 - **@block** : le mélange (voir le principe) dans `prx_pcons` du projecteur, puis `cfchng` : le moteur actuel (buildiff, morph) fait
   la transition.
 - **Les matrices** : à l'activation, chaque configuration est chargée une fois par confload (outdiff × configuration ×
@@ -257,7 +257,7 @@ module Global.
    Compléments (23 novembre 2026, demandes de l'utilisateur) : Play / Edit en bypass, Pause, Rule, Loop reverse, le
    placement de la trajectoire sur la surface (5e ligne du pad), un chemin bien visible ; dans Edit A … D, la taille des
    points (menu de la vue, « Size of the points », comme « Size of … » des vues Space).
-6. Export et import, faders de l'APCmini, chapitre du manuel de Diffusion-3, tests mSL (Ex-30xx).
+6. Export et import, faders de l'APCmini, chapitre du manuel d'Espaces, tests mSL (Ex-30xx).
 
 ## Extension : les trajectoires A … D et les courbes (24 novembre 2026)
 
@@ -268,7 +268,7 @@ Décidé avec l'utilisateur :
   Mix le long de la chaîne (A B, A B C, A B C D), Glide, Dyn (les courbes d'accélération de Space et les courbes de
   l'utilisateur) ; le placement actuel devient celui du chemin entier. Le mélange réutilise celui des projecteurs
   spatiaux (sp_Native, sp_MkBlend), dans le plan x, y. Les MetaSurfaces sauvées sont reprises (leur chemin dans A).
-- **Le module Curves dans Diffusion-3** : une bibliothèque partagée, mSL_Curves (préfixe crv_), tirée du module Curves
+- **Le module Curves dans Espaces** : une bibliothèque partagée, mSL_Curves (préfixe crv_), tirée du module Curves
   d'Interstys : 64 courbes en mémoire statique (lisibles par @block sans allocation), leurs types (Env, Wave, HEnv, QWave,
   HWave), périodique, sustain, la forme des segments, les noms, Undo ; les éditeurs « Curves A … D » ; des tables de
   1 025 échantillons de la forme complète, construites par @gfx quand une courbe change (crv_F) ; la sauvegarde avec le
@@ -346,7 +346,7 @@ L'étape 4, deuxième volet (écrit le 24 novembre 2026) : Interstys passe sur m
   … « H » sont les éditeurs de la bibliothèque (crv_Editor : en plus, la touche z pour Undo, Duplicate, le menu du type au
   clic droit, la hauteur du graphe qui suit le panneau, les exports en réglages : `nom-its-curve-date.mSL`).
 - Les tables de mSL_Curves prennent le format d'Interstys : 4 096 échantillons, deux gardes de chaque côté (un cycle pour
-  l'interpolation cubique), le palier des enveloppes (les Grains) ; Diffusion-3 en profite (1 024 échantillons avant).
+  l'interpolation cubique), le palier des enveloppes (les Grains) ; Espaces en profite (1 024 échantillons avant).
   Le dernier échantillon est maintenant F(1) (Interstys y mettait F(0)) : une courbe non périodique lue en cycle (LFO)
   saute à la fin de son cycle au lieu de rejoindre son début sur 1/4 096 de la période.
 - Le bloc d'une courbe de mSL_Curves est celui d'Interstys précédé d'un mot (la courbe existe) : Interstys garde ses

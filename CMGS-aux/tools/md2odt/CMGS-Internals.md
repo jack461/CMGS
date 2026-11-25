@@ -20,7 +20,7 @@ composition et à la diffusion de musique concrète. Elle comprend principalemen
 | **FilePlayer** | lecture des fichiers sonores, pilotée par le Game Master |
 | **ScriptMaster** | édition, mise au point et exécution des scripts mSL |
 | **Interstys** | lignes à retard fractionnaires modulaires (lignes, lecteurs, écrivains, effets) |
-| **Diffusion-3** | spatialisation sur un grand nombre de haut-parleurs (projecteurs, scènes, morphing) |
+| **Espaces** | spatialisation sur un grand nombre de haut-parleurs (projecteurs, scènes, morphing) |
 | **MIDI_In**, **MIDIduino** | entrée de commandes MIDI et de capteurs vers le Game Master |
 | **GMAuxiliary.eel** | script REAPER (ReaScript) qui réalise pour les plug-ins ce qu'ils ne peuvent pas faire eux-mêmes |
 
@@ -106,10 +106,10 @@ nécessaire à son interface et à sa communication avec le Game Master.
 | Affichages système (`mSL_show_Utilities`) | oui | oui | oui | oui | oui | — |
 | Écran *Live* | oui | — | — | oui | oui | — |
 
-*GP : GamePlayer, FP : FilePlayer, SM : ScriptMaster, IN : Interstys, D3 : Diffusion-3, MI : MIDI_In.*
+*GP : GamePlayer, FP : FilePlayer, SM : ScriptMaster, IN : Interstys, D3 : Espaces, MI : MIDI_In.*
 
 GamePlayer et Interstys disposent de leur propre gestion des onglets et des panneaux, plus
-ancienne ; `mSL_Panes` en est la version partagée, utilisée par Diffusion-3. Le
+ancienne ; `mSL_Panes` en est la version partagée, utilisée par Espaces. Le
 désassembleur (`mSL_DeAsm`) et l'inspection de la mémoire (`mSL_Dbg_Memory`) sont présents dans
 les cinq grands plug-ins ; ScriptMaster y ajoute ses outils d'édition des scripts
 (`ScriptMaster_Utilities`, également utilisés par Interstys).

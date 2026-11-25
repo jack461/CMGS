@@ -31,7 +31,7 @@ qu'on peut lui demander est d'exposer ses paramètres dans la zone de son type, 
 
 | Élément de gmem | Problème |
 |---------------------------------------------|-----------------------------------------------------------|
-| la plage de paramètres du type, dans `gmem[paramGCopy + n]` (Interstys 256 à 511, Diffusion-3 512 à 639…) | deux instances y publieraient en même temps ; un `set` venu d'une autre application irait à l'une ou à l'autre |
+| la plage de paramètres du type, dans `gmem[paramGCopy + n]` (Interstys 256 à 511, Espaces 512 à 639…) | deux instances y publieraient en même temps ; un `set` venu d'une autre application irait à l'une ou à l'autre |
 | la boîte aux lettres du script auxiliaire (`dateRqst`, `dateCfrm`, `cmndKode`, `cmndPar1` à `3`, `scptPar1` à `3`, `rtrnVal1` à `4`) | elle est unique et sans adresse : deux requêtes rapprochées s'écrasent (l'export du journal par `p`, l'écriture d'un fichier…) |
 | la chaîne échangée (`expldwstr`, `xplStr1`, `xplStr2`) | même problème |
 | les noms des fichiers produits (`syslog-<Plugin>-<date>.txt`, les exports) | deux instances peuvent écrire le même nom dans la même seconde |
@@ -57,7 +57,7 @@ script auxiliaire la connaisse aussi :
 |------------|----------------------------------------------------------------------|
 | 0 | la marque `'inst'` (0 : emplacement libre) |
 | 1 | le propriétaire : l'identifiant unique de l'instance (la réservation, ci-dessous) |
-| 2 | le type d'application (Game Master, FilePlayer, ScriptMaster, Interstys, Diffusion-3, MIDI) |
+| 2 | le type d'application (Game Master, FilePlayer, ScriptMaster, Interstys, Espaces, MIDI) |
 | 3 | le numéro d'instance dans son type (1, 2, 3…) |
 | 4 | le battement de cœur : `time_precise()` au dernier passage dans `@gfx` |
 | 5 | l'état : indicateurs (exposée, fenêtre ouverte, occupée, en erreur…) |
@@ -73,7 +73,7 @@ script auxiliaire la connaisse aussi :
 - À `@init`, l'instance tire un identifiant (`rand()` et `time_precise()`), parcourt le pool, et réserve le premier
   emplacement libre ou abandonné par `atomic_setifequal(gmem[e + 1], 0, id)`. Elle relit le mot : s'il porte son
   identifiant, l'emplacement est à elle. Deux instances qui s'initialisent en même temps ne peuvent pas prendre le
-  même. Les fonctions `atomic_*` opèrent aussi sur gmem ; elles sont déjà employées dans le code (Diffusion-3).
+  même. Les fonctions `atomic_*` opèrent aussi sur gmem ; elles sont déjà employées dans le code (Espaces).
 - L'instance écrit son battement de cœur à chaque passage dans `@gfx`, qui tourne même fenêtre fermée
   (`options:gfx_idle`).
 - Un emplacement dont le battement a plus de 5 s est abandonné (instance supprimée, mise hors ligne, plantage) : une
@@ -110,7 +110,7 @@ script auxiliaire la connaisse aussi :
 
 - Écrire : l'émetteur réserve une entrée de l'anneau du destinataire par `atomic_add` sur l'index d'écriture, remplit
   l'entrée, puis écrit sa séquence en dernier. Le destinataire ne lit une entrée qu'une fois sa séquence écrite : c'est
-  le principe de `prv_seq` dans Diffusion-3-Projectors.
+  le principe de `prv_seq` dans Espaces-Projectors.
 - Lire : le destinataire traite ses entrées dans l'ordre, dans `@gfx` (ou dans `@block` pour une commande audio), et
   avance l'index de lecture. Si l'anneau est plein, l'émetteur reçoit une erreur.
 - Répondre : dans la zone de réponses de l'émetteur, avec la séquence de la demande.
@@ -219,7 +219,7 @@ Le premier moyen est le plus sûr.
 ### Le collecteur, une table de mixage
 
 - Entrées : les canaux de la piste (128 au plus) ; pour chacun, un gain, une coupure, un solo, un groupe.
-- Sorties : un format choisi (stéréo, quadriphonie, 8 canaux, la disposition de Diffusion-3…), placé sur les premiers
+- Sorties : un format choisi (stéréo, quadriphonie, 8 canaux, la disposition d'Espaces…), placé sur les premiers
   canaux de la piste ; les autres canaux sont mis à zéro.
 - Le routage vers la piste Master ou une sous-piste reste celui de REAPER (envoi au parent, envois, nombre de canaux de
   la piste) : un JSFX ne peut pas envoyer de son hors de sa piste.

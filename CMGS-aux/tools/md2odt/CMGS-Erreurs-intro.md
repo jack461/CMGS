@@ -38,16 +38,16 @@ exportez le journal (touche `p`) et signalez-la à l'auteur ; il est en généra
 | Codes | Domaine |
 |----------------------|------------------------------------------------------------------------------|
 | 0100 à 0199 | mémoire statique, configurations de haut-parleurs du Game Master |
-| 0200 à 0299 | tables de Diffusion-3, listes d'actions du Game Master |
+| 0200 à 0299 | tables d'Espaces, listes d'actions du Game Master |
 | 0300 à 0399 | configurations de haut-parleurs et banques du Game Master |
 | 0400 à 0499 | fichiers son, écran « Live » |
 | 0500 à 0599 | lecture des clips (Game Master) |
 | 0600 à 0699 | blocs de commande des lecteurs (FilePlayer), paramètres |
-| 0700 à 0899 | tables du Game Master, matrices de Diffusion-3, modules définis par `gui` |
+| 0700 à 0899 | tables du Game Master, matrices d'Espaces, modules définis par `gui` |
 | 1000 à 1999 | compilateur, mémoire dynamique, exécution des scripts |
-| 2000 à 2499 | syntaxe de mSL, lancement des scripts, tables de Diffusion-3 |
+| 2000 à 2499 | syntaxe de mSL, lancement des scripts, tables d'Espaces |
 | 2600 à 2999 | Interstys |
-| 3000 à 4999 | compilateur, ramasse-miettes, ordonnanceur, erreurs internes de Diffusion-3 |
+| 3000 à 4999 | compilateur, ramasse-miettes, ordonnanceur, erreurs internes d'Espaces |
 | 6000 à 7999 | script auxiliaire, playlog, actions différées |
 | 9000 à 9999 | erreurs internes et d'initialisation |
 | 10000 et plus | erreurs signalées par les scripts (`error(n)`) |

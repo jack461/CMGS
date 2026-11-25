@@ -10,7 +10,7 @@ lang: fr-FR
 Le module **mSL Console** exécute aussitôt une ligne de mSL tapée au clavier, sans passer par un fichier : pour
 essayer une expression, consulter ou modifier les variables d'un script en cours, appeler ses fonctions, envoyer des
 réglages (*settings*) au plug-in, ou demander l'explication d'une erreur. Il existe dans les cinq plug-ins (Game
-Master, FilePlayer, ScriptMaster, Diffusion-3, Interstys) ; on l'ajoute à un panneau par le menu des modules
+Master, FilePlayer, ScriptMaster, Espaces, Interstys) ; on l'ajoute à un panneau par le menu des modules
 (Shift + clic droit).
 
 En bas du module se trouve la ligne de saisie ; au-dessus, les dernières lignes de la console, la plus récente en bas.

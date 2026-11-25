@@ -15,7 +15,7 @@ Le **Multichannel VU meter** affiche le niveau crête de chacun des canaux d'une
 **128 canaux**. Il permet de voir d'un coup d'œil sur quels canaux il y a du signal, à quel niveau, et
 lesquels ont dépassé un seuil de saturation.
 
-Il est destiné aux diffusions multicanales de la suite CMGS (Game Master, Diffusion-3, Interstys…),
+Il est destiné aux diffusions multicanales de la suite CMGS (Game Master, Espaces, Interstys…),
 mais fonctionne sur n'importe quelle piste. Plusieurs VU-mètres peuvent être placés dans une même
 session, chacun avec sa propre couleur.
 

@@ -57,7 +57,7 @@ important a en outre son propre manuel, dans le dossier `CMGS-docs` :
 | Fichier | Contenu |
 |---|---|
 | `GameMaster-Manuel` | le Game Master : clips, modes de jeu et d'espace, banques, jeu automatique, playlog |
-| `Diffusion-3-Manuel` | Diffusion-3 : projecteurs, scènes, trajectoires, configurations, APCmini |
+| `Espaces-Manuel` | Espaces : projecteurs, scènes, trajectoires, configurations, APCmini |
 | `Interstys-Manuel` | Interstys : lignes, lecteurs, enregistreurs, effets, courbes, liens MIDI |
 | `MCBM-Manuel` | les gestionnaires de basses MCBM-64 et MCBM-128 |
 | `SmoothMultiLimiter-Manuel` | le limiteur multicanal |
@@ -94,9 +94,9 @@ Le Game Master se compose de plusieurs plug-ins :
 | `MIDI_In` | transmet au Game Master les messages d'un périphérique MIDI (contrôleurs, notes) |
 | `MIDIduino` | transmet au Game Master les notes envoyées par des capteurs (par exemple infrarouges, sur un Arduino), ou par tout clavier MIDI |
 
-## Diffusion-3
+## Espaces
 
-**Diffusion-3** diffuse, ou spatialise, des sources multicanales sur une installation multicanale (un acousmonium),
+**Espaces** diffuse, ou spatialise, des sources multicanales sur une installation multicanale (un acousmonium),
 jusqu'à 128 canaux en entrée et en sortie. Il a d'abord été conçu pour diffuser facilement des pièces stéréophoniques
 sur un grand nombre de haut-parleurs ; il permet aussi d'essayer la spatialisation d'une piste pendant la composition,
 ou de projeter en concert plusieurs sources (un instrument joué en direct, des pistes d'accompagnement).
@@ -139,7 +139,7 @@ CMGS fournit aussi des plug-ins plus simples, utiles dans une session multicanal
 | `Synchronizer` | fournit aux autres plug-ins le numéro exact de l'échantillon courant, pour les synchroniser à l'échantillon près |
 
 Trois plug-ins servent d'exemples : `AKAI-Ex-01` et `AKAI-Ex-02` (programmation d'un AKAI APCmini), et `Space3D-Demo`
-(la vue en trois dimensions de Diffusion-3).
+(la vue en trois dimensions d'Espaces).
 
 ## Le script auxiliaire
 
@@ -147,7 +147,7 @@ Trois plug-ins servent d'exemples : `AKAI-Ex-01` et `AKAI-Ex-02` (programmation 
 REAPER (voir l'installation). Lancé, il reste en tâche de fond et répond aux demandes des plug-ins :
 
 - **écrire des fichiers** : export du journal d'un plug-in (touche `p`), patchs et sessions d'Interstys, exports de
-  Diffusion-3 ;
+  Espaces ;
 - **afficher** un texte dans la console de REAPER (touche `P` du journal) ou une boîte de dialogue ;
 - **piloter REAPER** : lecture, arrêt, pause, déplacement vers un marqueur, position du curseur, exécution de
   n'importe quelle action de REAPER par son numéro ;
@@ -222,7 +222,7 @@ Ouvrez le dossier des ressources de REAPER (*Options ▷ Show REAPER resource pa
 | Depuis le dossier de CMGS | Vers le dossier des ressources de REAPER | Contenu |
 |---|---|---|
 | `CMGS-effects/` | `Effects/CMGS-effects/` | les plug-ins, et leurs bibliothèques dans `CMGS-libs/` |
-| `CMGS-data/` | `Data/CMGS-data/` | les données lues par les plug-ins : thèmes de l'interface, configurations de Diffusion-3 |
+| `CMGS-data/` | `Data/CMGS-data/` | les données lues par les plug-ins : thèmes de l'interface, configurations d'Espaces |
 | `CMGS-auxiliary.eel` | `Scripts/CMGS-auxiliary.eel` | le script auxiliaire |
 
 **Gardez ces noms** : les plug-ins cherchent ces dossiers sous ces noms, et les projets de REAPER désignent les
@@ -265,7 +265,7 @@ fenêtre, puis en enregistrant le projet. Il faut refaire cette opération aprè
 en particulier sur une autre machine. Les sons du dossier `Data` suivent le projet : un projet ainsi organisé se
 transporte d'une machine à l'autre, pourvu que CMGS y soit installé.
 
-Interstys et Diffusion-3 ont leurs propres fichiers (patchs, sessions, configurations), décrits dans leurs manuels.
+Interstys et Espaces ont leurs propres fichiers (patchs, sessions, configurations), décrits dans leurs manuels.
 
 ## Pour les développeurs
 
@@ -280,7 +280,7 @@ Le dépôt est organisé ainsi :
 | Chemin | Contenu |
 |---|---|
 | `CMGS-effects/` | les plug-ins (`.jsfx`) ; `CMGS-libs/` contient les bibliothèques communes et le code des gros plug-ins (`.jsfx-inc`) |
-| `CMGS-data/` | les données lues à l'exécution : thèmes, configurations de Diffusion-3 |
+| `CMGS-data/` | les données lues à l'exécution : thèmes, configurations d'Espaces |
 | `CMGS-auxiliary.eel` | le script auxiliaire (généré) |
 | `CMGS-scripts/` | les scripts mSL : algorithmes, presets, exemples, tests |
 | `CMGS-docs/` | les manuels |

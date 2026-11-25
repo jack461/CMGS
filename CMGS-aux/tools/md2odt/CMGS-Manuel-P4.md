@@ -38,16 +38,16 @@ exportez le journal (touche `p`) et signalez-la à l'auteur ; il est en généra
 | Codes | Domaine |
 |----------------------|------------------------------------------------------------------------------|
 | 0100 à 0199 | mémoire statique, configurations de haut-parleurs du Game Master |
-| 0200 à 0299 | tables de Diffusion-3, listes d'actions du Game Master |
+| 0200 à 0299 | tables d'Espaces, listes d'actions du Game Master |
 | 0300 à 0399 | configurations de haut-parleurs et banques du Game Master |
 | 0400 à 0499 | fichiers son, écran « Live » |
 | 0500 à 0599 | lecture des clips (Game Master) |
 | 0600 à 0699 | blocs de commande des lecteurs (FilePlayer), paramètres |
-| 0700 à 0899 | tables du Game Master, matrices de Diffusion-3, modules définis par `gui` |
+| 0700 à 0899 | tables du Game Master, matrices d'Espaces, modules définis par `gui` |
 | 1000 à 1999 | compilateur, mémoire dynamique, exécution des scripts |
-| 2000 à 2499 | syntaxe de mSL, lancement des scripts, tables de Diffusion-3 |
+| 2000 à 2499 | syntaxe de mSL, lancement des scripts, tables d'Espaces |
 | 2600 à 2999 | Interstys |
-| 3000 à 4999 | compilateur, ramasse-miettes, ordonnanceur, erreurs internes de Diffusion-3 |
+| 3000 à 4999 | compilateur, ramasse-miettes, ordonnanceur, erreurs internes d'Espaces |
 | 6000 à 7999 | script auxiliaire, playlog, actions différées |
 | 9000 à 9999 | erreurs internes et d'initialisation |
 | 10000 et plus | erreurs signalées par les scripts (`error(n)`) |
@@ -79,60 +79,60 @@ plus utilisés : ils concernaient les anciens fichiers de configuration séparé
 | 0140 | Game Master | Configuration de haut-parleurs : numéro de HP hors limites. |
 | 0141 | Game Master | Configuration de haut-parleurs : numéro de configuration hors limites. |
 | 0148 | tous | Interprète : instruction interne inconnue (code machine invalide). |
-| 0202 | Diffusion-3 | Table de diffusion : le numéro de diffusion est déjà utilisé. |
-| 0203 | Diffusion-3 | Table de diffusion : erreur de syntaxe dans une déclaration de diffusion. |
-| 0204 | Diffusion-3 | Table de diffusion : numéro de canal incorrect ou manquant dans une diffusion. |
-| 0206 | Diffusion-3 | Table de diffusion : le caractère « > » est attendu. |
-| 0207 | Diffusion-3 | Table de diffusion : numéro de paquet d’actions incorrect (1 à 16). |
-| 0208 | Diffusion-3 | Table de diffusion : numéro d’opération incorrect dans un paquet d’actions. |
-| 0209 | Diffusion-3 | Table de diffusion : un volume est attendu après dB. |
-| 0210 | Diffusion-3 | Table de diffusion : conf ou prop est attendu après remove. |
-| 0211 | Diffusion-3 | Table de diffusion : numéro de groupe manquant ou incorrect. |
-| 0212 | Diffusion-3 | Table de diffusion : numéro de diffusion attendu après remove conf. |
-| 0213 | Diffusion-3 | Table de diffusion : diffusion non définie (dans un groupe, ou après pad). |
-| 0214 | Diffusion-3 | Table de diffusion : trop de diffusions après pad. |
-| 0215 | Diffusion-3 | Table de diffusion : plus de 16 diffusions dans un groupe. |
-| 0216 | Diffusion-3 | Table de diffusion : volume incorrect (vol). |
-| 0217 | Diffusion-3 | Table de diffusion : ajustement de volume incorrect (vadj). |
-| 0218 | Diffusion-3 | Table de diffusion : temps de morphing incorrect (morpht). |
-| 0219 | Diffusion-3 | Table de diffusion : mode incorrect (opmod). |
-| 0220 | Diffusion-3 | Table de diffusion : délai aléatoire incorrect (rdelay). |
-| 0222 | Diffusion-3 | Table de diffusion : numéro de scène attendu. |
-| 0223 | Diffusion-3 | Table de diffusion : le numéro de préset est déjà utilisé. |
-| 0224 | Diffusion-3 | Table de diffusion : numéro de préset ou parenthèse attendus après prop. |
-| 0225 | Diffusion-3 | Table de diffusion : numéro de préset ou parenthèse attendus après prop. |
-| 0226 | Diffusion-3 | Table de diffusion : déclaration incorrecte dans un préset. |
-| 0227 | Diffusion-3 | Table de diffusion : déclaration incorrecte dans un préset. |
-| 0228 | Diffusion-3 | Table de diffusion : valeur de morpht attendue dans un préset. |
-| 0229 | Diffusion-3 | Table de diffusion : valeur de rdelay attendue dans un préset. |
-| 0230 | Diffusion-3 | Table de diffusion : diffusion non définie (indiff, outdiff) : elle doit être déclarée avant le préset. |
-| 0231 | Diffusion-3 | Table de diffusion : numéro de diffusion attendu (indiff, outdiff). |
-| 0233 | Diffusion-3 | Table de diffusion : numéro de diffusion attendu après defaultconf. |
-| 0234 | Diffusion-3 | Table de diffusion : numéro de scène attendu (sgi, pad). |
-| 0235 | Diffusion-3 | Table de diffusion : numéro de projecteur attendu (pload). |
-| 0236 | Diffusion-3 | Table de diffusion : préset non défini (pload). |
-| 0237 | Diffusion-3 | Table de diffusion : numéro de préset attendu (pload). |
-| 0238 | Diffusion-3 | Table de diffusion : numéro de préset attendu après remove prop. |
-| 0239 | Diffusion-3 | Table de diffusion : numéro de couleur attendu (color). |
-| 0240 | Diffusion-3 | Table de diffusion : numéro de couleur attendu (color). |
-| 0250 | Diffusion-3 | Table de diffusion : numéro de haut-parleur (1 à 128), frame, size ou « ; » attendu (hppos). |
-| 0251 | Diffusion-3 | Table de diffusion : « < », On ou Off attendu après un numéro de haut-parleur (hppos). |
-| 0252 | Diffusion-3 | Table de diffusion : position x attendue, un nombre (hppos ; le cadre est vérifié à la fin : 2426). |
-| 0253 | Diffusion-3 | Table de diffusion : position y attendue, un nombre (hppos ; le cadre est vérifié à la fin : 2426). |
-| 0254 | Diffusion-3 | Table de diffusion : position z attendue, un nombre (hppos ; le cadre est vérifié à la fin : 2426). |
-| 0255 | Diffusion-3 | Table de diffusion : On, Off, « , » ou « ; » attendu (hppos). |
-| 0256 | Diffusion-3 | Table de diffusion : la configuration est trop grande (plus de 34 000 mots ; conf). |
+| 0202 | Espaces | Table de diffusion : le numéro de diffusion est déjà utilisé. |
+| 0203 | Espaces | Table de diffusion : erreur de syntaxe dans une déclaration de diffusion. |
+| 0204 | Espaces | Table de diffusion : numéro de canal incorrect ou manquant dans une diffusion. |
+| 0206 | Espaces | Table de diffusion : le caractère « > » est attendu. |
+| 0207 | Espaces | Table de diffusion : numéro de paquet d’actions incorrect (1 à 16). |
+| 0208 | Espaces | Table de diffusion : numéro d’opération incorrect dans un paquet d’actions. |
+| 0209 | Espaces | Table de diffusion : un volume est attendu après dB. |
+| 0210 | Espaces | Table de diffusion : conf ou prop est attendu après remove. |
+| 0211 | Espaces | Table de diffusion : numéro de groupe manquant ou incorrect. |
+| 0212 | Espaces | Table de diffusion : numéro de diffusion attendu après remove conf. |
+| 0213 | Espaces | Table de diffusion : diffusion non définie (dans un groupe, ou après pad). |
+| 0214 | Espaces | Table de diffusion : trop de diffusions après pad. |
+| 0215 | Espaces | Table de diffusion : plus de 16 diffusions dans un groupe. |
+| 0216 | Espaces | Table de diffusion : volume incorrect (vol). |
+| 0217 | Espaces | Table de diffusion : ajustement de volume incorrect (vadj). |
+| 0218 | Espaces | Table de diffusion : temps de morphing incorrect (morpht). |
+| 0219 | Espaces | Table de diffusion : mode incorrect (opmod). |
+| 0220 | Espaces | Table de diffusion : délai aléatoire incorrect (rdelay). |
+| 0222 | Espaces | Table de diffusion : numéro de scène attendu. |
+| 0223 | Espaces | Table de diffusion : le numéro de préset est déjà utilisé. |
+| 0224 | Espaces | Table de diffusion : numéro de préset ou parenthèse attendus après prop. |
+| 0225 | Espaces | Table de diffusion : numéro de préset ou parenthèse attendus après prop. |
+| 0226 | Espaces | Table de diffusion : déclaration incorrecte dans un préset. |
+| 0227 | Espaces | Table de diffusion : déclaration incorrecte dans un préset. |
+| 0228 | Espaces | Table de diffusion : valeur de morpht attendue dans un préset. |
+| 0229 | Espaces | Table de diffusion : valeur de rdelay attendue dans un préset. |
+| 0230 | Espaces | Table de diffusion : diffusion non définie (indiff, outdiff) : elle doit être déclarée avant le préset. |
+| 0231 | Espaces | Table de diffusion : numéro de diffusion attendu (indiff, outdiff). |
+| 0233 | Espaces | Table de diffusion : numéro de diffusion attendu après defaultconf. |
+| 0234 | Espaces | Table de diffusion : numéro de scène attendu (sgi, pad). |
+| 0235 | Espaces | Table de diffusion : numéro de projecteur attendu (pload). |
+| 0236 | Espaces | Table de diffusion : préset non défini (pload). |
+| 0237 | Espaces | Table de diffusion : numéro de préset attendu (pload). |
+| 0238 | Espaces | Table de diffusion : numéro de préset attendu après remove prop. |
+| 0239 | Espaces | Table de diffusion : numéro de couleur attendu (color). |
+| 0240 | Espaces | Table de diffusion : numéro de couleur attendu (color). |
+| 0250 | Espaces | Table de diffusion : numéro de haut-parleur (1 à 128), frame, size ou « ; » attendu (hppos). |
+| 0251 | Espaces | Table de diffusion : « < », On ou Off attendu après un numéro de haut-parleur (hppos). |
+| 0252 | Espaces | Table de diffusion : position x attendue, un nombre (hppos ; le cadre est vérifié à la fin : 2426). |
+| 0253 | Espaces | Table de diffusion : position y attendue, un nombre (hppos ; le cadre est vérifié à la fin : 2426). |
+| 0254 | Espaces | Table de diffusion : position z attendue, un nombre (hppos ; le cadre est vérifié à la fin : 2426). |
+| 0255 | Espaces | Table de diffusion : On, Off, « , » ou « ; » attendu (hppos). |
+| 0256 | Espaces | Table de diffusion : la configuration est trop grande (plus de 34 000 mots ; conf). |
 | 0257 | Game Master | Liste d'actions trop longue. |
 | 0258 | Game Master | Liste d'actions : adresse incorrecte (trop basse). |
-| 0259 | Diffusion-3 | Table de diffusion : invert : une diffusion déclarée avant (et pas celle-ci) est attendue. |
+| 0259 | Espaces | Table de diffusion : invert : une diffusion déclarée avant (et pas celle-ci) est attendue. |
 | 0260 | Game Master | Table des macro-définitions saturée. |
 | 0261 | Game Master | Action inconnue (non reconnue). |
 | 0262 | Game Master | Macro-définition : symbole introuvable. |
 | 0263 | Game Master | Action inconnue. |
-| 0269 | Diffusion-3 | Table de diffusion : état inconnu de l'analyseur (erreur interne). |
-| 0297 | Diffusion-3 | Table de diffusion : caractère inattendu. |
-| 0298 | Diffusion-3 | Table de diffusion : mot-clé inconnu. |
-| 0299 | Diffusion-3 | Table de diffusion : l'analyseur s'est arrêté (erreur interne). |
+| 0269 | Espaces | Table de diffusion : état inconnu de l'analyseur (erreur interne). |
+| 0297 | Espaces | Table de diffusion : caractère inattendu. |
+| 0298 | Espaces | Table de diffusion : mot-clé inconnu. |
+| 0299 | Espaces | Table de diffusion : l'analyseur s'est arrêté (erreur interne). |
 | 0311 | Game Master | Configuration de haut-parleurs : numéro de configuration trop élevé. |
 | 0312 | Game Master | Configuration de haut-parleurs : nombre de HP incorrect. |
 | 0313 | Game Master | Configuration de haut-parleurs : identification de configuration invalide. |
@@ -201,9 +201,9 @@ plus utilisés : ils concernaient les anciens fichiers de configuration séparé
 | 0614 | FilePlayer | Configuration de haut-parleurs incorrecte (second jeu de canaux). |
 | 0615 | FilePlayer | Numéro de canal invalide (second jeu de canaux). |
 | 0620 | FilePlayer | `` set(`pval, …) `` : les paramètres sont en lecture seule dans un FilePlayer. |
-| 0621 | Diffusion-3, Game Master, Interstys, ScriptMaster | `` set(`pval, …) `` : ce paramètre appartient à une autre application (il n'est donc pas modifié). |
+| 0621 | Espaces, Game Master, Interstys, ScriptMaster | `` set(`pval, …) `` : ce paramètre appartient à une autre application (il n'est donc pas modifié). |
 | 0702 | Game Master | Table : nom réservé. |
-| 0710 | Diffusion-3 | Matrices : libération d’une matrice qui n’était pas utilisée : erreur interne. |
+| 0710 | Espaces | Matrices : libération d’une matrice qui n’était pas utilisée : erreur interne. |
 | 0711 | Game Master | Table : identification de configuration invalide. |
 | 0712 | Game Master | Table : identification de configuration invalide. |
 | 0714 | Game Master | Table : identification de configuration invalide. |
@@ -378,59 +378,59 @@ plus utilisés : ils concernaient les anciens fichiers de configuration séparé
 | 2419 | tous | Pas de table des variables pointeurs (erreur interne). |
 | 2420 | tous | Pas de table des variables propres (erreur interne). |
 | 2421 | tous | Appel de fonction : le nombre d'arguments ne correspond pas au nombre de paramètres. |
-| 2423 | Diffusion-3 | hppos frame : deux nombres a b (a < b) ou Metres attendus. |
-| 2424 | Diffusion-3 | hppos size : trois nombres X Y Z attendus (les dimensions en mètres, positives). |
-| 2425 | Diffusion-3 | hppos frame Metres : les dimensions sont nécessaires (size X Y Z). |
-| 2426 | Diffusion-3 | hppos : la position d'un haut-parleur sort du cadre (frame a b : [a, b] ; Metres : [0, X] × [0, Y] × [0, Z] ; sans frame : [−5, 5]) ; le log donne le haut-parleur. |
-| 2427 | Diffusion-3 | hppos : trop d'entrées. |
-| 2428 | Diffusion-3 | hppos : mémoire insuffisante pour les positions. |
-| 2438 | Diffusion-3 | D3_config : l’argument n’est pas une liste de mots (data(…)). |
-| 2439 | Diffusion-3 | Couleur attendue, de 0 à 0xFFFFFF (bgcolor). |
-| 2440 | Diffusion-3 | Fichier de configuration non trouvé. |
-| 2460 | Diffusion-3 | Projet : des enregistrements de la configuration trop grands, perdus au chargement. |
-| 2461 | Diffusion-3 | Configurations, copie ou renumérotation : un numéro de source (1 à 255) ou de diffusion (1 à 4094) est attendu. |
-| 2462 | Diffusion-3 | Configurations : ce numéro est déjà utilisé : supprimer d’abord la source ou la diffusion. |
-| 2463 | Diffusion-3 | Configurations, copie ou renumérotation : un numéro de source (1 à 255) ou de diffusion (1 à 4094) est attendu. |
-| 2464 | Diffusion-3 | Configurations : ce numéro est déjà utilisé : supprimer d’abord la source ou la diffusion. |
-| 2465 | Diffusion-3 | Configurations : la diffusion n’est plus définie. |
-| 2466 | Diffusion-3 | Configurations : pas de mémoire pour la copie. |
-| 2467 | Diffusion-3 | Export (Configurations, Trajectories) : le script CMGS-auxiliary.eel ne tourne pas, est trop ancien (à relancer), ou est occupé : rien n’est écrit. |
-| 2468 | Diffusion-3 | Export (Configurations, Trajectories) : le texte est trop long : rien n’est écrit. |
-| 2470 | Diffusion-3 | Numéro de trajectoire attendu, de 1 à 128 (trajectory). |
-| 2471 | Diffusion-3 | « nom », closed, open ou « : » attendu (trajectory). |
-| 2472 | Diffusion-3 | Coordonnée attendue, de −10 à 10 (trajectory ; ou plus de 1024 points). |
-| 2473 | Diffusion-3 | « , » ou « ; » attendu (trajectory). |
-| 2474 | Diffusion-3 | Trajectoire de GRM Spaces déposée : la bibliothèque est pleine (128). |
-| 2475 | Diffusion-3 | Edit, copie du tracé dans la bibliothèque : elle est pleine. |
-| 2476 | Diffusion-3 | Edit, copie du tracé dans la bibliothèque : il faut au moins 2 points. |
-| 2477 | Diffusion-3 | Export (Configurations, Trajectories) : le script CMGS-auxiliary.eel ne tourne pas, est trop ancien (à relancer), ou est occupé : rien n’est écrit. |
-| 2478 | Diffusion-3 | Export (Configurations, Trajectories) : le texte est trop long : rien n’est écrit. |
-| 2480 | Diffusion-3 | Edit, export : la configuration n’a pas de point. |
-| 2481 | Diffusion-3 | Edit, export : le script CMGS-auxiliary.eel ne tourne pas, est trop ancien (à relancer), ou est occupé : rien n’est écrit. |
-| 2482 | Diffusion-3 | Edit, export : le texte est trop long : rien n’est écrit. |
-| 2483 | Diffusion-3 | Edit, export : le fichier n’a pas pu être écrit. |
-| 2484 | Diffusion-3 | Edit : la configuration de la bibliothèque a plus de 128 points : elle n’est pas chargée. |
-| 2485 | Diffusion-3 | Edit, export d’une trajectoire (.xml) : il faut au moins 2 points. |
-| 2486 | Diffusion-3 | Edit, settings : un bloc Edit A, B, C ou D est attendu. |
-| 2487 | Diffusion-3 | Edit, settings : name attend un "texte". |
-| 2488 | Diffusion-3 | Edit, settings : kind attend Speakers, Sources ou Trajectory. |
-| 2489 | Diffusion-3 | Edit, settings : une clé (name, kind, closed, smooth, free, point) ou Edit est attendue. |
-| 2490 | Diffusion-3 | Edit, settings : une valeur hors de sa plage (coordonnées, courbures, On / Off). |
-| 2491 | Diffusion-3 | Edit, settings : plus de 128 points. |
-| 2492 | Diffusion-3 | Numéro de source attendu, de 1 à 255 (source). |
-| 2493 | Diffusion-3 | « : » attendu après le numéro (source). |
-| 2494 | Diffusion-3 | Numéro de point attendu, de 1 à 128, suivi de « < » (source ; ou plus de 128 points). |
-| 2495 | Diffusion-3 | Coordonnée attendue, entre −1 et 1 (source). |
-| 2496 | Diffusion-3 | « , » ou « ; » attendu (source). |
-| 2497 | Diffusion-3 | Space (préset) : la source n’est pas déclarée. |
-| 2498 | Diffusion-3 | Space (préset) : un numéro de source est attendu. |
-| 2501 | Diffusion-3 | Conf Editor : la configuration n’est pas définie (chargement, Add, Subtract). |
-| 2502 | Diffusion-3 | Conf Editor : un numéro de configuration entre 1 et 4094 est attendu (Save as, Rename). |
-| 2503 | Diffusion-3 | Conf Editor : (plus utilisé depuis le 2026-11-21 : une matrice vide est enregistrée comme une configuration sans source). |
-| 2504 | Diffusion-3 | Conf Editor : plus de mémoire pour la configuration. |
-| 2505 | Diffusion-3 | Conf Editor : le ring est plein (64 configurations) : en retirer une d’abord. |
-| 2506 | Diffusion-3 | Conf Editor : plus de numéro libre pour une nouvelle configuration. |
-| 2507 | Diffusion-3 | Conf Editor : un facteur entre 0.1 et 10 (ou entre -20 dB et +20 dB) est attendu (cellule 3, Other value). |
+| 2423 | Espaces | hppos frame : deux nombres a b (a < b) ou Metres attendus. |
+| 2424 | Espaces | hppos size : trois nombres X Y Z attendus (les dimensions en mètres, positives). |
+| 2425 | Espaces | hppos frame Metres : les dimensions sont nécessaires (size X Y Z). |
+| 2426 | Espaces | hppos : la position d'un haut-parleur sort du cadre (frame a b : [a, b] ; Metres : [0, X] × [0, Y] × [0, Z] ; sans frame : [−5, 5]) ; le log donne le haut-parleur. |
+| 2427 | Espaces | hppos : trop d'entrées. |
+| 2428 | Espaces | hppos : mémoire insuffisante pour les positions. |
+| 2438 | Espaces | D3_config : l’argument n’est pas une liste de mots (data(…)). |
+| 2439 | Espaces | Couleur attendue, de 0 à 0xFFFFFF (bgcolor). |
+| 2440 | Espaces | Fichier de configuration non trouvé. |
+| 2460 | Espaces | Projet : des enregistrements de la configuration trop grands, perdus au chargement. |
+| 2461 | Espaces | Configurations, copie ou renumérotation : un numéro de source (1 à 255) ou de diffusion (1 à 4094) est attendu. |
+| 2462 | Espaces | Configurations : ce numéro est déjà utilisé : supprimer d’abord la source ou la diffusion. |
+| 2463 | Espaces | Configurations, copie ou renumérotation : un numéro de source (1 à 255) ou de diffusion (1 à 4094) est attendu. |
+| 2464 | Espaces | Configurations : ce numéro est déjà utilisé : supprimer d’abord la source ou la diffusion. |
+| 2465 | Espaces | Configurations : la diffusion n’est plus définie. |
+| 2466 | Espaces | Configurations : pas de mémoire pour la copie. |
+| 2467 | Espaces | Export (Configurations, Trajectories) : le script CMGS-auxiliary.eel ne tourne pas, est trop ancien (à relancer), ou est occupé : rien n’est écrit. |
+| 2468 | Espaces | Export (Configurations, Trajectories) : le texte est trop long : rien n’est écrit. |
+| 2470 | Espaces | Numéro de trajectoire attendu, de 1 à 128 (trajectory). |
+| 2471 | Espaces | « nom », closed, open ou « : » attendu (trajectory). |
+| 2472 | Espaces | Coordonnée attendue, de −10 à 10 (trajectory ; ou plus de 1024 points). |
+| 2473 | Espaces | « , » ou « ; » attendu (trajectory). |
+| 2474 | Espaces | Trajectoire de GRM Spaces déposée : la bibliothèque est pleine (128). |
+| 2475 | Espaces | Edit, copie du tracé dans la bibliothèque : elle est pleine. |
+| 2476 | Espaces | Edit, copie du tracé dans la bibliothèque : il faut au moins 2 points. |
+| 2477 | Espaces | Export (Configurations, Trajectories) : le script CMGS-auxiliary.eel ne tourne pas, est trop ancien (à relancer), ou est occupé : rien n’est écrit. |
+| 2478 | Espaces | Export (Configurations, Trajectories) : le texte est trop long : rien n’est écrit. |
+| 2480 | Espaces | Edit, export : la configuration n’a pas de point. |
+| 2481 | Espaces | Edit, export : le script CMGS-auxiliary.eel ne tourne pas, est trop ancien (à relancer), ou est occupé : rien n’est écrit. |
+| 2482 | Espaces | Edit, export : le texte est trop long : rien n’est écrit. |
+| 2483 | Espaces | Edit, export : le fichier n’a pas pu être écrit. |
+| 2484 | Espaces | Edit : la configuration de la bibliothèque a plus de 128 points : elle n’est pas chargée. |
+| 2485 | Espaces | Edit, export d’une trajectoire (.xml) : il faut au moins 2 points. |
+| 2486 | Espaces | Edit, settings : un bloc Edit A, B, C ou D est attendu. |
+| 2487 | Espaces | Edit, settings : name attend un "texte". |
+| 2488 | Espaces | Edit, settings : kind attend Speakers, Sources ou Trajectory. |
+| 2489 | Espaces | Edit, settings : une clé (name, kind, closed, smooth, free, point) ou Edit est attendue. |
+| 2490 | Espaces | Edit, settings : une valeur hors de sa plage (coordonnées, courbures, On / Off). |
+| 2491 | Espaces | Edit, settings : plus de 128 points. |
+| 2492 | Espaces | Numéro de source attendu, de 1 à 255 (source). |
+| 2493 | Espaces | « : » attendu après le numéro (source). |
+| 2494 | Espaces | Numéro de point attendu, de 1 à 128, suivi de « < » (source ; ou plus de 128 points). |
+| 2495 | Espaces | Coordonnée attendue, entre −1 et 1 (source). |
+| 2496 | Espaces | « , » ou « ; » attendu (source). |
+| 2497 | Espaces | Space (préset) : la source n’est pas déclarée. |
+| 2498 | Espaces | Space (préset) : un numéro de source est attendu. |
+| 2501 | Espaces | Conf Editor : la configuration n’est pas définie (chargement, Add, Subtract). |
+| 2502 | Espaces | Conf Editor : un numéro de configuration entre 1 et 4094 est attendu (Save as, Rename). |
+| 2503 | Espaces | Conf Editor : (plus utilisé depuis le 2026-11-21 : une matrice vide est enregistrée comme une configuration sans source). |
+| 2504 | Espaces | Conf Editor : plus de mémoire pour la configuration. |
+| 2505 | Espaces | Conf Editor : le ring est plein (64 configurations) : en retirer une d’abord. |
+| 2506 | Espaces | Conf Editor : plus de numéro libre pour une nouvelle configuration. |
+| 2507 | Espaces | Conf Editor : un facteur entre 0.1 et 10 (ou entre -20 dB et +20 dB) est attendu (cellule 3, Other value). |
 | 2601 | Interstys | Numéro de lecteur (Reader) invalide. |
 | 2602 | Interstys | Numéro d'enregistreur (Writer) invalide. |
 | 2603 | Interstys | Lecteur non défini, ou pas en mode délai. |
@@ -588,16 +588,16 @@ plus utilisés : ils concernaient les anciens fichiers de configuration séparé
 | 4001 | tous | Compilateur : zone de travail trop petite. |
 | 4002 | tous | Compilateur : débordement d'une table interne. |
 | 4003 | tous | Compilateur : pas de mémoire virtuelle fournie. |
-| 4090 | Diffusion-3 | Écriture en mémoire refusée (adresse trop basse) : erreur interne. |
-| 4092 | Diffusion-3 | Écriture en mémoire refusée (adresse hors de la zone de travail) : erreur interne. |
-| 4093 | Diffusion-3 | Matrices : plus de matrice libre (mémoire saturée) : erreur interne. |
-| 4094 | Diffusion-3 | Projecteur compromis : erreur interne. |
-| 4097 | Diffusion-3 | Actions : erreur dans l'exécution d'une liste d'actions. |
+| 4090 | Espaces | Écriture en mémoire refusée (adresse trop basse) : erreur interne. |
+| 4092 | Espaces | Écriture en mémoire refusée (adresse hors de la zone de travail) : erreur interne. |
+| 4093 | Espaces | Matrices : plus de matrice libre (mémoire saturée) : erreur interne. |
+| 4094 | Espaces | Projecteur compromis : erreur interne. |
+| 4097 | Espaces | Actions : erreur dans l'exécution d'une liste d'actions. |
 | 4401 | tous | Erreur dans la définition d'une fonction. |
 | 4402 | tous | Erreur dans la définition d'une fonction. |
 | 4403 | tous | Erreur dans la définition d'une fonction. |
 | 4404 | tous | Erreur dans la définition d'une fonction. |
-| 4410 | Diffusion-3 | Erreur interne de Diffusion-3. |
+| 4410 | Espaces | Erreur interne d'Espaces. |
 | 4444 | tous | Compilateur : erreur en lisant une chaîne de caractères. |
 | 4621 | tous | Ordonnanceur : entrée de tâche invalide (erreur interne). |
 | 4622 | tous | Ordonnanceur : entrée de tâche invalide (erreur interne). |
