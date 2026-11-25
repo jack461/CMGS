@@ -2,7 +2,7 @@
 
 *Français plus bas.*
 
-Scripts in **mSL**, the scripting language embedded in the CMGS applications (GamePlayer, Diffusion-3, Interstys,
+Scripts in **mSL**, the scripting language embedded in the CMGS applications (GamePlayer, Espaces, Interstys,
 ScriptMaster, FilePlayer). The applications do not need them: they are recipes, presets, examples and tests.
 
 **Running a script:** drop the `.mSL` file into the window of the plugin (GamePlayer: with Alt, or in the top band;
@@ -35,7 +35,7 @@ Numbering of the scripts:
     Ex-0NNN   generic tests of the language : they must run correctly in every plugin
     Ex-1NNN   functions or structures specific to Interstys
     Ex-2NNN   specific to GamePlayer
-    Ex-3NNN   specific to Diffusion-3
+    Ex-3NNN   specific to Espaces
 
 check_scripts.py takes the plugin from the name of the log ("syslog-Interstys-..."): it ignores the
 specific scripts of the other plugins, and reports one run in the wrong plugin as a failure.
@@ -47,7 +47,7 @@ The table of the keyboard keys of the plugins is now made by `CMGS-aux/tools/key
 
 # Scripts de CMGS (mSL)
 
-Des scripts en **mSL**, le langage de script intégré aux applications de CMGS (GamePlayer, Diffusion-3, Interstys,
+Des scripts en **mSL**, le langage de script intégré aux applications de CMGS (GamePlayer, Espaces, Interstys,
 ScriptMaster, FilePlayer). Les applications n'en ont pas besoin : ce sont des recettes, des presets, des exemples et
 des tests.
 

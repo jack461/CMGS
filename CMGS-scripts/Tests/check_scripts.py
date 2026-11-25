@@ -40,7 +40,7 @@ the rest of the log. A script which did not compile starts at its "ERR: NNNN can
 
 The first digit of the number of a script tells the plug-ins it runs in : Ex-0NNN (generic
 tests of the language) in all of them, Ex-1NNN in Interstys, Ex-2NNN in the GamePlayer, Ex-3NNN in
-Diffusion-3. When the plug-in is known from the name of the log, the specific scripts of the other
+Espaces. When the plug-in is known from the name of the log, the specific scripts of the other
 plug-ins are ignored, and one run in this log is reported as a failure (not checked).
 
 A script run several times : its expected texts are checked in its last run, its expected errors are
@@ -60,10 +60,11 @@ EXPECTED = re.compile(r'//\s*Expect(?:ed)?\s*"(.*)"[ \t]*$', re.M)  # (the text 
 EXPECTED_ERR = re.compile(r'//\s*Expect(?:ed)?\s+error\s+(\d+)')
 ALLOWED_ERR = re.compile(r'//\s*Allowed\s+error\s+(\d+)')
 # the plug-in specific series of scripts (first digit of the number), named as in "syslog-<Plugin>-<date>.txt"
-SERIES = {'1': 'Interstys', '2': 'GamePlayer', '3': 'Diffusion3'}
+SERIES = {'1': 'Interstys', '2': 'GamePlayer', '3': 'Espaces'}
+OLD_NAMES = {'Diffusion3': 'Espaces'}  # the logs written before 2026-11-25 (Espaces was Diffusion-3)
 SERIES_NAME = re.compile(r'^Ex-(\d)\d{3}\.mSL$')
 LOG_PLUGIN = re.compile(r'^syslog-(.+?)-\d{4}-')
-COMPILE_FAIL = re.compile(r'^ERR:\s*\d+\s+(?:-\s+)?can.t compile "(.*)"')  # (Diffusion-3 : "ERR: 2236 - can't compile")
+COMPILE_FAIL = re.compile(r'^ERR:\s*\d+\s+(?:-\s+)?can.t compile "(.*)"')  # (Espaces : "ERR: 2236 - can't compile")
 ERROR_LINE = re.compile(r'^(?:ERR:\s*(\d+)|\*\*\* ERR:.*?Error:\s*(-?\d+))')
 
 
@@ -137,6 +138,7 @@ def main():
         sys.exit('No syslog-*.txt found.')
     m = LOG_PLUGIN.match(os.path.basename(log))
     plugin = m.group(1) if m else None
+    plugin = OLD_NAMES.get(plugin, plugin)
     print('Log :', log)
     lines = open(log, encoding='utf-8', errors='replace').read().splitlines()
     # a full log (a ring) exported from its start : the newest lines come first, up to the separator ;

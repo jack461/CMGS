@@ -31,35 +31,35 @@ KEY_VARS = r'(key|u_ch|ch|zzch|k|KeyedT|Keyed|gwk|xx|inKey)'
 # in the mSL Console (mcon_Key(c))
 FILE_KEY_VARS = {'mSL_Console.jsfx-inc': (r'(c)', {'mcon_Key'})}
 # Files (or parts of names) that are not keyboard code : parsers, archives, generated files
-SKIP = ('mSL_Comp_lib', 'Diffusion-3-XML', 'mSL_Utilities', 'ZZZ', 'unused', 'The_Obsolete',
-        'Diffusion-3-Set-Table', 'Diffusion-3-Utils', 'mSL_string_list', 'mSL_ui_Menus', 'mSL_GM_Vars', 'mSL_FR_Vars')
+SKIP = ('mSL_Comp_lib', 'Espaces-XML', 'mSL_Utilities', 'ZZZ', 'unused', 'The_Obsolete',
+        'Espaces-Set-Table', 'Espaces-Utils', 'mSL_string_list', 'mSL_ui_Menus', 'mSL_GM_Vars', 'mSL_FR_Vars')
 # Functions that compare such variables with characters but do not handle keys (string parsing...)
 NOT_KEYS = {('GamePlayer.jsfx-inc', f) for f in ('getClipName', 'rebuildAllaliases', 'installClipSet',
             'SetClipsList', 'updClSel', 'clDirResolve')} | {('FilePlayer.jsfx-inc', 'checkRCB')} | \
            {('Interstys.jsfx-inc', 'its_Rd_SegMenu')} | \
-           {('Diffusion-3-MetaSurface.jsfx-inc', 'ms_Migrate')} | \
+           {('Espaces-MetaSurface.jsfx-inc', 'ms_Migrate')} | \
            {('mSL_ui_LibJJ.jsfx-inc', f) for f in ('GM_key_frame', 'GM_key_end', 'GM_key_peek', 'GM_key_take',
                                                    'GM_key_take_in', 'GM_key_mods')}
 READERS = set()
 
 # Plugins and the shared files they include (see the imports of each plugin)
-PLUGINS = ['GamePlayer', 'FilePlayer', 'ScriptMaster', 'Diffusion-3', 'Interstys']
+PLUGINS = ['GamePlayer', 'FilePlayer', 'ScriptMaster', 'Espaces', 'Interstys']
 SHARED = {
     'mSL_Dbg_Memory.jsfx-inc': PLUGINS,
-    'mSL_Panes.jsfx-inc': ['Diffusion-3', 'ScriptMaster', 'FilePlayer'],
+    'mSL_Panes.jsfx-inc': ['Espaces', 'ScriptMaster', 'FilePlayer'],
     'mSL_ui_Pads.jsfx-inc': ['GamePlayer'],              # interactive leds : GamePlayer only
     'ScriptMaster_Utilities.jsfx-inc': ['ScriptMaster', 'Interstys'],
-    'mSL_System_Keys.jsfx-inc': ['FilePlayer', 'ScriptMaster', 'Diffusion-3', 'Interstys'],
+    'mSL_System_Keys.jsfx-inc': ['FilePlayer', 'ScriptMaster', 'Espaces', 'Interstys'],
     'ui-lib-JJ-GUI.jsfx-inc': PLUGINS,                    # GM_Tab_Keys (Tab, Shift + Tab), GM_Size_Keys (Cmd + - + 0)
     'mSL_Console.jsfx-inc': PLUGINS,                      # the module mSL Console (2026-11-19)
-    'mSL_Curves.jsfx-inc': ['Diffusion-3', 'Interstys'],  # the modules Curves (2026-11-24 ; Interstys : the same day)
+    'mSL_Curves.jsfx-inc': ['Espaces', 'Interstys'],  # the modules Curves (2026-11-24 ; Interstys : the same day)
 }
 
 # Levels, in the order they see the key during a frame : each level only gets the keys the previous ones left
 #   first     : right after GM_key_frame, before the modules (Cmd + - + = 0 : the display size, GM_Size_Keys)
 #   module    : the mouse is in the module (its own keys, then the keys of its pads)
 #   pane      : genericItemsPos, the pane under the mouse (Shift + arrows : column sizes)
-#   tab       : the commands of the tab or of the screen (do_Generic_Commands, Live screen of Diffusion-3)
+#   tab       : the commands of the tab or of the screen (do_Generic_Commands, Live screen of Espaces)
 #   plugin    : the commands of the plugin (do_Plugin_Keys)
 #   system    : the system commands (do_System_Keys, mSL_System_Keys.jsfx-inc)
 #   last      : the Studio pad of GamePlayer, when it is displayed
@@ -73,7 +73,7 @@ ORDER = {
                   "pendant l'apprentissage d'un raccourci, la touche va d'abord à celui-ci",
     'FilePlayer': "Cmd + - + = 0 (taille d'affichage) → module sous la souris → panneau → commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys)",
     'ScriptMaster': "Cmd + - + = 0 (taille d'affichage) → module sous la souris → panneau → commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys)",
-    'Diffusion-3': "Cmd + - + = 0 (taille d'affichage) → module sous la souris (écran Live : la boîte sous la souris) → panneau → écran Live (do_live_actions) "
+    'Espaces': "Cmd + - + = 0 (taille d'affichage) → module sous la souris (écran Live : la boîte sous la souris) → panneau → écran Live (do_live_actions) "
                    "→ commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys)",
     'Interstys': "Cmd + - + = 0 (taille d'affichage) → module sous la souris (puis ses pads) → panneau → commandes d'onglet (do_Generic_Commands) → "
                  "commandes du plugin (do_Plugin_Keys) → commandes système (do_System_Keys)",
@@ -113,14 +113,14 @@ HANDLERS = {
     ('ScriptMaster.jsfx-inc', 'do_Plugin_Keys'): ('plugin', 'commandes de ScriptMaster'),
     ('FilePlayer.jsfx-inc', 'show_SysLog'): ('module', 'log système'),
     ('ScriptMaster.jsfx-inc', 'show_SysLog'): ('module', 'log système'),
-    ('Diffusion-3.jsfx-inc', 'do_live_actions'): ('tab', 'écran Live : commandes'),
-    ('Diffusion-3.jsfx-inc', 'mouse_hover'): ('module', 'écran Live : boîte sous la souris'),
-    ('Diffusion-3.jsfx-inc', 'do_Plugin_Keys'): ('plugin', 'commandes de Diffusion-3'),
-    ('Diffusion-3.jsfx-inc', 'show_SysLog'): ('module', 'log système'),
-    ('Diffusion-3-Space3D.jsfx-inc', 'show_Space_Pad'): ('module', 'Space A ... D (la vue)'),
-    ('Diffusion-3-Edit.jsfx-inc', 'show_Edit_Pad'): ('module', 'Edit A ... D (éditeurs de points)'),
-    ('Diffusion-3-ConfEditor.jsfx-inc', 'show_ConfEditor_Pad'): ('module', 'Conf Editor (éditeur de configurations)'),
-    ('Diffusion-3-MetaSurface.jsfx-inc', 'show_MetaSurface_Pad'): ('module', 'MetaSurface A ... D'),
+    ('Espaces.jsfx-inc', 'do_live_actions'): ('tab', 'écran Live : commandes'),
+    ('Espaces.jsfx-inc', 'mouse_hover'): ('module', 'écran Live : boîte sous la souris'),
+    ('Espaces.jsfx-inc', 'do_Plugin_Keys'): ('plugin', "commandes d'Espaces"),
+    ('Espaces.jsfx-inc', 'show_SysLog'): ('module', 'log système'),
+    ('Espaces-Space3D.jsfx-inc', 'show_Space_Pad'): ('module', 'Space A ... D (la vue)'),
+    ('Espaces-Edit.jsfx-inc', 'show_Edit_Pad'): ('module', 'Edit A ... D (éditeurs de points)'),
+    ('Espaces-ConfEditor.jsfx-inc', 'show_ConfEditor_Pad'): ('module', 'Conf Editor (éditeur de configurations)'),
+    ('Espaces-MetaSurface.jsfx-inc', 'show_MetaSurface_Pad'): ('module', 'MetaSurface A ... D'),
     ('mSL_Curves.jsfx-inc', 'crv_Editor'): ('module', 'Curves (éditeurs de courbes : A ... D, Interstys A ... H)'),
     ('mSL_Dbg_Memory.jsfx-inc', 'show_Memory'): ('module', 'mémoire (débogueur)'),
     ('mSL_Panes.jsfx-inc', 'genericItemsPos'): ('pane', 'largeur des colonnes'),
@@ -130,7 +130,7 @@ HANDLERS = {
     ('ui-lib-JJ-GUI.jsfx-inc', 'GM_Size_Keys'): ('first', 'taille d\'affichage'),
 }
 # The commands of the plugins (plugin and system levels), compared between plugins
-SYSTEM = [('Interstys', 'Interstys.jsfx-inc', 'do_Plugin_Keys'), ('Diffusion-3', 'Diffusion-3.jsfx-inc', 'do_Plugin_Keys'),
+SYSTEM = [('Interstys', 'Interstys.jsfx-inc', 'do_Plugin_Keys'), ('Espaces', 'Espaces.jsfx-inc', 'do_Plugin_Keys'),
           ('FilePlayer', None, None), ('ScriptMaster', None, None)]
 
 
@@ -384,7 +384,7 @@ def conflicts(rows):
                 if m['level'] != 'module' or not (values(c) & values(m)) or not mods_meet(c, m): continue
                 if c['level'] == 'pane' and 'Shift' not in mods_set(m): continue
                 if c['level'] == 'last' and m['fn'] in ('show_Studio_Play_Pad',): continue
-                # the Live screen of Diffusion-3 : only the boxes under the mouse, no modules
+                # the Live screen of Espaces : only the boxes under the mouse, no modules
                 if c['fn'] == 'do_live_actions' and m['fn'] != 'mouse_hover': continue
                 if c['level'] == 'last':
                     studio.setdefault((c['desc'], c['file'], m['desc']), set()).add(c['key'])
@@ -435,7 +435,7 @@ def report(rows):
     # the commands of the plugins (plugin and system levels)
     out += ['## Commandes des plugins : comparaison', '',
             'Les commandes du plugin (do_Plugin_Keys : Tab, affichages) et les commandes système (do_System_Keys, '
-            'communes à FilePlayer, ScriptMaster, Diffusion-3 et Interstys). Majuscules pour les affichages, minuscules '
+            'communes à FilePlayer, ScriptMaster, Espaces et Interstys). Majuscules pour les affichages, minuscules '
             'pour les commandes. GamePlayer : ses commandes de concert sont au niveau de l\'onglet, et ses '
             'raccourcis sont définis par l\'utilisateur.', '']
     keys = collections.OrderedDict()

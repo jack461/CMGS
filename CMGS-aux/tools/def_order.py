@@ -1,5 +1,5 @@
 # Expand a JSFX shell (includes + _suppress parts, roughly as the preprocessor) and report the functions called before
-# their first definition. Usage: python3 defcheck.py Diffusion-3.jsfx [--only file1,file2]
+# their first definition. Usage: python3 defcheck.py Espaces.jsfx [--only file1,file2]
 import re, sys, os
 
 ROOT = os.getcwd()

@@ -18,7 +18,7 @@ files = [f for f in files if not any(s in f for s in skip)]
 def app(f):
     b = os.path.basename(f)
     for k, v in (('GamePlayer', 'Game Master'), ('mSL_clip_lib', 'Game Master'), ('FilePlayer', 'FilePlayer'),
-                 ('ScriptMaster', 'ScriptMaster'), ('Diffusion-3', 'Diffusion-3'), ('AKAI-APCmini', 'Diffusion-3'),
+                 ('ScriptMaster', 'ScriptMaster'), ('Espaces', 'Espaces'), ('AKAI-APCmini', 'Espaces'),
                  ('Interstys', 'Interstys'), ('MIDI', 'MIDI_In'), ('CMGS-auxiliary', 'script auxiliaire'),
                  ('MCBM', 'MCBM'), ('SmoothMultiLimiter', 'SmoothMultiLimiter')):
         if k in b: return v
